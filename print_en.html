@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 17 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 23 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -353,6 +353,12 @@ details[open] > summary { list-style: none; }
   <li>OpenAI/Anthropic/Ollama compat</li>
   <li>IO structs & IPC</li>
   <li>Detokenizer & streaming</li>
+  <li>The scheduler event loop</li>
+  <li>Req & ScheduleBatch</li>
+  <li>The schedule policy</li>
+  <li>Zero-overhead overlap scheduler</li>
+  <li>Chunked prefill</li>
+  <li>DP controller & PP scheduling</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -3802,6 +3808,1175 @@ output_strs.append(incremental_output)</pre>
   <ul>
     <li>Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (Lesson 16) round-trip, why the detokenizer sends results back to the TokenizerManager (Lesson 14) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.</li>
     <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the <strong>HTTP server route</strong> turns the slices TokenizerManager yields into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>) — and why the offline Engine path has no SSE.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>The scheduler event loop</h1>
+
+<p class="lead">
+Welcome to Part 5 — the engine's <strong>heart</strong>. The previous four parts showed how a request <strong>comes in</strong>
+(HTTP, tokenize, IPC) and <strong>goes out</strong> (detokenize, streaming). Now the camera turns to the one role in the middle
+that actually <strong>makes decisions</strong>: the <strong>Scheduler</strong>. It runs in its <strong>own subprocess</strong>, and at
+its core is an <strong>infinite loop</strong> called <span class="inline">event_loop_normal</span> — the engine's <strong>heartbeat</strong>.
+Each beat (we call it one <strong>step</strong>) runs five things — "receive → enqueue → form batch → forward → process result" —
+as fast as possible, then immediately starts the next beat. This lesson sits right on that heart and listens to every beat.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the scheduler as an <strong>air-traffic controller's radar sweep</strong>. Every revolution, the controller repeats the
+  same routine: first <strong>take in new arrivals</strong> and put them in the <strong>holding pattern</strong>; then <strong>decide
+  which planes land/take off this sweep</strong> (the runway is finite — you can't clear them all); then <strong>clear</strong> those
+  planes and watch them execute; finally <strong>handle what just happened</strong> — a plane that landed frees the runway, one that
+  departed is closed out. Then the radar <strong>sweeps again</strong>, forever. There is <strong>one</strong> tower, it <strong>flies
+  no plane itself</strong>, yet <strong>every sweep's scheduling is its call</strong>. That is the scheduler's event loop.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  In one line: <strong>the scheduler is an infinite loop, in its own subprocess, beating thousands of times per second</strong>.
+  Each beat (step) does five things in order — <span class="inline">recv_requests</span> (receive),
+  <span class="inline">process_input_requests</span> (enqueue), <span class="inline">get_next_batch_to_run</span> (form batch),
+  <span class="inline">run_batch</span> (forward), <span class="inline">process_batch_result</span> (finish). It is the engine's
+  <strong>single decision-maker</strong>: it <strong>owns the KV-cache accounting</strong> and decides <strong>who is in this step's
+  batch</strong>. It <strong>only decides, never computes</strong> — the real GPU matmuls go to TpWorker→ModelRunner (Lesson 24).
+  The shorter and faster the loop, the higher the throughput — exactly what the <strong>overlap scheduler</strong> (Lesson 21) later optimizes.
+</div>
+
+<h2>The five actions of a heartbeat: what happens in one step</h2>
+<p>The event loop is essentially <span class="inline">while True</span>. Setting aside the exit and idle branches, each round (one
+step) is a <strong>five-stage pipeline</strong>. Memorize the order and you hold the <strong>master index</strong> to all of Part 5 —
+every later lesson just <strong>zooms into one of these stages</strong>:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests() — receive</h4><p><strong>Drain</strong> the ZMQ inbox of all new <span class="mono">TokenizedGenerateReqInput</span> (Lesson 16, sent by the TokenizerManager). If none, you get an empty list — it never blocks.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>process_input_requests() — enqueue</h4><p>Add new requests to the <strong>waiting queue</strong>; also handle control messages (abort / flush cache / update weights, etc.).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>get_next_batch_to_run() — form batch</h4><p>Build <strong>this step's</strong> batch: budget permitting, form a <strong>prefill batch</strong> from waiting reqs, else a <strong>decode batch</strong> of running reqs (Lessons 19/20). Continuous batching (Lesson 5) <strong>re-happens here every step</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>run_batch() — forward</h4><p>Hand the batch to TpWorker → <span class="mono">ModelRunner.forward</span> on the GPU (Lesson 24), get logits, then <strong>sample</strong> the new tokens.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>process_batch_result() — finish</h4><p>Append new tokens; detect <strong>finished</strong> reqs (stop conditions); <strong>free their KV slots</strong>; send outputs to the DetokenizerManager (Lesson 17). Then <strong>go back to step 1</strong>.</p></div></div>
+</div>
+
+<p>These five steps are <strong>very short</strong>, yet run thousands of times per second. The key is that it's a <strong>closed loop</strong>:
+right after step 5 finishes, it returns to step 1 to receive new requests — there is no notion of "finish this batch entirely before
+serving anyone new." Because every revolution re-runs step 3 <span class="inline">get_next_batch_to_run</span>, <strong>the batch is
+re-formed over and over</strong>, finished reqs leave on the spot and waiting ones fill in instantly — this is exactly where Lesson 5's
+<strong>continuous batching</strong> physically happens.</p>
+
+<h2>The loop as a diagram: how a request flows through the heart</h2>
+<p>If you draw "how data flows" inside one step, you get this pipeline: requests enter from the inbox, get scheduled into a batch,
+go forward on the GPU, and the result splits two ways — new tokens go to detokenize, finished reqs are evicted and free their VRAM —
+then it <strong>loops back to the top</strong>. Note the <strong>loop-back arrow</strong>: it is the soul of the "heartbeat," meaning this
+pipeline <strong>never stops</strong>.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">Inbox</div><div class="nd">ZMQ recv<br>recv_requests</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Schedule</div><div class="nd">get_next_batch<br>_to_run (decide)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">GPU forward</div><div class="nd">run_batch<br>forward+sample</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Finish</div><div class="nd">append tokens<br>evict/detok</div></div>
+  <div class="arrow">↺</div>
+  <div class="node hl"><div class="nt">Next beat</div><div class="nd">back to inbox<br>step + 1</div></div>
+</div>
+
+<p>In this diagram only the <strong>"Schedule"</strong> cell is <strong>pure-CPU decision</strong>, and only the <strong>"GPU forward"</strong>
+cell actually burns compute. This split is crucial: while the CPU forms the batch, the GPU is <strong>idle</strong>; while the GPU does
+forward, the CPU is <strong>idle</strong>. The plain <span class="inline">event_loop_normal</span> runs them <strong>strictly serially</strong> —
+which is why <span class="inline">event_loop_overlap</span> (Lesson 21) exists: it is the <strong>same loop</strong>, but pipelined so the
+CPU's batching/finishing is <strong>hidden behind the previous step's GPU compute</strong>, keeping the GPU from ever idling.</p>
+
+<h2>Where each step goes: the loop IS Part 5's table of contents</h2>
+<p>These five steps map almost one-to-one onto the lessons ahead. Treat this table as a <strong>navigation map</strong>: jump from "which
+step of the heartbeat" to its detail lesson, and conversely, while reading a detail lesson remember where it sits in the <strong>whole step</strong>.</p>
+
+<table class="t">
+  <tr><th>Stage</th><th>What it does</th><th>Detailed in</th></tr>
+  <tr><td><strong>recv_requests</strong></td><td>Drain the ZMQ inbox, receive TokenizedGenerateReqInput</td><td class="mono">Lesson 16 io_struct / IPC</td></tr>
+  <tr><td><strong>process_input_requests</strong></td><td>New reqs into the <strong>waiting queue</strong>; handle abort/flush control msgs</td><td class="mono">Lesson 19 Req / ScheduleBatch</td></tr>
+  <tr><td><strong>get_next_batch_to_run</strong></td><td>Form this step's batch: prefill first, else decode (continuous batching)</td><td class="mono">Lesson 20 policy · Lesson 22 chunked prefill</td></tr>
+  <tr><td><strong>run_batch</strong></td><td>Hand to TpWorker→ModelRunner.forward on GPU, sample tokens</td><td class="mono">Lesson 24 model forward</td></tr>
+  <tr><td><strong>process_batch_result</strong></td><td>Append tokens, detect finished, free KV, send to detokenize</td><td class="mono">Lesson 17 detokenize & streaming</td></tr>
+</table>
+
+<h2>Who decides, who computes: the single-threaded sole decision-maker</h2>
+<p>There are many roles in the engine, but <strong>each TP rank has exactly one scheduler, and it is single-threaded</strong>. That is not
+a limitation but a <strong>design</strong>: letting <strong>one</strong> role own the KV-cache ledger and decide every step's batch means
+<strong>no two parties fight over the same VRAM</strong> and no locks are needed. Telling "<strong>who decides</strong>" from
+"<strong>who computes</strong>" is the key to reading scheduler code:</p>
+
+<div class="cols">
+  <div class="col"><h4>Scheduler: decides, doesn't compute</h4><p>One process, single-threaded, the <strong>sole decision-maker</strong>. It
+  <strong>owns the KV-cache ledger</strong>, decides <strong>who is in this step's batch</strong>, who finishes and leaves, who fills in.
+  It does only <strong>lightweight CPU accounting and judgment</strong>, <strong>touching not a single matmul</strong> — precisely because
+  it is light, it can beat tens of thousands of times per second.</p></div>
+  <div class="col"><h4>TpWorker / ModelRunner: computes, doesn't decide</h4><p>It takes the batch the scheduler formed and dutifully runs
+  <span class="mono">forward</span> on the <strong>GPU</strong> (Lesson 24), producing logits, then samples. It <strong>does not decide what
+  the batch is</strong> nor touch scheduling policy — it just <strong>squeezes the compute</strong>. Decoupling decision from compute is
+  what lets the two <strong>pipeline in parallel</strong> in the overlap scheduler.</p></div>
+</div>
+
+<h2>Real code: the event_loop_normal heartbeat</h2>
+<p>Here is the actual loop skeleton. Notice how <strong>plain</strong> it is — just a <span class="inline">while True</span> with our five
+steps <strong>laid out verbatim</strong>: receive, enqueue, form batch, (if any) forward + finish, else idle self-check. Read these dozen
+lines and you've read the heartbeat of the entire engine.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_normal</span><span class="ln">the scheduler heartbeat: one revolution per step</span></div>
+  <pre><span class="kw">def</span> event_loop_normal(self):
+    <span class="cm"># A normal scheduler loop.</span>
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.gracefully_exit:
+            <span class="kw">break</span>
+
+        <span class="cm"># (1) receive: drain the ZMQ inbox of new requests</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        <span class="cm"># (2) enqueue: new reqs into waiting queue, handle control msgs</span>
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># (3) form batch: decide what this step runs (prefill or decode)</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># (4) forward: run this batch on GPU, sample from logits</span>
+            result = self.run_batch(batch)
+            <span class="cm"># (5) finish: append tokens, evict finished, send to detok</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            <span class="cm"># nothing to do: self-check and re-init states</span>
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>Line it up with the opening radar analogy: <span class="inline">recv_requests</span> is "take in arrivals,"
+<span class="inline">process_input_requests</span> is "put them in the holding pattern," <span class="inline">get_next_batch_to_run</span>
+is "decide which planes this sweep," <span class="inline">run_batch</span> is "clear them to execute," and
+<span class="inline">process_batch_result</span> is "handle what just landed/departed." The radar sweeps again — back to the top of
+<span class="inline">while True</span>. <span class="inline">event_loop_overlap</span> is the <strong>pipelined version</strong> of the same
+logic: a result queue defers the previous step's <span class="inline">process_batch_result</span> to overlap with GPU compute, thereby
+<strong>hiding</strong> the CPU time (detailed in Lesson 21).</p>
+
+<p>One final intuition: <strong>the loop's speed directly caps throughput.</strong> Each revolution advances exactly one decode step;
+every request emits exactly one token. If the Python accounting in steps 3 and 5 is too slow, the GPU <strong>idles</strong> waiting on the
+CPU to form the batch, and no card, however strong, stays fed. So SGLang polishes this loop as <strong>the hottest of hot paths</strong> —
+the entire reason Lesson 21's overlap scheduler exists, and the yardstick to carry through all of Part 5:
+<strong>every design ultimately serves one goal — keep this heart beating fast and full.</strong></p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The scheduler is the engine's heart</strong>: it runs in its <strong>own subprocess</strong>; its core is the infinite loop <span class="mono">event_loop_normal</span>, beating thousands of times per second, each beat a <strong>step</strong>.</li>
+    <li><strong>The five stages of a step</strong> (memorize the order): recv_requests → process_input_requests → get_next_batch_to_run → run_batch → process_batch_result → back to the top.</li>
+    <li><strong>The batch is re-formed every step</strong>: stage 3 reruns each revolution — finished reqs leave on the spot and free KV, waiting ones fill in — this is Lesson 5's continuous batching in the flesh.</li>
+    <li><strong>Decide vs compute</strong>: the scheduler is single-threaded, the sole decision-maker, owns the KV ledger, does only light CPU accounting; only TpWorker/ModelRunner runs forward on the GPU (Lesson 24).</li>
+    <li><strong>Loop speed caps throughput</strong>: CPU batching and GPU compute are serial in the normal version ⇒ Lesson 21's <span class="mono">event_loop_overlap</span> pipelines to hide CPU time behind GPU compute. Builds on Lessons 16/17; leads to Lessons 19/20/22/24.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What five things does the scheduler's <code>event_loop_normal</code> do each step (one revolution), and why does the <strong>order</strong> matter?</div>
+  <ol class="opts">
+    <li>Order is irrelevant; the five steps can run in any shuffled, parallel order</li>
+    <li>First <code>run_batch</code> then <code>recv_requests</code>, since you compute before receiving</li>
+    <li><code>recv_requests</code> (receive) → <code>process_input_requests</code> (into waiting queue) → <code>get_next_batch_to_run</code> (form this step's batch) → <code>run_batch</code> (GPU forward+sample) → <code>process_batch_result</code> (append tokens/evict finished/free KV/send to detok), then loop; the order matters because <strong>you must take in new reqs before forming a batch, form a batch before forwarding, and have results before finishing</strong></li>
+    <li>Only <code>get_next_batch_to_run</code>; everything else happens inside the GPU kernel</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The loop is <code>while True</code>, and the five steps have strict <strong>data dependencies</strong>: no new reqs means nothing to enqueue, an empty waiting queue means no prefill batch, no batch means no forward, and no forward result means you can't append tokens, detect finish, or free KV. Shuffling breaks the dependency. Memorizing this order is the master index to Part 5.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does the scheduler re-call <code>get_next_batch_to_run</code> to re-form the batch <strong>every step</strong>, rather than forming it once and reusing it?</div>
+  <ol class="opts">
+    <li>Because this is where <strong>continuous batching</strong> (Lesson 5) physically happens: re-forming each step lets <strong>finished reqs leave on the spot and free their KV slots</strong> and <strong>waiting reqs fill in next step</strong>, keeping the batch full so the GPU never idles for any single request</li>
+    <li>Because re-forming speeds up a single request's decoding</li>
+    <li>Purely for logging convenience, with no performance meaning</li>
+    <li>Because the GPU requires a brand-new batch object each step or it errors</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Forming once and locking it degrades to static batching: the whole batch waits for the slowest req, finished slots idle, new reqs can't enter. Re-forming each step makes the batch a 'recomputed result' rather than a static object — finished filtered out, waiting admitted in, always full. That is continuous batching, the first engine of high throughput.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Within one step, <strong>which part is the scheduler's CPU decision and which is the actual GPU compute</strong>? How does this split motivate <code>event_loop_overlap</code> (Lesson 21)?</div>
+  <ol class="opts">
+    <li>The scheduler itself runs inside the GPU kernel, so overlap is moot</li>
+    <li><code>get_next_batch_to_run</code> / <code>process_batch_result</code> are <strong>pure-CPU lightweight accounting and decision</strong>, while <code>run_batch</code> (→ModelRunner.forward) is the <strong>GPU compute</strong>; the normal loop runs them <strong>serially</strong> so the GPU idles while the CPU forms the batch — hence Lesson 21 <strong>pipelines</strong> to hide the CPU part behind the previous step's GPU compute</li>
+    <li><code>run_batch</code> is the CPU decision, while forming the batch is the GPU compute</li>
+    <li>All five steps run on the GPU; no CPU involvement</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'air-traffic controller's radar sweep' analogy, describe one full step of the scheduler's <code>event_loop_normal</code>. Map each of the five stages: <code>recv_requests</code> (receive TokenizedGenerateReqInput, Lesson 16), <code>process_input_requests</code> (enqueue into waiting, handle abort/flush), <code>get_next_batch_to_run</code> (prefill first else decode, Lessons 19/20), <code>run_batch</code> (→ModelRunner.forward, Lesson 24), and <code>process_batch_result</code> (append tokens, detect finished, free KV, send to DetokenizerManager, Lesson 17), and explain why the 'loop-back' is the soul of the heartbeat.</li>
+    <li>Argue the claim 'loop speed directly caps throughput,' and explain why the scheduler is <strong>single-threaded, the sole decision-maker per TP rank</strong>, owning the KV-cache ledger. Building on that, explain how <code>event_loop_overlap</code> (Lesson 21) optimizes via pipelining, and why a long prompt needs chunked prefill (Lesson 22) to avoid clogging this loop.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Req & ScheduleBatch</h1>
+
+<p class="lead">
+Last lesson we saw the scheduler's <strong>heartbeat</strong>—that <span class="inline">while True</span> event loop (Lesson 18). But what does each
+beat actually <strong>operate on</strong>? The answer is two data structures that run through all of Part 5: <strong>Req</strong> and
+<strong>ScheduleBatch</strong>. <span class="inline">Req</span> is <strong>one request's own state machine</strong>—it stays <strong>alive</strong> from
+birth to death; <span class="inline">ScheduleBatch</strong> is <strong>the cluster of Reqs forwarded together in ONE step</strong>, and it is
+<strong>ephemeral</strong>—rebuilt every beat. Grasp this "persistent vs temporary" split and you hold the two tools in the scheduler's hands.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the engine as an <strong>airline</strong>. Each <strong>passenger (Req)</strong> carries a <strong>persistent booking and state</strong>:
+  where they board, where they go, what they checked, whether they've checked in, boarded, arrived. That record <strong>persists from booking to
+  landing</strong>, surviving many flight legs. But each departing <strong>flight manifest (ScheduleBatch)</strong> is <strong>assembled per
+  departure</strong>: it is either a <strong>boarding group of new passengers</strong> (extend/prefill batch—seating new arrivals by how much
+  luggage they carry) or a <strong>cruising cabin of existing passengers</strong> (decode batch—everyone advancing one step together). Passengers are
+  <strong>persistent</strong>, manifests are <strong>assembled per flight and discarded on landing</strong>; whoever arrives <strong>deplanes</strong>
+  (filter_batch removes finished requests from the manifest). The SAME passenger appears on many <strong>successive cruising manifests</strong>—exactly
+  why Req and ScheduleBatch must be split.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  In one line: <strong>Req records "who a request is and how far it got"; ScheduleBatch records "which Reqs to compute together this step, and how."</strong>
+  <span class="inline">Req</span> holds input tokens, output tokens generated so far, sampling params, the KV-cache indices it owns (Lessons 4/30),
+  prefix-match info (RadixAttention, Lesson 7), and finished/abort status; it moves through <strong>waiting → running → finished</strong>.
+  <span class="inline">ScheduleBatch</span> carries a <strong>mode</strong>: either <strong>EXTEND (prefill)</strong>—admit <strong>new requests</strong>
+  and consume their whole prompt at once—or <strong>DECODE</strong>—let <strong>running requests</strong> each emit <strong>one</strong> new token. The batch
+  also handles KV-pool <strong>alloc (on admit) and free (on finish)</strong>, and <span class="inline">filter_batch()</span> <strong>drops finished
+  requests</strong> mid-flight (the "slot freeing" of continuous batching, Lesson 5).
+</div>
+
+<h2>1. Req: one request's state machine, alive from birth to death</h2>
+<p>
+<span class="inline">Req</span> is SGLang's most <strong>intimate</strong> object—it is "<strong>a request's entire net worth</strong>." The class's
+docstring is one line: <em>"The input and output status of a request."</em> It holds at least: <strong>original input tokens (origin_input_ids)</strong>,
+<strong>incrementally appended output tokens (output_ids)</strong>, <strong>sampling params (sampling_params)</strong>, the <strong>position it occupies in
+the KV cache (req_pool_idx, kv_committed_len/kv_allocated_len, ...)</strong>, and, on a prefix-tree hit, its <strong>prefix_indices (RadixAttention,
+Lesson 7)</strong>. Crucially it carries its own <strong>lifecycle</strong>: before admission it queues in <strong>waiting</strong>; once chosen for
+prefill it enters <strong>running</strong>; after emitting its last token (EOS hit, max_new_tokens reached, or abort) it becomes <strong>finished</strong>,
+and its KV slots are freed. Here is its whole life.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>waiting</h4><p>The request is tokenized and sent into the scheduler over IPC (Lesson 16), landing first in the <strong>waiting queue</strong>. It owns no KV yet—just queuing, waiting for the schedule policy (Lesson 20) to pick it.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>running · first beat: extend (prefill)</h4><p>Once selected it enters running and, in an <strong>EXTEND batch</strong>, consumes its whole prompt at once: <code>prepare_for_extend()</code> allocates its KV slots and lays out variable-length token tensors. Prefix-hit parts (Lesson 7) are reused, not recomputed.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>running · then many beats: decode</h4><p>The same Req then appears in <strong>a long run of DECODE batches</strong>; each beat <code>prepare_for_decode()</code> requests one new KV slot and computes just <strong>one</strong> new token, appending one to <code>output_ids</code>. It <strong>dwells here longest</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed</h4><p>On EOS, max_new_tokens, or abort it turns <strong>finished</strong>; <code>filter_batch()</code> drops it from the current batch on the spot, KV slots return to the pool (Lesson 30), and results flow to the detokenizer (Lesson 17).</p></div></div>
+</div>
+
+<h2>2. ScheduleBatch: the cluster forwarded together this step, carrying a mode</h2>
+<p>
+If Req is "a person," <span class="inline">ScheduleBatch</span> is "<strong>this flight's manifest</strong>"—docstring: <em>"Store all information of a
+batch on the scheduler."</em> Its <strong>first field is literally <code>reqs: List[Req]</code></strong>, the requests to compute this step; almost all
+other fields are tensors <strong>laid out temporarily</strong> for the forward pass (input_ids, seq_lens, out_cache_loc, ...). Its most important property is
+<strong>forward_mode</strong>, with two main forms that decide "how" this beat computes:
+</p>
+
+<div class="cols">
+  <div class="col">
+    <h4>EXTEND / prefill batch</h4>
+    <p>Built by <code>prepare_for_extend()</code>, <code>forward_mode = EXTEND</code>. It <strong>admits new requests</strong> and forwards each request's
+    <strong>whole prompt</strong> at once. Because prompts differ in length, it lays out <strong>variable-length (ragged) token tensors</strong> and
+    <strong>allocates KV slots</strong> for each new request. In source, <code>input_ids</code> takes <code>get_fill_ids()[len(prefix_indices):]</code>—
+    <strong>only the part the prefix missed</strong> (Lesson 7). When a long prompt is too big, it is sliced into chunked prefill (Lesson 22).</p>
+  </div>
+  <div class="col">
+    <h4>DECODE batch</h4>
+    <p>Built by <code>prepare_for_decode()</code>, <code>forward_mode = DECODE</code>. It holds <strong>already-running requests</strong>, each emitting
+    <strong>just one</strong> new token, so tensors are the regular <strong>1 token per request</strong>, needing only <strong>one more KV slot</strong> per
+    request for the new token. It <strong>recurs constantly</strong>—a request spends the vast majority of its beats in decode batches. This is throughput's
+    main stage: the fuller the batch, the better the GPU pays off (continuous batching, Lesson 5).</p>
+  </div>
+</div>
+
+<h2>3. Key fields at a glance: what each holds, what role it plays</h2>
+<p>Lay the two structures' core fields side by side and the "persistent vs temporary" split is obvious—Req's fields <strong>travel with the request</strong>, ScheduleBatch's fields <strong>travel with this step</strong>.</p>
+
+<table class="t">
+  <tr><th>Structure</th><th>Field</th><th>Role</th></tr>
+  <tr><td class="mono">Req</td><td class="mono">origin_input_ids / output_ids</td><td>Input tokens and incrementally appended output tokens—the request's "content," persistent</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">sampling_params</td><td>Temperature, top-p, max_new_tokens, ...—decides how to pick the next token</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">req_pool_idx / kv_*_len</td><td>Its position and length in the KV cache (Lessons 4/30), growing as it generates</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">prefix_indices</td><td>Prefix-tree reuse (RadixAttention, Lesson 7), skipped during extend</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">finished() status</td><td>EOS / max_new_tokens / abort—triggers filter_batch eviction and KV free</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">reqs: List[Req]</td><td>The requests forwarded together this step—the batch's "skeleton," rebuilt each step</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">forward_mode</td><td>EXTEND or DECODE—decides "how" this beat computes</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">input_ids / seq_lens / out_cache_loc</td><td>Tensors laid out for the forward pass and KV output locations, handed to ModelRunner (Lesson 24)</td></tr>
+</table>
+
+<h2>4. What a decode batch looks like: a few requests, each +1 this beat</h2>
+<p>Zoom into <strong>one decode beat</strong>: the batch has several Reqs, their sequences grown to different lengths, and <strong>each adds exactly one new
+token this step</strong>. Each row below is one request; the highlighted cell is <strong>the single token generated this beat and just written to KV</strong>.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">A DECODE batch (this beat: each request +1 new token)</div>
+  <div class="cells">
+    <span class="lab">Req&nbsp;A</span><span class="cell">The</span><span class="cell">&nbsp;weather</span><span class="cell">&nbsp;is</span><span class="cell hl">&nbsp;nice</span><span class="sep"></span><span class="q">+1</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Req&nbsp;B</span><span class="cell">def</span><span class="cell">&nbsp;add</span><span class="cell hl">(a</span><span class="sep"></span><span class="q">+1</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Req&nbsp;C</span><span class="cell">The</span><span class="cell">&nbsp;sky</span><span class="cell">&nbsp;is</span><span class="cell">&nbsp;very</span><span class="cell hl">&nbsp;blue</span><span class="sep"></span><span class="q">+1</span>
+  </div>
+</div>
+<p>Note the three requests have <strong>different generated lengths</strong> yet sit in one decode batch—because decode tensors are the regular "1 token per
+request," with length differences recorded by each <code>seq_lens</code>. Next beat, if Req B emits EOS, <code>filter_batch()</code> <strong>drops it on the
+spot</strong> and frees its KV slots, leaving A and C running; the freed capacity can then admit new requests from the waiting queue (Lessons 5 and 20).</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">skeletons of the two data structures</span></div>
+<pre><span class="kw">class</span> Req(ReqDllmMixin):
+    <span class="cm"># The input and output status of a request.</span>
+    <span class="kw">def</span> __init__(self, rid, origin_input_ids, sampling_params, ...):
+        self.rid = rid                      <span class="cm"># request id</span>
+        self.origin_input_ids = origin_input_ids   <span class="cm"># input tokens</span>
+        self.output_ids = array(<span class="st">"q"</span>)         <span class="cm"># incrementally appended output</span>
+        self.sampling_params = sampling_params     <span class="cm"># sampling params</span>
+        self.req_pool_idx = <span class="kw">None</span>            <span class="cm"># KV slot it owns (Lessons 4/30)</span>
+
+<span class="kw">class</span> ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+    <span class="cm"># Store all information of a batch on the scheduler.</span>
+    reqs: List[Req]                         <span class="cm"># requests forwarded together this step</span>
+
+    <span class="kw">def</span> prepare_for_extend(self):           <span class="cm"># prefill: admit new reqs, eat whole prompt</span>
+        self.forward_mode = ForwardMode.EXTEND
+        <span class="cm"># only the part the prefix missed (RadixAttention, Lesson 7)</span>
+        input_ids = [r.get_fill_ids()[len(r.prefix_indices):] <span class="kw">for</span> r <span class="kw">in</span> self.reqs]
+
+    <span class="kw">def</span> prepare_for_decode(self):           <span class="cm"># decode: running reqs, +1 token each</span>
+        self.forward_mode = ForwardMode.DECODE
+        <span class="cm"># one more KV slot per req; tensors regular, 1 token per req</span>
+
+    <span class="kw">def</span> filter_batch(self, ...):            <span class="cm"># drop finished reqs mid-flight (Lesson 5)</span>
+        keep_indices = [i <span class="kw">for</span> i <span class="kw">in</span> range(len(self.reqs))
+                        <span class="kw">if</span> <span class="kw">not</span> self.reqs[i].finished()]
+        self.reqs = [self.reqs[i] <span class="kw">for</span> i <span class="kw">in</span> keep_indices]</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Req = one request's state machine, persistent</strong>: holds input/output tokens, sampling params, owned KV indices (Lessons 4/30), prefix-match info (Lesson 7), and finished status; moves through <span class="mono">waiting → running → finished</span>, alive from birth to death.</li>
+    <li><strong>ScheduleBatch = the cluster of Reqs forwarded together this step, temporary</strong>: its first field is <span class="mono">reqs: List[Req]</span>, the rest mostly tensors laid out for the forward pass; it is <strong>rebuilt every step</strong> (Lesson 18) and discarded after use.</li>
+    <li><strong>The batch has two modes</strong>: <span class="mono">EXTEND/prefill</span> (<code>prepare_for_extend()</code>, admit new reqs, eat whole prompt, lay out ragged tensors) vs <span class="mono">DECODE</span> (<code>prepare_for_decode()</code>, running reqs +1 token each, regular tensors).</li>
+    <li><strong>The batch manages KV alloc and free</strong>: alloc on admit, free on finish; <span class="mono">filter_batch()</span> drops finished reqs mid-flight, freeing slots for waiters—this is continuous batching (Lesson 5) in the flesh.</li>
+    <li><strong>Why split them</strong>: the same Req appears in many <strong>successive decode batches</strong>—Req persists, the batch is ephemeral. Carry this pair into the schedule policy (Lesson 20), chunked prefill (Lesson 22), and model forward (Lesson 24), and all of Part 5 lines up.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the most essential <strong>lifecycle</strong> difference between <code>Req</code> and <code>ScheduleBatch</code>?</div>
+  <ol class="opts">
+    <li>Both are temporary, rebuilt per token, mirroring each other</li>
+    <li><code>Req</code> is <strong>persistent</strong>—one request stays alive from waiting to finished; <code>ScheduleBatch</code> is <strong>ephemeral</strong>—rebuilt every step and discarded, so the same Req appears in many <strong>successive decode batches</strong></li>
+    <li>Both are persistent, with exactly one instance each per session</li>
+    <li><code>Req</code> is temporary and <code>ScheduleBatch</code> persistent, the batch lasting until engine shutdown</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. This is exactly why they are split: the batch is a <strong>recomputed result</strong> of each loop step (Lesson 18), ephemeral; while a request takes tens to hundreds of decode beats to finish, needing a <strong>persistent</strong> object to carry its output tokens, KV indices, and status throughout. Req persistent, batch ephemeral—the spine of Part 5.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is the essential difference between a <code>ScheduleBatch</code>'s <strong>EXTEND (prefill) batch</strong> and a <strong>DECODE batch</strong>?</div>
+  <ol class="opts">
+    <li>DECODE admits new requests and processes whole prompts, EXTEND emits just one token</li>
+    <li>They are identical, differing only in name</li>
+    <li>EXTEND, built by <code>prepare_for_extend()</code>, <strong>admits new requests</strong> and eats each whole prompt at once (ragged tensors, allocate KV for new reqs); DECODE, built by <code>prepare_for_decode()</code>, gives <strong>each running request +1 token</strong> (regular 1-token-per-req, one more KV slot each)</li>
+    <li>EXTEND runs on GPU, DECODE on CPU, unrelated to each other</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. <code>forward_mode</code> decides 'how' this beat computes. EXTEND handles the prompt: varying lengths ⇒ ragged tensors, allocate KV for new reqs, and only the prefix-missed part (Lesson 7). DECODE handles generation: each emits one token ⇒ regular tensors, one more KV slot each. A request extends once in its life (or split into chunks, Lesson 22) but decodes many times.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does <code>filter_batch()</code> do in scheduling, and why is it crucial for throughput?</div>
+  <ol class="opts">
+    <li>It sorts the whole batch so the longest request comes first</li>
+    <li>It <strong>drops finished requests from the batch on the spot</strong> mid-flight and frees their KV slots, so the freed capacity lets new requests from the waiting queue fill in—the 'slot-freeing' of <strong>continuous batching</strong> (Lesson 5)</li>
+    <li>It copies the batch as a backup and never removes any request</li>
+    <li>It is called once at engine shutdown to clear all requests</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. In source, <code>filter_batch</code> keeps only requests that are <code>not finished()</code> via <code>keep_indices</code>, rebuilding <code>reqs</code> and the matching tensors. Without dropping finished ones mid-flight, the batch degrades to static batching—waiting for the slowest, finished slots idle. Evict on the spot + free KV + admit waiters keeps the batch full, the root of high throughput.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'airline: passenger (Req) vs flight manifest (ScheduleBatch)' analogy, explain the division of labor between the two data structures. Cover: which fields Req carries (input/output tokens, sampling params, KV indices, prefix_indices, finished status) and its waiting→running→finished lifecycle; and why ScheduleBatch is <strong>rebuilt each step</strong>, plus how its two <code>forward_mode</code>s (EXTEND/DECODE) lay out tensors and allocate KV.</li>
+    <li>Thinking forward from this lesson: <code>get_next_batch_to_run</code> (Lessons 18/20) must choose each step between 'form an EXTEND batch to admit new requests' and 'form a DECODE batch to advance running ones.' Explain how this choice interacts with KV-pool capacity, waiting-queue length, and the empty slots freed by <code>filter_batch</code>, and connect it to why chunked prefill (Lesson 22) prevents one very long prompt from clogging this loop.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>The schedule policy</h1>
+
+<p class="lead">
+Last lesson we nailed two data structures: the persistent <span class="inline">Req</span> and the ephemeral <span class="inline">ScheduleBatch</span>.
+This lesson answers the two most critical questions of every step: with so many requests waiting, <strong>who runs next</strong>, and <strong>how many fit</strong>?
+The answers live in two roles—<span class="inline">SchedulePolicy</span> does the <strong>ordering</strong> (who first),
+<span class="inline">PrefillAdder</span> does the <strong>throttling</strong> (how many). The former lets requests whose prefix is already in cache jump the line, harvesting nearly-free throughput;
+the latter holds two yardsticks—a token budget and a memory budget—and stuffs requests into this step's prefill batch one by one until nothing more fits.
+The scheduler and the cache (Lesson 7) are <strong>co-designed</strong> this way—the secret behind SGLang being fast and cheap under real traffic.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Real-world analogy</div>
+  Think of the schedule policy as a <strong>smart venue host / bouncer</strong> at a hot restaurant. A long line waits outside, and he does not naively admit people purely by arrival.
+  First he <strong>reorders the line</strong>: which parties are "already half-prepped" (ingredients ready = cache hit, i.e. <strong>LPM, longest-prefix-match</strong>) get bumped to the front—
+  serving them costs the kitchen almost nothing; if everyone's similar, he admits by <strong>arrival (FCFS)</strong>, fair and simple; and VIP reservations go early by <strong>explicit priority</strong>.
+  Once ordered, he admits people <strong>counting two capacities</strong>: are there enough <strong>seats</strong> (the memory KV budget), and how many dishes can the <strong>kitchen</strong> cook this round (the token budget)—
+  whichever fills first stops the round. Next beat, repeat. <strong>Order + throttle</strong> is the whole of the schedule policy.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>policy decides order, budget decides count</strong>. <span class="inline">get_next_batch_to_run</span> (Lesson 18) each beat first calls
+  <span class="inline">SchedulePolicy.calc_priority</span> to <strong>reorder the waiting queue in place</strong>, then hands off to <span class="inline">PrefillAdder</span>
+  to <span class="inline">add_one_req</span> one by one under a <strong>double budget</strong>, admitting where it fits (<strong>chunking</strong> if needed) and stopping when full.
+  The core ordering mode is <strong>cache-aware LPM</strong>: prefer requests whose prompt prefix already sits in the RadixAttention cache—
+  admitting them is nearly "free" because that attention was already computed (Lesson 7). This step directly raises the cache hit rate, and hit rate is where SGLang's real speed comes from.
+  Meanwhile the scheduler each beat <strong>balances "admit new prefills" vs "just decode"</strong>: the former grows throughput but raises latency for running decodes, the latter keeps latency low (Lesson 8).
+  The policy is the weight on this scale, beat after beat.
+</div>
+
+<h2>Who runs first: what each of the three policies optimizes</h2>
+<p>
+<span class="inline">SchedulePolicy</span> abstracts "order" into one call to <span class="mono">calc_priority</span>: it <strong>reorders the waiting queue in place</strong>.
+The mode is chosen by workload—when many requests share prefixes, <strong>cache-aware</strong> pays off most; for fairness and simplicity, <strong>FCFS</strong>; to honor business priority, <strong>priority</strong>.
+Note one engineering detail: when the queue is very long (&gt;128), the expensive prefix matching temporarily falls back to FCFS, so sorting itself never becomes the bottleneck.
+</p>
+
+<table class="t">
+  <tr><th>Policy</th><th>How it orders</th><th>What it optimizes</th><th>Cost / fit</th></tr>
+  <tr><td class="mono">LPM (cache-aware)</td><td>Longest-prefix-match first: cached-prefix reqs jump ahead</td><td><strong>Cache hit rate</strong> → near-free throughput</td><td>Must compute prefixes; falls back to FCFS on long queues</td></tr>
+  <tr><td class="mono">FCFS</td><td>First-come-first-served, by arrival</td><td><strong>Fair, simple, predictable</strong></td><td>Ignores cache; misses hot-prefix dividends</td></tr>
+  <tr><td class="mono">priority</td><td>Sort by each request's explicit priority</td><td><strong>Honors business urgency</strong> (VIP first)</td><td>Needs upper-layer values; can starve low priority</td></tr>
+</table>
+
+<h2>How many fit: PrefillAdder builds a batch under a double budget</h2>
+<p>
+Once ordered, <span class="inline">PrefillAdder</span> holds two yardsticks and stuffs requests into this beat's prefill batch:
+a <strong>token budget</strong> (<span class="mono">rem_total_tokens / rem_input_tokens</span>, keep this prefill step from getting too big—tied to chunked prefill, Lesson 22),
+and a <strong>memory budget</strong> (enough free KV-pool slots, Lessons 4/30—never admit a request you can't fit).
+<span class="mono">add_one_req</span> tries each in turn: add it whole if it fits, otherwise <strong>chunk</strong> it; once either budget is exhausted it returns <span class="mono">NO_TOKEN / OTHER</span> and stops.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Take the head request</h4><p>Pull the next req off the sorted waiting queue and compute its token need: <span class="mono">cand_extend_input_len + max_new + page_size</span>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Check the token budget</h4><p>If <span class="mono">total_tokens ≥ rem_total_tokens</span>, return <span class="mono">NO_TOKEN</span>; this yardstick caps the total prefill per beat.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Check memory / slots</h4><p>Insufficient KV-pool room (incl. SWA constraints) also rejects—never over-admit a request that can't fit.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Add whole or chunk</h4><p>If the budget allows, add the whole req to <span class="mono">can_run_list</span>; if only half fits, <strong>chunk</strong> it and continue next beat (Lesson 22).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>Update budget, back to 1</h4><p><span class="mono">_update_prefill_budget</span> deducts both budgets; loop until full or the queue empties—this beat's batch is then fixed.</p></div></div>
+</div>
+
+<h2>Cache-aware vs fair: LPM against FCFS</h2>
+<p>
+Why does cache-aware ordering matter so much? Because it <strong>directly raises the RadixAttention hit rate</strong>—by clustering "same opening" requests to run first, the shared prefix is computed once.
+That is the meaning of <strong>co-designing</strong> the scheduler with the cache: the goal of ordering is not abstract fairness but feeding the cache—the money-saving machine—as full as possible.
+But cache-awareness has a cost: computing prefixes, and possibly making later arrivals wait a bit longer. So FCFS is kept as the counterpoint—simple, fair, predictable.
+</p>
+
+<div class="cols">
+  <div class="col"><h4>LPM (cache-aware)</h4><p>Bumps <strong>prefix-hit</strong> requests to the front. Pros: high hit rate, near-free admission, huge real-traffic speedups (shared system prompts / few-shot / chat history). Cost: must compute prefixes; falls back to FCFS on long queues. <strong>Optimizes hit rate</strong>.</p></div>
+  <div class="col"><h4>FCFS (first-come-first-served)</h4><p>Strictly by arrival, first in first run. Pros: <strong>fair, simple, predictable latency</strong>, no infinite wait for late arrivals. Cost: ignores the cache, leaking the hot-prefix dividend. <strong>Optimizes fairness</strong>.</p></div>
+</div>
+
+<h2>The line-jump in action: a reordered waiting queue</h2>
+<p>
+This diagram grounds the abstract "ordering": the original queue by arrival is A, B, C, D; among them B and D have cache-hitting openings (half-set tables).
+LPM <strong>bumps them to the front</strong>—this beat runs B and D first, harvesting two nearly-free units of throughput, and A, C slide back. The highlighted cells are the prefix-hit requests that jump ahead.
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">Waiting queue: LPM bumps cache-hitting requests (highlighted) to the front</div>
+  <div class="cells">
+    <span class="lab">Raw</span><span class="cell">A arrives</span><span class="cell">B arrives</span><span class="cell">C arrives</span><span class="cell">D arrives</span><span class="sep"></span><span class="q">FCFS order</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Hit?</span><span class="cell">A miss</span><span class="cell hl">B prefix hit</span><span class="cell">C miss</span><span class="cell hl">D prefix hit</span><span class="sep"></span><span class="q">probe cache</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Reordered</span><span class="cell hl">B first</span><span class="cell hl">D first</span><span class="cell">A after</span><span class="cell">C after</span><span class="sep"></span><span class="q">LPM order</span>
+  </div>
+</div>
+
+<h2>Read the source: calc_priority and the budget check</h2>
+<p>
+Both the policy and the budget live in <span class="mono">schedule_policy.py</span>. <span class="mono">calc_priority</span> first determines the active policy, then sorts by branch;
+<span class="mono">PrefillAdder.add_one_req</span> decides admit-or-reject through a chain of budget checks. Below are the most telling lines.
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">order + throttle</span></div>
+<pre><span class="kw">def</span> calc_priority(self, waiting_queue, running_batch=<span class="kw">None</span>):
+    policy = self._determine_active_policy(waiting_queue)   <span class="cm"># long queue(&gt;128) falls back to FCFS</span>
+
+    <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:          <span class="cm"># fair: by arrival order</span>
+        <span class="kw">if</span> self.enable_priority_scheduling:
+            SchedulePolicy._sort_by_priority_and_fcfs(waiting_queue, self.priority_sign)
+        <span class="kw">return</span>
+
+    <span class="kw">if</span> <span class="kw">isinstance</span>(policy, CacheAwarePolicy):           <span class="cm"># cache-aware: raise hit rate</span>
+        temporary_deprioritized = self._compute_prefix_matches(waiting_queue, policy)
+        <span class="kw">if</span> policy == CacheAwarePolicy.LPM:               <span class="cm"># longest-prefix-match first</span>
+            SchedulePolicy._sort_by_longest_prefix(waiting_queue, temporary_deprioritized)
+
+<span class="cm"># —— PrefillAdder.add_one_req: the double-budget check ——</span>
+total_tokens = cand_extend_input_len + max_new + self.page_size
+<span class="kw">if</span> total_tokens &gt;= self.rem_total_tokens:            <span class="cm"># token/memory budget short -&gt; reject</span>
+    <span class="kw">return</span> AddReqResult.NO_TOKEN                       <span class="cm"># never admit one that won't fit (L4/30)</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Policy ordering and budget throttling are two things</strong>: <span class="mono">SchedulePolicy.calc_priority</span> decides <strong>who runs first</strong> (reorders the waiting queue in place), <span class="mono">PrefillAdder</span> decides <strong>how many fit</strong> (add_one_req under a double budget).</li>
+    <li><strong>Three modes, each with a strength</strong>: <span class="mono">LPM</span> (cache-aware) optimizes <strong>hit rate</strong> by bumping prefix-cached reqs ahead (Lesson 7); <span class="mono">FCFS</span> optimizes <strong>fairness</strong>, simple and predictable; <span class="mono">priority</span> honors business priority. Pick LPM when the workload shares prefixes.</li>
+    <li><strong>PrefillAdder's two yardsticks</strong>: a <strong>token budget</strong> (keep a beat's prefill from getting too big, tied to chunked prefill in Lesson 22) + a <strong>memory budget</strong> (free KV-pool slots, Lessons 4/30); stop when either is exhausted, <strong>chunk</strong> if needed.</li>
+    <li><strong>The prefill-vs-decode admission tension</strong>: each beat balances "admit new prefills to grow throughput but raise latency" vs "just decode to keep latency low" (Lessons 18/8); the policy is the weight on this scale.</li>
+    <li><strong>Scheduler and cache are co-designed</strong>: cache-aware ordering directly raises the RadixAttention hit rate, and that hit rate is the root of SGLang's real-traffic speedup—ordering's goal is not abstract fairness but feeding the cache full.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does cache-aware <strong>LPM (longest-prefix-match)</strong> ordering optimize, versus <strong>FCFS</strong>?</div>
+  <ol class="opts">
+    <li>LPM optimizes <strong>cache hit rate</strong>—bumping requests whose prompt prefix is already in the RadixAttention cache to the front so admitting them is nearly free; FCFS optimizes <strong>fairness</strong>—strictly by arrival, simple and predictable</li>
+    <li>Both only optimize single-request latency, with no effect on throughput</li>
+    <li>LPM optimizes fairness and FCFS optimizes hit rate, exactly reversed</li>
+    <li>Both optimize memory usage, unrelated to the cache</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. LPM lets cached-opening requests jump ahead so a shared prefix is computed once, directly raising the RadixAttention hit rate—the source of real-traffic speedups (Lesson 7); FCFS ignores the cache and goes by arrival, buying fairness, simplicity and predictable latency. On long queues LPM even falls back to FCFS so sorting never becomes the bottleneck.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. When <code>PrefillAdder</code> decides 'how many requests fit this beat', which <strong>two budgets</strong> does it use?</div>
+  <ol class="opts">
+    <li>A <strong>token budget</strong> (keep this prefill step from getting too big, tied to chunked prefill) + a <strong>memory budget</strong> (enough free KV-pool slots, never admit a req that won't fit); stop when either runs out</li>
+    <li>A disk-space budget + a process-count budget</li>
+    <li>A CPU-core budget + a network-bandwidth budget</li>
+    <li>Only a token budget; memory never enters the decision</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <code>add_one_req</code> computes <code>total_tokens = cand_extend_input_len + max_new + page_size</code>; if <code>≥ rem_total_tokens</code> it returns <code>NO_TOKEN</code>, and it also checks free KV-pool slots (Lessons 4/30). The token budget caps the per-beat prefill size (chunking, Lesson 22), the memory budget guarantees it fits—whichever yardstick fills first stops admission.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What is the '<strong>prefill-vs-decode admission tension</strong>' the scheduler faces each beat?</div>
+  <ol class="opts">
+    <li>They are fully independent and never affect each other</li>
+    <li>Prefill and decode must run on different GPUs; the scheduler just picks the card</li>
+    <li>The tension refers to bandwidth contention between CPU and disk</li>
+    <li>Admitting more new prefills <strong>grows throughput</strong> but <strong>raises latency for running decodes</strong>; just advancing old decodes <strong>keeps latency low</strong> but adds no new throughput—the policy balances the two each beat</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Prefill eats whole prompts and burns compute, pulling new requests into the batch to grow throughput, but it contends with running decodes and raises their latency; decode-only keeps latency steady but adds no throughput. The scheduler weights this scale with policy each beat (Lessons 18/8)—the core trade-off of batch formation.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'smart host / bouncer' analogy, explain the two actions of the schedule policy: <strong>ordering</strong> (how <code>SchedulePolicy.calc_priority</code> reorders the waiting queue in place by LPM / FCFS / priority) and <strong>throttling</strong> (how <code>PrefillAdder</code> calls <code>add_one_req</code> one by one under the token + memory double budget, chunking when needed). Then explain why cache-aware ordering directly raises the RadixAttention hit rate, illustrating the scheduler-cache <strong>co-design</strong>.</li>
+    <li>Thinking forward: if your production traffic has thousands of requests sharing one very long system prompt, would you pick LPM or FCFS, and why? Then, using <code>PrefillAdder</code>'s double budget, explain how a very long prompt is held back by the token budget and <strong>chunked prefill (Lesson 22)</strong>—so it can't monopolize a beat and clog all decodes—connecting it to KV-pool capacity (Lessons 4/30) and the throughput/latency trade-off (Lesson 8).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Zero-overhead overlap scheduler</h1>
+
+<p class="lead">
+This is Part 5's <strong>signature</strong> lesson—the optimization name-dropped back in Lessons 1 and 3: the <strong>zero-overhead overlap scheduler</strong>.
+Recall Lesson 18: every scheduler step mixes two kinds of work—<strong>CPU scheduling</strong> (build the batch, sample, bookkeep, prepare the next step's inputs)
+and the <strong>GPU forward</strong>. In the naive <span class="inline">event_loop_normal</span>, these are <strong>strictly serial</strong>:
+GPU finishes → CPU then forms the next batch → GPU runs again. The catch: <strong>while the CPU forms the batch, the GPU sits idle</strong>.
+For decode—where each step is very fast—the fixed CPU overhead becomes a sizable fraction of a step, so a chunk of expensive GPU time is wasted.
+This lesson shows how SGLang <strong>pipelines</strong> the two to erase that idle gap entirely: keep the GPU <strong>never idle</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Real-world analogy</div>
+  Think of one step as a <strong>relay race / two-stage assembly line</strong>. The naive loop is a single runner: after sprinting this leg he must <strong>stop</strong>, walk back to the line, tie his shoes,
+  catch his breath—and only then sprint the next leg, leaving the track (GPU) empty in between. The overlap scheduler uses <strong>two runners</strong>: while the current runner (GPU) sprints all-out,
+  the next runner (CPU) is <strong>already at the line, laced up and set</strong>, so the baton passes with <strong>zero pause</strong>.
+  Or a kitchen: while the current dish sizzles on the stove (GPU), the prep cook (CPU) is already chopping and plating the <strong>next order</strong>—
+  <strong>the stove never burns empty</strong>. The only cost: you are forever <strong>one beat behind</strong>, because the work you finish is always the previous leg's result.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>hide this step's CPU scheduling inside the previous step's GPU compute</strong>. Instead of "compute → finish → form next" in series,
+  <span class="inline">event_loop_overlap</span> <strong>launches</strong> step N's GPU forward, <strong>does not wait for it</strong>, and immediately has the CPU form step N+1's batch and <strong>finish the previous (N−1) step's</strong> result—
+  the previous result lives in a <span class="mono">result_queue</span> (a future) and is processed <strong>one beat late</strong>. Each step's CPU overhead now falls neatly within the "shadow" of that step's GPU compute and is <strong>fully hidden</strong>,
+  presenting as <strong>near-zero scheduling overhead</strong> with the GPU saturated.
+  The cost is <strong>one extra beat of latency</strong> (you're always one step behind) plus finer state management—the next batch is built before the current result is known, so sampled tokens and KV bookkeeping have cross-beat dependencies,
+  which SGLang handles for you via the future/event machinery in <span class="mono">batch_overlap</span>. This is v0.4's "zero-overhead batch scheduler"; it pairs perfectly with continuous batching (Lesson 5): <strong>the batch is always full, and the scheduling that keeps it full costs nothing</strong>.
+</div>
+
+<h2>The problem: in the serial loop, the GPU idles while the CPU forms the batch</h2>
+<p>
+Do the accounting first. The only thing that truly burns GPU in a step is <span class="mono">run_batch</span> (→ ModelRunner.forward, Lesson 24);
+the rest—<span class="mono">get_next_batch_to_run</span> (form the batch), <span class="mono">sample</span>, <span class="mono">process_batch_result</span> (append tokens, detect finished, free KV, bookkeep, prep next inputs)—
+is all <strong>lightweight CPU work</strong>. The naive <span class="inline">event_loop_normal</span> lines them up <strong>in a straight line</strong>: CPU forms batch → GPU forward → CPU finishes → CPU forms next → GPU forward…
+The trouble is at the seams: whenever the CPU is forming/sampling/bookkeeping, <strong>the GPU has nothing to do and just idles</strong>; conversely, the CPU idles during the forward.
+Two expensive resources take turns being busy and idle—neither is fed. For prefill (GPU-heavy) the CPU share is small; but once you hit decode—
+one token per request per step, an extremely fast forward—that fixed scheduling overhead becomes a <strong>conspicuous slice</strong> of the step.
+The faster the loop spins and the less the GPU rests, the more this fixed overhead stings: it <strong>caps</strong> whole-engine throughput.
+</p>
+
+<div class="cols">
+  <div class="col"><h4>Naive serial: event_loop_normal (Lesson 18)</h4><p>Within a step, <strong>CPU forms batch → GPU forward → CPU finishes</strong> queue up with no overlap. The GPU <strong>idles for the whole stretch</strong> while the CPU forms/samples/bookkeeps. Decode steps make the GPU very fast, so CPU overhead dominates and <strong>compute is wasted</strong>; loop speed caps throughput.</p></div>
+  <div class="col"><h4>Overlap pipeline: event_loop_overlap (this lesson)</h4><p><strong>Launch</strong> this step's GPU forward (don't wait), and the CPU immediately forms the next batch and <strong>finishes the previous step</strong>. CPU scheduling is <strong>hidden in the GPU compute's shadow</strong>, so the GPU has <strong>no gaps</strong>—scheduling overhead near zero. Cost: one beat behind.</p></div>
+</div>
+
+<h2>The fix: tuck the next step's scheduling into this step's GPU shadow</h2>
+<p>
+The overlap loop has just three core moves, but the order is everything. First, <strong>launch</strong> step N's forward: call <span class="mono">run_batch</span> to hand the batch to the GPU,
+but <strong>return immediately—don't block on the result</strong>—and <span class="mono">append</span> this "launched, pending" batch with its result handle onto <span class="mono">result_queue</span>.
+Second, while the GPU is busy on N, <strong>the CPU goes off to form step N+1's batch</strong> (next step's <span class="mono">get_next_batch_to_run</span> is effectively prepped here).
+Third, <strong>finish the previous (N−1) step</strong>: <span class="mono">popleft</span> from <span class="mono">result_queue</span> that prior batch and its <em>now-ready</em> result and run <span class="mono">process_batch_result</span>—
+append tokens, detect finished, free KV. Note the stagger: <strong>when we process N−1's result, the GPU is busy computing N</strong>. So every slice of CPU work lands inside the GPU compute's shadow.
+That's where "one beat behind" comes from, and where "zero-overhead" comes from—you always process the <strong>previous</strong> step's result, yet no step's CPU time <strong>ever makes the GPU wait</strong>.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Launch step N's forward, don't wait</h4><p><span class="mono">batch = get_next_batch_to_run()</span> forms batch N; <span class="mono">run_batch(batch)</span> <strong>fires it onto the GPU and moves on</strong>, pushing <span class="mono">(batch.copy(), result)</span> onto <span class="mono">result_queue</span>. GPU starts; CPU doesn't block.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>While GPU is busy, CPU preps N+1</h4><p>With the GPU still on N, the CPU is already <strong>receiving requests, forming the next batch, prepping samples</strong>. This CPU time <strong>doesn't occupy the GPU</strong>—it hides in N's compute shadow.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Finish the previous step (N−1)</h4><p><span class="mono">popleft</span> batch N−1 from <span class="mono">result_queue</span>—it's <strong>now done</strong>. <span class="mono">process_batch_result</span> appends tokens, detects finished, <strong>frees KV</strong>, sends to detok (Lesson 17). You always process the <strong>previous</strong> step.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Update last_batch, back to 1</h4><p><span class="mono">last_batch = batch</span>; loop back to launch N+1. Every beat is a staggered "launch this / finish previous" pipeline; the GPU baton passes with <strong>no pause</strong>.</p></div></div>
+</div>
+
+<h2>The GPU never idles: draw every beat on a timeline</h2>
+<p>
+This figure spreads "one beat behind" out in the open. Slice time into four beats (T1…T4); the top row is the GPU, the bottom row the CPU. In the <strong>naive serial</strong> case,
+the two rows are <strong>out of phase</strong>—GPU lit while CPU dark, CPU lit while GPU dark, always one side idling. In the <strong>overlap</strong> case, <strong>the GPU row is lit end to end with no empty cell</strong> (highlighted cell = "GPU computing"),
+while the CPU row works <strong>in the same beat as the GPU</strong>: at T2, the GPU computes batch 2 while the CPU <strong>simultaneously</strong> forms batch 3 and finishes batch 1's result.
+You can see two things at a glance: one, the GPU <strong>never idles</strong>—the root of saturated throughput; two, results always land <strong>one beat late</strong>—batch 1's result isn't finished until T2, which is exactly the extra beat of latency (Lesson 8's throughput/latency trade-off in the flesh).
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">Naive serial vs overlap pipeline: highlighted cell = GPU computing (watch whether the GPU row has gaps)</div>
+  <div class="cells">
+    <span class="lab">serial·GPU</span><span class="cell">T1 run b1</span><span class="cell">T2 idle</span><span class="cell">T3 run b2</span><span class="cell">T4 idle</span><span class="sep"></span><span class="q">gaps → wasted compute</span>
+  </div>
+  <div class="cells">
+    <span class="lab">serial·CPU</span><span class="cell">T1 idle</span><span class="cell">T2 form b2</span><span class="cell">T3 idle</span><span class="cell">T4 form b3</span><span class="sep"></span><span class="q">rows out of phase</span>
+  </div>
+  <div class="cells">
+    <span class="lab">overlap·GPU</span><span class="cell hl">T1 run b1</span><span class="cell hl">T2 run b2</span><span class="cell hl">T3 run b3</span><span class="cell hl">T4 run b4</span><span class="sep"></span><span class="q">no gaps → saturated</span>
+  </div>
+  <div class="cells">
+    <span class="lab">overlap·CPU</span><span class="cell">T1 form b2</span><span class="cell">T2 form b3·finish b1</span><span class="cell">T3 form b4·finish b2</span><span class="cell">T4 form b5·finish b3</span><span class="sep"></span><span class="q">hidden in GPU shadow</span>
+  </div>
+</div>
+
+<h2>Account honestly: zero-overhead is not zero-cost</h2>
+<p>
+Overlap is no free lunch; it <strong>trades GPU idling for one beat of latency plus complexity</strong>. The upside column is hard: <strong>near-zero scheduling overhead</strong>, <strong>saturated GPU utilization</strong>,
+and clearly higher throughput in decode-heavy regimes. The cost column matters too: <strong>+1 beat of latency</strong>—you're forever one step behind, nudging single-request token timings (Lesson 8);
+and <strong>harder state management</strong>—the next batch is built before the current result <em>exists</em>, so sampled tokens and KV bookkeeping carry <strong>cross-beat dependencies</strong>,
+which SGLang threads through the future/event objects in the <span class="mono">batch_overlap</span> directory to keep correct. Some cases (where you must have the previous result before forming the next,
+the source's <span class="mono">is_disable_overlap_for_batch</span>) temporarily fall back to no-overlap and finish the prior batch first. Understand this ledger and you see why it's "zero-overhead":
+not cost-free, but with the cost <strong>moved somewhere that doesn't dent throughput</strong>.
+</p>
+
+<table class="t">
+  <tr><th>Dimension</th><th>Naive event_loop_normal</th><th>Overlap event_loop_overlap</th></tr>
+  <tr><td>CPU scheduling overhead</td><td>On the critical path; GPU idles</td><td class="mono">≈ 0 (hidden in GPU shadow)</td></tr>
+  <tr><td>GPU utilization</td><td>Visible gaps on decode steps</td><td><strong>Saturated, no gaps</strong></td></tr>
+  <tr><td>Throughput</td><td>Capped by loop speed</td><td><strong>Markedly higher</strong> (v0.4 headline)</td></tr>
+  <tr><td>Latency</td><td>Finished in real time</td><td><strong>+1 beat</strong> (always one behind)</td></tr>
+  <tr><td>Implementation complexity</td><td>Simple, straight-line</td><td>Needs <span class="mono">result_queue</span> + cross-beat deps</td></tr>
+</table>
+
+<h2>Read the source: event_loop_overlap's staggered pipeline</h2>
+<p>
+The real thing lives in <span class="mono">scheduler.py</span>'s <span class="mono">event_loop_overlap</span>. Grab three points: one, <span class="mono">result_queue</span>, a deque
+holding "launched but not yet finished" batches; two, right after <span class="mono">run_batch</span> we <strong>append immediately, never blocking</strong>, deferring the finish to the next beat;
+three, <span class="mono">pop_and_process</span> takes the <strong>previous</strong> beat's batch off the front and runs <span class="mono">process_batch_result</span>—and while that line executes, the GPU is busy on this beat. That's how the stagger is built.
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">staggered / one beat behind</span></div>
+<pre><span class="kw">def</span> event_loop_overlap(self):
+    <span class="cm"># A loop that overlaps CPU scheduling with GPU compute</span>
+    self.result_queue = deque()                  <span class="cm"># holds "launched, pending-finish" batches</span>
+
+    <span class="kw">def</span> pop_and_process():
+        <span class="cm"># Finish the previous step (N-1) result -- deferred one beat</span>
+        tmp_batch, tmp_result = self.result_queue.popleft()
+        self.process_batch_result(tmp_batch, tmp_result)
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        batch = self.get_next_batch_to_run()     <span class="cm"># CPU: form this step's (N) batch</span>
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:                                <span class="cm"># launch this step's forward, don't wait</span>
+            batch_result = self.run_batch(batch)
+            self.result_queue.append((batch.copy(), batch_result))
+
+        <span class="kw">if</span> self.last_batch:                      <span class="cm"># while GPU runs N, CPU finishes N-1</span>
+            pop_and_process()
+
+        self.last_batch = batch                  <span class="cm"># back to top: next beat launches N+1</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The problem is serialization</strong>: in naive <span class="mono">event_loop_normal</span> (Lesson 18) CPU forming/sampling/bookkeeping and the GPU forward <strong>queue up in order</strong>, so the GPU idles while the CPU works. Decode makes the GPU very fast, the CPU share dominates, and loop speed <strong>caps</strong> throughput.</li>
+    <li><strong>The fix is overlap</strong>: <span class="mono">event_loop_overlap</span> <strong>launches</strong> step N's forward (no wait), and the CPU immediately forms batch N+1 and <strong>finishes step N−1's</strong> result (kept in <span class="mono">result_queue</span> / a future, one beat late). CPU scheduling hides <strong>in the GPU compute's shadow</strong>.</li>
+    <li><strong>What overlaps what</strong>: step N's <strong>GPU forward</strong> ∥ step N+1's <strong>CPU batch-forming</strong> + step N−1's <strong>CPU finishing</strong>. The GPU <strong>never idles</strong>; scheduling overhead is near zero.</li>
+    <li><strong>The cost is one beat</strong>: you always process results <strong>one step late</strong> (Lesson 8's throughput/latency trade-off), plus harder cross-beat state—the next batch is built before the current result exists, so SGLang carries dependencies via <span class="mono">batch_overlap</span>'s future/event objects.</li>
+    <li><strong>It pairs with continuous batching</strong>: continuous batching (Lesson 5) keeps the batch <strong>always full</strong>; the overlap scheduler makes <strong>keeping it full free</strong>. This is v0.4's headline win, the "zero-overhead" cited in Lessons 1/3. Combine with CUDA Graph (Lesson 27) to shave the per-step cost further.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In <code>event_loop_overlap</code>, <strong>what overlaps with what</strong>? Name precisely which part runs on the GPU and which on the CPU.</div>
+  <ol class="opts">
+    <li>Two different requests' GPU forwards run in parallel on one card; the CPU is uninvolved</li>
+    <li>Step N's <strong>GPU forward</strong> (<code>run_batch</code>→ModelRunner.forward) runs <strong>in the same beat as</strong> the <strong>CPU forming step N+1's batch</strong> plus the <strong>CPU finishing step N−1's result</strong> (<code>process_batch_result</code>): after launching this step's forward without waiting, the CPU immediately forms the next batch and pops the previous step's result from <code>result_queue</code> to finish it</li>
+    <li>This step's CPU finishing overlaps with this step's own GPU forward (parallel within the same step)</li>
+    <li>The GPU forward overlaps with GPU sampling, with no CPU work at all</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The scheduler 'decides, never computes': forming/sampling/finishing are light CPU work, while only <code>run_batch</code> burns GPU. The overlap loop launches step N's forward and <strong>appends to <code>result_queue</code> without blocking</strong>; while the GPU computes N, the CPU forms N+1's batch and <code>popleft</code>s N−1's result to finish it. So each beat's CPU time hides in the same beat's GPU compute shadow.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does this overlap hide <strong>scheduling overhead down to near zero</strong>, earning the name 'zero-overhead'?</div>
+  <ol class="opts">
+    <li>Because overlap makes the CPU scheduling code itself run faster</li>
+    <li>Because the CPU's forming/sampling/bookkeeping time falls inside the 'shadow' of that beat's GPU forward and is <strong>fully masked</strong>—the GPU never idles waiting on the CPU, so the CPU cost leaves the critical path, presenting as near-zero scheduling overhead with the GPU saturated</li>
+    <li>Because it deletes the batch-forming and sampling steps entirely</li>
+    <li>Because the forward is moved onto the CPU, eliminating the GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. 'Zero-overhead' isn't cost-free; it moves the cost <strong>somewhere that doesn't dent throughput</strong>. In the serial version the GPU idles while the CPU works, and that idle caps throughput; overlap puts CPU scheduling and the GPU forward in the same beat, masking CPU time behind GPU compute and saturating utilization. The win is biggest on decode, where the GPU is very fast and the CPU share is large.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What is the overlap scheduler's <strong>main cost</strong>, and why is a <code>result_queue</code> needed?</div>
+  <ol class="opts">
+    <li>The cost is <strong>one extra beat of latency</strong>—you always process the <strong>previous</strong> step's result, forever one step behind real time (Lesson 8's throughput/latency trade-off), plus harder cross-beat state; the <code>result_queue</code> holds 'launched but not yet finished' batches, <strong>deferring the finish one beat</strong> so it's <code>popleft</code>-ed once the GPU is done</li>
+    <li>The cost is doubled VRAM; the <code>result_queue</code> caches KV</li>
+    <li>The cost is lower throughput; the <code>result_queue</code> throttles intake</li>
+    <li>There is no cost; the <code>result_queue</code> is just a logging buffer</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. In source, right after <code>run_batch</code> we <code>result_queue.append((batch.copy(), result))</code> without blocking, and only the next beat <code>popleft</code>s it for <code>process_batch_result</code>—so finishing always lags one beat, hence +1 latency. The next batch is built before the current result exists, giving sampled-token / KV-bookkeeping cross-beat dependencies threaded via <code>batch_overlap</code>'s future/event objects. Cases needing the prior result first fall back to no-overlap temporarily.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'relay race / two-stage assembly line' analogy, walk through one step of <code>event_loop_overlap</code>'s staggered pipeline. Cover each: (1) <strong>launch</strong> step N's forward (<code>run_batch</code> without waiting, push <code>(batch.copy(), result)</code> onto <code>result_queue</code>); (2) while the GPU computes N, the CPU forms step N+1's batch; (3) <code>pop_and_process</code> finishes step N−1 (<code>process_batch_result</code>: append tokens, detect finished, free KV, send to detok, Lesson 17). Explain why being 'one beat behind' is both the cost and the source of 'zero-overhead,' and, contrasting naive <code>event_loop_normal</code> (Lesson 18), why the GPU never idles.</li>
+    <li>Argue that 'the overlap scheduler pairs perfectly with continuous batching': continuous batching (Lesson 5) keeps the batch <strong>always full</strong>, while the overlap scheduler makes <strong>keeping it full free</strong>. Explain which half of the throughput problem each solves, why the overlap win is largest in decode-heavy regimes (tie to Lesson 8 throughput/latency and Lesson 24 model forward), and how it stacks with CUDA Graph (Lesson 27) to further thin the per-step cost. Then discuss: under what workloads or latency-sensitive scenarios might the +1-beat latency be an unacceptable trade-off?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Chunked prefill</h1>
+
+<p class="lead">
+Last lesson we saw the scheduler's two-step move: order first, then throttle. This lesson zooms in on the trickiest throttling case: what happens when the head of the queue is a <strong>huge prompt</strong> (say a 32k-token document)?
+If you let it <strong>prefill entirely in ONE step</strong>, that step becomes a "whale"—it monopolizes the whole GPU for tens of milliseconds, and every other request that is <span class="inline">decoding</span> behind it <strong>stalls completely</strong>: nobody's tokens come out, and latency spikes (TTFT/ITL blow up, Lesson 8).
+<strong>Chunked prefill</strong> cuts that whale into <strong>fixed-size token chunks</strong>, spread over several steps, each step nibbling one small bite while <strong>mixed in the same batch</strong> with everyone else's decode. No step is enormous; everyone's tokens keep flowing.
+Remember one line: <strong>never let one long request blow up a step—chunk it and feed it slowly, mixed with decode</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Real-world analogy</div>
+  Picture this step's GPU as a <strong>lively dinner table</strong>. Everyone takes turns talking (each request's decode emits a token in turn), conversation flowing.
+  Then a <strong>giant meal</strong> arrives (a 32k-token prompt). The dumb move: have one person <strong>stuff the whole plate in their mouth at once</strong>—now they chew head-down for tens of seconds, during which <strong>nobody can get a word in</strong>; one person choked the whole table's chat.
+  The smart move is to <strong>eat the giant meal in small bites while still holding the conversation</strong>: each round you swallow just <strong>one bite (one chunk)</strong>, chew, say a line, then take the next bite. The meal still gets finished, and the table's chat (everyone else's decode) <strong>never stops</strong>.
+  The key discipline: <strong>each bite has a fixed size cap</strong>—nobody is ever allowed to cram their mouth full and block everyone's turn.
+  The cost is real too: the big meal takes several rounds to finish (a few extra steps, and its own first byte is slower), but in exchange <strong>the whole table stays smooth</strong>—nobody gets choked off.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  In one line: <strong>split a big prefill into many small per-step chunks, mix them with decode, and trade a few extra steps for globally smooth latency</strong>.
+  Who does the cutting? The very <span class="inline">PrefillAdder</span> from last lesson (Lesson 20). It holds a <strong>token budget</strong> (the server arg <span class="mono">chunked_prefill_size</span> sets how many prefill tokens fit per step) and, inside <span class="mono">add_one_req</span>, tries each request: if the whole thing fits, commit it; <strong>if it doesn't, slice off only the part that fits</strong> and leave the rest for the next step.
+  So a 32k prompt gets cut into several chunks across consecutive steps—its KV cache (Lesson 4) <strong>fills chunk by chunk</strong>, and only after the <strong>last chunk</strong> does that request switch into decode and emit its first token. And every such step runs a <strong>mixed batch</strong>: some requests prefilling a chunk, others decoding, with the event loop (Lesson 18) advancing as usual.
+  Pull back: chunked prefill and last lesson's throttling are two sides of one coin—throttling guarantees "don't eat too much in one step," chunking guarantees "what doesn't fit isn't choked down whole either; slice it and take it slow."
+  It tames an extreme that would otherwise spike latency into a stream of steady small steps—the key to SGLang staying smooth under <strong>mixed long/short traffic</strong>.
+</div>
+
+<h2>The problem: one whale clogs the whole pool</h2>
+<p>
+First, what happens without chunking. Continuous batching (Lesson 5) rests on a happy premise: "every step is fast, and the batch advances together."
+But the moment a 32k-token prefill jumps to the head and you make it <strong>finish in one step</strong>, that step's forward compute explodes tens of times over—
+the GPU is monopolized for tens of milliseconds, during which <strong>every other decode request in the batch just waits</strong>: they should emit one token per step, but now they stall alongside the whale.
+To the user this reads as a streaming answer that <strong>suddenly freezes</strong> (ITL spike), plus longer first-token latency for new requests (TTFT spike, Lesson 8).
+One overlong request ruined an entire batch's experience. This is not a "won't fit in memory" problem—KV slots may be plenty; it is a <strong>"too much compute in one step"</strong> problem,
+congestion along the time axis. Chunked prefill exists precisely to flatten this "one big fish stops the whole pool" spike.
+</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ One-step full prefill (spike)</h4><p>32k tokens finish in a <strong>single step</strong>: that step is enormous, monopolizing the GPU for tens of ms. Every other request's decode in the batch <strong>stalls</strong>, no tokens emitted. TTFT/ITL <strong>spike instantly</strong> (Lesson 8); users see output freeze. One whale clogs the pool.</p></div>
+  <div class="col"><h4>✅ Chunked prefill (smooth)</h4><p>The 32k is cut into <strong>fixed-size chunks</strong> over several steps. Each step computes one chunk + is <strong>mixed with everyone's decode</strong>; no step is huge. Everyone's tokens <strong>keep flowing</strong>, latency steady. A few extra steps buy <strong>global smoothness</strong> and better goodput-under-SLA.</p></div>
+</div>
+
+<h2>How to cut: split 32k into multi-step chunks</h2>
+<p>
+The mechanism is plain and effective: each step, <span class="inline">PrefillAdder</span> carries a fixed chunk-token budget (<span class="mono">rem_chunk_tokens</span>, derived from <span class="mono">chunked_prefill_size</span>).
+When a request's pending <span class="mono">input_tokens</span> is <strong>less than or equal to</strong> the remaining chunk budget, the whole thing is committed at once via the non-chunked path;
+once it <strong>exceeds</strong> it, the chunked branch kicks in: take only <span class="mono">trunc_len</span> tokens (floored to <span class="mono">page_size</span> for page alignment),
+mark that slice as this step's extend range (<span class="mono">set_extend_range</span>), and leave the rest. The request is recorded as <span class="mono">new_chunked_req</span>,
+and next step it returns with its filled prefix and <strong>slices the next chunk from the cut point</strong>. Round after round, the prompt's KV cache (Lesson 4) accumulates chunk by chunk,
+until the last chunk is filled and it finally leaves prefill and enters decode. The diagram below traces a 32k prompt being chunked across consecutive steps.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Step 1: chunk #1</h4><p>Take the 32k prompt at the head; <span class="mono">input_tokens &gt; rem_chunk_tokens</span> → slice only <span class="mono">trunc_len</span> (e.g. 8k, page-aligned). Fill the first 8k of KV, running mixed with others' decode.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Step 2: chunk #2</h4><p>The same request returns as <span class="mono">new_chunked_req</span>, slicing the next 8k from offset 8k. Another bounded small step; decode keeps flowing.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Steps 3…N: continue</h4><p>Chunk after chunk fills the KV (Lesson 4). No step is large, none monopolizes the GPU—the spike is fully flattened.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Last chunk: enter decode</h4><p>When the remainder fits in one step, the non-chunked path commits it whole. The prompt is now fully prefilled, and the request emits its first token.</p></div></div>
+</div>
+
+<h2>Mixed batch: prefill and decode in the same step</h2>
+<p>
+The reason chunking protects others' latency is the <strong>mixed batch</strong>: the prefill chunk that was sliced off does not get a step to itself; it shares <strong>one batch</strong> with a crowd of decoding requests in the same forward pass.
+So each step's work = one bounded prefill chunk + one decode token from every running request—controlled in size, steady in rhythm.
+This also answers "why not just queue the long request last"—that would starve it, with unbounded first-token latency; chunking lets it <strong>slice-and-mix</strong>,
+making steady prefill progress without stealing everyone's throughput. The diagram below shows the makeup of one mixed-batch step: the highlighted cell is the long request's <strong>one prefill chunk</strong>,
+the rest are each request's <strong>decode</strong>. The chunk's size (the highlighted cell's "width") is set by <span class="mono">chunked_prefill_size</span>—the very knob between smoothness and step count.
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">One step's mixed batch: 1 prefill chunk (highlighted) + several decodes in the same forward</div>
+  <div class="cells">
+    <span class="lab">members</span><span class="cell hl">long req · chunk#k</span><span class="cell">R2 decode</span><span class="cell">R3 decode</span><span class="cell">R4 decode</span><span class="cell">R5 decode</span><span class="sep"></span><span class="q">mixed batch</span>
+  </div>
+  <div class="cells">
+    <span class="lab">this step</span><span class="cell hl">fill 8k KV</span><span class="cell">emit 1 tok</span><span class="cell">emit 1 tok</span><span class="cell">emit 1 tok</span><span class="cell">emit 1 tok</span><span class="sep"></span><span class="q">bounded + flowing</span>
+  </div>
+  <div class="cells">
+    <span class="lab">next step</span><span class="cell hl">chunk#k+1</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="sep"></span><span class="q">steady rhythm</span>
+  </div>
+</div>
+
+<h2>The trade-off: chunk size is the knob</h2>
+<p>
+Chunking isn't free: it splits a prefill across steps, so <strong>total step count rises</strong>, and the whale's own TTFT is spread over several steps—its <strong>first byte is a bit slower</strong>.
+What you buy is smooth latency for <strong>everyone</strong> and higher goodput-under-SLA—in real mixed long/short workloads this is almost always worth it.
+And <span class="mono">chunked_prefill_size</span> is the knob: <strong>smaller</strong> means lighter prefill per step and smoother decode, but more steps, a slower whale first-byte, and more fixed overhead amortized;
+<strong>larger</strong> means fewer steps and a faster whale finish, but heavier steps and the spike risk creeping back (back to Lesson 8's throughput/latency trade-off).
+There's no universal optimum—it depends on your latency SLA and your long/short mix. The table lays the two ends side by side.
+</p>
+
+<table class="t">
+  <tr><th>chunk size</th><th>prefill per step</th><th>decode smoothness</th><th>total steps / whale TTFT</th><th>fits</th></tr>
+  <tr><td class="mono">smaller</td><td>light, bounded</td><td><strong>very smooth</strong>, tiny spikes</td><td>more steps, slower whale first byte</td><td>latency-sensitive, decode-heavy</td></tr>
+  <tr><td class="mono">larger</td><td>heavy, near-whole</td><td>worse, <strong>spike returns</strong></td><td>fewer steps, faster whale finish</td><td>throughput-first, long-prompt-heavy</td></tr>
+  <tr><td class="mono">chunking off</td><td>whole in one bite</td><td><strong>worst</strong>, one step stalls all</td><td>fewest steps, but latency blows up</td><td>rarely advised (fine only for short prompts)</td></tr>
+</table>
+
+<h2>Read the source: the chunk decision in add_one_req</h2>
+<p>
+Chunking lives in <span class="mono">schedule_policy.py</span>'s <span class="inline">PrefillAdder.add_one_req</span>.
+It first computes how many tokens the request needs, runs the token/memory budget checks, then an <span class="mono">if / else</span> decides: commit the whole thing if it fits,
+otherwise take the <strong>chunked prefill</strong> branch—floor <span class="mono">trunc_len</span> to <span class="mono">page_size</span>,
+commit only that slice, and record the request as <span class="mono">new_chunked_req</span> to continue next step. The most telling lines follow.
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::PrefillAdder.add_one_req</span><span class="ln">chunk decision</span></div>
+<pre><span class="cm"># whole fits (input_tokens ≤ remaining chunk budget) → commit at once, no chunking</span>
+<span class="kw">elif</span> self.rem_chunk_tokens <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> input_tokens &lt;= self.rem_chunk_tokens:
+    req.set_extend_range(<span class="cm"># commit the whole prompt this step</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.full_untruncated_fill_ids))
+    self.can_run_list.append(req)
+<span class="kw">else</span>:                                            <span class="cm"># doesn't fit → chunked prefill</span>
+    trunc_len = self.rem_chunk_tokens // self.page_size * self.page_size  <span class="cm"># page-aligned cut</span>
+    <span class="kw">if</span> trunc_len &lt;= 0:
+        <span class="kw">return</span> AddReqResult.OTHER
+    req.set_extend_range(<span class="cm"># compute only the first trunc_len tokens; rest next step</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.prefix_indices) + trunc_len)
+    self.can_run_list.append(req)
+    self.new_chunked_req = req                    <span class="cm"># remember it; slice the next chunk next step</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The problem</strong>: a huge prompt (e.g. 32k) prefilled <strong>whole in one step</strong> monopolizes the GPU and <strong>stalls every decode</strong> in the batch, causing TTFT/ITL latency spikes (Lesson 8). One whale clogs the pool.</li>
+    <li><strong>The fix</strong>: split the big prefill into <strong>fixed-size token chunks</strong> (set by <span class="mono">chunked_prefill_size</span>) across <strong>several steps</strong>, <strong>mixed in the same batch</strong> with others' decode—no step is huge, everyone's tokens keep flowing.</li>
+    <li><strong>Who cuts</strong>: <span class="inline">PrefillAdder</span> (Lesson 20) enforces the per-step token budget in <span class="mono">add_one_req</span>, clamping a non-fitting request to the remaining budget (<span class="mono">trunc_len</span>, page-aligned) and recording <span class="mono">new_chunked_req</span> for next step; KV fills chunk by chunk (Lesson 4), and only after the last chunk does it enter decode.</li>
+    <li><strong>Trade-off &amp; knob</strong>: chunking costs <strong>more steps</strong> and a thinner whale TTFT, buying <strong>smooth global latency</strong> and higher goodput-under-SLA. <span class="mono">chunked_prefill_size</span> smaller = smoother but more steps; larger = fewer steps but the spike returns (Lesson 8's trade-off).</li>
+    <li><strong>One-line close</strong>: never let one long request blow up a step—chunk it and feed it slowly, mixed with decode; spend a few extra steps to keep the whole table smooth. This is also the seed of the motivation for PD disaggregation (Lesson 45), which splits prefill and decode onto separate instances entirely.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Without chunking, why does a 32k-token huge prompt become a big problem?</div>
+  <ol class="opts">
+    <li>Because a 32k-token KV cache can never fit in VRAM and must OOM</li>
+    <li>Because the scheduler cannot order requests longer than 4k tokens</li>
+    <li>Because if it is <strong>prefilled whole in one step</strong>, that step's forward compute explodes and <strong>monopolizes the GPU for tens of ms</strong>; every decoding request in the batch <strong>stalls</strong>, no tokens emitted, so TTFT/ITL spike (Lesson 8)—one whale clogs the whole pool</li>
+    <li>Because a long prompt breaks sampling temperature, producing garbage output</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. It's <strong>congestion along the time axis</strong>, not a memory problem—KV slots may be plenty, but 'too much compute in one step' lets one request monopolize the GPU while everyone else's decode waits. Users see streaming freeze (ITL spike) and slower first tokens (TTFT spike). Chunking exists to flatten exactly this spike.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. How does chunked prefill <strong>actually work</strong> so it advances the long request without stalling others?</div>
+  <ol class="opts">
+    <li>Give the long request its own dedicated GPU, physically isolated from decode</li>
+    <li>Compress the prompt to under 4k tokens then prefill it all at once</li>
+    <li>Move the long request to the very end of the queue and prefill it whole only after all decodes finish</li>
+    <li>Split the big prefill into <strong>fixed-size token chunks</strong> (set by <code>chunked_prefill_size</code>) across <strong>several steps</strong>, forwarded <strong>in the same batch mixed with</strong> others' decode; KV fills chunk by chunk, and only after the <strong>last chunk</strong> does the request enter decode</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Two keys: (1) <strong>chunking</strong> bounds prefill per step so no step is huge; (2) the <strong>mixed batch</strong> forwards that one chunk together with a crowd of decodes, so each step = one bounded prefill chunk + one token from everyone—controlled and steady. Queuing it last would starve the long request with unbounded first-token latency, so that's no good.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Tuning the <code>chunked_prefill_size</code> knob smaller vs larger means what trade-off?</div>
+  <ol class="opts">
+    <li><strong>Smaller</strong>: lighter prefill per step and smoother decode, but <strong>more total steps</strong> and a slower whale first byte; <strong>larger</strong>: fewer steps and a faster whale finish, but heavier steps and <strong>the spike risk returns</strong> (back to Lesson 8's throughput/latency trade-off)</li>
+    <li>It only controls logging frequency and has no performance effect</li>
+    <li>Smaller raises throughput, larger lowers it, with no latency effect</li>
+    <li>It sets the KV cache page size, where larger saves more VRAM</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <code>chunked_prefill_size</code> sets how many prefill tokens fit per step—the very knob between smoothness and step count. There's no universal optimum: go smaller for latency-sensitive, decode-heavy loads; larger for throughput-first, long-prompt-heavy ones. It controls the bounded per-step prefill cap, not the VRAM page size or logging.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'eating a giant meal while still chatting' analogy, fully explain chunked prefill. Cover each: (1) the <strong>problem</strong>—a 32k prompt prefilled whole in one step monopolizes the GPU and <strong>stalls</strong> every decode in the batch, causing TTFT/ITL spikes (Lesson 8); (2) the <strong>fix</strong>—<code>PrefillAdder</code> (Lesson 20) enforces the per-step token budget in <code>add_one_req</code>, clamping a non-fitting request to the remaining budget (<code>trunc_len</code>, page-aligned), recording <code>new_chunked_req</code> for next step, filling KV chunk by chunk (Lesson 4), entering decode only after the last chunk; (3) the <strong>mixed batch</strong>—that one chunk is forwarded alongside others' decode, the event loop (Lesson 18) advancing as usual.</li>
+    <li>Discuss chunked prefill's <strong>trade-off</strong> and its place in the system. Chunking costs <strong>a few extra steps</strong> and thins the whale's own TTFT, but buys <strong>smooth global latency</strong> and higher goodput-under-SLA—explain why this is usually worth it in real mixed long/short workloads, the costs of <code>chunked_prefill_size</code> being too small vs too large (tie to Lesson 8), and why mixing prefill and decode in one step still has tension, motivating PD disaggregation (Lesson 45) that splits the two onto separate instances entirely.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>DP controller & PP scheduling</h1>
+
+<p class="lead">
+For five lessons we watched <strong>one</strong> scheduler process beat on <strong>one</strong> card: receive, batch, forward, finish. But real deployments have 8 cards per box and hundreds per cluster—
+a model may be <strong>too big for one card</strong>, and traffic may be <strong>too heavy for one replica</strong>. Closing Part 5, we pull the camera back to the <strong>multi-process, multi-card</strong> scale and look at two parallelisms that change the <strong>control flow</strong>:
+<strong>data parallel (DP)</strong> (replicate the whole runtime N times and fan requests out) and <strong>pipeline parallel (PP)</strong> (split the model's layers into stages and keep multiple micro-batches flowing across them).
+Note: what they change is not how the matrices compute, but <strong>who dispatches and how many micro-batches are in flight</strong>—exactly the scheduler's concern.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of <strong>DP</strong> as <strong>multiple identical checkout lanes</strong> in a store: each lane is <strong>fully equipped</strong> (its own cashier, scanner, register), and a <strong>greeter</strong> at the door routes each customer to a lane;
+  lanes don't interfere, and the more you open, the more customers you ring up per minute. Think of <strong>PP</strong> as <strong>one long conveyor with stations</strong>: each station does just one step (label → box → seal),
+  and many items ride at once, each at a different station, so no station sits idle. DP is "replicate whole lanes for throughput", PP is "split one job into a relay so everyone stays busy"—one handles <strong>dispatch</strong>, one handles <strong>relay</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>DP replicates "the whole model" and fans requests out to many independent replicas; PP splits "the model's layers" and pipelines multiple micro-batches across stages.</strong>
+  DP's conductor is the <span class="inline">DataParallelController</span>—it does <strong>no forward</strong> itself, only dispatching incoming requests <strong>round-robin or load-aware</strong> to N <strong>full runtimes</strong> (each replica has its own scheduler + TP workers + KV cache + a full copy of the model weights).
+  PP's executor is <span class="inline">SchedulerPPMixin.event_loop_pp</span>—it reshapes Lesson 18's single-stage heartbeat into a <strong>pipelined loop</strong>, so stage1 processes micro-batch B while stage2 processes micro-batch A,
+  amortizing the fill/drain <strong>"bubble"</strong>. Layer on <strong>tensor parallel (TP)</strong> (split each layer's matrices, deep dive Lesson 46) and a big deployment is <strong>TP × PP × DP</strong> stitched in three dimensions.
+</div>
+
+<h2>Data parallel (DP): replicate the whole runtime, fan requests out</h2>
+<p>DP's idea is the plainest: <strong>if one replica can't keep up with traffic, run N replicas</strong>. The key is that each replica is a <strong>complete engine</strong>—
+not sharing some weights, but <strong>each holding a full model copy</strong>, each running a Lesson-18 event loop, each managing its own KV ledger.
+Replicas are <strong>request-isolated</strong>: customer A on replica 1, customer B on replica 2, never interacting. The only coordination needed is that <strong>dispatcher</strong> at the door—
+the <span class="inline">DataParallelController</span>. It catches all incoming requests up front, picks a replica by policy (round-robin <span class="mono">round_robin_scheduler</span>,
+or load-aware by in-flight requests/tokens), <strong>forwards the request as-is</strong>, and never touches the GPU.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">DataParallelController</div><div class="nd">round-robin / load-aware<br>round_robin_scheduler</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Replica 1 (full runtime)</div><div class="nd">scheduler+TP+KV<br>a full model</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Replica 2 (full runtime)</div><div class="nd">scheduler+TP+KV<br>a full model</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Replica N (full runtime)</div><div class="nd">scheduler+TP+KV<br>a full model</div></div>
+</div>
+
+<p>Read three things off this figure. First, <strong>the controller sits before all replicas</strong>, the first fork a request hits, making only the "to whom" decision.
+Second, each replica is <strong>self-contained</strong>—inside it is everything from the last five lessons: an <span class="inline">event_loop_normal</span>, a prefill/decode trade-off, an independent KV ledger.
+Third, DP is a <strong>throughput multiplier</strong>: N replicas can scale whole-box throughput N-fold, since requests are spread and don't contend.
+A caveat: this is <strong>request-level DP</strong>; in MoE models there is finer-grained <strong>attention DP / expert DP</strong>, with more nuanced control flow and communication, deferred to Lessons 46/47 and not covered here.</p>
+
+<h2>Pipeline parallel (PP): split layers into stages, keep micro-batches in flight</h2>
+<p>When a model is <strong>too big for one card</strong>, DP replication is hopeless—you can't even fit one copy, let alone N. Now use PP: cut the model's <strong>layers</strong> vertically into a few <strong>stages</strong>,
+layers 1–10 on GPU0, 11–20 on GPU1, 21–30 on GPU2…, so each card holds <strong>one stage</strong>. A batch's forward becomes a <strong>relay</strong>:
+data passes stage1, hands activations to stage2, then stage3… The catch: with only one batch in flight, while stage2 works, stage1/stage3 sit <strong>idle waiting</strong>,
+and GPU utilization is dismal—this is the <strong>pipeline bubble</strong>. The fix is to split a big batch into multiple <strong>micro-batches</strong> and run them <strong>staggered</strong>, in flight together.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">t1</div><div class="sc"><h4>Fill</h4><p>micro-batch A enters <strong>stage1</strong>; stage2, stage3 still empty—this tick is part of the bubble, only one stage busy.</p></div></div>
+  <div class="step"><div class="num">t2</div><div class="sc"><h4>Ramping</h4><p>A advances to <strong>stage2</strong> while micro-batch B enters <strong>stage1</strong>; two stages busy, the pipe begins to fill.</p></div></div>
+  <div class="step"><div class="num">t3</div><div class="sc"><h4>Full (steady state)</h4><p>A in <strong>stage3</strong>, B in <strong>stage2</strong>, C enters <strong>stage1</strong>—<strong>all three busy</strong>, bubble amortized; this is where PP wants to live.</p></div></div>
+  <div class="step"><div class="num">t4</div><div class="sc"><h4>Drain</h4><p>After the last micro-batch is launched, A has emitted and B/C walk off the tail stages; a tail bubble reappears. <strong>More micro-batches ⇒ higher full-load fraction</strong>, smaller bubble.</p></div></div>
+</div>
+
+<p>Grasp this staggered figure and you've got PP's soul: <strong>at any instant, different stages process different micro-batches.</strong>
+Precisely because <strong>multiple micro-batches are in flight</strong>, each stage's GPU never idles waiting on the previous—this is why <span class="inline">event_loop_pp</span> must be more complex than the normal loop:
+it <strong>tracks several</strong> micro-batches at different stages, manages inter-stage activation send/recv, and coordinates "when to launch the next micro-batch".
+A plain single-stage loop watches one batch per tick; the PP loop watches a string of them. The <strong>fill</strong> and <strong>drain</strong> ends carry unavoidable bubbles, but as long as steady state is long enough (micro-batches ≫ stages), the bubble fraction approaches zero.</p>
+
+<h2>How the three compose: TP × PP × DP</h2>
+<p>DP, PP, and the <strong>TP (tensor parallel)</strong> that Lesson 46 details are three <strong>orthogonal</strong> dimensions you can stack.
+The fastest way to tell them apart is to ask: <strong>"what does it replicate, what does it split?"</strong></p>
+
+<table class="t">
+  <tr><th>Dimension</th><th>What it does to the model</th><th>Granularity of split/replicate</th><th>Who orchestrates</th></tr>
+  <tr><td><strong>DP data parallel</strong></td><td><strong>Replicate the whole model</strong>, fan requests to replicas</td><td class="mono">whole runtime (replica level)</td><td class="mono">DataParallelController</td></tr>
+  <tr><td><strong>PP pipeline parallel</strong></td><td>Split <strong>layers into stages</strong> across cards, micro-batch relay</td><td class="mono">layers (stage level)</td><td class="mono">event_loop_pp (in scheduler)</td></tr>
+  <tr><td><strong>TP tensor parallel</strong></td><td>Split <strong>each layer's matrices</strong>, many cards compute one layer</td><td class="mono">a single layer's weight matrix</td><td class="mono">inside model forward (Lessons 24/46)</td></tr>
+</table>
+
+<p>Picture them stacked: <strong>TP within a layer</strong> (many cards co-compute one layer's matmul), <strong>PP across layers</strong> (different stages on different cards), <strong>DP across whole replicas</strong> (replicate the box and fan out).
+A typical large cluster might be "TP=8, PP=2, DP=4"—each replica uses 16 cards (8-way TP × 2 PP stages) to hold one copy of a big model, then 4 replicas to carry traffic, 64 cards in all.
+And <strong>what the scheduler orchestrates here is DP (via the controller's dispatch) and PP (via the pp loop advancing micro-batches)</strong>—the two dimensions that change control flow;
+TP <strong>hides inside the model forward</strong>, largely transparent to the scheduler—the scheduler hands the batch to ModelRunner and TP's multi-card cooperation happens automatically inside <span class="inline">forward</span> (Lesson 24). That's why this lesson belongs in Part 5: DP and PP are <strong>scheduling</strong> problems, TP is a <strong>compute</strong> problem.</p>
+
+<h2>When to use DP vs PP</h2>
+<p>They solve <strong>different bottlenecks</strong>—don't conflate them:</p>
+
+<div class="cols">
+  <div class="col"><h4>DP: for throughput (model fits)</h4><p>The premise is <strong>one copy already fits the existing cards</strong>. When traffic is high and a single replica queues badly, replicate N copies and let the controller spread requests,
+  scaling throughput near-linearly. The cost is <strong>VRAM multiplied</strong> (a full weight set per replica). It <strong>cannot</strong> help you fit a model that doesn't fit—replication just makes "doesn't fit" into "doesn't fit N times".</p></div>
+  <div class="col"><h4>PP: for capacity (model too big)</h4><p>The premise is <strong>the model is too big for one card</strong> (even one TP group). Split layers into stages across cards so each holds only one stage of weights, turning "doesn't fit" into "fits".
+  The cost is <strong>fill/drain bubbles</strong> and <strong>inter-stage communication</strong>, amortized by many micro-batches. It does <strong>not</strong> directly improve single-request latency—mainly it <strong>makes a huge model runnable</strong>.</p></div>
+</div>
+
+<p>In practice the two often appear <strong>together</strong>: first use PP (and TP) to <strong>fit</strong> one big model into a card group, then use DP to <strong>replicate</strong> that ready-made replica to carry traffic.
+So by now you should be able to translate this into concrete actions—<strong>"make it fit" via splitting (PP/TP), "keep it fed" via replication (DP)</strong>.</p>
+
+<h2>Real code: how the controller round-robins dispatch</h2>
+<p>Below is the core round-robin dispatch in <span class="inline">DataParallelController</span>. Note how <strong>light</strong> it is—
+it keeps a <span class="mono">round_robin_counter</span>, finds the next <strong>ready</strong> worker, <span class="mono">sock_send</span>s the request there, and advances the pointer modulo the worker count. It <strong>never touches the GPU</strong>, making only the "to whom" decision.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/data_parallel_controller.py ::DataParallelController</span><span class="ln">DP controller: round-robin to the next ready replica</span></div>
+  <pre><span class="kw">def</span> round_robin_scheduler(self, req: Req):
+    <span class="cm"># Direct-route if a DP rank is pinned, else round-robin</span>
+    <span class="kw">if</span> self.maybe_external_dp_rank_routing(req):
+        <span class="kw">return</span>
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.status[self.round_robin_counter]:
+            <span class="cm"># This worker is ready: send the request</span>
+            sock_send(self.workers[self.round_robin_counter], req)
+            self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+                self.workers
+            )
+            <span class="kw">break</span>
+        <span class="cm"># Otherwise skip it, look at the next</span>
+        self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+            self.workers
+        )</pre>
+</div>
+
+<p>Align this with the fan-out figure: <span class="inline">self.workers</span> are the N replicas' sockets, <span class="inline">round_robin_counter</span> is the greeter's "which lane is next" counter,
+<span class="inline">self.status</span> marks which replicas are ready (skip the ones that aren't). <span class="inline">sock_send</span> <strong>delivers the request as-is</strong> to the chosen replica—after that the request's fate is entirely up to that replica's internal scheduler,
+and the controller immediately turns to the next. Not one line of matmul, confirming "<strong>the controller only decides dispatch, never computes</strong>". Load-aware policy (pick the least-busy replica by in-flight requests/tokens) just swaps "advance the pointer" for "consult the ledger", equally lightweight.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>DP (data parallel)</strong>: replicate the <strong>whole runtime</strong> into N independent replicas (each with scheduler+TP+KV+a full model), with <span class="mono">DataParallelController</span> <strong>fanning out</strong> requests round-robin/load-aware; a <strong>throughput multiplier</strong>, request-isolated, replicas don't interact.</li>
+    <li><strong>PP (pipeline parallel)</strong>: split the model's <strong>layers into stages</strong> across cards; <span class="mono">event_loop_pp</span> keeps <strong>multiple micro-batches flowing across stages</strong> (stage1 on B while stage2 on A), amortizing the fill/drain <strong>bubble</strong> via micro-batch count; born to <strong>fit a huge model</strong>.</li>
+    <li><strong>TP × PP × DP are three orthogonal dims</strong>: TP splits <strong>matrices within a layer</strong>, PP splits <strong>stages across layers</strong>, DP replicates <strong>whole replicas</strong>. The scheduler orchestrates DP (controller) and PP (pp loop); TP hides in the model forward, transparent to the scheduler.</li>
+    <li><strong>Selection rule</strong>: model too big ⇒ PP/TP (split, "make it fit"); traffic too heavy ⇒ DP (replicate, "keep it fed"); big deployments stack all three. Deep dives: Lesson 46 (TP/PP/EP/DP), Lesson 47 (EPLB), Lesson 24 (forward), Lesson 18 (event loop), Lesson 2 (3-process model).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In <strong>data parallel (DP)</strong>, what role does each replica vs the <code>DataParallelController</code> play?</div>
+  <ol class="opts">
+    <li>Each replica holds only some layers, and the controller passes activations between them</li>
+    <li>The controller splits each request into pieces, one per replica, then stitches them back</li>
+    <li>Each replica is a <strong>full runtime</strong> (its own scheduler+TP worker+KV cache+<strong>a full model copy</strong>), request-isolated and non-interacting; the controller does <strong>no forward</strong>, only <strong>fanning out</strong> incoming requests round-robin/load-aware to a ready replica</li>
+    <li>Replicas share one set of weights, and the controller merges their outputs</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. DP <strong>replicates the whole runtime</strong>: each replica holds a full model, runs its own event loop, manages its own KV ledger, and whatever replica a request lands on handles it end-to-end. The controller does one ultra-light thing—'to whom'—never touching the GPU. Splitting layers/passing activations is PP; sharing weights and merging outputs is not how DP works.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does <strong>pipeline parallel (PP)</strong> keep <strong>multiple micro-batches in flight</strong> instead of running one batch at a time?</div>
+  <ol class="opts">
+    <li>Because multiple micro-batches can share one KV cache to save VRAM</li>
+    <li>Because layers are split into stages across cards; with one batch, while one stage works the others <strong>idle</strong> (the pipeline <strong>bubble</strong>). Staggering multiple micro-batches lets stage1 run B while stage2 runs A, so <strong>all stages stay busy</strong> and the bubble is amortized</li>
+    <li>Because a single batch cannot be sampled and must be split into micro-batches</li>
+    <li>Because it skips inter-stage communication and avoids passing activations</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. PP's bottleneck is the <strong>fill/drain bubble</strong>: in relay-style forward, with one batch some stage always idles. Staggered micro-batches drive the pipe into <strong>steady-state full load</strong> (different stages on different micro-batches); more micro-batches ⇒ higher full-load fraction ⇒ bubble approaching zero. That's why <code>event_loop_pp</code> must be more complex than the normal loop—it tracks a string of micro-batches at different stages.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Distinguishing <strong>TP, PP, DP</strong> in one line, which statement is most accurate?</div>
+  <ol class="opts">
+    <li>All three split the model's layers, differing only in stage count</li>
+    <li>All three are orchestrated uniformly by the DataParallelController</li>
+    <li><strong>TP</strong> splits <strong>matrices within a layer</strong>, <strong>PP</strong> splits <strong>stages across layers</strong>, <strong>DP</strong> replicates <strong>whole replicas</strong>; the scheduler orchestrates DP (controller dispatch) and PP (pp loop), while TP hides <strong>inside the model forward</strong>, largely transparent to the scheduler</li>
+    <li>TP replicates the whole model, PP replicates the whole model, DP splits matrices</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Three orthogonal dims, told apart by 'what it replicates/splits': DP=whole-model replicate (replica level), PP=layers into stages (stage level), TP=split a single layer's matrices. Big deployments stack TP×PP×DP. The key is separating the <strong>scheduling</strong> problem (DP/PP change control flow, hence Part 5) from the <strong>compute</strong> problem (TP inside forward, Lessons 24/46).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'supermarket checkout lanes vs conveyor stations' analogy, fully explain DP vs PP. Cover each: (1) <strong>DP</strong>—why it replicates the <strong>whole runtime</strong> (each replica with its own scheduler+TP+KV+a full model), how <code>DataParallelController</code> <strong>round-robins/fans out</strong> requests via <code>round_robin_scheduler</code> without touching the GPU, and why it is a <strong>throughput multiplier</strong> yet can't rescue a model that 'doesn't fit'; (2) <strong>PP</strong>—why <strong>splitting layers into stages</strong> fits a huge model, why <code>event_loop_pp</code> keeps <strong>multiple micro-batches staggered in flight</strong>, and where the <strong>fill/drain bubble</strong> comes from and how micro-batch count amortizes it.</li>
+    <li>Discuss how <strong>TP × PP × DP</strong> compose in a large cluster, and why this lesson belongs to 'scheduling'. Explain: (1) for a 'TP=8, PP=2, DP=4' deployment, what each dimension splits/replicates and how the total card count is computed; (2) why the scheduler orchestrates <strong>DP (controller dispatch) and PP (the pp loop advancing micro-batches)</strong> while <strong>TP is transparent to the scheduler</strong> (hidden in <code>forward</code>, Lessons 24/46); (3) from this, state the selection rule—which parallelism to reach for when the model is too big vs traffic too heavy—and point to the deep dives (Lesson 46 TP/PP/EP/DP, Lesson 47 EPLB).</li>
   </ul>
 </div>
 </div>

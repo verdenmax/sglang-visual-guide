@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>18 · 调度器事件循环 / The scheduler event loop - SGLang 图解教程</title>
+<meta name="description" content="第五部分 · 调度器｜调度器事件循环 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="18 · 调度器事件循环 / The scheduler event loop - SGLang 图解教程">
+<meta property="og:description" content="第五部分 · 调度器｜调度器事件循环 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="18 · 调度器事件循环 / The scheduler event loop - SGLang 图解教程">
+<meta name="twitter:description" content="第五部分 · 调度器｜调度器事件循环 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></span>
+    <span class="pill">18 / 23</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:78%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></div>
+    <h1><span class="lang-zh">调度器事件循环</span><span class="lang-en">The scheduler event loop</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+欢迎来到 Part 5——整台引擎的<strong>心脏</strong>。前面四个 Part 我们看完了请求<strong>怎么进来</strong>（HTTP、分词、IPC）、
+又<strong>怎么出去</strong>（反分词、流式）。现在镜头对准中间那个真正<strong>做决策</strong>的角色：<strong>调度器（Scheduler）</strong>。
+它跑在自己<strong>独立的子进程</strong>里，核心是一段叫 <span class="inline">event_loop_normal</span> 的<strong>无限循环</strong>——
+这就是引擎的<strong>心跳</strong>。每跳动一次（我们叫一个 <strong>step</strong>），它都把"收请求 → 入队 → 组批 → 前向 → 处理结果"五件事
+飞快地做一遍，然后立刻进入下一跳。这一课，我们就趴在这颗心脏上，听清它每一次跳动的节奏。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把调度器想成<strong>机场塔台的雷达扫描（radar sweep）</strong>。雷达每转一圈，管制员都重复同一套动作：先<strong>接收新到达的航班</strong>、
+  把它们纳入<strong>盘旋等待区（holding pattern）</strong>；再<strong>决定这一圈让哪些飞机起飞/降落</strong>（跑道容量有限，不能全放）；
+  接着<strong>放行</strong>这些飞机、看着它们执行；最后<strong>处理刚发生的结果</strong>——谁落地了就清出跑道、谁飞走了就销号。然后雷达<strong>转下一圈</strong>，
+  周而复始。塔台<strong>只有一个</strong>、<strong>不亲自开飞机</strong>，但<strong>每一圈的调度全由它拍板</strong>。调度器的事件循环，就是这道永不停歇的雷达扫描。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>调度器 = 一个跑在独立子进程里、每秒钟跳动成千上万次的无限循环</strong>。每一次跳动（step），
+  它依次做五件事——<span class="inline">recv_requests</span>（收）、<span class="inline">process_input_requests</span>（入队）、
+  <span class="inline">get_next_batch_to_run</span>（组批）、<span class="inline">run_batch</span>（前向）、
+  <span class="inline">process_batch_result</span>（收尾）。它是引擎里<strong>唯一的决策者</strong>：独占 KV 缓存的<strong>账本</strong>，
+  决定每一步<strong>这一批由谁组成</strong>。它<strong>只决策、不计算</strong>——真正的 GPU 矩阵乘交给 TpWorker→ModelRunner（第 24 课）。
+  循环越短、转得越快，吞吐就越高，这也正是后面<strong>重叠调度器</strong>（第 21 课）要优化的根。
+</div>
+
+<h2>心跳的五个动作：一个 step 里发生了什么</h2>
+<p>事件循环本质是 <span class="inline">while True</span>。抛开退出与空闲分支，每一轮（一个 step）从头到尾就是<strong>五步流水</strong>。
+记住这个顺序，你就拿到了理解整个 Part 5 的<strong>主索引</strong>——后面每一课都是在把其中某一步<strong>放大讲细</strong>：</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests()——收</h4><p>从 ZMQ 收件箱里<strong>取空</strong>所有新到的 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课，由 TokenizerManager 发来）。没有就拿到空列表，绝不阻塞。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>process_input_requests()——入队</h4><p>把新请求挂进<strong>等待队列（waiting queue）</strong>；顺手处理控制消息（abort 中止 / flush 清缓存 / 更新权重等）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>get_next_batch_to_run()——组批</h4><p>组建<strong>这一步</strong>的批：预算够就从等待队列里组一个 <strong>prefill 批</strong>，否则把在跑的请求组成 <strong>decode 批</strong>（第 19/20 课）。连续批处理（第 5 课）就在这里<strong>每步重演</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>run_batch()——前向</h4><p>把这一批交给 TpWorker → <span class="mono">ModelRunner.forward</span> 上 GPU 跑一遍（第 24 课），拿到 logits 后<strong>采样</strong>出新 token。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>process_batch_result()——收尾</h4><p>把新 token 追加到各请求；检测<strong>完成</strong>的（命中停止条件）；<strong>释放它们的 KV 槽位</strong>；把输出发给 DetokenizerManager（第 17 课）。然后<strong>回到第 1 步</strong>。</p></div></div>
+</div>
+
+<p>这五步<strong>极短</strong>，却每秒钟跑成千上万遍。关键在于它是一条<strong>闭环</strong>：第 5 步收尾完，立刻又回到第 1 步收新请求——
+没有"等这批彻底跑完再接客"的概念。正因为每一圈都重新走第 3 步 <span class="inline">get_next_batch_to_run</span>，
+<strong>批才会被一遍遍重新组建</strong>，完成的请求当场离场、等待的请求即刻补入——这正是第 5 课<strong>连续批处理</strong>在物理层面发生的地方。</p>
+
+<p>还要厘清两个常被忽略的细节。其一，<strong>第 1 步 <span class="inline">recv_requests</span> 绝不阻塞</strong>：它只是把收件箱里<strong>此刻已到</strong>的请求一次性取空，
+收件箱空就拿到一个空列表、循环照常往下走。这一点至关重要——如果"收请求"会卡住等新请求，那已经在跑的几十条请求就会<strong>跟着一起被冻住</strong>，
+GPU 立刻饿死。所以事件循环采用的是<strong>轮询（poll）而非等待（block）</strong>的姿态：每圈瞥一眼收件箱，有就收、没有就算了，绝不为新请求耽误老请求。
+其二，当 <span class="inline">get_next_batch_to_run</span> 返回空（既没有 prefill 也没有 decode 要做，即服务器此刻空闲）时，
+循环不会傻转空圈，而是走 <span class="inline">on_idle</span> 分支做一次<strong>自检与状态回收</strong>——比如校验 KV 账本有没有泄漏、把空出来的缓存归位，
+为下一波流量做好准备。这就是代码里那个 <span class="inline">else</span> 分支的意义。</p>
+
+<p>把镜头再拉远一点接回第 2 课的<strong>三进程模型</strong>：TokenizerManager 在一个进程把文字变 token，Scheduler（连同 TpWorker）在中间这个进程做调度与前向，
+DetokenizerManager 在第三个进程把 token 拼回文字。本课讲的事件循环，就是<strong>中间这个进程的全部生命</strong>——它启动后就一头扎进 <span class="inline">while True</span>，
+直到 <span class="inline">gracefully_exit</span> 被置位才优雅退出。换句话说，<strong>"调度器进程"约等于"这段事件循环"</strong>：进程在，循环就在转；循环停，进程也就该收摊了。
+理解这一点，你就明白为什么说它是引擎的"心脏"——心脏一停，整台机器就死了。</p>
+
+<h2>把循环画成一张图：请求在心脏里的流动</h2>
+<p>如果把一个 step 里"数据怎么流"画出来，就是下面这条流水线：请求从收件箱进来，经调度组成批，上 GPU 前向，
+结果分两路——新 token 发去反分词、完成的请求清退释放显存——然后<strong>循环回到开头</strong>。注意那条<strong>回环箭头</strong>：
+它才是"心跳"的灵魂，意味着这条流水线<strong>永不停机</strong>。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">收件箱</div><div class="nd">ZMQ 收新请求<br>recv_requests</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">调度组批</div><div class="nd">get_next_batch<br>_to_run（决策）</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">GPU 前向</div><div class="nd">run_batch<br>forward+采样</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">结果收尾</div><div class="nd">追加 token<br>清退/发反分词</div></div>
+  <div class="arrow">↺</div>
+  <div class="node hl"><div class="nt">下一跳</div><div class="nd">回到收件箱<br>step + 1</div></div>
+</div>
+
+<p>这张图里只有<strong>"调度组批"</strong>那一格是<strong>纯 CPU 的决策</strong>，<strong>"GPU 前向"</strong>那一格才是真正烧算力的计算。
+这个区分至关重要：CPU 在组批时，GPU 是<strong>闲着</strong>的；GPU 在前向时，CPU 也<strong>闲着</strong>。
+朴素的 <span class="inline">event_loop_normal</span> 让两者<strong>严格串行</strong>——这就是为什么会有 <span class="inline">event_loop_overlap</span>（第 21 课）：
+它是<strong>同一条循环</strong>，但用<strong>流水线</strong>把 CPU 的组批/收尾<strong>藏进上一步 GPU 计算的时间里</strong>，让 GPU 永不空等。</p>
+
+<p>顺带说明流水线里那条<strong>分叉</strong>：第 5 步收尾时，结果其实分两路走。一路是<strong>给客户端的产出</strong>——把这一步新采样出的 token
+打包成 <span class="mono">BatchTokenIDOutput</span> 发给 DetokenizerManager（第 17 课），由它拼回文字、流式吐给用户；另一路是<strong>给引擎自己的回收</strong>——
+对那些命中停止条件（EOS / 停止串 / 达到 max_new_tokens）而<strong>完成</strong>的请求，把它们移出在跑批、<strong>释放各自的 KV 槽位</strong>归还内存池。
+正因为有这条"完成即释放"的回收路，第 3 步下一圈才有空间接纳等待队列里的新请求——<strong>收尾与组批，一退一进，咬合成连续批处理的齿轮</strong>。</p>
+
+<h2>每一步去了哪一课：循环就是 Part 5 的目录</h2>
+<p>这五步几乎一一对应接下来的每一课。把这张表当作<strong>导航图</strong>：你随时可以从"心跳的第几步"跳到对应的细节课，
+也能反过来在读细节课时，记得它在<strong>整个 step</strong> 里处在什么位置。</p>
+
+<table class="t">
+  <tr><th>阶段</th><th>它做什么</th><th>细节在哪一课</th></tr>
+  <tr><td><strong>recv_requests</strong></td><td>从 ZMQ 取空收件箱，收 TokenizedGenerateReqInput</td><td class="mono">第 16 课 io_struct / IPC</td></tr>
+  <tr><td><strong>process_input_requests</strong></td><td>新请求入<strong>等待队列</strong>，处理 abort/flush 等控制消息</td><td class="mono">第 19 课 Req / ScheduleBatch</td></tr>
+  <tr><td><strong>get_next_batch_to_run</strong></td><td>组这一步的批：优先 prefill，否则 decode（连续批处理）</td><td class="mono">第 20 课 调度策略 · 第 22 课分块预填充</td></tr>
+  <tr><td><strong>run_batch</strong></td><td>交 TpWorker→ModelRunner.forward 上 GPU，采样出 token</td><td class="mono">第 24 课 模型前向</td></tr>
+  <tr><td><strong>process_batch_result</strong></td><td>追加 token、检测完成、释放 KV、发去反分词</td><td class="mono">第 17 课 反分词与流式</td></tr>
+</table>
+
+<h2>谁决策、谁计算：单线程的唯一决策者</h2>
+<p>整台引擎里有很多角色，但<strong>每个 TP rank 只有一个调度器，且它是单线程的</strong>。这不是限制，而是<strong>设计</strong>：
+让<strong>唯一一个</strong>角色掌管 KV 缓存账本、独自决定每一步的批，就<strong>不会有两个人抢同一块显存</strong>、也不需要锁。
+分清"<strong>谁决策</strong>"和"<strong>谁计算</strong>"，是读懂调度器代码的钥匙：</p>
+
+<div class="cols">
+  <div class="col"><h4>调度器：决策但不计算</h4><p>单进程、单线程，是<strong>唯一决策者</strong>。它<strong>独占 KV 缓存的账本</strong>，
+  决定每一步<strong>这批由谁组成</strong>、谁该完成离场、谁能补入。它做的全是<strong>CPU 上的轻量记账与判断</strong>，<strong>不碰一次矩阵乘</strong>——
+  正因为轻，它才能每秒跳动上万次。</p></div>
+  <div class="col"><h4>TpWorker / ModelRunner：计算但不决策</h4><p>拿到调度器组好的批，老老实实在 <strong>GPU</strong> 上跑
+  <span class="mono">forward</span>（第 24 课），算出 logits 再采样。它<strong>不决定批是什么</strong>、也不碰调度策略，只负责<strong>把算力榨干</strong>。
+  决策与计算解耦，二者才能在重叠调度器里<strong>并行流水</strong>。</p></div>
+</div>
+
+<p>为什么"<strong>独占账本</strong>"这件事如此重要？因为显存是引擎里最稀缺的资源，KV 缓存的每一个槽位都要<strong>精确记账</strong>：哪些槽位正被在跑的请求占用、
+还剩多少可分配、某条请求完成后该回收哪几行。如果有<strong>两个</strong>角色都能改这本账，就必然出现"两条请求被分到同一块显存"的灾难，
+为了避免就得上锁，而锁又会拖慢这条每秒上万次的热循环。SGLang 的选择干脆利落：<strong>让唯一的、单线程的调度器独占这本账</strong>——
+它在第 3 步组批时按账本判断"显存够不够再收一条"，在第 5 步收尾时把完成请求的槽位<strong>当场划掉、还回池子</strong>。
+没有竞争、没有锁，决策因此既快又安全。这也解释了为什么<strong>每个 TP rank 各有一个独立调度器</strong>：每张卡的显存是各自的账，自然该由各自的决策者来管。</p>
+
+<p>再把第 3 步多说一句，因为它是整个循环里<strong>最有戏</strong>的一步。它不是简单地"把所有在跑的请求拼起来"，而是要做一个关键取舍：
+<strong>这一步到底做 prefill 还是 decode？</strong>预算（显存、token 数）允许时，它优先从等待队列里捞出新请求组一个 <strong>prefill 批</strong>，
+先把新 prompt 的 KV 算出来；否则就把当前在跑的请求组成一个 <strong>decode 批</strong>，各推进一个 token。"谁先上、上多少、prefill 还是 decode"
+这套取舍逻辑叫<strong>调度策略</strong>（第 20 课），而当某条 prompt 长到会<strong>霸占一整步</strong>、把别的请求卡住时，第 22 课的<strong>分块预填充</strong>
+会把它切成小块塞进 decode 步的缝隙里——这些都是在第 3 步这一格里发生的事，本课先记住它的<strong>位置</strong>，细节留给后面。</p>
+
+<h2>真实代码：event_loop_normal 的心跳</h2>
+<p>下面是调度器真正的循环骨架。注意它有多<strong>朴素</strong>——就是一个 <span class="inline">while True</span>，
+里面把我们讲的五步<strong>原样排开</strong>：收、入队、组批、（有批就）前向+收尾、否则空闲自检。读懂这十几行，
+你就读懂了整台引擎的心跳。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_normal</span><span class="ln">调度器的心跳：每个 step 跑一圈</span></div>
+  <pre><span class="kw">def</span> event_loop_normal(self):
+    <span class="cm"># A normal scheduler loop.</span>
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.gracefully_exit:
+            <span class="kw">break</span>
+
+        <span class="cm"># ① 收：取空 ZMQ 收件箱里的新请求</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        <span class="cm"># ② 入队：新请求进等待队列，处理控制消息</span>
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># ③ 组批：决定这一步跑什么（prefill 还是 decode）</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># ④ 前向：上 GPU 跑这一批，拿 logits 采样</span>
+            result = self.run_batch(batch)
+            <span class="cm"># ⑤ 收尾：追加 token、清退完成的、发去反分词</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            <span class="cm"># 没活干就自检、回收状态</span>
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>把这段和开头的雷达类比对齐：<span class="inline">recv_requests</span> 是"接收新到达"，
+<span class="inline">process_input_requests</span> 是"纳入盘旋等待区"，<span class="inline">get_next_batch_to_run</span> 是"决定这一圈放哪些飞机"，
+<span class="inline">run_batch</span> 是"放行执行"，<span class="inline">process_batch_result</span> 是"处理刚落地/飞走的"。雷达转下一圈，循环回到 <span class="inline">while True</span> 顶端。
+这套对应关系不是牵强的比喻，而是<strong>结构上的同构</strong>：塔台之所以高效，正因为它把"接收—决策—放行—善后"压缩成一套可以无限重复的固定动作；
+调度器之所以高吞吐，也正因为它把请求生命周期里的一切，都收敛进这五步、每秒重复上万遍。
+<span class="inline">event_loop_overlap</span> 是同一段逻辑的<strong>流水线版</strong>：用一个结果队列把上一步的 <span class="inline">process_batch_result</span>
+推迟到下一步与 GPU 计算重叠，从而把 CPU 时间<strong>藏起来</strong>（第 21 课细讲）。</p>
+
+<p>最后强调一个直觉：<strong>这个循环的速度，直接给吞吐封顶。</strong>循环每转一圈才前进一个 decode 步、各请求才各吐一个 token。
+如果第 3、5 步的 Python 记账太慢，GPU 就会在等 CPU 组批时<strong>空转</strong>，再强的卡也喂不饱。所以 SGLang 把这条循环
+<strong>当作最热的热路径</strong>来打磨——这正是第 21 课重叠调度器存在的全部理由，也是你往后读 Part 5 每一课时应当始终带着的那把尺子：
+<strong>任何设计，最终都要服务于"让这颗心脏跳得又快又满"。</strong></p>
+
+<p>把这条主线收个尾：第 18 课（本课）给出<strong>骨架</strong>——五步心跳的顺序与边界；第 19 课打开第 2、3 步，讲清楚一条请求在调度器内部到底长什么样
+（<span class="mono">Req</span> 与 <span class="mono">ScheduleBatch</span> 这两个核心数据结构）；第 20 课打开第 3 步的<strong>取舍大脑</strong>，讲调度策略怎么排序、怎么决定谁先上；
+第 21 课把整条循环<strong>流水线化</strong>，是吞吐优化的标志性一招；第 22 课处理"长 prompt 堵路"的特例；第 24 课则深入第 4 步，看 GPU 上的前向到底怎么算。
+换句话说，<strong>后面六课都是在本课这张五步图上做注解</strong>。只要你脑子里随时能默画出"收 → 入队 → 组批 → 前向 → 收尾 → 回环"这条闭环，
+无论读到哪一课，都能立刻定位它在<strong>整个 step</strong> 里的位置，不会迷路。这，就是把调度器当作"心脏"来理解的全部价值。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>调度器是引擎的心脏</strong>：跑在<strong>独立子进程</strong>里，核心是无限循环 <span class="mono">event_loop_normal</span>，每秒跳动成千上万次，每次叫一个 <strong>step</strong>。</li>
+    <li><strong>一个 step 的五步</strong>（记住顺序）：recv_requests 收 → process_input_requests 入队 → get_next_batch_to_run 组批 → run_batch 前向 → process_batch_result 收尾 → 回到开头。</li>
+    <li><strong>批每步重组</strong>：第 3 步每圈都重来，完成的请求当场离场释放 KV、等待的即刻补入——这就是第 5 课连续批处理的物理现场。</li>
+    <li><strong>决策 vs 计算</strong>：调度器单线程、唯一决策者，独占 KV 账本、只做 CPU 轻量记账；TpWorker/ModelRunner 才上 GPU 做 forward（第 24 课）。</li>
+    <li><strong>循环速度给吞吐封顶</strong>：CPU 组批与 GPU 计算在 normal 版里串行 ⇒ 第 21 课 <span class="mono">event_loop_overlap</span> 用流水线把 CPU 时间藏进 GPU 计算后。前接第 16/17 课，后接第 19/20/22/24 课。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 调度器 <code>event_loop_normal</code> 每一个 step（一圈）依次做哪五件事？<strong>顺序</strong>为什么重要？</div>
+  <ol class="opts">
+    <li>顺序无所谓，五步可以任意打乱并行执行</li>
+    <li>先 <code>run_batch</code> 再 <code>recv_requests</code>，因为要先算完才收新请求</li>
+    <li><code>recv_requests</code>（收）→ <code>process_input_requests</code>（入等待队列）→ <code>get_next_batch_to_run</code>（组这一步的批）→ <code>run_batch</code>（上 GPU 前向+采样）→ <code>process_batch_result</code>（追加 token/清退完成的/释放 KV/发反分词），然后回到开头；顺序重要是因为<strong>必须先收进新请求、再组批，组完批才能前向，前向出结果才能收尾</strong></li>
+    <li>只有 <code>get_next_batch_to_run</code> 一步，其余都在 GPU 内核里完成</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。事件循环是 <code>while True</code>，每圈五步有严格<strong>数据依赖</strong>：收件箱里没新请求就无从入队，等待队列里没请求就组不出 prefill 批，没组好批就无法前向，没前向结果就无法追加 token、判完成、释放 KV。打乱顺序会破坏依赖。记住这五步的顺序，就拿到了 Part 5 的主索引。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么调度器要在<strong>每一个 step</strong> 都重新调用 <code>get_next_batch_to_run</code> 把批重组一遍，而不是一次组好用到底？</div>
+  <ol class="opts">
+    <li>因为这正是<strong>连续批处理</strong>（第 5 课）的物理现场：每步重组才能让<strong>完成的请求当场离场、立刻释放 KV 槽</strong>，让<strong>等待的请求下一步就补入</strong>，批次始终满载，GPU 不为任何单条请求空转</li>
+    <li>因为重组批能提高单条请求的解码速度</li>
+    <li>纯粹是为了日志统计方便，没有性能意义</li>
+    <li>因为 GPU 要求每步换一个全新的 batch 对象，否则会报错</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。若一次组好绑死到底，就退化成静态批处理：整批要等最慢的那条，完成的槽位空转、新请求进不来。每步重组让批成为“被重新计算的结果”而非静态对象——完成的过滤离场、等待的接纳补入，批永远满。这就是连续批处理，也是高吞吐的第一引擎。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在一个 step 里，<strong>哪部分是调度器在 CPU 上的决策、哪部分是真正烧算力的 GPU 计算</strong>？这个区分如何引出 <code>event_loop_overlap</code>（第 21 课）？</div>
+  <ol class="opts">
+    <li>调度器本身就在 GPU 内核里跑，无所谓重叠</li>
+    <li><code>get_next_batch_to_run</code> / <code>process_batch_result</code> 是<strong>纯 CPU 的轻量记账与决策</strong>，<code>run_batch</code>（→ModelRunner.forward）才是<strong>GPU 计算</strong>；normal 版让两者<strong>串行</strong>，CPU 组批时 GPU 空等，所以第 21 课用<strong>流水线</strong>把 CPU 部分藏进上一步 GPU 计算里</li>
+    <li><code>run_batch</code> 是 CPU 决策，组批才是 GPU 计算</li>
+    <li>全部五步都在 GPU 上执行，没有 CPU 参与</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。调度器“只决策、不计算”：组批和收尾是 CPU 上的轻量记账，唯独 <code>run_batch</code> 把批交给 TpWorker→ModelRunner 在 GPU 上 forward（第 24 课）。normal 版严格串行，CPU 忙时 GPU 闲、反之亦然。由于循环速度直接给吞吐封顶，第 21 课的 overlap 版用结果队列把上一步收尾推迟、与本步 GPU 计算重叠，从而把 CPU 时间藏起来。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“机场塔台雷达扫描”的类比，完整描述调度器 <code>event_loop_normal</code> 一个 step 的全过程。请逐一对应五步：<code>recv_requests</code>（收 TokenizedGenerateReqInput，第 16 课）、<code>process_input_requests</code>（入等待队列、处理 abort/flush）、<code>get_next_batch_to_run</code>（prefill 优先否则 decode，第 19/20 课）、<code>run_batch</code>（→ModelRunner.forward，第 24 课）、<code>process_batch_result</code>（追加 token、检测完成、释放 KV、发 DetokenizerManager，第 17 课），并点明“回环”为什么是心跳的灵魂。</li>
+    <li>“循环速度直接给吞吐封顶”——请论证这句话，并解释为什么调度器是<strong>单线程、每 TP rank 唯一的决策者</strong>、独占 KV 缓存账本。在此基础上说明 <code>event_loop_overlap</code>（第 21 课）如何用流水线优化、长 prompt 为何需要分块预填充（第 22 课）来避免堵住这条循环。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Welcome to Part 5 — the engine's <strong>heart</strong>. The previous four parts showed how a request <strong>comes in</strong>
+(HTTP, tokenize, IPC) and <strong>goes out</strong> (detokenize, streaming). Now the camera turns to the one role in the middle
+that actually <strong>makes decisions</strong>: the <strong>Scheduler</strong>. It runs in its <strong>own subprocess</strong>, and at
+its core is an <strong>infinite loop</strong> called <span class="inline">event_loop_normal</span> — the engine's <strong>heartbeat</strong>.
+Each beat (we call it one <strong>step</strong>) runs five things — "receive → enqueue → form batch → forward → process result" —
+as fast as possible, then immediately starts the next beat. This lesson sits right on that heart and listens to every beat.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the scheduler as an <strong>air-traffic controller's radar sweep</strong>. Every revolution, the controller repeats the
+  same routine: first <strong>take in new arrivals</strong> and put them in the <strong>holding pattern</strong>; then <strong>decide
+  which planes land/take off this sweep</strong> (the runway is finite — you can't clear them all); then <strong>clear</strong> those
+  planes and watch them execute; finally <strong>handle what just happened</strong> — a plane that landed frees the runway, one that
+  departed is closed out. Then the radar <strong>sweeps again</strong>, forever. There is <strong>one</strong> tower, it <strong>flies
+  no plane itself</strong>, yet <strong>every sweep's scheduling is its call</strong>. That is the scheduler's event loop.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  In one line: <strong>the scheduler is an infinite loop, in its own subprocess, beating thousands of times per second</strong>.
+  Each beat (step) does five things in order — <span class="inline">recv_requests</span> (receive),
+  <span class="inline">process_input_requests</span> (enqueue), <span class="inline">get_next_batch_to_run</span> (form batch),
+  <span class="inline">run_batch</span> (forward), <span class="inline">process_batch_result</span> (finish). It is the engine's
+  <strong>single decision-maker</strong>: it <strong>owns the KV-cache accounting</strong> and decides <strong>who is in this step's
+  batch</strong>. It <strong>only decides, never computes</strong> — the real GPU matmuls go to TpWorker→ModelRunner (Lesson 24).
+  The shorter and faster the loop, the higher the throughput — exactly what the <strong>overlap scheduler</strong> (Lesson 21) later optimizes.
+</div>
+
+<h2>The five actions of a heartbeat: what happens in one step</h2>
+<p>The event loop is essentially <span class="inline">while True</span>. Setting aside the exit and idle branches, each round (one
+step) is a <strong>five-stage pipeline</strong>. Memorize the order and you hold the <strong>master index</strong> to all of Part 5 —
+every later lesson just <strong>zooms into one of these stages</strong>:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests() — receive</h4><p><strong>Drain</strong> the ZMQ inbox of all new <span class="mono">TokenizedGenerateReqInput</span> (Lesson 16, sent by the TokenizerManager). If none, you get an empty list — it never blocks.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>process_input_requests() — enqueue</h4><p>Add new requests to the <strong>waiting queue</strong>; also handle control messages (abort / flush cache / update weights, etc.).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>get_next_batch_to_run() — form batch</h4><p>Build <strong>this step's</strong> batch: budget permitting, form a <strong>prefill batch</strong> from waiting reqs, else a <strong>decode batch</strong> of running reqs (Lessons 19/20). Continuous batching (Lesson 5) <strong>re-happens here every step</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>run_batch() — forward</h4><p>Hand the batch to TpWorker → <span class="mono">ModelRunner.forward</span> on the GPU (Lesson 24), get logits, then <strong>sample</strong> the new tokens.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>process_batch_result() — finish</h4><p>Append new tokens; detect <strong>finished</strong> reqs (stop conditions); <strong>free their KV slots</strong>; send outputs to the DetokenizerManager (Lesson 17). Then <strong>go back to step 1</strong>.</p></div></div>
+</div>
+
+<p>These five steps are <strong>very short</strong>, yet run thousands of times per second. The key is that it's a <strong>closed loop</strong>:
+right after step 5 finishes, it returns to step 1 to receive new requests — there is no notion of "finish this batch entirely before
+serving anyone new." Because every revolution re-runs step 3 <span class="inline">get_next_batch_to_run</span>, <strong>the batch is
+re-formed over and over</strong>, finished reqs leave on the spot and waiting ones fill in instantly — this is exactly where Lesson 5's
+<strong>continuous batching</strong> physically happens.</p>
+
+<h2>The loop as a diagram: how a request flows through the heart</h2>
+<p>If you draw "how data flows" inside one step, you get this pipeline: requests enter from the inbox, get scheduled into a batch,
+go forward on the GPU, and the result splits two ways — new tokens go to detokenize, finished reqs are evicted and free their VRAM —
+then it <strong>loops back to the top</strong>. Note the <strong>loop-back arrow</strong>: it is the soul of the "heartbeat," meaning this
+pipeline <strong>never stops</strong>.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">Inbox</div><div class="nd">ZMQ recv<br>recv_requests</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Schedule</div><div class="nd">get_next_batch<br>_to_run (decide)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">GPU forward</div><div class="nd">run_batch<br>forward+sample</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Finish</div><div class="nd">append tokens<br>evict/detok</div></div>
+  <div class="arrow">↺</div>
+  <div class="node hl"><div class="nt">Next beat</div><div class="nd">back to inbox<br>step + 1</div></div>
+</div>
+
+<p>In this diagram only the <strong>"Schedule"</strong> cell is <strong>pure-CPU decision</strong>, and only the <strong>"GPU forward"</strong>
+cell actually burns compute. This split is crucial: while the CPU forms the batch, the GPU is <strong>idle</strong>; while the GPU does
+forward, the CPU is <strong>idle</strong>. The plain <span class="inline">event_loop_normal</span> runs them <strong>strictly serially</strong> —
+which is why <span class="inline">event_loop_overlap</span> (Lesson 21) exists: it is the <strong>same loop</strong>, but pipelined so the
+CPU's batching/finishing is <strong>hidden behind the previous step's GPU compute</strong>, keeping the GPU from ever idling.</p>
+
+<h2>Where each step goes: the loop IS Part 5's table of contents</h2>
+<p>These five steps map almost one-to-one onto the lessons ahead. Treat this table as a <strong>navigation map</strong>: jump from "which
+step of the heartbeat" to its detail lesson, and conversely, while reading a detail lesson remember where it sits in the <strong>whole step</strong>.</p>
+
+<table class="t">
+  <tr><th>Stage</th><th>What it does</th><th>Detailed in</th></tr>
+  <tr><td><strong>recv_requests</strong></td><td>Drain the ZMQ inbox, receive TokenizedGenerateReqInput</td><td class="mono">Lesson 16 io_struct / IPC</td></tr>
+  <tr><td><strong>process_input_requests</strong></td><td>New reqs into the <strong>waiting queue</strong>; handle abort/flush control msgs</td><td class="mono">Lesson 19 Req / ScheduleBatch</td></tr>
+  <tr><td><strong>get_next_batch_to_run</strong></td><td>Form this step's batch: prefill first, else decode (continuous batching)</td><td class="mono">Lesson 20 policy · Lesson 22 chunked prefill</td></tr>
+  <tr><td><strong>run_batch</strong></td><td>Hand to TpWorker→ModelRunner.forward on GPU, sample tokens</td><td class="mono">Lesson 24 model forward</td></tr>
+  <tr><td><strong>process_batch_result</strong></td><td>Append tokens, detect finished, free KV, send to detokenize</td><td class="mono">Lesson 17 detokenize & streaming</td></tr>
+</table>
+
+<h2>Who decides, who computes: the single-threaded sole decision-maker</h2>
+<p>There are many roles in the engine, but <strong>each TP rank has exactly one scheduler, and it is single-threaded</strong>. That is not
+a limitation but a <strong>design</strong>: letting <strong>one</strong> role own the KV-cache ledger and decide every step's batch means
+<strong>no two parties fight over the same VRAM</strong> and no locks are needed. Telling "<strong>who decides</strong>" from
+"<strong>who computes</strong>" is the key to reading scheduler code:</p>
+
+<div class="cols">
+  <div class="col"><h4>Scheduler: decides, doesn't compute</h4><p>One process, single-threaded, the <strong>sole decision-maker</strong>. It
+  <strong>owns the KV-cache ledger</strong>, decides <strong>who is in this step's batch</strong>, who finishes and leaves, who fills in.
+  It does only <strong>lightweight CPU accounting and judgment</strong>, <strong>touching not a single matmul</strong> — precisely because
+  it is light, it can beat tens of thousands of times per second.</p></div>
+  <div class="col"><h4>TpWorker / ModelRunner: computes, doesn't decide</h4><p>It takes the batch the scheduler formed and dutifully runs
+  <span class="mono">forward</span> on the <strong>GPU</strong> (Lesson 24), producing logits, then samples. It <strong>does not decide what
+  the batch is</strong> nor touch scheduling policy — it just <strong>squeezes the compute</strong>. Decoupling decision from compute is
+  what lets the two <strong>pipeline in parallel</strong> in the overlap scheduler.</p></div>
+</div>
+
+<h2>Real code: the event_loop_normal heartbeat</h2>
+<p>Here is the actual loop skeleton. Notice how <strong>plain</strong> it is — just a <span class="inline">while True</span> with our five
+steps <strong>laid out verbatim</strong>: receive, enqueue, form batch, (if any) forward + finish, else idle self-check. Read these dozen
+lines and you've read the heartbeat of the entire engine.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_normal</span><span class="ln">the scheduler heartbeat: one revolution per step</span></div>
+  <pre><span class="kw">def</span> event_loop_normal(self):
+    <span class="cm"># A normal scheduler loop.</span>
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.gracefully_exit:
+            <span class="kw">break</span>
+
+        <span class="cm"># (1) receive: drain the ZMQ inbox of new requests</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        <span class="cm"># (2) enqueue: new reqs into waiting queue, handle control msgs</span>
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># (3) form batch: decide what this step runs (prefill or decode)</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># (4) forward: run this batch on GPU, sample from logits</span>
+            result = self.run_batch(batch)
+            <span class="cm"># (5) finish: append tokens, evict finished, send to detok</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            <span class="cm"># nothing to do: self-check and re-init states</span>
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>Line it up with the opening radar analogy: <span class="inline">recv_requests</span> is "take in arrivals,"
+<span class="inline">process_input_requests</span> is "put them in the holding pattern," <span class="inline">get_next_batch_to_run</span>
+is "decide which planes this sweep," <span class="inline">run_batch</span> is "clear them to execute," and
+<span class="inline">process_batch_result</span> is "handle what just landed/departed." The radar sweeps again — back to the top of
+<span class="inline">while True</span>. <span class="inline">event_loop_overlap</span> is the <strong>pipelined version</strong> of the same
+logic: a result queue defers the previous step's <span class="inline">process_batch_result</span> to overlap with GPU compute, thereby
+<strong>hiding</strong> the CPU time (detailed in Lesson 21).</p>
+
+<p>One final intuition: <strong>the loop's speed directly caps throughput.</strong> Each revolution advances exactly one decode step;
+every request emits exactly one token. If the Python accounting in steps 3 and 5 is too slow, the GPU <strong>idles</strong> waiting on the
+CPU to form the batch, and no card, however strong, stays fed. So SGLang polishes this loop as <strong>the hottest of hot paths</strong> —
+the entire reason Lesson 21's overlap scheduler exists, and the yardstick to carry through all of Part 5:
+<strong>every design ultimately serves one goal — keep this heart beating fast and full.</strong></p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The scheduler is the engine's heart</strong>: it runs in its <strong>own subprocess</strong>; its core is the infinite loop <span class="mono">event_loop_normal</span>, beating thousands of times per second, each beat a <strong>step</strong>.</li>
+    <li><strong>The five stages of a step</strong> (memorize the order): recv_requests → process_input_requests → get_next_batch_to_run → run_batch → process_batch_result → back to the top.</li>
+    <li><strong>The batch is re-formed every step</strong>: stage 3 reruns each revolution — finished reqs leave on the spot and free KV, waiting ones fill in — this is Lesson 5's continuous batching in the flesh.</li>
+    <li><strong>Decide vs compute</strong>: the scheduler is single-threaded, the sole decision-maker, owns the KV ledger, does only light CPU accounting; only TpWorker/ModelRunner runs forward on the GPU (Lesson 24).</li>
+    <li><strong>Loop speed caps throughput</strong>: CPU batching and GPU compute are serial in the normal version ⇒ Lesson 21's <span class="mono">event_loop_overlap</span> pipelines to hide CPU time behind GPU compute. Builds on Lessons 16/17; leads to Lessons 19/20/22/24.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What five things does the scheduler's <code>event_loop_normal</code> do each step (one revolution), and why does the <strong>order</strong> matter?</div>
+  <ol class="opts">
+    <li>Order is irrelevant; the five steps can run in any shuffled, parallel order</li>
+    <li>First <code>run_batch</code> then <code>recv_requests</code>, since you compute before receiving</li>
+    <li><code>recv_requests</code> (receive) → <code>process_input_requests</code> (into waiting queue) → <code>get_next_batch_to_run</code> (form this step's batch) → <code>run_batch</code> (GPU forward+sample) → <code>process_batch_result</code> (append tokens/evict finished/free KV/send to detok), then loop; the order matters because <strong>you must take in new reqs before forming a batch, form a batch before forwarding, and have results before finishing</strong></li>
+    <li>Only <code>get_next_batch_to_run</code>; everything else happens inside the GPU kernel</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The loop is <code>while True</code>, and the five steps have strict <strong>data dependencies</strong>: no new reqs means nothing to enqueue, an empty waiting queue means no prefill batch, no batch means no forward, and no forward result means you can't append tokens, detect finish, or free KV. Shuffling breaks the dependency. Memorizing this order is the master index to Part 5.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does the scheduler re-call <code>get_next_batch_to_run</code> to re-form the batch <strong>every step</strong>, rather than forming it once and reusing it?</div>
+  <ol class="opts">
+    <li>Because this is where <strong>continuous batching</strong> (Lesson 5) physically happens: re-forming each step lets <strong>finished reqs leave on the spot and free their KV slots</strong> and <strong>waiting reqs fill in next step</strong>, keeping the batch full so the GPU never idles for any single request</li>
+    <li>Because re-forming speeds up a single request's decoding</li>
+    <li>Purely for logging convenience, with no performance meaning</li>
+    <li>Because the GPU requires a brand-new batch object each step or it errors</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Forming once and locking it degrades to static batching: the whole batch waits for the slowest req, finished slots idle, new reqs can't enter. Re-forming each step makes the batch a 'recomputed result' rather than a static object — finished filtered out, waiting admitted in, always full. That is continuous batching, the first engine of high throughput.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Within one step, <strong>which part is the scheduler's CPU decision and which is the actual GPU compute</strong>? How does this split motivate <code>event_loop_overlap</code> (Lesson 21)?</div>
+  <ol class="opts">
+    <li>The scheduler itself runs inside the GPU kernel, so overlap is moot</li>
+    <li><code>get_next_batch_to_run</code> / <code>process_batch_result</code> are <strong>pure-CPU lightweight accounting and decision</strong>, while <code>run_batch</code> (→ModelRunner.forward) is the <strong>GPU compute</strong>; the normal loop runs them <strong>serially</strong> so the GPU idles while the CPU forms the batch — hence Lesson 21 <strong>pipelines</strong> to hide the CPU part behind the previous step's GPU compute</li>
+    <li><code>run_batch</code> is the CPU decision, while forming the batch is the GPU compute</li>
+    <li>All five steps run on the GPU; no CPU involvement</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'air-traffic controller's radar sweep' analogy, describe one full step of the scheduler's <code>event_loop_normal</code>. Map each of the five stages: <code>recv_requests</code> (receive TokenizedGenerateReqInput, Lesson 16), <code>process_input_requests</code> (enqueue into waiting, handle abort/flush), <code>get_next_batch_to_run</code> (prefill first else decode, Lessons 19/20), <code>run_batch</code> (→ModelRunner.forward, Lesson 24), and <code>process_batch_result</code> (append tokens, detect finished, free KV, send to DetokenizerManager, Lesson 17), and explain why the 'loop-back' is the soul of the heartbeat.</li>
+    <li>Argue the claim 'loop speed directly caps throughput,' and explain why the scheduler is <strong>single-threaded, the sole decision-maker per TP rank</strong>, owning the KV-cache ledger. Building on that, explain how <code>event_loop_overlap</code> (Lesson 21) optimizes via pipelining, and why a long prompt needs chunked prefill (Lesson 22) to avoid clogging this loop.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="17-detokenizer-and-streaming.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">Detokenizer 与流式输出</span><span class="lang-en">Detokenizer &amp; streaming</span></div></a><a class="next" href="19-req-and-schedule-batch.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">Req 与 ScheduleBatch</span><span class="lang-en">Req &amp; ScheduleBatch</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

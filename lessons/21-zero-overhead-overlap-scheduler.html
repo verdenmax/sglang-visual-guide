@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>21 · 零开销重叠调度器 / Zero-overhead overlap scheduler - SGLang 图解教程</title>
+<meta name="description" content="第五部分 · 调度器｜零开销重叠调度器 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="21 · 零开销重叠调度器 / Zero-overhead overlap scheduler - SGLang 图解教程">
+<meta property="og:description" content="第五部分 · 调度器｜零开销重叠调度器 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="21 · 零开销重叠调度器 / Zero-overhead overlap scheduler - SGLang 图解教程">
+<meta name="twitter:description" content="第五部分 · 调度器｜零开销重叠调度器 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></span>
+    <span class="pill">21 / 23</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:91%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></div>
+    <h1><span class="lang-zh">零开销重叠调度器</span><span class="lang-en">Zero-overhead overlap scheduler</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+这是 Part 5 的<strong>招牌课</strong>，也是第 1 课、第 3 课都点过名的那项优化：<strong>零开销重叠调度器（zero-overhead overlap scheduler）</strong>。
+回忆第 18 课，调度器的每一拍（step）都掺着两种活：一种是 <strong>CPU 上的调度</strong>——组批、采样、记账、给下一步备料；
+另一种是 <strong>GPU 上的前向（forward）</strong>。在朴素的 <span class="inline">event_loop_normal</span> 里，这两件事是<strong>严格串行</strong>的：
+GPU 算完 → CPU 才动手组下一批 → GPU 再算。问题是，<strong>CPU 组批的那段时间，GPU 整个在干等</strong>。
+对解码（decode）这种单拍极快的步骤，CPU 的调度开销可能占到一拍的不小比例——于是相当一部分昂贵的 GPU 算力被白白晾着。
+这一课讲的，就是 SGLang 怎么用一招<strong>流水线（pipeline）</strong>把这段空等彻底抹掉：让 GPU <strong>永不停转</strong>。
+把这一课记牢一句话：<strong>当 GPU 在算这一步时，CPU 已经在为下一步铺路、并顺手收尾上一步</strong>——三件事咬合成一条永不停歇的传送带，
+这正是第 1 课提到的"零开销批调度器"、也是 SGLang 在 v0.4 里拿来当招牌讲的那项硬优化。理解了它，你就理解了为什么 SGLang 在高并发 decode 下能把 GPU 榨到几乎满载。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把一拍调度想成一场<strong>接力赛（relay race）/ 两段式流水线</strong>。朴素循环像只有一名选手在跑：他冲完这一棒，得先<strong>停下来</strong>走回起跑线、系好鞋带、调整呼吸，
+  然后才冲下一棒——这中间赛道（GPU）空着没人跑。重叠调度器换成<strong>两人接力</strong>：当前选手（GPU）正在全速冲刺这一棒时，
+  下一名选手（CPU）<strong>已经站在交接区把鞋带系好、做好起跑预备</strong>，交接棒时<strong>没有一丝停顿</strong>。
+  换个厨房的比方也一样：当前这道菜还在灶上（GPU）翻炒，备餐厨师（CPU）就已经把<strong>下一单</strong>的食材切配装盘、摆好待命——
+  <strong>灶台从不空烧</strong>。代价只有一个：你永远比"实时"<strong>慢半拍</strong>，因为收尾的总是上一棒的结果。但只要交接处不停顿，整支队伍的总成绩就由跑得最快的那条腿决定，而不再被换人的间隙拖累。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>把这一步的 CPU 调度，藏进上一步的 GPU 计算里</strong>。<span class="inline">event_loop_overlap</span> 不再"算完→收尾→再组下一批"地串行，
+  而是<strong>先发射</strong>本步（第 N 步）的 GPU 前向，<strong>不等它算完</strong>，立刻让 CPU 去组第 N+1 步的批、并<strong>顺手收尾上一步（第 N−1 步）</strong>的结果——
+  上一步的结果存在一个 <span class="mono">result_queue</span>（结果队列 / future）里，<strong>推迟一拍</strong>才处理。这样每一拍的 CPU 调度开销，
+  都正好落在 GPU 那一拍的计算"影子"里被<strong>完全遮住</strong>，对外表现为<strong>近乎零的调度开销</strong>、GPU 利用率拉满。
+  代价是<strong>多一拍延迟</strong>（你总是慢一步）外加更精细的状态管理——下一批要在当前结果还没出来时就先搭好，SGLang 用 <span class="mono">batch_overlap</span> 那套
+  future/event 机制替你扛住了依赖。这正是 v0.4 主打的"零开销批调度器"；它与连续批处理（第 5 课）是绝配：<strong>批永远满载，而把它喂满的调度还不要钱</strong>。
+</div>
+
+<h2>问题：串行循环里，GPU 在 CPU 组批时干等</h2>
+<p>
+先把账算清。一拍里 GPU 真正烧算力的只有 <span class="mono">run_batch</span>（→ ModelRunner.forward，第 24 课）；
+其余的 <span class="mono">get_next_batch_to_run</span>（组批）、<span class="mono">sample</span>（采样）、<span class="mono">process_batch_result</span>（追加 token、判完成、释放 KV、记账、给下一步备输入）
+全是<strong>CPU 上的轻量活</strong>。朴素的 <span class="inline">event_loop_normal</span> 把它们<strong>排成一条直线</strong>：CPU 组好批 → GPU 前向 → CPU 收尾 → CPU 再组下一批 → GPU 再前向……
+问题出在<strong>衔接处</strong>：每当 CPU 在组批、采样、记账时，<strong>GPU 没有任务可做，只能空转等待</strong>；反过来 GPU 前向时，CPU 也闲着。
+两个昂贵的资源<strong>轮流忙、轮流闲</strong>，谁也没吃饱。这种"你忙我闲、我忙你闲"的错峰，就是串行循环最大的浪费源头。对 prefill 这种 GPU 重活，CPU 那点开销占比还小；可一旦进入 decode——
+每拍只给每条请求生成一个 token，GPU 前向本身就极快——CPU 那段固定的调度开销立刻变成一拍里<strong>相当显眼的一块</strong>。
+循环转得越快、GPU 越闲不下来，这块固定开销就越扎眼：它直接给整机吞吐<strong>封了顶</strong>。
+再把这笔账具体化：假设一拍 decode 的 GPU 前向只要 8 毫秒，而 CPU 组批、采样、记账加起来要 4 毫秒，那么串行下一拍就是 12 毫秒，
+其中整整三分之一的时间 GPU 在睡觉——意味着你买的那张昂贵显卡，有三分之一的钱花在了等 CPU 上。请求并发越高、批越大，CPU 那段记账反而越重，
+这个比例还可能更难看。这正是问题的要害：<strong>不是 GPU 不够快，而是它被一段本可以并行的 CPU 工作活活拖住、轮流空转</strong>。
+只要能让这段 CPU 工作"躲"到 GPU 计算的背后去，理论上就能把一拍从 12 毫秒压回 8 毫秒——吞吐凭空多出一半，而且一行模型代码都不用改。
+</p>
+
+<div class="cols">
+  <div class="col"><h4>朴素串行：event_loop_normal（第 18 课）</h4><p>一拍内 <strong>CPU 组批 → GPU 前向 → CPU 收尾</strong> 顺序排队，互不重叠。GPU 在 CPU 组批/采样/记账时<strong>整段空等</strong>。decode 步 GPU 极快，CPU 开销占比大，<strong>算力被晾着</strong>，循环速度给吞吐封顶。</p></div>
+  <div class="col"><h4>重叠流水线：event_loop_overlap（本课）</h4><p>先<strong>发射</strong>本步 GPU 前向（不等它算完），CPU 立刻去组下一批并<strong>收尾上一步</strong>的结果。CPU 调度被<strong>藏进 GPU 计算的影子里</strong>，GPU <strong>不再有空隙</strong>——调度开销近乎归零。代价：慢一拍。</p></div>
+</div>
+
+<h2>修复：把下一步的调度，塞进这一步的 GPU 影子里</h2>
+<p>
+重叠循环的核心动作只有三步，但顺序极讲究。第一，<strong>发射</strong>本步（N）的前向：调用 <span class="mono">run_batch</span> 把批交给 GPU，
+但<strong>立即返回、不阻塞等结果</strong>，把这个"已发射、待收尾"的批连同它的结果句柄一起 <span class="mono">append</span> 进 <span class="mono">result_queue</span>。
+第二，趁 GPU 正埋头算 N，<strong>CPU 回头去组第 N+1 步的批</strong>（下一拍的 <span class="mono">get_next_batch_to_run</span> 其实是这一拍就开始铺路的）。
+第三，<strong>收尾上一步（N−1）</strong>：从 <span class="mono">result_queue</span> 里 <span class="mono">popleft</span> 出上一拍那个批和它<em>现在已经算好</em>的结果，做 <span class="mono">process_batch_result</span>——
+追加 token、判完成、释放 KV。注意这个错位：<strong>当我们处理 N−1 的结果时，GPU 正忙着算 N</strong>。于是 CPU 的每一段活，都精确地落在 GPU 计算的"影子"里。
+这就是"慢一拍"的由来，也是"零开销"的由来——你处理的永远是<strong>上一步</strong>的结果，但每一步的 CPU 时间都<strong>不再让 GPU 等</strong>。
+这里有个容易被忽略的精妙之处：发射前向用的是<strong>异步</strong>语义——<span class="mono">run_batch</span> 把核函数排进 GPU 队列后<strong>不等它跑完就返回</strong>，
+所以 CPU 才能立刻腾出手去组下一批。真正的"等待"被推迟到下一拍 <span class="mono">pop_and_process</span> 去队列里取结果时才隐式发生，而那时 GPU 早已算完，几乎不用真等。
+换句话说，<strong>CPU 和 GPU 像两条独立的传送带各自满速运转</strong>，只在每拍交接处对一次账：本拍发射的批进队列、上拍的批出队列收尾。
+正因为这种"发射—入队—下一拍再收尾"的错位，整条循环才不存在任何一方干等另一方的缝隙。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>发射本步前向（N），不等它</h4><p><span class="mono">batch = get_next_batch_to_run()</span> 组好第 N 批，<span class="mono">run_batch(batch)</span> 把它<strong>丢上 GPU 就走</strong>，把 <span class="mono">(batch.copy(), result)</span> 压进 <span class="mono">result_queue</span>。GPU 开始算，CPU 不阻塞。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>趁 GPU 忙，CPU 备下一批（N+1）</h4><p>GPU 还在算 N 的当口，CPU 已经在<strong>收新请求、组下一拍的批、采样备料</strong>。这段 CPU 时间<strong>不占用 GPU</strong>——它躲在 N 的计算影子里。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>收尾上一步（N−1）的结果</h4><p>从 <span class="mono">result_queue</span> <span class="mono">popleft</span> 出第 N−1 批——它<strong>现在已算完</strong>。<span class="mono">process_batch_result</span> 追加 token、判完成、<strong>释放 KV</strong>、发反分词（第 17 课）。处理的永远是<strong>上一步</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>更新 last_batch，回到 1</h4><p><span class="mono">last_batch = batch</span>，循环回到第 1 步发射 N+1。每一拍都是"发射这步 / 收尾上步"的错位流水，GPU 接力棒<strong>无停顿交接</strong>。</p></div></div>
+</div>
+
+<h2>GPU 永不空转：把每一拍画在时间轴上</h2>
+<p>
+下面这张图把"慢一拍"摊开看。把时间横着切成四拍（T1…T4），上面一行是 GPU、下面一行是 CPU。在<strong>朴素串行</strong>里，
+两行是<strong>错峰</strong>的——GPU 亮时 CPU 暗、CPU 亮时 GPU 暗，总有一方在空等。而在<strong>重叠</strong>里，<strong>GPU 那一行从头亮到尾、没有一个空格</strong>（高亮格就是"GPU 正在算"），
+CPU 那一行则在 GPU 的<strong>同一拍里同时工作</strong>：T2 这一拍，GPU 在算第 2 批，CPU<strong>同时</strong>在组第 3 批、并收尾第 1 批的结果。
+你能直观看到两点：其一，GPU<strong>从不空转</strong>，这正是吞吐拉满的根；其二，结果总是<strong>晚一拍</strong>落地——第 1 批的结果要等到 T2 才处理完，这就是多出来的那一拍延迟（第 8 课的吞吐/延迟权衡在这里现形）。
+还要点明一个常见误解：这"晚一拍"<strong>并不会让单条请求变慢一倍</strong>，它只是在整条生成的最前面<strong>一次性</strong>多压了一拍的固定延迟——
+后续每个 token 仍然是一拍一个、稳定吐出。对一条要生成几百个 token 的长回答来说，开头多等一拍几乎察觉不到；
+而它换来的是<strong>每一拍</strong>都把 GPU 喂满，吞吐的收益是持续累积的。所以这笔交易在绝大多数服务场景里都极其划算：用一次性的、微小的延迟，换走全程的算力浪费。
+只有在那种"只生成极少 token、且对首包时延锱铢必较"的场景里，才需要重新掂量这一拍是否值得。
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">朴素串行 vs 重叠流水线：高亮格 = GPU 正在算（看 GPU 那一行有没有空格）</div>
+  <div class="cells">
+    <span class="lab">串行·GPU</span><span class="cell">T1 算批1</span><span class="cell">T2 空等</span><span class="cell">T3 算批2</span><span class="cell">T4 空等</span><span class="sep"></span><span class="q">有空格→算力浪费</span>
+  </div>
+  <div class="cells">
+    <span class="lab">串行·CPU</span><span class="cell">T1 空等</span><span class="cell">T2 组批2</span><span class="cell">T3 空等</span><span class="cell">T4 组批3</span><span class="sep"></span><span class="q">两行错峰、轮流闲</span>
+  </div>
+  <div class="cells">
+    <span class="lab">重叠·GPU</span><span class="cell hl">T1 算批1</span><span class="cell hl">T2 算批2</span><span class="cell hl">T3 算批3</span><span class="cell hl">T4 算批4</span><span class="sep"></span><span class="q">无空格→满载</span>
+  </div>
+  <div class="cells">
+    <span class="lab">重叠·CPU</span><span class="cell">T1 组批2</span><span class="cell">T2 组批3·收尾1</span><span class="cell">T3 组批4·收尾2</span><span class="cell">T4 组批5·收尾3</span><span class="sep"></span><span class="q">藏进 GPU 影子里</span>
+  </div>
+</div>
+
+<h2>账要算清：零开销不是没代价</h2>
+<p>
+重叠不是免费午餐，它把"开销"从 GPU 空转<strong>换成了一拍延迟 + 复杂度</strong>。好处一栏很硬：<strong>调度开销近乎归零</strong>、<strong>GPU 利用率拉满</strong>，
+decode 密集场景吞吐显著抬升。好处之所以这么实在，是因为它榨的是<strong>本来就闲着的那段 CPU 时间</strong>，等于不花额外成本白捡吞吐。代价一栏也要看清：<strong>+1 拍延迟</strong>——你永远比实时慢一步，对单条请求的首 token / 末 token 时延略有影响（第 8 课）；
+还有<strong>状态管理更难</strong>——下一批要在当前结果<em>还没算出来</em>时就先搭好，意味着采样 token、KV 记账等存在<strong>跨拍依赖</strong>，
+SGLang 用 <span class="mono">batch_overlap</span> 目录里的 future/event 对象替你把这些依赖串好、保证正确。还有些场景（如某些需要立刻拿到上一步结果才能组下一批的情形，
+源码里的 <span class="mono">is_disable_overlap_for_batch</span>）会临时退回不重叠、先把上一批收尾。理解这张账，你就明白为什么这叫"零开销"——
+不是没有成本，而是<strong>把成本藏到了不影响吞吐的地方</strong>。
+最后再强调一句工程直觉：重叠之所以能成立，前提是"调度"和"计算"<strong>分属两种不同的硬件资源</strong>（CPU 与 GPU），它们能真正物理并行。
+如果两件事抢的是同一块资源，重叠就只是把先后顺序换了个写法、并不会更快。SGLang 这套设计精准地踩在了这个前提上：
+GPU 埋头做矩阵乘的几毫秒，对 CPU 来说是大把可用的空闲时间，正好拿来组下一批、采样、记账。
+把这块本就闲着的 CPU 时间利用起来，几乎是"无中生有"地榨出了吞吐——这也是为什么它被称作"零开销"而不仅仅是"低开销"。
+</p>
+
+<table class="t">
+  <tr><th>维度</th><th>朴素 event_loop_normal</th><th>重叠 event_loop_overlap</th></tr>
+  <tr><td>CPU 调度开销</td><td>暴露在关键路径，GPU 空等</td><td class="mono">≈ 0（藏进 GPU 影子）</td></tr>
+  <tr><td>GPU 利用率</td><td>decode 步明显有空隙</td><td><strong>满载、无空格</strong></td></tr>
+  <tr><td>吞吐</td><td>被循环速度封顶</td><td><strong>显著抬升</strong>（v0.4 招牌）</td></tr>
+  <tr><td>延迟</td><td>实时收尾</td><td><strong>+1 拍</strong>（总慢一步）</td></tr>
+  <tr><td>实现复杂度</td><td>简单、直来直去</td><td>需 <span class="mono">result_queue</span> + 跨拍依赖管理</td></tr>
+</table>
+
+<h2>读源码：event_loop_overlap 的错位流水</h2>
+<p>
+真身就在 <span class="mono">scheduler.py</span> 的 <span class="mono">event_loop_overlap</span>。抓三个关键点：一是 <span class="mono">result_queue</span> 这个双端队列，
+存放"已发射但还没收尾"的批；二是 <span class="mono">run_batch</span> 之后<strong>立刻 append、不阻塞</strong>，把收尾推迟到下一拍；
+三是 <span class="mono">pop_and_process</span> 从队首取出<strong>上一拍</strong>的批做 <span class="mono">process_batch_result</span>——这一句执行时，GPU 正忙着算本拍。错位，就是这么实现的。
+读这段时还可以留意一处细节：批入队前调用了 <span class="mono">batch.copy()</span>。为什么要拷贝？因为本拍的批对象接下来可能被 <span class="mono">get_next_batch_to_run</span> 复用或就地改写，
+而队列里那份必须保留"发射时的快照"，等下一拍收尾时才不会读到被篡改的状态——这正是跨拍依赖管理的一个缩影。源码里还有 <span class="mono">is_disable_overlap_for_batch</span> 的分支，
+在少数必须立刻拿到上一步结果才能继续的情形下，提前把上一批收尾、临时退回不重叠，保证正确性优先于性能。
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">错位流水 / 慢一拍</span></div>
+<pre><span class="kw">def</span> event_loop_overlap(self):
+    <span class="cm"># 重叠 CPU 调度与 GPU 计算的事件循环</span>
+    self.result_queue = deque()                  <span class="cm"># 存"已发射、待收尾"的批</span>
+
+    <span class="kw">def</span> pop_and_process():
+        <span class="cm"># 收尾上一步(N-1)的结果——推迟一拍处理</span>
+        tmp_batch, tmp_result = self.result_queue.popleft()
+        self.process_batch_result(tmp_batch, tmp_result)
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        batch = self.get_next_batch_to_run()     <span class="cm"># CPU：组本步(N)的批</span>
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:                                <span class="cm"># 发射本步前向，不等它算完</span>
+            batch_result = self.run_batch(batch)
+            self.result_queue.append((batch.copy(), batch_result))
+
+        <span class="kw">if</span> self.last_batch:                      <span class="cm"># GPU 算 N 时，CPU 回头收尾 N-1</span>
+            pop_and_process()
+
+        self.last_batch = batch                  <span class="cm"># 回到开头：下一拍发射 N+1</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>问题在串行</strong>：朴素 <span class="mono">event_loop_normal</span>（第 18 课）里 CPU 组批/采样/记账与 GPU 前向<strong>顺序排队</strong>，CPU 干活时 GPU 空等。decode 步 GPU 极快，CPU 开销占比大，循环速度给吞吐<strong>封顶</strong>。</li>
+    <li><strong>修复靠重叠</strong>：<span class="mono">event_loop_overlap</span> 先<strong>发射</strong>第 N 步前向（不等），CPU 立刻组第 N+1 批、并<strong>收尾第 N−1 步</strong>的结果（存在 <span class="mono">result_queue</span> / future 里，推迟一拍）。CPU 调度被<strong>藏进 GPU 计算的影子</strong>。</li>
+    <li><strong>什么叠什么</strong>：第 N 步的 <strong>GPU 前向</strong> ∥ 第 N+1 步的 <strong>CPU 组批</strong> + 第 N−1 步的 <strong>CPU 收尾</strong>。GPU <strong>从不空转</strong>，调度开销近乎归零。</li>
+    <li><strong>代价是慢一拍</strong>：你永远比实时<strong>晚一步</strong>处理结果（第 8 课的吞吐/延迟权衡），外加跨拍状态管理更难——下一批在当前结果未出时就搭好，SGLang 用 <span class="mono">batch_overlap</span> 的 future/event 扛依赖。</li>
+    <li><strong>与连续批处理是绝配</strong>：连续批处理（第 5 课）让批<strong>永远满载</strong>，重叠调度器让<strong>喂满批的调度不要钱</strong>。这是 v0.4 的招牌优化，也是第 1/3 课点名的那项"零开销"。配合 CUDA Graph（第 27 课）把单步再压薄。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 <code>event_loop_overlap</code> 里，<strong>什么和什么重叠</strong>？请精确说出哪部分在 GPU、哪部分在 CPU。</div>
+  <ol class="opts">
+    <li>两个不同请求的 GPU 前向在同一张卡上并行，CPU 不参与</li>
+    <li>第 N 步的 <strong>GPU 前向</strong>（<code>run_batch</code>→ModelRunner.forward）与 <strong>CPU 组第 N+1 步的批</strong> + <strong>CPU 收尾第 N−1 步的结果</strong>（<code>process_batch_result</code>）<strong>同拍并行</strong>：发射本步前向后不等它，CPU 立刻去组下一批、并从 <code>result_queue</code> 取出上一步结果做收尾</li>
+    <li>本步的 CPU 收尾与本步的 GPU 前向重叠（同一步内并行）</li>
+    <li>GPU 前向与 GPU 采样重叠，全程没有 CPU 工作</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。调度器“只决策、不计算”：组批/采样/收尾是 CPU 轻量活，唯独 <code>run_batch</code> 烧 GPU。overlap 版发射第 N 步前向后<strong>立刻 append 进 <code>result_queue</code> 不阻塞</strong>，趁 GPU 算 N 的当口，CPU 去组 N+1 的批、并 <code>popleft</code> 出 N−1 的结果做收尾。于是每一拍的 CPU 时间都藏进同拍 GPU 计算的影子里。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么这套重叠能把<strong>调度开销藏到近乎为零</strong>，让人称它“零开销”？</div>
+  <ol class="opts">
+    <li>因为重叠让 CPU 的调度代码运行得更快了</li>
+    <li>因为 CPU 的组批/采样/记账时间，正好落在 GPU 那一拍前向计算的“影子”里被<strong>完全遮住</strong>——GPU 从不为等 CPU 而空转，CPU 开销不再出现在关键路径上，所以对外表现为近乎零的调度开销、GPU 满载</li>
+    <li>因为它彻底删掉了组批和采样这两步</li>
+    <li>因为前向被搬到了 CPU 上，省掉了 GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。“零开销”不是没成本，而是把成本<strong>藏到不影响吞吐的地方</strong>。串行版里 CPU 干活时 GPU 空等，这段空等直接给吞吐封顶；overlap 把 CPU 调度与 GPU 前向并到同一拍，CPU 时间被 GPU 计算遮住，GPU 利用率拉满。decode 步 GPU 极快、CPU 占比大，收益尤其明显。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 重叠调度器的<strong>主要代价</strong>是什么？为什么需要一个 <code>result_queue</code>？</div>
+  <ol class="opts">
+    <li>代价是<strong>多一拍延迟</strong>——你处理的永远是<strong>上一步</strong>的结果，总比实时慢一步（第 8 课的吞吐/延迟权衡），外加跨拍状态管理更难；<code>result_queue</code> 正是用来暂存“已发射但还没收尾”的批，把收尾<strong>推迟一拍</strong>，等 GPU 算完再 <code>popleft</code> 处理</li>
+    <li>代价是显存翻倍，<code>result_queue</code> 缓存 KV</li>
+    <li>代价是吞吐下降，<code>result_queue</code> 用来限流</li>
+    <li>没有代价，<code>result_queue</code> 只是日志缓冲</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。源码里 <code>run_batch</code> 后立刻 <code>result_queue.append((batch.copy(), result))</code> 不阻塞，下一拍才 <code>popleft</code> 做 <code>process_batch_result</code>——所以收尾恒落后一拍，这就是 +1 拍延迟。下一批要在当前结果未出时就搭好，采样 token / KV 记账存在跨拍依赖，靠 <code>batch_overlap</code> 的 future/event 串好。某些必须先拿到上一步结果的情形会临时退回不重叠。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“接力赛 / 两段式流水线”的类比，完整讲清 <code>event_loop_overlap</code> 一个 step 的错位流水。请逐一覆盖：①<strong>发射</strong>第 N 步前向（<code>run_batch</code> 不等结果、把 <code>(batch.copy(), result)</code> 压进 <code>result_queue</code>）；②趁 GPU 算 N，CPU 组第 N+1 步的批；③<code>pop_and_process</code> 收尾第 N−1 步（<code>process_batch_result</code>：追加 token、判完成、释放 KV、发反分词第 17 课）。并解释“慢一拍”为何既是代价又是“零开销”的来源，对照朴素 <code>event_loop_normal</code>（第 18 课）说明 GPU 为什么从不空转。</li>
+    <li>论证“重叠调度器与连续批处理是绝配”：连续批处理（第 5 课）让批<strong>永远满载</strong>，重叠调度器让<strong>喂满批的调度不要钱</strong>。请说明两者各解决吞吐的哪一半，为什么 decode 密集场景下重叠收益最大（联系第 8 课吞吐/延迟、第 24 课模型前向），以及它如何与 CUDA Graph（第 27 课）叠加把单步成本进一步压薄。再讨论：在什么样的负载或延迟敏感场景下，+1 拍延迟可能是不可接受的取舍？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+This is Part 5's <strong>signature</strong> lesson—the optimization name-dropped back in Lessons 1 and 3: the <strong>zero-overhead overlap scheduler</strong>.
+Recall Lesson 18: every scheduler step mixes two kinds of work—<strong>CPU scheduling</strong> (build the batch, sample, bookkeep, prepare the next step's inputs)
+and the <strong>GPU forward</strong>. In the naive <span class="inline">event_loop_normal</span>, these are <strong>strictly serial</strong>:
+GPU finishes → CPU then forms the next batch → GPU runs again. The catch: <strong>while the CPU forms the batch, the GPU sits idle</strong>.
+For decode—where each step is very fast—the fixed CPU overhead becomes a sizable fraction of a step, so a chunk of expensive GPU time is wasted.
+This lesson shows how SGLang <strong>pipelines</strong> the two to erase that idle gap entirely: keep the GPU <strong>never idle</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Real-world analogy</div>
+  Think of one step as a <strong>relay race / two-stage assembly line</strong>. The naive loop is a single runner: after sprinting this leg he must <strong>stop</strong>, walk back to the line, tie his shoes,
+  catch his breath—and only then sprint the next leg, leaving the track (GPU) empty in between. The overlap scheduler uses <strong>two runners</strong>: while the current runner (GPU) sprints all-out,
+  the next runner (CPU) is <strong>already at the line, laced up and set</strong>, so the baton passes with <strong>zero pause</strong>.
+  Or a kitchen: while the current dish sizzles on the stove (GPU), the prep cook (CPU) is already chopping and plating the <strong>next order</strong>—
+  <strong>the stove never burns empty</strong>. The only cost: you are forever <strong>one beat behind</strong>, because the work you finish is always the previous leg's result.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>hide this step's CPU scheduling inside the previous step's GPU compute</strong>. Instead of "compute → finish → form next" in series,
+  <span class="inline">event_loop_overlap</span> <strong>launches</strong> step N's GPU forward, <strong>does not wait for it</strong>, and immediately has the CPU form step N+1's batch and <strong>finish the previous (N−1) step's</strong> result—
+  the previous result lives in a <span class="mono">result_queue</span> (a future) and is processed <strong>one beat late</strong>. Each step's CPU overhead now falls neatly within the "shadow" of that step's GPU compute and is <strong>fully hidden</strong>,
+  presenting as <strong>near-zero scheduling overhead</strong> with the GPU saturated.
+  The cost is <strong>one extra beat of latency</strong> (you're always one step behind) plus finer state management—the next batch is built before the current result is known, so sampled tokens and KV bookkeeping have cross-beat dependencies,
+  which SGLang handles for you via the future/event machinery in <span class="mono">batch_overlap</span>. This is v0.4's "zero-overhead batch scheduler"; it pairs perfectly with continuous batching (Lesson 5): <strong>the batch is always full, and the scheduling that keeps it full costs nothing</strong>.
+</div>
+
+<h2>The problem: in the serial loop, the GPU idles while the CPU forms the batch</h2>
+<p>
+Do the accounting first. The only thing that truly burns GPU in a step is <span class="mono">run_batch</span> (→ ModelRunner.forward, Lesson 24);
+the rest—<span class="mono">get_next_batch_to_run</span> (form the batch), <span class="mono">sample</span>, <span class="mono">process_batch_result</span> (append tokens, detect finished, free KV, bookkeep, prep next inputs)—
+is all <strong>lightweight CPU work</strong>. The naive <span class="inline">event_loop_normal</span> lines them up <strong>in a straight line</strong>: CPU forms batch → GPU forward → CPU finishes → CPU forms next → GPU forward…
+The trouble is at the seams: whenever the CPU is forming/sampling/bookkeeping, <strong>the GPU has nothing to do and just idles</strong>; conversely, the CPU idles during the forward.
+Two expensive resources take turns being busy and idle—neither is fed. For prefill (GPU-heavy) the CPU share is small; but once you hit decode—
+one token per request per step, an extremely fast forward—that fixed scheduling overhead becomes a <strong>conspicuous slice</strong> of the step.
+The faster the loop spins and the less the GPU rests, the more this fixed overhead stings: it <strong>caps</strong> whole-engine throughput.
+</p>
+
+<div class="cols">
+  <div class="col"><h4>Naive serial: event_loop_normal (Lesson 18)</h4><p>Within a step, <strong>CPU forms batch → GPU forward → CPU finishes</strong> queue up with no overlap. The GPU <strong>idles for the whole stretch</strong> while the CPU forms/samples/bookkeeps. Decode steps make the GPU very fast, so CPU overhead dominates and <strong>compute is wasted</strong>; loop speed caps throughput.</p></div>
+  <div class="col"><h4>Overlap pipeline: event_loop_overlap (this lesson)</h4><p><strong>Launch</strong> this step's GPU forward (don't wait), and the CPU immediately forms the next batch and <strong>finishes the previous step</strong>. CPU scheduling is <strong>hidden in the GPU compute's shadow</strong>, so the GPU has <strong>no gaps</strong>—scheduling overhead near zero. Cost: one beat behind.</p></div>
+</div>
+
+<h2>The fix: tuck the next step's scheduling into this step's GPU shadow</h2>
+<p>
+The overlap loop has just three core moves, but the order is everything. First, <strong>launch</strong> step N's forward: call <span class="mono">run_batch</span> to hand the batch to the GPU,
+but <strong>return immediately—don't block on the result</strong>—and <span class="mono">append</span> this "launched, pending" batch with its result handle onto <span class="mono">result_queue</span>.
+Second, while the GPU is busy on N, <strong>the CPU goes off to form step N+1's batch</strong> (next step's <span class="mono">get_next_batch_to_run</span> is effectively prepped here).
+Third, <strong>finish the previous (N−1) step</strong>: <span class="mono">popleft</span> from <span class="mono">result_queue</span> that prior batch and its <em>now-ready</em> result and run <span class="mono">process_batch_result</span>—
+append tokens, detect finished, free KV. Note the stagger: <strong>when we process N−1's result, the GPU is busy computing N</strong>. So every slice of CPU work lands inside the GPU compute's shadow.
+That's where "one beat behind" comes from, and where "zero-overhead" comes from—you always process the <strong>previous</strong> step's result, yet no step's CPU time <strong>ever makes the GPU wait</strong>.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Launch step N's forward, don't wait</h4><p><span class="mono">batch = get_next_batch_to_run()</span> forms batch N; <span class="mono">run_batch(batch)</span> <strong>fires it onto the GPU and moves on</strong>, pushing <span class="mono">(batch.copy(), result)</span> onto <span class="mono">result_queue</span>. GPU starts; CPU doesn't block.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>While GPU is busy, CPU preps N+1</h4><p>With the GPU still on N, the CPU is already <strong>receiving requests, forming the next batch, prepping samples</strong>. This CPU time <strong>doesn't occupy the GPU</strong>—it hides in N's compute shadow.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Finish the previous step (N−1)</h4><p><span class="mono">popleft</span> batch N−1 from <span class="mono">result_queue</span>—it's <strong>now done</strong>. <span class="mono">process_batch_result</span> appends tokens, detects finished, <strong>frees KV</strong>, sends to detok (Lesson 17). You always process the <strong>previous</strong> step.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Update last_batch, back to 1</h4><p><span class="mono">last_batch = batch</span>; loop back to launch N+1. Every beat is a staggered "launch this / finish previous" pipeline; the GPU baton passes with <strong>no pause</strong>.</p></div></div>
+</div>
+
+<h2>The GPU never idles: draw every beat on a timeline</h2>
+<p>
+This figure spreads "one beat behind" out in the open. Slice time into four beats (T1…T4); the top row is the GPU, the bottom row the CPU. In the <strong>naive serial</strong> case,
+the two rows are <strong>out of phase</strong>—GPU lit while CPU dark, CPU lit while GPU dark, always one side idling. In the <strong>overlap</strong> case, <strong>the GPU row is lit end to end with no empty cell</strong> (highlighted cell = "GPU computing"),
+while the CPU row works <strong>in the same beat as the GPU</strong>: at T2, the GPU computes batch 2 while the CPU <strong>simultaneously</strong> forms batch 3 and finishes batch 1's result.
+You can see two things at a glance: one, the GPU <strong>never idles</strong>—the root of saturated throughput; two, results always land <strong>one beat late</strong>—batch 1's result isn't finished until T2, which is exactly the extra beat of latency (Lesson 8's throughput/latency trade-off in the flesh).
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">Naive serial vs overlap pipeline: highlighted cell = GPU computing (watch whether the GPU row has gaps)</div>
+  <div class="cells">
+    <span class="lab">serial·GPU</span><span class="cell">T1 run b1</span><span class="cell">T2 idle</span><span class="cell">T3 run b2</span><span class="cell">T4 idle</span><span class="sep"></span><span class="q">gaps → wasted compute</span>
+  </div>
+  <div class="cells">
+    <span class="lab">serial·CPU</span><span class="cell">T1 idle</span><span class="cell">T2 form b2</span><span class="cell">T3 idle</span><span class="cell">T4 form b3</span><span class="sep"></span><span class="q">rows out of phase</span>
+  </div>
+  <div class="cells">
+    <span class="lab">overlap·GPU</span><span class="cell hl">T1 run b1</span><span class="cell hl">T2 run b2</span><span class="cell hl">T3 run b3</span><span class="cell hl">T4 run b4</span><span class="sep"></span><span class="q">no gaps → saturated</span>
+  </div>
+  <div class="cells">
+    <span class="lab">overlap·CPU</span><span class="cell">T1 form b2</span><span class="cell">T2 form b3·finish b1</span><span class="cell">T3 form b4·finish b2</span><span class="cell">T4 form b5·finish b3</span><span class="sep"></span><span class="q">hidden in GPU shadow</span>
+  </div>
+</div>
+
+<h2>Account honestly: zero-overhead is not zero-cost</h2>
+<p>
+Overlap is no free lunch; it <strong>trades GPU idling for one beat of latency plus complexity</strong>. The upside column is hard: <strong>near-zero scheduling overhead</strong>, <strong>saturated GPU utilization</strong>,
+and clearly higher throughput in decode-heavy regimes. The cost column matters too: <strong>+1 beat of latency</strong>—you're forever one step behind, nudging single-request token timings (Lesson 8);
+and <strong>harder state management</strong>—the next batch is built before the current result <em>exists</em>, so sampled tokens and KV bookkeeping carry <strong>cross-beat dependencies</strong>,
+which SGLang threads through the future/event objects in the <span class="mono">batch_overlap</span> directory to keep correct. Some cases (where you must have the previous result before forming the next,
+the source's <span class="mono">is_disable_overlap_for_batch</span>) temporarily fall back to no-overlap and finish the prior batch first. Understand this ledger and you see why it's "zero-overhead":
+not cost-free, but with the cost <strong>moved somewhere that doesn't dent throughput</strong>.
+</p>
+
+<table class="t">
+  <tr><th>Dimension</th><th>Naive event_loop_normal</th><th>Overlap event_loop_overlap</th></tr>
+  <tr><td>CPU scheduling overhead</td><td>On the critical path; GPU idles</td><td class="mono">≈ 0 (hidden in GPU shadow)</td></tr>
+  <tr><td>GPU utilization</td><td>Visible gaps on decode steps</td><td><strong>Saturated, no gaps</strong></td></tr>
+  <tr><td>Throughput</td><td>Capped by loop speed</td><td><strong>Markedly higher</strong> (v0.4 headline)</td></tr>
+  <tr><td>Latency</td><td>Finished in real time</td><td><strong>+1 beat</strong> (always one behind)</td></tr>
+  <tr><td>Implementation complexity</td><td>Simple, straight-line</td><td>Needs <span class="mono">result_queue</span> + cross-beat deps</td></tr>
+</table>
+
+<h2>Read the source: event_loop_overlap's staggered pipeline</h2>
+<p>
+The real thing lives in <span class="mono">scheduler.py</span>'s <span class="mono">event_loop_overlap</span>. Grab three points: one, <span class="mono">result_queue</span>, a deque
+holding "launched but not yet finished" batches; two, right after <span class="mono">run_batch</span> we <strong>append immediately, never blocking</strong>, deferring the finish to the next beat;
+three, <span class="mono">pop_and_process</span> takes the <strong>previous</strong> beat's batch off the front and runs <span class="mono">process_batch_result</span>—and while that line executes, the GPU is busy on this beat. That's how the stagger is built.
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">staggered / one beat behind</span></div>
+<pre><span class="kw">def</span> event_loop_overlap(self):
+    <span class="cm"># A loop that overlaps CPU scheduling with GPU compute</span>
+    self.result_queue = deque()                  <span class="cm"># holds "launched, pending-finish" batches</span>
+
+    <span class="kw">def</span> pop_and_process():
+        <span class="cm"># Finish the previous step (N-1) result -- deferred one beat</span>
+        tmp_batch, tmp_result = self.result_queue.popleft()
+        self.process_batch_result(tmp_batch, tmp_result)
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        batch = self.get_next_batch_to_run()     <span class="cm"># CPU: form this step's (N) batch</span>
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:                                <span class="cm"># launch this step's forward, don't wait</span>
+            batch_result = self.run_batch(batch)
+            self.result_queue.append((batch.copy(), batch_result))
+
+        <span class="kw">if</span> self.last_batch:                      <span class="cm"># while GPU runs N, CPU finishes N-1</span>
+            pop_and_process()
+
+        self.last_batch = batch                  <span class="cm"># back to top: next beat launches N+1</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The problem is serialization</strong>: in naive <span class="mono">event_loop_normal</span> (Lesson 18) CPU forming/sampling/bookkeeping and the GPU forward <strong>queue up in order</strong>, so the GPU idles while the CPU works. Decode makes the GPU very fast, the CPU share dominates, and loop speed <strong>caps</strong> throughput.</li>
+    <li><strong>The fix is overlap</strong>: <span class="mono">event_loop_overlap</span> <strong>launches</strong> step N's forward (no wait), and the CPU immediately forms batch N+1 and <strong>finishes step N−1's</strong> result (kept in <span class="mono">result_queue</span> / a future, one beat late). CPU scheduling hides <strong>in the GPU compute's shadow</strong>.</li>
+    <li><strong>What overlaps what</strong>: step N's <strong>GPU forward</strong> ∥ step N+1's <strong>CPU batch-forming</strong> + step N−1's <strong>CPU finishing</strong>. The GPU <strong>never idles</strong>; scheduling overhead is near zero.</li>
+    <li><strong>The cost is one beat</strong>: you always process results <strong>one step late</strong> (Lesson 8's throughput/latency trade-off), plus harder cross-beat state—the next batch is built before the current result exists, so SGLang carries dependencies via <span class="mono">batch_overlap</span>'s future/event objects.</li>
+    <li><strong>It pairs with continuous batching</strong>: continuous batching (Lesson 5) keeps the batch <strong>always full</strong>; the overlap scheduler makes <strong>keeping it full free</strong>. This is v0.4's headline win, the "zero-overhead" cited in Lessons 1/3. Combine with CUDA Graph (Lesson 27) to shave the per-step cost further.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In <code>event_loop_overlap</code>, <strong>what overlaps with what</strong>? Name precisely which part runs on the GPU and which on the CPU.</div>
+  <ol class="opts">
+    <li>Two different requests' GPU forwards run in parallel on one card; the CPU is uninvolved</li>
+    <li>Step N's <strong>GPU forward</strong> (<code>run_batch</code>→ModelRunner.forward) runs <strong>in the same beat as</strong> the <strong>CPU forming step N+1's batch</strong> plus the <strong>CPU finishing step N−1's result</strong> (<code>process_batch_result</code>): after launching this step's forward without waiting, the CPU immediately forms the next batch and pops the previous step's result from <code>result_queue</code> to finish it</li>
+    <li>This step's CPU finishing overlaps with this step's own GPU forward (parallel within the same step)</li>
+    <li>The GPU forward overlaps with GPU sampling, with no CPU work at all</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The scheduler 'decides, never computes': forming/sampling/finishing are light CPU work, while only <code>run_batch</code> burns GPU. The overlap loop launches step N's forward and <strong>appends to <code>result_queue</code> without blocking</strong>; while the GPU computes N, the CPU forms N+1's batch and <code>popleft</code>s N−1's result to finish it. So each beat's CPU time hides in the same beat's GPU compute shadow.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does this overlap hide <strong>scheduling overhead down to near zero</strong>, earning the name 'zero-overhead'?</div>
+  <ol class="opts">
+    <li>Because overlap makes the CPU scheduling code itself run faster</li>
+    <li>Because the CPU's forming/sampling/bookkeeping time falls inside the 'shadow' of that beat's GPU forward and is <strong>fully masked</strong>—the GPU never idles waiting on the CPU, so the CPU cost leaves the critical path, presenting as near-zero scheduling overhead with the GPU saturated</li>
+    <li>Because it deletes the batch-forming and sampling steps entirely</li>
+    <li>Because the forward is moved onto the CPU, eliminating the GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. 'Zero-overhead' isn't cost-free; it moves the cost <strong>somewhere that doesn't dent throughput</strong>. In the serial version the GPU idles while the CPU works, and that idle caps throughput; overlap puts CPU scheduling and the GPU forward in the same beat, masking CPU time behind GPU compute and saturating utilization. The win is biggest on decode, where the GPU is very fast and the CPU share is large.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What is the overlap scheduler's <strong>main cost</strong>, and why is a <code>result_queue</code> needed?</div>
+  <ol class="opts">
+    <li>The cost is <strong>one extra beat of latency</strong>—you always process the <strong>previous</strong> step's result, forever one step behind real time (Lesson 8's throughput/latency trade-off), plus harder cross-beat state; the <code>result_queue</code> holds 'launched but not yet finished' batches, <strong>deferring the finish one beat</strong> so it's <code>popleft</code>-ed once the GPU is done</li>
+    <li>The cost is doubled VRAM; the <code>result_queue</code> caches KV</li>
+    <li>The cost is lower throughput; the <code>result_queue</code> throttles intake</li>
+    <li>There is no cost; the <code>result_queue</code> is just a logging buffer</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. In source, right after <code>run_batch</code> we <code>result_queue.append((batch.copy(), result))</code> without blocking, and only the next beat <code>popleft</code>s it for <code>process_batch_result</code>—so finishing always lags one beat, hence +1 latency. The next batch is built before the current result exists, giving sampled-token / KV-bookkeeping cross-beat dependencies threaded via <code>batch_overlap</code>'s future/event objects. Cases needing the prior result first fall back to no-overlap temporarily.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'relay race / two-stage assembly line' analogy, walk through one step of <code>event_loop_overlap</code>'s staggered pipeline. Cover each: (1) <strong>launch</strong> step N's forward (<code>run_batch</code> without waiting, push <code>(batch.copy(), result)</code> onto <code>result_queue</code>); (2) while the GPU computes N, the CPU forms step N+1's batch; (3) <code>pop_and_process</code> finishes step N−1 (<code>process_batch_result</code>: append tokens, detect finished, free KV, send to detok, Lesson 17). Explain why being 'one beat behind' is both the cost and the source of 'zero-overhead,' and, contrasting naive <code>event_loop_normal</code> (Lesson 18), why the GPU never idles.</li>
+    <li>Argue that 'the overlap scheduler pairs perfectly with continuous batching': continuous batching (Lesson 5) keeps the batch <strong>always full</strong>, while the overlap scheduler makes <strong>keeping it full free</strong>. Explain which half of the throughput problem each solves, why the overlap win is largest in decode-heavy regimes (tie to Lesson 8 throughput/latency and Lesson 24 model forward), and how it stacks with CUDA Graph (Lesson 27) to further thin the per-step cost. Then discuss: under what workloads or latency-sensitive scenarios might the +1-beat latency be an unacceptable trade-off?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="20-schedule-policy.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">调度策略</span><span class="lang-en">The schedule policy</span></div></a><a class="next" href="22-chunked-prefill.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">分块预填充</span><span class="lang-en">Chunked prefill</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>20 · 调度策略 / The schedule policy - SGLang 图解教程</title>
+<meta name="description" content="第五部分 · 调度器｜调度策略 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="20 · 调度策略 / The schedule policy - SGLang 图解教程">
+<meta property="og:description" content="第五部分 · 调度器｜调度策略 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="20 · 调度策略 / The schedule policy - SGLang 图解教程">
+<meta name="twitter:description" content="第五部分 · 调度器｜调度策略 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></span>
+    <span class="pill">20 / 23</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:86%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></div>
+    <h1><span class="lang-zh">调度策略</span><span class="lang-en">The schedule policy</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课我们看清了两个数据结构：持久的 <span class="inline">Req</span> 与临时的 <span class="inline">ScheduleBatch</span>。
+这一课回答两个最要命的问题：每一拍（step）里，等待队列那么多请求，<strong>该让谁先跑</strong>？又<strong>能塞下几个</strong>？
+答案藏在两个角色里——<span class="inline">SchedulePolicy</span> 负责<strong>排序</strong>（决定先后），
+<span class="inline">PrefillAdder</span> 负责<strong>限流</strong>（决定多少）。前者让“开头已经在缓存里”的请求插队，几乎白捡一份吞吐；
+后者拿着 token 预算和显存预算两把尺子，往这一拍的 prefill 批里一个一个塞，直到塞不下为止。
+调度器和缓存（第 7 课）就是这样<strong>协同设计</strong>的——这正是 SGLang 在真实流量下又快又省的秘密。
+把这一课记牢一句话：<strong>先排序、再限流，排序为了喂饱缓存，限流为了不撑爆显存</strong>。这两步合起来，
+就是事件循环（第 18 课）里 <span class="inline">get_next_batch_to_run</span> 每一拍真正在做的“拍板”动作，也是整台引擎吞吐与延迟平衡的关键所在。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把调度策略想成一家热门餐厅的<strong>聪明领位员（smart host / bouncer）</strong>。门口排着长队，他不傻乎乎地只按到店先后放人。
+  他先<strong>给队伍重新排序</strong>：哪几桌客人“桌子已经半摆好了”（食材备齐 = 缓存命中，对应 <strong>LPM 最长前缀匹配</strong>），就让他们插到前面——
+  因为招待他们几乎不费厨房功夫；要是大家都差不多，就按<strong>到店先后（FCFS）</strong>公平放行；遇到订了 VIP 套餐的，就按<strong>显式优先级（priority）</strong>提前。
+  排好序之后，他还要<strong>数着两个容量</strong>放人：餐厅<strong>座位</strong>够不够（显存 KV 预算）、后厨<strong>这一轮能炒几个菜</strong>（token 预算）——
+  两者哪个先满，这一轮就停止放人。下一拍再来一遍。<strong>排序 + 限流</strong>，就是调度策略的全部。
+  这位领位员有个铁律：<strong>绝不放进一个坐不下的客人</strong>——宁可让他多等一拍，也不能让满屋子在吃饭的客人因为超额而被挤掉、上菜变慢。
+  他也懂取舍：多放新客进门（多接 prefill）能提高翻台率（吞吐），却会让已经在吃的人上菜更慢（在跑 decode 的延迟变高）；
+  只顾招待在座的（只 decode）则上菜快、但门口的队伍迟迟不动。每一拍，他都在这架天平上重新放砝码。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>策略决定顺序，预算决定数量</strong>。<span class="inline">get_next_batch_to_run</span>（第 18 课）每拍先调
+  <span class="inline">SchedulePolicy.calc_priority</span> 把<strong>等待队列就地排序</strong>，再交给 <span class="inline">PrefillAdder</span>
+  在<strong>双预算</strong>下逐个 <span class="inline">add_one_req</span>，能塞则塞（必要时<strong>切块 chunk</strong>），塞满即止。
+  排序的核心模式是<strong>缓存感知的 LPM</strong>：优先让 prompt 前缀已落在 RadixAttention 缓存里的请求先跑——
+  接纳它们几乎是“免费”的，因为那段注意力早算过了（第 7 课）。这一步直接抬高缓存命中率，而命中率正是 SGLang 真实速度的来源。
+  与此同时，调度器每拍都在<strong>“多接新 prefill”与“只推老 decode”之间权衡</strong>：前者增吞吐却抬高在跑请求的延迟，后者保延迟（第 8 课）。
+  策略，就是这场天平每一拍的砝码。再把镜头拉远一点：这一课的两个角色，恰好对应一个朴素却深刻的工程直觉——
+  <strong>系统的快，一半来自“把对的活排在前面”，一半来自“别一口吃成胖子”</strong>。排序解决前者，预算解决后者。
+  前面我们讲过的连续批处理（第 5 课）让批永远满载、RadixAttention（第 7 课）让共享前缀只算一次，
+  而调度策略正是把这两件利器<strong>真正用起来</strong>的那只手：没有缓存感知排序，再好的缓存也喂不饱；没有双预算限流，再大的显存也会被一个超长请求撑爆。
+</div>
+
+<h2>谁先跑：三种排序策略各自优化什么</h2>
+<p>
+<span class="inline">SchedulePolicy</span> 把“先后”抽象成 <span class="mono">calc_priority</span> 一次调用：它就地<strong>重排等待队列</strong>。
+模式由工作负载决定——很多请求共享前缀时，<strong>缓存感知</strong>最划算；要公平简单，<strong>FCFS</strong>；要尊重业务优先级，<strong>priority</strong>。
+注意一个工程细节：当队列特别长（&gt;128）时，昂贵的前缀匹配会临时退回 FCFS，避免排序本身成为瓶颈。
+为什么排序如此关键？因为在连续批处理（第 5 课）里，每一拍能接纳的新请求名额有限，谁排在队首谁就先享受这有限的名额；
+而把“前缀已缓存”的请求顶到队首，等于让缓存命中的红利<strong>尽早兑现</strong>——这是一笔几乎不花算力就能拿到的吞吐。
+反过来，如果排序时无视缓存，热点前缀的请求散落在队尾，命中红利就被白白拖延甚至漏掉。所以排序的本质，
+不是“对谁更公平”，而是“怎样让这一拍跑得最划算”。这也解释了为什么 SGLang 把缓存感知作为默认追求，
+只有在缓存被禁用或队列过长时才退回到更朴素的 FCFS。
+</p>
+
+<table class="t">
+  <tr><th>策略</th><th>怎么排</th><th>优化什么</th><th>代价 / 适用</th></tr>
+  <tr><td class="mono">LPM（缓存感知）</td><td>最长前缀匹配在前：前缀已在缓存里的优先</td><td><strong>缓存命中率</strong>→近乎免费的吞吐</td><td>需算前缀；队列过长时退回 FCFS</td></tr>
+  <tr><td class="mono">FCFS</td><td>先到先服务，按到达顺序</td><td><strong>公平、简单、可预测</strong></td><td>忽略缓存，热点前缀红利拿不到</td></tr>
+  <tr><td class="mono">priority</td><td>按每请求显式优先级排序</td><td><strong>尊重业务轻重缓急</strong>（VIP 先行）</td><td>需上层赋值；可能饿死低优先级</td></tr>
+</table>
+
+<h2>能塞几个：PrefillAdder 在双预算下组批</h2>
+<p>
+排好序后，<span class="inline">PrefillAdder</span> 拿着两把尺子往这一拍的 prefill 批里塞请求：
+<strong>token 预算</strong>（<span class="mono">rem_total_tokens / rem_input_tokens</span>，别让这一步 prefill 太大，连着第 22 课的分块预填充），
+和<strong>显存预算</strong>（KV 池要有足够空闲槽，第 4/30 课——绝不接纳一个放不下的请求）。
+这里要厘清两者的“计量单位”：token 预算数的是<strong>这一拍要算多少个 token</strong>，它直接决定前向计算的规模与耗时；
+显存预算数的是<strong>这一拍要占多少个 KV 槽</strong>，它决定能不能把这些 token 的中间状态存下来。一个管“算得过来”，一个管“放得下”，
+缺一不可。而且这两个预算不是接纳完才检查，而是<strong>每接一个就当场扣减、当场判断</strong>，所以批是被“贪心地”一点点填满的：
+能塞就塞，直到下一个再也塞不进——这既保证了批尽量满载（高吞吐），又保证了永不超额（不崩）。
+<span class="mono">add_one_req</span> 逐个尝试，能整段塞就整段，塞不下就<strong>切块（chunk）</strong>，任一预算耗尽就返回 <span class="mono">NO_TOKEN / OTHER</span> 停手。
+这两把尺子缺一不可：只看 token 预算，可能算力够却没有 KV 槽存放它的缓存，结果接进来也跑不动；只看显存预算，
+可能槽位够却一拍吃进一个超长 prompt，把这一步 prefill 撑得过大、拖慢所有人。<span class="mono">_update_prefill_budget</span> 每接一个就同步扣减两个预算，
+保证“接纳”和“实际占用”始终对齐，绝不乐观超额。值得强调的是切块的妙处：当一个超长 prompt 装不进剩余 token 预算时，
+它不会被整条拒绝，而是只塞进能装下的前半段、剩下的下一拍续上（第 22 课），这样既不堵死循环，也不让长请求饿死。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>取队首请求</h4><p>从已排序的等待队列拿下一条，算出它要吃多少 token：<span class="mono">cand_extend_input_len + max_new + page_size</span>。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>查 token 预算</h4><p>若 <span class="mono">total_tokens ≥ rem_total_tokens</span> 直接 <span class="mono">NO_TOKEN</span>；这把尺子限制单拍 prefill 的总量。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>查显存 / 槽位</h4><p>KV 池剩余不足（含 SWA 等约束）同样拒绝——绝不超额接纳一个放不下的请求。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>整段或切块塞入</h4><p>预算够则整段加入 <span class="mono">can_run_list</span>；只够一半就 <strong>chunk</strong>，下一拍续上（第 22 课）。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>更新预算，回到 1</h4><p><span class="mono">_update_prefill_budget</span> 扣减两个预算，循环直到塞满或队列空——这一拍的批就定了。</p></div></div>
+</div>
+
+<h2>缓存感知 vs 公平：LPM 与 FCFS 的对照</h2>
+<p>
+为什么缓存感知排序这么重要？因为它<strong>直接抬高 RadixAttention 命中率</strong>——让“开头一样”的请求扎堆先跑，那段共享前缀只算一次。
+这就是调度器与缓存<strong>协同设计</strong>的意义：排序的目标不是抽象的公平，而是把缓存这台“省钱机器”喂到最饱。
+可以用一个数字直觉感受它的威力：假设线上一半请求共享同一段 2000 token 的系统提示，命中后这 2000 token 的注意力一次都不用重算，
+单条请求的 prefill 计算量可能直接砍掉大半。把这些请求排到前面、扎堆命中，整机吞吐的提升是成倍的——这就是为什么 SGLang 在“多请求共享长前缀”的真实场景里表现尤为亮眼。
+但缓存感知也有代价：要算前缀、可能让后到的请求等久一点。于是 FCFS 作为对照保留下来，简单、公平、可预测。
+怎么选？看负载画像：如果你的流量里成千上万请求都以同一段系统提示、同一套 few-shot 模板、或同一段对话历史开头，
+那 LPM 的命中红利会非常可观，是首选；如果请求之间几乎不共享前缀（比如各不相同的一次性查询），LPM 多花的前缀匹配就成了纯开销，
+此时朴素的 FCFS 反而更省、更稳；若有明确的业务分级（付费用户优先、实时接口优先），priority 让你把这份优先级直接写进调度。换句话说，<strong>策略不是越聪明越好，而是要和工作负载匹配</strong>——这正是 SGLang 把策略做成可切换、
+并按队列长度自动降级的原因。理解了这一点，你就能根据自己的业务，给调度器选对那把“尺子”，让排序与限流都服务于同一个目标：又快又稳地把每一拍的算力用在刀刃上。</p>
+
+<div class="cols">
+  <div class="col"><h4>LPM（缓存感知）</h4><p>把<strong>前缀已命中</strong>的请求顶到队首。优点：命中率高、招待近乎免费、真实流量提速巨大（共享系统提示 / few-shot / 对话历史）。代价：要算前缀；队列过长临时退回 FCFS。<strong>优化命中率</strong>。</p></div>
+  <div class="col"><h4>FCFS（先到先服务）</h4><p>严格按到达顺序，谁先来谁先跑。优点：<strong>公平、简单、延迟可预测</strong>，不会让后到的无限等待。代价：忽略缓存，热点前缀的红利白白漏掉。<strong>优化公平性</strong>。</p></div>
+</div>
+
+<h2>插队现场：被重排的等待队列</h2>
+<p>
+下面这张图把抽象的“排序”落到实处：原队列按到达顺序是 A、B、C、D；其中 B 和 D 的开头命中了缓存（半摆好的桌子）。
+LPM 把它们<strong>顶到前面</strong>——这一拍先跑 B、D，几乎白捡两份吞吐，A、C 顺延到后面。高亮格就是命中前缀、得以插队的请求。
+你可能会问：A、C 被一直往后推，会不会饿死？不会——一方面命中是动态的，A、C 跑过一轮后它们的前缀也会进缓存、下一拍可能反过来命中；
+另一方面队列过长时策略会自动退回 FCFS，给“等久了”的请求兜底。所以 LPM 不是无脑插队，而是<strong>在公平的底线之上，优先兑现缓存红利</strong>。
+这张图也直观解释了为什么“调度器 + 缓存协同设计”不是一句口号：缓存负责把共享前缀存下来，调度器负责把命中它的请求挑出来先跑，
+二者一存一取，缺了任何一半，命中率都上不去。
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">等待队列：LPM 让命中缓存的请求（高亮）插队到前面</div>
+  <div class="cells">
+    <span class="lab">原始</span><span class="cell">A 到达</span><span class="cell">B 到达</span><span class="cell">C 到达</span><span class="cell">D 到达</span><span class="sep"></span><span class="q">FCFS 顺序</span>
+  </div>
+  <div class="cells">
+    <span class="lab">命中</span><span class="cell">A 未命中</span><span class="cell hl">B 命中前缀</span><span class="cell">C 未命中</span><span class="cell hl">D 命中前缀</span><span class="sep"></span><span class="q">查缓存</span>
+  </div>
+  <div class="cells">
+    <span class="lab">重排</span><span class="cell hl">B 先跑</span><span class="cell hl">D 先跑</span><span class="cell">A 顺延</span><span class="cell">C 顺延</span><span class="sep"></span><span class="q">LPM 顺序</span>
+  </div>
+</div>
+
+<h2>读源码：calc_priority 与预算判断</h2>
+<p>
+策略与预算的真身都在 <span class="mono">schedule_policy.py</span>。<span class="mono">calc_priority</span> 先定活跃策略，再按分支排序；
+<span class="mono">PrefillAdder.add_one_req</span> 则用一连串预算判断决定接纳还是拒绝。下面截取最能说明问题的几行。
+读这段源码时，请抓住三个关键点：一是 <span class="mono">_determine_active_policy</span> 会在队列过长时把活跃策略悄悄换成 FCFS；
+二是 FCFS 分支直接按到达顺序（或叠加 priority）返回，几乎零成本；三是缓存感知分支先做 <span class="mono">_compute_prefix_matches</span> 算出每条请求的命中长度，
+再据此做最长前缀排序。预算这边，<span class="mono">total_tokens</span> 把“输入 + 预留输出 + 页对齐”一并算进去，
+任何一个超过剩余预算就立刻 <span class="mono">NO_TOKEN</span> 退出——这正是“绝不接纳放不下的请求”在代码里的落点。
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">排序 + 限流</span></div>
+<pre><span class="kw">def</span> calc_priority(self, waiting_queue, running_batch=<span class="kw">None</span>):
+    policy = self._determine_active_policy(waiting_queue)   <span class="cm"># 队列过长(&gt;128)临时退回 FCFS</span>
+
+    <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:          <span class="cm"># 公平：按到达顺序</span>
+        <span class="kw">if</span> self.enable_priority_scheduling:
+            SchedulePolicy._sort_by_priority_and_fcfs(waiting_queue, self.priority_sign)
+        <span class="kw">return</span>
+
+    <span class="kw">if</span> <span class="kw">isinstance</span>(policy, CacheAwarePolicy):           <span class="cm"># 缓存感知：抬高命中率</span>
+        temporary_deprioritized = self._compute_prefix_matches(waiting_queue, policy)
+        <span class="kw">if</span> policy == CacheAwarePolicy.LPM:               <span class="cm"># 最长前缀匹配在前</span>
+            SchedulePolicy._sort_by_longest_prefix(waiting_queue, temporary_deprioritized)
+
+<span class="cm"># —— PrefillAdder.add_one_req：双预算判断 ——</span>
+total_tokens = cand_extend_input_len + max_new + self.page_size
+<span class="kw">if</span> total_tokens &gt;= self.rem_total_tokens:            <span class="cm"># token/显存预算不足 → 拒绝</span>
+    <span class="kw">return</span> AddReqResult.NO_TOKEN                       <span class="cm"># 绝不接纳放不下的请求(第 4/30 课)</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>策略排序 + 预算限流是两件事</strong>：<span class="mono">SchedulePolicy.calc_priority</span> 决定<strong>谁先跑</strong>（就地重排等待队列），<span class="mono">PrefillAdder</span> 决定<strong>塞几个</strong>（双预算下逐个 add_one_req）。</li>
+    <li><strong>三种模式各有所长</strong>：<span class="mono">LPM</span>（缓存感知）优化<strong>命中率</strong>、让前缀已缓存的请求插队（第 7 课）；<span class="mono">FCFS</span> 优化<strong>公平</strong>、简单可预测；<span class="mono">priority</span> 尊重业务优先级。负载多共享前缀时选 LPM。</li>
+    <li><strong>PrefillAdder 的两把尺子</strong>：<strong>token 预算</strong>（单拍 prefill 不过大，连第 22 课分块预填充）+ <strong>显存预算</strong>（KV 池有空闲槽，第 4/30 课）；任一耗尽即停，必要时<strong>切块</strong>。</li>
+    <li><strong>prefill 与 decode 的接纳张力</strong>：每拍要在“多接新 prefill 增吞吐、抬延迟”与“只推老 decode 保延迟”之间权衡（第 18/8 课），策略就是这场天平的砝码。</li>
+    <li><strong>调度器与缓存协同设计</strong>：缓存感知排序直接抬高 RadixAttention 命中率，而命中率正是 SGLang 真实流量提速的根——排序的目标不是抽象公平，而是把缓存喂饱。一存一取、协同配合，缺任何一半命中率都上不去。</li>
+    <li><strong>记住一句话收尾</strong>：先排序、再限流；排序为了喂饱缓存、兑现命中红利，限流为了既满载又不撑爆显存。这一拍由谁组成、有多大，就此拍板，然后交给前向（第 24 课）去算。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 缓存感知的 <strong>LPM（最长前缀匹配）</strong>排序和 <strong>FCFS</strong> 各自优化的是什么？</div>
+  <ol class="opts">
+    <li>LPM 优化<strong>缓存命中率</strong>——把 prompt 前缀已在 RadixAttention 缓存里的请求顶到前面、接纳它们几乎免费；FCFS 优化<strong>公平性</strong>——严格按到达顺序，简单可预测</li>
+    <li>两者都只优化单请求延迟，不影响吞吐</li>
+    <li>LPM 优化公平、FCFS 优化命中率，正好相反</li>
+    <li>两者都优化显存占用，和缓存无关</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。LPM 让“开头已缓存”的请求插队，相同前缀只算一次，直接抬高 RadixAttention 命中率，这是真实流量提速的来源（第 7 课）；FCFS 不看缓存、只按到达顺序，换来的是公平、简单与可预测的延迟。队列过长时 LPM 还会临时退回 FCFS 以免排序成瓶颈。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <code>PrefillAdder</code> 决定“这一拍能塞几个请求”时，靠的是哪<strong>两个预算</strong>？</div>
+  <ol class="opts">
+    <li><strong>token 预算</strong>（别让这一步 prefill 太大，连着分块预填充）+ <strong>显存预算</strong>（KV 池要有足够空闲槽，绝不接纳放不下的请求）；任一耗尽即停</li>
+    <li>磁盘空间预算 + 进程数预算</li>
+    <li>CPU 核数预算 + 网络带宽预算</li>
+    <li>只有一个 token 预算，显存从不参与判断</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<code>add_one_req</code> 算出 <code>total_tokens = cand_extend_input_len + max_new + page_size</code>，若 <code>≥ rem_total_tokens</code> 就 <code>NO_TOKEN</code>；同时检查 KV 池空闲槽（第 4/30 课）。token 预算限制单拍 prefill 规模（第 22 课分块），显存预算保证放得下——两把尺子任一满即停手。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 调度器每一拍面对的“<strong>prefill 与 decode 的接纳张力</strong>”指的是什么？</div>
+  <ol class="opts">
+    <li>两者完全独立，从不互相影响</li>
+    <li>prefill 和 decode 必须在不同 GPU 上跑，调度器只是选卡</li>
+    <li>张力指的是 CPU 和磁盘之间的带宽争用</li>
+    <li>多接纳新 prefill 能<strong>增吞吐</strong>，却会<strong>抬高在跑请求的延迟</strong>；只推进老 decode 则<strong>保延迟</strong>但少了新吞吐——策略每拍在两者间权衡</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。prefill 吃整段 prompt、占算力，能把新请求拉进批里增吞吐，但和在跑的 decode 抢资源、抬高它们的延迟；只 decode 则延迟稳但吞吐不长。调度器每拍用策略在这架天平上加砝码（第 18/8 课），这正是组批决策的核心权衡。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“聪明领位员（host / bouncer）”的类比讲清调度策略的两个动作：<strong>排序</strong>（<code>SchedulePolicy.calc_priority</code> 怎样按 LPM / FCFS / priority 就地重排等待队列）与<strong>限流</strong>（<code>PrefillAdder</code> 怎样在 token + 显存双预算下逐个 <code>add_one_req</code>、必要时切块）。再说明为什么“缓存感知排序”会直接抬高 RadixAttention 命中率，从而体现调度器与缓存的<strong>协同设计</strong>。</li>
+    <li>顺着这一课往后想：若你的线上流量里成千上万请求共享同一段超长系统提示，你会选 LPM 还是 FCFS？为什么？再结合 <code>PrefillAdder</code> 的双预算，说明一个超长 prompt 如何被 token 预算与<strong>分块预填充（第 22 课）</strong>挡住、避免它独占一拍把 decode 全堵死，并联系 KV 池容量（第 4/30 课）与吞吐 / 延迟（第 8 课）的权衡。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson we nailed two data structures: the persistent <span class="inline">Req</span> and the ephemeral <span class="inline">ScheduleBatch</span>.
+This lesson answers the two most critical questions of every step: with so many requests waiting, <strong>who runs next</strong>, and <strong>how many fit</strong>?
+The answers live in two roles—<span class="inline">SchedulePolicy</span> does the <strong>ordering</strong> (who first),
+<span class="inline">PrefillAdder</span> does the <strong>throttling</strong> (how many). The former lets requests whose prefix is already in cache jump the line, harvesting nearly-free throughput;
+the latter holds two yardsticks—a token budget and a memory budget—and stuffs requests into this step's prefill batch one by one until nothing more fits.
+The scheduler and the cache (Lesson 7) are <strong>co-designed</strong> this way—the secret behind SGLang being fast and cheap under real traffic.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Real-world analogy</div>
+  Think of the schedule policy as a <strong>smart venue host / bouncer</strong> at a hot restaurant. A long line waits outside, and he does not naively admit people purely by arrival.
+  First he <strong>reorders the line</strong>: which parties are "already half-prepped" (ingredients ready = cache hit, i.e. <strong>LPM, longest-prefix-match</strong>) get bumped to the front—
+  serving them costs the kitchen almost nothing; if everyone's similar, he admits by <strong>arrival (FCFS)</strong>, fair and simple; and VIP reservations go early by <strong>explicit priority</strong>.
+  Once ordered, he admits people <strong>counting two capacities</strong>: are there enough <strong>seats</strong> (the memory KV budget), and how many dishes can the <strong>kitchen</strong> cook this round (the token budget)—
+  whichever fills first stops the round. Next beat, repeat. <strong>Order + throttle</strong> is the whole of the schedule policy.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>policy decides order, budget decides count</strong>. <span class="inline">get_next_batch_to_run</span> (Lesson 18) each beat first calls
+  <span class="inline">SchedulePolicy.calc_priority</span> to <strong>reorder the waiting queue in place</strong>, then hands off to <span class="inline">PrefillAdder</span>
+  to <span class="inline">add_one_req</span> one by one under a <strong>double budget</strong>, admitting where it fits (<strong>chunking</strong> if needed) and stopping when full.
+  The core ordering mode is <strong>cache-aware LPM</strong>: prefer requests whose prompt prefix already sits in the RadixAttention cache—
+  admitting them is nearly "free" because that attention was already computed (Lesson 7). This step directly raises the cache hit rate, and hit rate is where SGLang's real speed comes from.
+  Meanwhile the scheduler each beat <strong>balances "admit new prefills" vs "just decode"</strong>: the former grows throughput but raises latency for running decodes, the latter keeps latency low (Lesson 8).
+  The policy is the weight on this scale, beat after beat.
+</div>
+
+<h2>Who runs first: what each of the three policies optimizes</h2>
+<p>
+<span class="inline">SchedulePolicy</span> abstracts "order" into one call to <span class="mono">calc_priority</span>: it <strong>reorders the waiting queue in place</strong>.
+The mode is chosen by workload—when many requests share prefixes, <strong>cache-aware</strong> pays off most; for fairness and simplicity, <strong>FCFS</strong>; to honor business priority, <strong>priority</strong>.
+Note one engineering detail: when the queue is very long (&gt;128), the expensive prefix matching temporarily falls back to FCFS, so sorting itself never becomes the bottleneck.
+</p>
+
+<table class="t">
+  <tr><th>Policy</th><th>How it orders</th><th>What it optimizes</th><th>Cost / fit</th></tr>
+  <tr><td class="mono">LPM (cache-aware)</td><td>Longest-prefix-match first: cached-prefix reqs jump ahead</td><td><strong>Cache hit rate</strong> → near-free throughput</td><td>Must compute prefixes; falls back to FCFS on long queues</td></tr>
+  <tr><td class="mono">FCFS</td><td>First-come-first-served, by arrival</td><td><strong>Fair, simple, predictable</strong></td><td>Ignores cache; misses hot-prefix dividends</td></tr>
+  <tr><td class="mono">priority</td><td>Sort by each request's explicit priority</td><td><strong>Honors business urgency</strong> (VIP first)</td><td>Needs upper-layer values; can starve low priority</td></tr>
+</table>
+
+<h2>How many fit: PrefillAdder builds a batch under a double budget</h2>
+<p>
+Once ordered, <span class="inline">PrefillAdder</span> holds two yardsticks and stuffs requests into this beat's prefill batch:
+a <strong>token budget</strong> (<span class="mono">rem_total_tokens / rem_input_tokens</span>, keep this prefill step from getting too big—tied to chunked prefill, Lesson 22),
+and a <strong>memory budget</strong> (enough free KV-pool slots, Lessons 4/30—never admit a request you can't fit).
+<span class="mono">add_one_req</span> tries each in turn: add it whole if it fits, otherwise <strong>chunk</strong> it; once either budget is exhausted it returns <span class="mono">NO_TOKEN / OTHER</span> and stops.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Take the head request</h4><p>Pull the next req off the sorted waiting queue and compute its token need: <span class="mono">cand_extend_input_len + max_new + page_size</span>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Check the token budget</h4><p>If <span class="mono">total_tokens ≥ rem_total_tokens</span>, return <span class="mono">NO_TOKEN</span>; this yardstick caps the total prefill per beat.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Check memory / slots</h4><p>Insufficient KV-pool room (incl. SWA constraints) also rejects—never over-admit a request that can't fit.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Add whole or chunk</h4><p>If the budget allows, add the whole req to <span class="mono">can_run_list</span>; if only half fits, <strong>chunk</strong> it and continue next beat (Lesson 22).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>Update budget, back to 1</h4><p><span class="mono">_update_prefill_budget</span> deducts both budgets; loop until full or the queue empties—this beat's batch is then fixed.</p></div></div>
+</div>
+
+<h2>Cache-aware vs fair: LPM against FCFS</h2>
+<p>
+Why does cache-aware ordering matter so much? Because it <strong>directly raises the RadixAttention hit rate</strong>—by clustering "same opening" requests to run first, the shared prefix is computed once.
+That is the meaning of <strong>co-designing</strong> the scheduler with the cache: the goal of ordering is not abstract fairness but feeding the cache—the money-saving machine—as full as possible.
+But cache-awareness has a cost: computing prefixes, and possibly making later arrivals wait a bit longer. So FCFS is kept as the counterpoint—simple, fair, predictable.
+</p>
+
+<div class="cols">
+  <div class="col"><h4>LPM (cache-aware)</h4><p>Bumps <strong>prefix-hit</strong> requests to the front. Pros: high hit rate, near-free admission, huge real-traffic speedups (shared system prompts / few-shot / chat history). Cost: must compute prefixes; falls back to FCFS on long queues. <strong>Optimizes hit rate</strong>.</p></div>
+  <div class="col"><h4>FCFS (first-come-first-served)</h4><p>Strictly by arrival, first in first run. Pros: <strong>fair, simple, predictable latency</strong>, no infinite wait for late arrivals. Cost: ignores the cache, leaking the hot-prefix dividend. <strong>Optimizes fairness</strong>.</p></div>
+</div>
+
+<h2>The line-jump in action: a reordered waiting queue</h2>
+<p>
+This diagram grounds the abstract "ordering": the original queue by arrival is A, B, C, D; among them B and D have cache-hitting openings (half-set tables).
+LPM <strong>bumps them to the front</strong>—this beat runs B and D first, harvesting two nearly-free units of throughput, and A, C slide back. The highlighted cells are the prefix-hit requests that jump ahead.
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">Waiting queue: LPM bumps cache-hitting requests (highlighted) to the front</div>
+  <div class="cells">
+    <span class="lab">Raw</span><span class="cell">A arrives</span><span class="cell">B arrives</span><span class="cell">C arrives</span><span class="cell">D arrives</span><span class="sep"></span><span class="q">FCFS order</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Hit?</span><span class="cell">A miss</span><span class="cell hl">B prefix hit</span><span class="cell">C miss</span><span class="cell hl">D prefix hit</span><span class="sep"></span><span class="q">probe cache</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Reordered</span><span class="cell hl">B first</span><span class="cell hl">D first</span><span class="cell">A after</span><span class="cell">C after</span><span class="sep"></span><span class="q">LPM order</span>
+  </div>
+</div>
+
+<h2>Read the source: calc_priority and the budget check</h2>
+<p>
+Both the policy and the budget live in <span class="mono">schedule_policy.py</span>. <span class="mono">calc_priority</span> first determines the active policy, then sorts by branch;
+<span class="mono">PrefillAdder.add_one_req</span> decides admit-or-reject through a chain of budget checks. Below are the most telling lines.
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">order + throttle</span></div>
+<pre><span class="kw">def</span> calc_priority(self, waiting_queue, running_batch=<span class="kw">None</span>):
+    policy = self._determine_active_policy(waiting_queue)   <span class="cm"># long queue(&gt;128) falls back to FCFS</span>
+
+    <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:          <span class="cm"># fair: by arrival order</span>
+        <span class="kw">if</span> self.enable_priority_scheduling:
+            SchedulePolicy._sort_by_priority_and_fcfs(waiting_queue, self.priority_sign)
+        <span class="kw">return</span>
+
+    <span class="kw">if</span> <span class="kw">isinstance</span>(policy, CacheAwarePolicy):           <span class="cm"># cache-aware: raise hit rate</span>
+        temporary_deprioritized = self._compute_prefix_matches(waiting_queue, policy)
+        <span class="kw">if</span> policy == CacheAwarePolicy.LPM:               <span class="cm"># longest-prefix-match first</span>
+            SchedulePolicy._sort_by_longest_prefix(waiting_queue, temporary_deprioritized)
+
+<span class="cm"># —— PrefillAdder.add_one_req: the double-budget check ——</span>
+total_tokens = cand_extend_input_len + max_new + self.page_size
+<span class="kw">if</span> total_tokens &gt;= self.rem_total_tokens:            <span class="cm"># token/memory budget short -&gt; reject</span>
+    <span class="kw">return</span> AddReqResult.NO_TOKEN                       <span class="cm"># never admit one that won't fit (L4/30)</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Policy ordering and budget throttling are two things</strong>: <span class="mono">SchedulePolicy.calc_priority</span> decides <strong>who runs first</strong> (reorders the waiting queue in place), <span class="mono">PrefillAdder</span> decides <strong>how many fit</strong> (add_one_req under a double budget).</li>
+    <li><strong>Three modes, each with a strength</strong>: <span class="mono">LPM</span> (cache-aware) optimizes <strong>hit rate</strong> by bumping prefix-cached reqs ahead (Lesson 7); <span class="mono">FCFS</span> optimizes <strong>fairness</strong>, simple and predictable; <span class="mono">priority</span> honors business priority. Pick LPM when the workload shares prefixes.</li>
+    <li><strong>PrefillAdder's two yardsticks</strong>: a <strong>token budget</strong> (keep a beat's prefill from getting too big, tied to chunked prefill in Lesson 22) + a <strong>memory budget</strong> (free KV-pool slots, Lessons 4/30); stop when either is exhausted, <strong>chunk</strong> if needed.</li>
+    <li><strong>The prefill-vs-decode admission tension</strong>: each beat balances "admit new prefills to grow throughput but raise latency" vs "just decode to keep latency low" (Lessons 18/8); the policy is the weight on this scale.</li>
+    <li><strong>Scheduler and cache are co-designed</strong>: cache-aware ordering directly raises the RadixAttention hit rate, and that hit rate is the root of SGLang's real-traffic speedup—ordering's goal is not abstract fairness but feeding the cache full.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does cache-aware <strong>LPM (longest-prefix-match)</strong> ordering optimize, versus <strong>FCFS</strong>?</div>
+  <ol class="opts">
+    <li>LPM optimizes <strong>cache hit rate</strong>—bumping requests whose prompt prefix is already in the RadixAttention cache to the front so admitting them is nearly free; FCFS optimizes <strong>fairness</strong>—strictly by arrival, simple and predictable</li>
+    <li>Both only optimize single-request latency, with no effect on throughput</li>
+    <li>LPM optimizes fairness and FCFS optimizes hit rate, exactly reversed</li>
+    <li>Both optimize memory usage, unrelated to the cache</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. LPM lets cached-opening requests jump ahead so a shared prefix is computed once, directly raising the RadixAttention hit rate—the source of real-traffic speedups (Lesson 7); FCFS ignores the cache and goes by arrival, buying fairness, simplicity and predictable latency. On long queues LPM even falls back to FCFS so sorting never becomes the bottleneck.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. When <code>PrefillAdder</code> decides 'how many requests fit this beat', which <strong>two budgets</strong> does it use?</div>
+  <ol class="opts">
+    <li>A <strong>token budget</strong> (keep this prefill step from getting too big, tied to chunked prefill) + a <strong>memory budget</strong> (enough free KV-pool slots, never admit a req that won't fit); stop when either runs out</li>
+    <li>A disk-space budget + a process-count budget</li>
+    <li>A CPU-core budget + a network-bandwidth budget</li>
+    <li>Only a token budget; memory never enters the decision</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <code>add_one_req</code> computes <code>total_tokens = cand_extend_input_len + max_new + page_size</code>; if <code>≥ rem_total_tokens</code> it returns <code>NO_TOKEN</code>, and it also checks free KV-pool slots (Lessons 4/30). The token budget caps the per-beat prefill size (chunking, Lesson 22), the memory budget guarantees it fits—whichever yardstick fills first stops admission.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What is the '<strong>prefill-vs-decode admission tension</strong>' the scheduler faces each beat?</div>
+  <ol class="opts">
+    <li>They are fully independent and never affect each other</li>
+    <li>Prefill and decode must run on different GPUs; the scheduler just picks the card</li>
+    <li>The tension refers to bandwidth contention between CPU and disk</li>
+    <li>Admitting more new prefills <strong>grows throughput</strong> but <strong>raises latency for running decodes</strong>; just advancing old decodes <strong>keeps latency low</strong> but adds no new throughput—the policy balances the two each beat</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Prefill eats whole prompts and burns compute, pulling new requests into the batch to grow throughput, but it contends with running decodes and raises their latency; decode-only keeps latency steady but adds no throughput. The scheduler weights this scale with policy each beat (Lessons 18/8)—the core trade-off of batch formation.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'smart host / bouncer' analogy, explain the two actions of the schedule policy: <strong>ordering</strong> (how <code>SchedulePolicy.calc_priority</code> reorders the waiting queue in place by LPM / FCFS / priority) and <strong>throttling</strong> (how <code>PrefillAdder</code> calls <code>add_one_req</code> one by one under the token + memory double budget, chunking when needed). Then explain why cache-aware ordering directly raises the RadixAttention hit rate, illustrating the scheduler-cache <strong>co-design</strong>.</li>
+    <li>Thinking forward: if your production traffic has thousands of requests sharing one very long system prompt, would you pick LPM or FCFS, and why? Then, using <code>PrefillAdder</code>'s double budget, explain how a very long prompt is held back by the token budget and <strong>chunked prefill (Lesson 22)</strong>—so it can't monopolize a beat and clog all decodes—connecting it to KV-pool capacity (Lessons 4/30) and the throughput/latency trade-off (Lesson 8).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="19-req-and-schedule-batch.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">Req 与 ScheduleBatch</span><span class="lang-en">Req &amp; ScheduleBatch</span></div></a><a class="next" href="21-zero-overhead-overlap-scheduler.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">零开销重叠调度器</span><span class="lang-en">Zero-overhead overlap scheduler</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

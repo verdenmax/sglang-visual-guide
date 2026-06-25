@@ -1242,6 +1242,450 @@ QUIZZES = {
             },
         ],
     },
+    "18-scheduler-event-loop.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "调度器 <code>event_loop_normal</code> 每一个 step（一圈）依次做哪五件事？<strong>顺序</strong>为什么重要？",
+                    "en": "What five things does the scheduler's <code>event_loop_normal</code> do each step (one revolution), and why does the <strong>order</strong> matter?",
+                },
+                "opts": [
+                    {
+                        "zh": "<code>recv_requests</code>（收）→ <code>process_input_requests</code>（入等待队列）→ <code>get_next_batch_to_run</code>（组这一步的批）→ <code>run_batch</code>（上 GPU 前向+采样）→ <code>process_batch_result</code>（追加 token/清退完成的/释放 KV/发反分词），然后回到开头；顺序重要是因为<strong>必须先收进新请求、再组批，组完批才能前向，前向出结果才能收尾</strong>",
+                        "en": "<code>recv_requests</code> (receive) → <code>process_input_requests</code> (into waiting queue) → <code>get_next_batch_to_run</code> (form this step's batch) → <code>run_batch</code> (GPU forward+sample) → <code>process_batch_result</code> (append tokens/evict finished/free KV/send to detok), then loop; the order matters because <strong>you must take in new reqs before forming a batch, form a batch before forwarding, and have results before finishing</strong>",
+                    },
+                    {"zh": "先 <code>run_batch</code> 再 <code>recv_requests</code>，因为要先算完才收新请求", "en": "First <code>run_batch</code> then <code>recv_requests</code>, since you compute before receiving"},
+                    {"zh": "只有 <code>get_next_batch_to_run</code> 一步，其余都在 GPU 内核里完成", "en": "Only <code>get_next_batch_to_run</code>; everything else happens inside the GPU kernel"},
+                    {"zh": "顺序无所谓，五步可以任意打乱并行执行", "en": "Order is irrelevant; the five steps can run in any shuffled, parallel order"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "事件循环是 <code>while True</code>，每圈五步有严格<strong>数据依赖</strong>：收件箱里没新请求就无从入队，等待队列里没请求就组不出 prefill 批，没组好批就无法前向，没前向结果就无法追加 token、判完成、释放 KV。打乱顺序会破坏依赖。记住这五步的顺序，就拿到了 Part 5 的主索引。",
+                    "en": "The loop is <code>while True</code>, and the five steps have strict <strong>data dependencies</strong>: no new reqs means nothing to enqueue, an empty waiting queue means no prefill batch, no batch means no forward, and no forward result means you can't append tokens, detect finish, or free KV. Shuffling breaks the dependency. Memorizing this order is the master index to Part 5.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么调度器要在<strong>每一个 step</strong> 都重新调用 <code>get_next_batch_to_run</code> 把批重组一遍，而不是一次组好用到底？",
+                    "en": "Why does the scheduler re-call <code>get_next_batch_to_run</code> to re-form the batch <strong>every step</strong>, rather than forming it once and reusing it?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为这正是<strong>连续批处理</strong>（第 5 课）的物理现场：每步重组才能让<strong>完成的请求当场离场、立刻释放 KV 槽</strong>，让<strong>等待的请求下一步就补入</strong>，批次始终满载，GPU 不为任何单条请求空转",
+                        "en": "Because this is where <strong>continuous batching</strong> (Lesson 5) physically happens: re-forming each step lets <strong>finished reqs leave on the spot and free their KV slots</strong> and <strong>waiting reqs fill in next step</strong>, keeping the batch full so the GPU never idles for any single request",
+                    },
+                    {"zh": "因为 GPU 要求每步换一个全新的 batch 对象，否则会报错", "en": "Because the GPU requires a brand-new batch object each step or it errors"},
+                    {"zh": "因为重组批能提高单条请求的解码速度", "en": "Because re-forming speeds up a single request's decoding"},
+                    {"zh": "纯粹是为了日志统计方便，没有性能意义", "en": "Purely for logging convenience, with no performance meaning"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "若一次组好绑死到底，就退化成静态批处理：整批要等最慢的那条，完成的槽位空转、新请求进不来。每步重组让批成为“被重新计算的结果”而非静态对象——完成的过滤离场、等待的接纳补入，批永远满。这就是连续批处理，也是高吞吐的第一引擎。",
+                    "en": "Forming once and locking it degrades to static batching: the whole batch waits for the slowest req, finished slots idle, new reqs can't enter. Re-forming each step makes the batch a 'recomputed result' rather than a static object — finished filtered out, waiting admitted in, always full. That is continuous batching, the first engine of high throughput.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在一个 step 里，<strong>哪部分是调度器在 CPU 上的决策、哪部分是真正烧算力的 GPU 计算</strong>？这个区分如何引出 <code>event_loop_overlap</code>（第 21 课）？",
+                    "en": "Within one step, <strong>which part is the scheduler's CPU decision and which is the actual GPU compute</strong>? How does this split motivate <code>event_loop_overlap</code> (Lesson 21)?",
+                },
+                "opts": [
+                    {
+                        "zh": "<code>get_next_batch_to_run</code> / <code>process_batch_result</code> 是<strong>纯 CPU 的轻量记账与决策</strong>，<code>run_batch</code>（→ModelRunner.forward）才是<strong>GPU 计算</strong>；normal 版让两者<strong>串行</strong>，CPU 组批时 GPU 空等，所以第 21 课用<strong>流水线</strong>把 CPU 部分藏进上一步 GPU 计算里",
+                        "en": "<code>get_next_batch_to_run</code> / <code>process_batch_result</code> are <strong>pure-CPU lightweight accounting and decision</strong>, while <code>run_batch</code> (→ModelRunner.forward) is the <strong>GPU compute</strong>; the normal loop runs them <strong>serially</strong> so the GPU idles while the CPU forms the batch — hence Lesson 21 <strong>pipelines</strong> to hide the CPU part behind the previous step's GPU compute",
+                    },
+                    {"zh": "全部五步都在 GPU 上执行，没有 CPU 参与", "en": "All five steps run on the GPU; no CPU involvement"},
+                    {"zh": "<code>run_batch</code> 是 CPU 决策，组批才是 GPU 计算", "en": "<code>run_batch</code> is the CPU decision, while forming the batch is the GPU compute"},
+                    {"zh": "调度器本身就在 GPU 内核里跑，无所谓重叠", "en": "The scheduler itself runs inside the GPU kernel, so overlap is moot"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "调度器“只决策、不计算”：组批和收尾是 CPU 上的轻量记账，唯独 <code>run_batch</code> 把批交给 TpWorker→ModelRunner 在 GPU 上 forward（第 24 课）。normal 版严格串行，CPU 忙时 GPU 闲、反之亦然。由于循环速度直接给吞吐封顶，第 21 课的 overlap 版用结果队列把上一步收尾推迟、与本步 GPU 计算重叠，从而把 CPU 时间藏起来。",
+                    "en": "The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“机场塔台雷达扫描”的类比，完整描述调度器 <code>event_loop_normal</code> 一个 step 的全过程。请逐一对应五步：<code>recv_requests</code>（收 TokenizedGenerateReqInput，第 16 课）、<code>process_input_requests</code>（入等待队列、处理 abort/flush）、<code>get_next_batch_to_run</code>（prefill 优先否则 decode，第 19/20 课）、<code>run_batch</code>（→ModelRunner.forward，第 24 课）、<code>process_batch_result</code>（追加 token、检测完成、释放 KV、发 DetokenizerManager，第 17 课），并点明“回环”为什么是心跳的灵魂。",
+                "en": "Using the 'air-traffic controller's radar sweep' analogy, describe one full step of the scheduler's <code>event_loop_normal</code>. Map each of the five stages: <code>recv_requests</code> (receive TokenizedGenerateReqInput, Lesson 16), <code>process_input_requests</code> (enqueue into waiting, handle abort/flush), <code>get_next_batch_to_run</code> (prefill first else decode, Lessons 19/20), <code>run_batch</code> (→ModelRunner.forward, Lesson 24), and <code>process_batch_result</code> (append tokens, detect finished, free KV, send to DetokenizerManager, Lesson 17), and explain why the 'loop-back' is the soul of the heartbeat.",
+            },
+            {
+                "zh": "“循环速度直接给吞吐封顶”——请论证这句话，并解释为什么调度器是<strong>单线程、每 TP rank 唯一的决策者</strong>、独占 KV 缓存账本。在此基础上说明 <code>event_loop_overlap</code>（第 21 课）如何用流水线优化、长 prompt 为何需要分块预填充（第 22 课）来避免堵住这条循环。",
+                "en": "Argue the claim 'loop speed directly caps throughput,' and explain why the scheduler is <strong>single-threaded, the sole decision-maker per TP rank</strong>, owning the KV-cache ledger. Building on that, explain how <code>event_loop_overlap</code> (Lesson 21) optimizes via pipelining, and why a long prompt needs chunked prefill (Lesson 22) to avoid clogging this loop.",
+            },
+        ],
+    },
+    "19-req-and-schedule-batch.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "<code>Req</code> 和 <code>ScheduleBatch</code> 在<strong>生命周期</strong>上最本质的区别是什么？",
+                    "en": "What is the most essential <strong>lifecycle</strong> difference between <code>Req</code> and <code>ScheduleBatch</code>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<code>Req</code> 是<strong>持久</strong>的——一条请求从 waiting 到 finished 一直活着；<code>ScheduleBatch</code> 是<strong>临时</strong>的——每个 step 重建一次、用完即弃，所以同一条 Req 会出现在许多<strong>连续的 decode 批</strong>里",
+                        "en": "<code>Req</code> is <strong>persistent</strong>—one request stays alive from waiting to finished; <code>ScheduleBatch</code> is <strong>ephemeral</strong>—rebuilt every step and discarded, so the same Req appears in many <strong>successive decode batches</strong>",
+                    },
+                    {"zh": "两者都临时，每个 token 都重建一次，互为副本", "en": "Both are temporary, rebuilt per token, mirroring each other"},
+                    {"zh": "<code>Req</code> 临时、<code>ScheduleBatch</code> 持久，批一旦建好就用到引擎关停", "en": "<code>Req</code> is temporary and <code>ScheduleBatch</code> persistent, the batch lasting until engine shutdown"},
+                    {"zh": "两者都持久，整个会话只各有一个实例", "en": "Both are persistent, with exactly one instance each per session"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这正是把两者拆开的原因：批是事件循环每步<strong>重新计算的结果</strong>（第 18 课），转瞬即逝；而一条请求要跨越几十上百拍 decode 才生成完，必须有个<strong>持久</strong>对象一路携带它的输出 token、KV 索引与状态。Req 持久、批临时，是 Part 5 的主轴。",
+                    "en": "This is exactly why they are split: the batch is a <strong>recomputed result</strong> of each loop step (Lesson 18), ephemeral; while a request takes tens to hundreds of decode beats to finish, needing a <strong>persistent</strong> object to carry its output tokens, KV indices, and status throughout. Req persistent, batch ephemeral—the spine of Part 5.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<code>ScheduleBatch</code> 的 <strong>EXTEND（prefill）批</strong>和 <strong>DECODE 批</strong>本质差别是什么？",
+                    "en": "What is the essential difference between a <code>ScheduleBatch</code>'s <strong>EXTEND (prefill) batch</strong> and a <strong>DECODE batch</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "EXTEND 由 <code>prepare_for_extend()</code> 构造，<strong>接纳新请求</strong>、一次吃掉每条整段 prompt（变长张量、为新请求分配 KV）；DECODE 由 <code>prepare_for_decode()</code> 构造，<strong>老请求每人各 +1 个 token</strong>（规整的每请求 1 token、各再要一个 KV 槽）",
+                        "en": "EXTEND, built by <code>prepare_for_extend()</code>, <strong>admits new requests</strong> and eats each whole prompt at once (ragged tensors, allocate KV for new reqs); DECODE, built by <code>prepare_for_decode()</code>, gives <strong>each running request +1 token</strong> (regular 1-token-per-req, one more KV slot each)",
+                    },
+                    {"zh": "EXTEND 在 GPU 上跑，DECODE 在 CPU 上跑，互不相干", "en": "EXTEND runs on GPU, DECODE on CPU, unrelated to each other"},
+                    {"zh": "两者完全一样，只是名字不同", "en": "They are identical, differing only in name"},
+                    {"zh": "DECODE 接纳新请求并处理整段 prompt，EXTEND 只吐一个 token", "en": "DECODE admits new requests and processes whole prompts, EXTEND emits just one token"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<code>forward_mode</code> 决定这一拍“怎么算”。EXTEND 处理 prompt：长度各异 ⇒ 变长张量、为新请求分配 KV，且只算前缀没命中的那截（第 7 课）。DECODE 处理生成：每条只吐一个 token ⇒ 张量规整、各再要一个 KV 槽。一条请求一生只 extend 一次（或被切成几块，第 22 课），却 decode 很多次。",
+                    "en": "<code>forward_mode</code> decides 'how' this beat computes. EXTEND handles the prompt: varying lengths ⇒ ragged tensors, allocate KV for new reqs, and only the prefix-missed part (Lesson 7). DECODE handles generation: each emits one token ⇒ regular tensors, one more KV slot each. A request extends once in its life (or split into chunks, Lesson 22) but decodes many times.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<code>filter_batch()</code> 在调度里干了什么？为什么它对吞吐至关重要？",
+                    "en": "What does <code>filter_batch()</code> do in scheduling, and why is it crucial for throughput?",
+                },
+                "opts": [
+                    {
+                        "zh": "它在飞行途中把<strong>已完成（finished）的请求当场从批里剔除</strong>、释放它们的 KV 槽，腾出的容量让等待队列的新请求补入——这就是<strong>连续批处理</strong>（第 5 课）的“腾槽”现场",
+                        "en": "It <strong>drops finished requests from the batch on the spot</strong> mid-flight and frees their KV slots, so the freed capacity lets new requests from the waiting queue fill in—the 'slot-freeing' of <strong>continuous batching</strong> (Lesson 5)",
+                    },
+                    {"zh": "它把整批排序，让最长的请求排在最前面", "en": "It sorts the whole batch so the longest request comes first"},
+                    {"zh": "它把批复制一份做备份，从不删除任何请求", "en": "It copies the batch as a backup and never removes any request"},
+                    {"zh": "它只在引擎关停时调用一次，用来清空所有请求", "en": "It is called once at engine shutdown to clear all requests"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "源码里 <code>filter_batch</code> 用 <code>keep_indices</code> 只保留 <code>not finished()</code> 的请求，重建 <code>reqs</code> 与对应张量。若不在途中剔除完成者，整批就退化成静态批处理——要等最慢那条、完成的槽位空转。当场清退 + 释放 KV + 接纳等待者，批才永远满载，这是高吞吐的根。",
+                    "en": "In source, <code>filter_batch</code> keeps only requests that are <code>not finished()</code> via <code>keep_indices</code>, rebuilding <code>reqs</code> and the matching tensors. Without dropping finished ones mid-flight, the batch degrades to static batching—waiting for the slowest, finished slots idle. Evict on the spot + free KV + admit waiters keeps the batch full, the root of high throughput.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“航空公司：乘客（Req）vs 航班舱单（ScheduleBatch）”的类比，完整讲清这两个数据结构的分工。请覆盖：Req 携带哪些字段（输入/输出 token、采样参数、KV 索引、prefix_indices、finished 状态）、它的 waiting→running→finished 生命周期；以及 ScheduleBatch 为何<strong>每步重建</strong>、它的 EXTEND/DECODE 两种 <code>forward_mode</code> 各自如何铺张量与分配 KV。",
+                "en": "Using the 'airline: passenger (Req) vs flight manifest (ScheduleBatch)' analogy, explain the division of labor between the two data structures. Cover: which fields Req carries (input/output tokens, sampling params, KV indices, prefix_indices, finished status) and its waiting→running→finished lifecycle; and why ScheduleBatch is <strong>rebuilt each step</strong>, plus how its two <code>forward_mode</code>s (EXTEND/DECODE) lay out tensors and allocate KV.",
+            },
+            {
+                "zh": "顺着这一课往后想：<code>get_next_batch_to_run</code>（第 18/20 课）每步要在“组一个 EXTEND 批接纳新请求”和“组一个 DECODE 批推进老请求”之间抉择。请说明这个抉择如何与 KV 池容量、等待队列长度、<code>filter_batch</code> 腾出的空槽相互作用，并联系分块预填充（第 22 课）为何能避免一个超长 prompt 把这条循环堵死。",
+                "en": "Thinking forward from this lesson: <code>get_next_batch_to_run</code> (Lessons 18/20) must choose each step between 'form an EXTEND batch to admit new requests' and 'form a DECODE batch to advance running ones.' Explain how this choice interacts with KV-pool capacity, waiting-queue length, and the empty slots freed by <code>filter_batch</code>, and connect it to why chunked prefill (Lesson 22) prevents one very long prompt from clogging this loop.",
+            },
+        ],
+    },
+    "20-schedule-policy.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "缓存感知的 <strong>LPM（最长前缀匹配）</strong>排序和 <strong>FCFS</strong> 各自优化的是什么？",
+                    "en": "What does cache-aware <strong>LPM (longest-prefix-match)</strong> ordering optimize, versus <strong>FCFS</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "LPM 优化<strong>缓存命中率</strong>——把 prompt 前缀已在 RadixAttention 缓存里的请求顶到前面、接纳它们几乎免费；FCFS 优化<strong>公平性</strong>——严格按到达顺序，简单可预测",
+                        "en": "LPM optimizes <strong>cache hit rate</strong>—bumping requests whose prompt prefix is already in the RadixAttention cache to the front so admitting them is nearly free; FCFS optimizes <strong>fairness</strong>—strictly by arrival, simple and predictable",
+                    },
+                    {"zh": "两者都优化显存占用，和缓存无关", "en": "Both optimize memory usage, unrelated to the cache"},
+                    {"zh": "LPM 优化公平、FCFS 优化命中率，正好相反", "en": "LPM optimizes fairness and FCFS optimizes hit rate, exactly reversed"},
+                    {"zh": "两者都只优化单请求延迟，不影响吞吐", "en": "Both only optimize single-request latency, with no effect on throughput"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LPM 让“开头已缓存”的请求插队，相同前缀只算一次，直接抬高 RadixAttention 命中率，这是真实流量提速的来源（第 7 课）；FCFS 不看缓存、只按到达顺序，换来的是公平、简单与可预测的延迟。队列过长时 LPM 还会临时退回 FCFS 以免排序成瓶颈。",
+                    "en": "LPM lets cached-opening requests jump ahead so a shared prefix is computed once, directly raising the RadixAttention hit rate—the source of real-traffic speedups (Lesson 7); FCFS ignores the cache and goes by arrival, buying fairness, simplicity and predictable latency. On long queues LPM even falls back to FCFS so sorting never becomes the bottleneck.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<code>PrefillAdder</code> 决定“这一拍能塞几个请求”时，靠的是哪<strong>两个预算</strong>？",
+                    "en": "When <code>PrefillAdder</code> decides 'how many requests fit this beat', which <strong>two budgets</strong> does it use?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>token 预算</strong>（别让这一步 prefill 太大，连着分块预填充）+ <strong>显存预算</strong>（KV 池要有足够空闲槽，绝不接纳放不下的请求）；任一耗尽即停",
+                        "en": "A <strong>token budget</strong> (keep this prefill step from getting too big, tied to chunked prefill) + a <strong>memory budget</strong> (enough free KV-pool slots, never admit a req that won't fit); stop when either runs out",
+                    },
+                    {"zh": "CPU 核数预算 + 网络带宽预算", "en": "A CPU-core budget + a network-bandwidth budget"},
+                    {"zh": "磁盘空间预算 + 进程数预算", "en": "A disk-space budget + a process-count budget"},
+                    {"zh": "只有一个 token 预算，显存从不参与判断", "en": "Only a token budget; memory never enters the decision"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<code>add_one_req</code> 算出 <code>total_tokens = cand_extend_input_len + max_new + page_size</code>，若 <code>≥ rem_total_tokens</code> 就 <code>NO_TOKEN</code>；同时检查 KV 池空闲槽（第 4/30 课）。token 预算限制单拍 prefill 规模（第 22 课分块），显存预算保证放得下——两把尺子任一满即停手。",
+                    "en": "<code>add_one_req</code> computes <code>total_tokens = cand_extend_input_len + max_new + page_size</code>; if <code>≥ rem_total_tokens</code> it returns <code>NO_TOKEN</code>, and it also checks free KV-pool slots (Lessons 4/30). The token budget caps the per-beat prefill size (chunking, Lesson 22), the memory budget guarantees it fits—whichever yardstick fills first stops admission.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "调度器每一拍面对的“<strong>prefill 与 decode 的接纳张力</strong>”指的是什么？",
+                    "en": "What is the '<strong>prefill-vs-decode admission tension</strong>' the scheduler faces each beat?",
+                },
+                "opts": [
+                    {
+                        "zh": "多接纳新 prefill 能<strong>增吞吐</strong>，却会<strong>抬高在跑请求的延迟</strong>；只推进老 decode 则<strong>保延迟</strong>但少了新吞吐——策略每拍在两者间权衡",
+                        "en": "Admitting more new prefills <strong>grows throughput</strong> but <strong>raises latency for running decodes</strong>; just advancing old decodes <strong>keeps latency low</strong> but adds no new throughput—the policy balances the two each beat",
+                    },
+                    {"zh": "prefill 和 decode 必须在不同 GPU 上跑，调度器只是选卡", "en": "Prefill and decode must run on different GPUs; the scheduler just picks the card"},
+                    {"zh": "两者完全独立，从不互相影响", "en": "They are fully independent and never affect each other"},
+                    {"zh": "张力指的是 CPU 和磁盘之间的带宽争用", "en": "The tension refers to bandwidth contention between CPU and disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "prefill 吃整段 prompt、占算力，能把新请求拉进批里增吞吐，但和在跑的 decode 抢资源、抬高它们的延迟；只 decode 则延迟稳但吞吐不长。调度器每拍用策略在这架天平上加砝码（第 18/8 课），这正是组批决策的核心权衡。",
+                    "en": "Prefill eats whole prompts and burns compute, pulling new requests into the batch to grow throughput, but it contends with running decodes and raises their latency; decode-only keeps latency steady but adds no throughput. The scheduler weights this scale with policy each beat (Lessons 18/8)—the core trade-off of batch formation.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“聪明领位员（host / bouncer）”的类比讲清调度策略的两个动作：<strong>排序</strong>（<code>SchedulePolicy.calc_priority</code> 怎样按 LPM / FCFS / priority 就地重排等待队列）与<strong>限流</strong>（<code>PrefillAdder</code> 怎样在 token + 显存双预算下逐个 <code>add_one_req</code>、必要时切块）。再说明为什么“缓存感知排序”会直接抬高 RadixAttention 命中率，从而体现调度器与缓存的<strong>协同设计</strong>。",
+                "en": "Using the 'smart host / bouncer' analogy, explain the two actions of the schedule policy: <strong>ordering</strong> (how <code>SchedulePolicy.calc_priority</code> reorders the waiting queue in place by LPM / FCFS / priority) and <strong>throttling</strong> (how <code>PrefillAdder</code> calls <code>add_one_req</code> one by one under the token + memory double budget, chunking when needed). Then explain why cache-aware ordering directly raises the RadixAttention hit rate, illustrating the scheduler-cache <strong>co-design</strong>.",
+            },
+            {
+                "zh": "顺着这一课往后想：若你的线上流量里成千上万请求共享同一段超长系统提示，你会选 LPM 还是 FCFS？为什么？再结合 <code>PrefillAdder</code> 的双预算，说明一个超长 prompt 如何被 token 预算与<strong>分块预填充（第 22 课）</strong>挡住、避免它独占一拍把 decode 全堵死，并联系 KV 池容量（第 4/30 课）与吞吐 / 延迟（第 8 课）的权衡。",
+                "en": "Thinking forward: if your production traffic has thousands of requests sharing one very long system prompt, would you pick LPM or FCFS, and why? Then, using <code>PrefillAdder</code>'s double budget, explain how a very long prompt is held back by the token budget and <strong>chunked prefill (Lesson 22)</strong>—so it can't monopolize a beat and clog all decodes—connecting it to KV-pool capacity (Lessons 4/30) and the throughput/latency trade-off (Lesson 8).",
+            },
+        ],
+    },
+    "21-zero-overhead-overlap-scheduler.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 <code>event_loop_overlap</code> 里，<strong>什么和什么重叠</strong>？请精确说出哪部分在 GPU、哪部分在 CPU。",
+                    "en": "In <code>event_loop_overlap</code>, <strong>what overlaps with what</strong>? Name precisely which part runs on the GPU and which on the CPU.",
+                },
+                "opts": [
+                    {
+                        "zh": "第 N 步的 <strong>GPU 前向</strong>（<code>run_batch</code>→ModelRunner.forward）与 <strong>CPU 组第 N+1 步的批</strong> + <strong>CPU 收尾第 N−1 步的结果</strong>（<code>process_batch_result</code>）<strong>同拍并行</strong>：发射本步前向后不等它，CPU 立刻去组下一批、并从 <code>result_queue</code> 取出上一步结果做收尾",
+                        "en": "Step N's <strong>GPU forward</strong> (<code>run_batch</code>→ModelRunner.forward) runs <strong>in the same beat as</strong> the <strong>CPU forming step N+1's batch</strong> plus the <strong>CPU finishing step N−1's result</strong> (<code>process_batch_result</code>): after launching this step's forward without waiting, the CPU immediately forms the next batch and pops the previous step's result from <code>result_queue</code> to finish it",
+                    },
+                    {"zh": "两个不同请求的 GPU 前向在同一张卡上并行，CPU 不参与", "en": "Two different requests' GPU forwards run in parallel on one card; the CPU is uninvolved"},
+                    {"zh": "GPU 前向与 GPU 采样重叠，全程没有 CPU 工作", "en": "The GPU forward overlaps with GPU sampling, with no CPU work at all"},
+                    {"zh": "本步的 CPU 收尾与本步的 GPU 前向重叠（同一步内并行）", "en": "This step's CPU finishing overlaps with this step's own GPU forward (parallel within the same step)"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "调度器“只决策、不计算”：组批/采样/收尾是 CPU 轻量活，唯独 <code>run_batch</code> 烧 GPU。overlap 版发射第 N 步前向后<strong>立刻 append 进 <code>result_queue</code> 不阻塞</strong>，趁 GPU 算 N 的当口，CPU 去组 N+1 的批、并 <code>popleft</code> 出 N−1 的结果做收尾。于是每一拍的 CPU 时间都藏进同拍 GPU 计算的影子里。",
+                    "en": "The scheduler 'decides, never computes': forming/sampling/finishing are light CPU work, while only <code>run_batch</code> burns GPU. The overlap loop launches step N's forward and <strong>appends to <code>result_queue</code> without blocking</strong>; while the GPU computes N, the CPU forms N+1's batch and <code>popleft</code>s N−1's result to finish it. So each beat's CPU time hides in the same beat's GPU compute shadow.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么这套重叠能把<strong>调度开销藏到近乎为零</strong>，让人称它“零开销”？",
+                    "en": "Why does this overlap hide <strong>scheduling overhead down to near zero</strong>, earning the name 'zero-overhead'?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为 CPU 的组批/采样/记账时间，正好落在 GPU 那一拍前向计算的“影子”里被<strong>完全遮住</strong>——GPU 从不为等 CPU 而空转，CPU 开销不再出现在关键路径上，所以对外表现为近乎零的调度开销、GPU 满载",
+                        "en": "Because the CPU's forming/sampling/bookkeeping time falls inside the 'shadow' of that beat's GPU forward and is <strong>fully masked</strong>—the GPU never idles waiting on the CPU, so the CPU cost leaves the critical path, presenting as near-zero scheduling overhead with the GPU saturated",
+                    },
+                    {"zh": "因为重叠让 CPU 的调度代码运行得更快了", "en": "Because overlap makes the CPU scheduling code itself run faster"},
+                    {"zh": "因为它彻底删掉了组批和采样这两步", "en": "Because it deletes the batch-forming and sampling steps entirely"},
+                    {"zh": "因为前向被搬到了 CPU 上，省掉了 GPU", "en": "Because the forward is moved onto the CPU, eliminating the GPU"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "“零开销”不是没成本，而是把成本<strong>藏到不影响吞吐的地方</strong>。串行版里 CPU 干活时 GPU 空等，这段空等直接给吞吐封顶；overlap 把 CPU 调度与 GPU 前向并到同一拍，CPU 时间被 GPU 计算遮住，GPU 利用率拉满。decode 步 GPU 极快、CPU 占比大，收益尤其明显。",
+                    "en": "'Zero-overhead' isn't cost-free; it moves the cost <strong>somewhere that doesn't dent throughput</strong>. In the serial version the GPU idles while the CPU works, and that idle caps throughput; overlap puts CPU scheduling and the GPU forward in the same beat, masking CPU time behind GPU compute and saturating utilization. The win is biggest on decode, where the GPU is very fast and the CPU share is large.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "重叠调度器的<strong>主要代价</strong>是什么？为什么需要一个 <code>result_queue</code>？",
+                    "en": "What is the overlap scheduler's <strong>main cost</strong>, and why is a <code>result_queue</code> needed?",
+                },
+                "opts": [
+                    {
+                        "zh": "代价是<strong>多一拍延迟</strong>——你处理的永远是<strong>上一步</strong>的结果，总比实时慢一步（第 8 课的吞吐/延迟权衡），外加跨拍状态管理更难；<code>result_queue</code> 正是用来暂存“已发射但还没收尾”的批，把收尾<strong>推迟一拍</strong>，等 GPU 算完再 <code>popleft</code> 处理",
+                        "en": "The cost is <strong>one extra beat of latency</strong>—you always process the <strong>previous</strong> step's result, forever one step behind real time (Lesson 8's throughput/latency trade-off), plus harder cross-beat state; the <code>result_queue</code> holds 'launched but not yet finished' batches, <strong>deferring the finish one beat</strong> so it's <code>popleft</code>-ed once the GPU is done",
+                    },
+                    {"zh": "代价是吞吐下降，<code>result_queue</code> 用来限流", "en": "The cost is lower throughput; the <code>result_queue</code> throttles intake"},
+                    {"zh": "没有代价，<code>result_queue</code> 只是日志缓冲", "en": "There is no cost; the <code>result_queue</code> is just a logging buffer"},
+                    {"zh": "代价是显存翻倍，<code>result_queue</code> 缓存 KV", "en": "The cost is doubled VRAM; the <code>result_queue</code> caches KV"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "源码里 <code>run_batch</code> 后立刻 <code>result_queue.append((batch.copy(), result))</code> 不阻塞，下一拍才 <code>popleft</code> 做 <code>process_batch_result</code>——所以收尾恒落后一拍，这就是 +1 拍延迟。下一批要在当前结果未出时就搭好，采样 token / KV 记账存在跨拍依赖，靠 <code>batch_overlap</code> 的 future/event 串好。某些必须先拿到上一步结果的情形会临时退回不重叠。",
+                    "en": "In source, right after <code>run_batch</code> we <code>result_queue.append((batch.copy(), result))</code> without blocking, and only the next beat <code>popleft</code>s it for <code>process_batch_result</code>—so finishing always lags one beat, hence +1 latency. The next batch is built before the current result exists, giving sampled-token / KV-bookkeeping cross-beat dependencies threaded via <code>batch_overlap</code>'s future/event objects. Cases needing the prior result first fall back to no-overlap temporarily.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“接力赛 / 两段式流水线”的类比，完整讲清 <code>event_loop_overlap</code> 一个 step 的错位流水。请逐一覆盖：①<strong>发射</strong>第 N 步前向（<code>run_batch</code> 不等结果、把 <code>(batch.copy(), result)</code> 压进 <code>result_queue</code>）；②趁 GPU 算 N，CPU 组第 N+1 步的批；③<code>pop_and_process</code> 收尾第 N−1 步（<code>process_batch_result</code>：追加 token、判完成、释放 KV、发反分词第 17 课）。并解释“慢一拍”为何既是代价又是“零开销”的来源，对照朴素 <code>event_loop_normal</code>（第 18 课）说明 GPU 为什么从不空转。",
+                "en": "Using the 'relay race / two-stage assembly line' analogy, walk through one step of <code>event_loop_overlap</code>'s staggered pipeline. Cover each: (1) <strong>launch</strong> step N's forward (<code>run_batch</code> without waiting, push <code>(batch.copy(), result)</code> onto <code>result_queue</code>); (2) while the GPU computes N, the CPU forms step N+1's batch; (3) <code>pop_and_process</code> finishes step N−1 (<code>process_batch_result</code>: append tokens, detect finished, free KV, send to detok, Lesson 17). Explain why being 'one beat behind' is both the cost and the source of 'zero-overhead,' and, contrasting naive <code>event_loop_normal</code> (Lesson 18), why the GPU never idles.",
+            },
+            {
+                "zh": "论证“重叠调度器与连续批处理是绝配”：连续批处理（第 5 课）让批<strong>永远满载</strong>，重叠调度器让<strong>喂满批的调度不要钱</strong>。请说明两者各解决吞吐的哪一半，为什么 decode 密集场景下重叠收益最大（联系第 8 课吞吐/延迟、第 24 课模型前向），以及它如何与 CUDA Graph（第 27 课）叠加把单步成本进一步压薄。再讨论：在什么样的负载或延迟敏感场景下，+1 拍延迟可能是不可接受的取舍？",
+                "en": "Argue that 'the overlap scheduler pairs perfectly with continuous batching': continuous batching (Lesson 5) keeps the batch <strong>always full</strong>, while the overlap scheduler makes <strong>keeping it full free</strong>. Explain which half of the throughput problem each solves, why the overlap win is largest in decode-heavy regimes (tie to Lesson 8 throughput/latency and Lesson 24 model forward), and how it stacks with CUDA Graph (Lesson 27) to further thin the per-step cost. Then discuss: under what workloads or latency-sensitive scenarios might the +1-beat latency be an unacceptable trade-off?",
+            },
+        ],
+    },
+    "22-chunked-prefill.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "为什么不分块时，一个 32k token 的超长 prompt 会成为大问题？",
+                    "en": "Without chunking, why does a 32k-token huge prompt become a big problem?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为它若在<strong>一拍里整段 prefill</strong>，这一步的前向计算量暴涨、<strong>独占 GPU 几十毫秒</strong>，批里所有正在 decode 的请求<strong>全部 stall</strong>、token 吐不出来，于是 TTFT/ITL 延迟尖峰（第 8 课）——一头鲸鱼堵死整池",
+                        "en": "Because if it is <strong>prefilled whole in one step</strong>, that step's forward compute explodes and <strong>monopolizes the GPU for tens of ms</strong>; every decoding request in the batch <strong>stalls</strong>, no tokens emitted, so TTFT/ITL spike (Lesson 8)—one whale clogs the whole pool",
+                    },
+                    {"zh": "因为 32k token 的 KV 缓存一定放不进显存，必然 OOM", "en": "Because a 32k-token KV cache can never fit in VRAM and must OOM"},
+                    {"zh": "因为长 prompt 会让采样温度失效，输出乱码", "en": "Because a long prompt breaks sampling temperature, producing garbage output"},
+                    {"zh": "因为调度器无法对超过 4k token 的请求排序", "en": "Because the scheduler cannot order requests longer than 4k tokens"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是<strong>时间维度的拥塞</strong>，不是显存问题——KV 槽位也许够，但“一拍算太多”让 GPU 被一个请求独占，批里其他人的 decode 只能干等。用户观感就是流式输出突然顿住（ITL 尖峰）、新请求首字变慢（TTFT 尖峰）。分块正是为摊平这种尖峰而生。",
+                    "en": "It's <strong>congestion along the time axis</strong>, not a memory problem—KV slots may be plenty, but 'too much compute in one step' lets one request monopolize the GPU while everyone else's decode waits. Users see streaming freeze (ITL spike) and slower first tokens (TTFT spike). Chunking exists to flatten exactly this spike.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "分块预填充<strong>具体怎么工作</strong>，才能既推进长请求、又不卡住别人？",
+                    "en": "How does chunked prefill <strong>actually work</strong> so it advances the long request without stalling others?",
+                },
+                "opts": [
+                    {
+                        "zh": "把大 prefill 切成<strong>固定大小的 token 块</strong>（由 <code>chunked_prefill_size</code> 设定），分摊到<strong>多拍</strong>，并和别人的 decode <strong>混在同一个批</strong>里前向；KV 一块块填，只有<strong>最后一块</strong>填完该请求才转入 decode",
+                        "en": "Split the big prefill into <strong>fixed-size token chunks</strong> (set by <code>chunked_prefill_size</code>) across <strong>several steps</strong>, forwarded <strong>in the same batch mixed with</strong> others' decode; KV fills chunk by chunk, and only after the <strong>last chunk</strong> does the request enter decode",
+                    },
+                    {"zh": "把长请求挪到队列最末尾，等所有 decode 都结束再单独整段 prefill", "en": "Move the long request to the very end of the queue and prefill it whole only after all decodes finish"},
+                    {"zh": "把 prompt 压缩到 4k token 以内再一次性 prefill", "en": "Compress the prompt to under 4k tokens then prefill it all at once"},
+                    {"zh": "为长请求单独开一张 GPU，和 decode 物理隔离", "en": "Give the long request its own dedicated GPU, physically isolated from decode"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键有二：① <strong>切块</strong>让每拍 prefill 有界、没有哪一步巨大；② <strong>混合批</strong>让这一个 chunk 和一堆 decode 同框前向，于是每拍 = 一个有界 prefill 块 + 全体各吐一个 token，规模可控、节奏稳定。排到最后会饿死长请求、首字延迟无限长，所以不可取。",
+                    "en": "Two keys: (1) <strong>chunking</strong> bounds prefill per step so no step is huge; (2) the <strong>mixed batch</strong> forwards that one chunk together with a crowd of decodes, so each step = one bounded prefill chunk + one token from everyone—controlled and steady. Queuing it last would starve the long request with unbounded first-token latency, so that's no good.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<code>chunked_prefill_size</code> 这个旋钮调小或调大，分别意味着什么取舍？",
+                    "en": "Tuning the <code>chunked_prefill_size</code> knob smaller vs larger means what trade-off?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>调小</strong>：每拍 prefill 更轻、decode 更顺滑，但<strong>总步数更多</strong>、长请求自己的首字更慢；<strong>调大</strong>：步数更少、长请求更快收尾，但每拍更重、<strong>尖峰风险回升</strong>（退回第 8 课吞吐/延迟权衡）",
+                        "en": "<strong>Smaller</strong>: lighter prefill per step and smoother decode, but <strong>more total steps</strong> and a slower whale first byte; <strong>larger</strong>: fewer steps and a faster whale finish, but heavier steps and <strong>the spike risk returns</strong> (back to Lesson 8's throughput/latency trade-off)",
+                    },
+                    {"zh": "调小提升吞吐、调大降低吞吐，与延迟无关", "en": "Smaller raises throughput, larger lowers it, with no latency effect"},
+                    {"zh": "它只控制日志频率，对性能没有影响", "en": "It only controls logging frequency and has no performance effect"},
+                    {"zh": "它决定 KV 缓存的页大小（page_size），越大越省显存", "en": "It sets the KV cache page size, where larger saves more VRAM"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<code>chunked_prefill_size</code> 设定每拍能吃多少 prefill token，正是平滑与步数之间那把旋钮。没有放之四海的最优值——延迟敏感、decode 密集就偏小；吞吐优先、长请求为主就偏大。它控制的是“每一拍 prefill 的有界上限”，而非显存页大小或日志。",
+                    "en": "<code>chunked_prefill_size</code> sets how many prefill tokens fit per step—the very knob between smoothness and step count. There's no universal optimum: go smaller for latency-sensitive, decode-heavy loads; larger for throughput-first, long-prompt-heavy ones. It controls the bounded per-step prefill cap, not the VRAM page size or logging.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“吃巨无霸大餐还要继续聊天”的类比，完整讲清分块预填充。请逐一覆盖：①<strong>问题</strong>——一个 32k prompt 若一拍整段 prefill，会独占 GPU、让批里所有 decode <strong>stall</strong>，造成 TTFT/ITL 尖峰（第 8 课）；②<strong>做法</strong>——<code>PrefillAdder</code>（第 20 课）在 <code>add_one_req</code> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<code>trunc_len</code> 按 page 对齐）、记为 <code>new_chunked_req</code> 下一拍续，KV 一块块填（第 4 课），最后一块才转 decode；③<strong>混合批</strong>——这一个 chunk 和别人的 decode 同批前向，事件循环（第 18 课）照常推进。",
+                "en": "Using the 'eating a giant meal while still chatting' analogy, fully explain chunked prefill. Cover each: (1) the <strong>problem</strong>—a 32k prompt prefilled whole in one step monopolizes the GPU and <strong>stalls</strong> every decode in the batch, causing TTFT/ITL spikes (Lesson 8); (2) the <strong>fix</strong>—<code>PrefillAdder</code> (Lesson 20) enforces the per-step token budget in <code>add_one_req</code>, clamping a non-fitting request to the remaining budget (<code>trunc_len</code>, page-aligned), recording <code>new_chunked_req</code> for next step, filling KV chunk by chunk (Lesson 4), entering decode only after the last chunk; (3) the <strong>mixed batch</strong>—that one chunk is forwarded alongside others' decode, the event loop (Lesson 18) advancing as usual.",
+            },
+            {
+                "zh": "讨论分块预填充的<strong>取舍</strong>与它在系统里的位置。分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，却换来<strong>全局延迟平滑</strong>与更高的达标吞吐（goodput-under-SLA）——请说明为什么在长短请求混跑的真实负载里这笔买卖通常值得，<code>chunked_prefill_size</code> 偏小/偏大各自的代价（联系第 8 课），以及为什么把 prefill 与 decode 混在一拍里仍有张力，从而引出 PD 分离（第 45 课）把两者彻底拆到不同实例的动机。",
+                "en": "Discuss chunked prefill's <strong>trade-off</strong> and its place in the system. Chunking costs <strong>a few extra steps</strong> and thins the whale's own TTFT, but buys <strong>smooth global latency</strong> and higher goodput-under-SLA—explain why this is usually worth it in real mixed long/short workloads, the costs of <code>chunked_prefill_size</code> being too small vs too large (tie to Lesson 8), and why mixing prefill and decode in one step still has tension, motivating PD disaggregation (Lesson 45) that splits the two onto separate instances entirely.",
+            },
+        ],
+    },
+    "23-dp-controller-and-pp-scheduling.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "<strong>数据并行 DP</strong> 里，每个副本和 <code>DataParallelController</code> 各自扮演什么角色？",
+                    "en": "In <strong>data parallel (DP)</strong>, what role does each replica vs the <code>DataParallelController</code> play?",
+                },
+                "opts": [
+                    {
+                        "zh": "每个副本是一台<strong>完整运行时</strong>（自带调度器+TP worker+KV 缓存+<strong>一整份模型</strong>），副本间请求级隔离、互不交互；控制器<strong>不做前向</strong>，只按轮询/负载把进来的请求<strong>扇出</strong>给某个就绪副本",
+                        "en": "Each replica is a <strong>full runtime</strong> (its own scheduler+TP worker+KV cache+<strong>a full model copy</strong>), request-isolated and non-interacting; the controller does <strong>no forward</strong>, only <strong>fanning out</strong> incoming requests round-robin/load-aware to a ready replica",
+                    },
+                    {"zh": "副本之间共享同一份模型权重，控制器负责合并它们的输出", "en": "Replicas share one set of weights, and the controller merges their outputs"},
+                    {"zh": "控制器把每个请求切成多段，分给不同副本各算一段再拼回", "en": "The controller splits each request into pieces, one per replica, then stitches them back"},
+                    {"zh": "副本只持有部分层，控制器负责在副本间传递激活值", "en": "Each replica holds only some layers, and the controller passes activations between them"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "DP 是<strong>复制整个运行时</strong>：每副本一整份模型、各跑各的事件循环、各管各的 KV 账本，请求落到哪个副本就由那个副本独立处理到底。控制器只做一件极轻的事——“分给谁”，从不碰 GPU。切层分激活那是 PP；共享权重合输出并非 DP 的工作方式。",
+                    "en": "DP <strong>replicates the whole runtime</strong>: each replica holds a full model, runs its own event loop, manages its own KV ledger, and whatever replica a request lands on handles it end-to-end. The controller does one ultra-light thing—'to whom'—never touching the GPU. Splitting layers/passing activations is PP; sharing weights and merging outputs is not how DP works.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<strong>流水线并行 PP</strong> 为什么要让<strong>多个 micro-batch 同时在飞</strong>，而不是一次只跑一个 batch？",
+                    "en": "Why does <strong>pipeline parallel (PP)</strong> keep <strong>multiple micro-batches in flight</strong> instead of running one batch at a time?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为层被切成段分到多卡，若只跑一个 batch，则某段工作时其它段全<strong>闲等</strong>（流水线<strong>气泡</strong>）；让多个 micro-batch 错峰流动，可使 stage1 跑 B 的同时 stage2 跑 A，<strong>各段都忙</strong>、气泡被摊薄",
+                        "en": "Because layers are split into stages across cards; with one batch, while one stage works the others <strong>idle</strong> (the pipeline <strong>bubble</strong>). Staggering multiple micro-batches lets stage1 run B while stage2 runs A, so <strong>all stages stay busy</strong> and the bubble is amortized",
+                    },
+                    {"zh": "因为多个 micro-batch 能共享同一份 KV 缓存，省显存", "en": "Because multiple micro-batches can share one KV cache to save VRAM"},
+                    {"zh": "因为这样可以跳过段间通信，避免传激活值", "en": "Because it skips inter-stage communication and avoids passing activations"},
+                    {"zh": "因为单个 batch 无法被采样，必须拆成 micro-batch", "en": "Because a single batch cannot be sampled and must be split into micro-batches"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "PP 的瓶颈是<strong>填充/排空气泡</strong>：接力式前向里，单 batch 时总有段在空等。多 micro-batch 错峰让管线进入<strong>稳态满载</strong>（不同 stage 处理不同 micro-batch），micro-batch 越多、满载占比越高、气泡占比越趋近零。这也是 <code>event_loop_pp</code> 必须比 normal 循环复杂的原因——它要同时追踪一串在不同段的 micro-batch。",
+                    "en": "PP's bottleneck is the <strong>fill/drain bubble</strong>: in relay-style forward, with one batch some stage always idles. Staggered micro-batches drive the pipe into <strong>steady-state full load</strong> (different stages on different micro-batches); more micro-batches ⇒ higher full-load fraction ⇒ bubble approaching zero. That's why <code>event_loop_pp</code> must be more complex than the normal loop—it tracks a string of micro-batches at different stages.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把 <strong>TP、PP、DP</strong> 一句话区分，哪种说法最准确？",
+                    "en": "Distinguishing <strong>TP, PP, DP</strong> in one line, which statement is most accurate?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>TP</strong> 切<strong>一层内的矩阵</strong>、<strong>PP</strong> 切<strong>跨层的段</strong>、<strong>DP</strong> 复制<strong>整个副本</strong>；调度器编排 DP（控制器分发）与 PP（pp 循环），而 TP 藏在<strong>模型前向内部</strong>、对调度器基本透明",
+                        "en": "<strong>TP</strong> splits <strong>matrices within a layer</strong>, <strong>PP</strong> splits <strong>stages across layers</strong>, <strong>DP</strong> replicates <strong>whole replicas</strong>; the scheduler orchestrates DP (controller dispatch) and PP (pp loop), while TP hides <strong>inside the model forward</strong>, largely transparent to the scheduler",
+                    },
+                    {"zh": "三者都是切分模型的层，只是切的段数不同", "en": "All three split the model's layers, differing only in stage count"},
+                    {"zh": "三者都由 DataParallelController 统一编排", "en": "All three are orchestrated uniformly by the DataParallelController"},
+                    {"zh": "TP 复制整模型、PP 复制整模型、DP 切矩阵", "en": "TP replicates the whole model, PP replicates the whole model, DP splits matrices"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "三维正交，靠“复制什么/切分什么”区分：DP=整模型复制（副本级）、PP=层切段（stage 级）、TP=单层矩阵切分。大部署是 TP×PP×DP 叠加。关键是分清<strong>调度</strong>问题（DP/PP 改变控制流，归 Part 5）与<strong>计算</strong>问题（TP 在 forward 内部，第 24/46 课）。",
+                    "en": "Three orthogonal dims, told apart by 'what it replicates/splits': DP=whole-model replicate (replica level), PP=layers into stages (stage level), TP=split a single layer's matrices. Big deployments stack TP×PP×DP. The key is separating the <strong>scheduling</strong> problem (DP/PP change control flow, hence Part 5) from the <strong>compute</strong> problem (TP inside forward, Lessons 24/46).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“超市收银通道 vs 传送带工位”的类比，完整讲清 DP 与 PP 的区别。请逐一覆盖：①<strong>DP</strong>——为何复制<strong>整个运行时</strong>（每副本自带调度器+TP+KV+一整份模型）、<code>DataParallelController</code> 如何用 <code>round_robin_scheduler</code> 把请求<strong>轮询扇出</strong>且自己不碰 GPU、为什么它是<strong>吞吐乘法器</strong>但救不了“装不下”的模型；②<strong>PP</strong>——为何把<strong>层切成段</strong>能装下超大模型、<code>event_loop_pp</code> 为何要让<strong>多个 micro-batch 错峰在飞</strong>、<strong>填充/排空气泡</strong>从哪来又怎么靠 micro-batch 数摊平。",
+                "en": "Using the 'supermarket checkout lanes vs conveyor stations' analogy, fully explain DP vs PP. Cover each: (1) <strong>DP</strong>—why it replicates the <strong>whole runtime</strong> (each replica with its own scheduler+TP+KV+a full model), how <code>DataParallelController</code> <strong>round-robins/fans out</strong> requests via <code>round_robin_scheduler</code> without touching the GPU, and why it is a <strong>throughput multiplier</strong> yet can't rescue a model that 'doesn't fit'; (2) <strong>PP</strong>—why <strong>splitting layers into stages</strong> fits a huge model, why <code>event_loop_pp</code> keeps <strong>multiple micro-batches staggered in flight</strong>, and where the <strong>fill/drain bubble</strong> comes from and how micro-batch count amortizes it.",
+            },
+            {
+                "zh": "讨论 <strong>TP × PP × DP</strong> 如何在一个大集群里拼起来，以及为什么本课归在“调度”里。请说明：①一个“TP=8、PP=2、DP=4”的部署各维度分别在切/复制什么、总卡数如何算；②为什么调度器编排的是 <strong>DP（控制器分发）与 PP（pp 循环推进 micro-batch）</strong>，而 <strong>TP 对调度器透明</strong>（藏在 <code>forward</code> 里，第 24/46 课）；③据此给出选型口诀——模型太大、流量太大分别该上哪种并行，并指出深入课程（第 46 课 TP/PP/EP/DP、第 47 课 EPLB）。",
+                "en": "Discuss how <strong>TP × PP × DP</strong> compose in a large cluster, and why this lesson belongs to 'scheduling'. Explain: (1) for a 'TP=8, PP=2, DP=4' deployment, what each dimension splits/replicates and how the total card count is computed; (2) why the scheduler orchestrates <strong>DP (controller dispatch) and PP (the pp loop advancing micro-batches)</strong> while <strong>TP is transparent to the scheduler</strong> (hidden in <code>forward</code>, Lessons 24/46); (3) from this, state the selection rule—which parallelism to reach for when the model is too big vs traffic too heavy—and point to the deep dives (Lesson 46 TP/PP/EP/DP, Lesson 47 EPLB).",
+            },
+        ],
+    },
 }
 
 

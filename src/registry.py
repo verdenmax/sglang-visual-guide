@@ -9,6 +9,7 @@ import part1
 import part2
 import part3
 import part4
+import part5
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -29,4 +30,10 @@ CONTENT = {
     "15-openai-anthropic-ollama-compat.html": part4.LESSON_15,
     "16-io-structs-and-ipc.html": part4.LESSON_16,
     "17-detokenizer-and-streaming.html": part4.LESSON_17,
+    "18-scheduler-event-loop.html": part5.LESSON_18,
+    "19-req-and-schedule-batch.html": part5.LESSON_19,
+    "20-schedule-policy.html": part5.LESSON_20,
+    "21-zero-overhead-overlap-scheduler.html": part5.LESSON_21,
+    "22-chunked-prefill.html": part5.LESSON_22,
+    "23-dp-controller-and-pp-scheduling.html": part5.LESSON_23,
 }

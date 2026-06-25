@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>22 · 分块预填充 / Chunked prefill - SGLang 图解教程</title>
+<meta name="description" content="第五部分 · 调度器｜分块预填充 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="22 · 分块预填充 / Chunked prefill - SGLang 图解教程">
+<meta property="og:description" content="第五部分 · 调度器｜分块预填充 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="22 · 分块预填充 / Chunked prefill - SGLang 图解教程">
+<meta name="twitter:description" content="第五部分 · 调度器｜分块预填充 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></span>
+    <span class="pill">22 / 23</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:95%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></div>
+    <h1><span class="lang-zh">分块预填充</span><span class="lang-en">Chunked prefill</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课我们看清了调度器“先排序、再限流”的双步动作。这一课盯住限流里最棘手的一种情况：当队首是一个<strong>超长 prompt</strong>（比如 32k token 的长文档）时，会发生什么？
+如果让它在<strong>一拍（step）里一口气全部 prefill</strong>，这一步就会变成一头“鲸鱼”——独占整张 GPU 几十毫秒，
+排在它后面所有正在 <span class="inline">decode</span> 的请求<strong>全部卡住</strong>，每个人的 token 都吐不出来，延迟瞬间炸裂（TTFT/ITL 飙升，第 8 课）。
+<strong>分块预填充（chunked prefill）</strong>就是把这头鲸鱼<strong>切成固定大小的小块</strong>，分摊到好几拍里，
+每一拍只啃一小口、并和别人的 decode <strong>混在同一个批</strong>里跑。没有哪一拍是巨大的，所有人的 token 都还在稳定流动。
+注意一个常见的误解：分块要解决的<strong>不是“放不下”，而是“算不过来”</strong>——显存里也许有的是 KV 槽位，
+真正被一个超长 prefill 卡住的是<strong>时间</strong>，是这一拍前向计算被一个请求独吞，害得别人寸步难行。
+理解了这一点，你就会发现分块和上一课的限流其实环环相扣：限流管的是“一拍别接太多请求”，分块管的是“接进来的那个超长请求也别一口吃完”。
+记住这一课一句话：<strong>别让一个长请求把一拍撑爆——把它切块，混着 decode 慢慢喂</strong>。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把这一拍的 GPU 想成一张<strong>正在热聊的饭桌</strong>。桌上每个人轮流说话（每个请求的 decode 在轮流吐 token），气氛流畅。
+  这时上来一道<strong>巨无霸大餐</strong>（32k token 的长 prompt）。笨办法是：让一个人<strong>把整盘菜一口塞进嘴里</strong>——
+  他得埋头猛嚼几十秒，这期间<strong>谁也插不上话</strong>，整桌的对话被他一个人噎停了。
+  聪明办法是<strong>把大餐切成小口、一口一口吃，同时还能继续聊天</strong>：每一轮只咽下<strong>一小口（一个 chunk）</strong>，
+  嚼一下、说句话，再来下一口。这样大餐照样吃得完，桌上的对话（别人的 decode）<strong>一刻也没断</strong>。
+  关键的纪律是：<strong>每一口的大小是固定上限的</strong>，绝不允许谁一口把嘴塞满、堵住所有人的发言。
+  代价也很实在：这顿大餐要吃好几轮才咽完（多花几拍、它自己的首字更慢一点），但换来的是<strong>满桌人的体验都顺滑</strong>——没人被噎停。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>把“大块 prefill”拆成“多拍小块”，再和 decode 混批，换全局延迟的平滑</strong>。
+  谁来切？正是上一课的 <span class="inline">PrefillAdder</span>（第 20 课）。它握着一个 <strong>token 预算</strong>
+  （由服务器参数 <span class="mono">chunked_prefill_size</span> 设定每拍能吃多少 prefill token），
+  在 <span class="mono">add_one_req</span> 里逐个尝试塞请求：能整段塞下就整段塞，<strong>塞不下就只切下能装的前半段</strong>，剩下的留到下一拍续上。
+  于是一个 32k 的 prompt 会被切成若干 chunk，分布在连续好几拍里——它的 KV 缓存（第 4 课）<strong>一块一块地填</strong>，
+  只有当<strong>最后一块</strong>填完，这个请求才正式转入 decode、开始吐第一个 token。而这每一拍，调度器跑的都是<strong>混合批（mixed batch）</strong>：
+  里面既有“正在 prefill 某一块”的长请求，也有“正在 decode”的其他请求，事件循环（第 18 课）每拍照常推进。
+  再把镜头拉远：分块预填充和上一课的限流是同一枚硬币的两面——限流保证“别一拍吃太多”，分块保证“吃不下的也别整条噎着，切开慢慢来”。
+  它把一个会制造延迟尖峰的极端情况，驯化成一串平稳的小步，这正是 SGLang 在<strong>长短请求混跑</strong>的真实流量里依然顺滑的关键。
+顺带一提，分块也为后面更激进的架构埋下伏笔：既然 prefill 和 decode 的负载特性如此不同，能不能干脆把它们拆到<strong>不同的实例</strong>上各自优化？
+那就是第 45 课要讲的 PD 分离。而在单实例内部，分块预填充是把这两种负载<strong>和平共处</strong>的最朴素也最实用的办法。
+</div>
+
+<h2>问题：一头鲸鱼堵死整个泳池</h2>
+<p>
+先看不分块会发生什么。连续批处理（第 5 课）的美好前提是“每一拍都很快、批里大家轮流前进”。
+可一旦队首挤进一个 32k token 的 prefill，而你让它<strong>一拍算完</strong>，这一拍的前向计算量就暴涨几十倍——
+GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求只能干等</strong>：它们本该每一拍吐一个 token，现在却要陪着这头鲸鱼一起卡住。
+对用户的直接观感就是：正在流式输出的回答<strong>突然顿住</strong>（ITL 尖峰），新请求的首字延迟也被拖长（TTFT 尖峰，第 8 课）。
+一个超长请求，毁掉了一整批人的体验。这不是显存放不下的问题——KV 槽位也许够；这是<strong>“一拍算太多”</strong>的问题，
+是时间维度上的拥塞。这里值得多想一层：连续批处理之所以高效，靠的是“每一拍都短、批里大家齐步走”，
+一旦某一拍因为一个巨型 prefill 而变得奇长，整条流水线的节奏就被打乱——后面所有拍都要为这一拍的失衡买单。
+更糟的是，线上流量往往<strong>长短混杂</strong>：99% 是几百 token 的短请求，偶尔混进一个几万 token 的长文档，
+而恰恰是这种偶发的长请求，会周期性地制造延迟毛刺，让 P99 延迟变得难看。分块预填充要解决的，正是这种“一条大鱼把整池水搅停”的尖峰。
+</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ 一拍整段 prefill（尖峰）</h4><p>32k token 在<strong>单拍</strong>算完：这一步巨大无比，独占 GPU 几十毫秒。批里其他请求的 decode <strong>全部 stall</strong>，token 吐不出来。TTFT/ITL <strong>瞬间飙升</strong>（第 8 课），用户看到输出顿住。一头鲸鱼堵死整池。</p></div>
+  <div class="col"><h4>✅ 分块 prefill（平滑）</h4><p>32k 被切成<strong>固定大小的 chunk</strong>，分摊到好几拍。每拍只算一个 chunk + <strong>混入大家的 decode</strong>，没有哪一拍巨大。所有人的 token <strong>持续流动</strong>，延迟平稳。多花几拍，换来<strong>全局顺滑</strong>与更好的达标吞吐。</p></div>
+</div>
+
+<h2>怎么切：把 32k 拆成多拍小块</h2>
+<p>
+分块的机制朴素而有效：<span class="inline">PrefillAdder</span> 每拍都带着一个固定的 chunk token 预算（<span class="mono">rem_chunk_tokens</span>，源自 <span class="mono">chunked_prefill_size</span>）。
+为什么是“每拍都带着”？因为预算是<strong>每接一个请求就当场扣减</strong>的：这一拍可能先塞了几个短请求的整段 prefill，
+剩下的预算才轮到队首那个长请求，于是它能切多大的一块，取决于<strong>这一拍前面已经被吃掉了多少</strong>。
+当一个请求的待算 token 数 <span class="mono">input_tokens</span> <strong>小于等于</strong>剩余 chunk 预算时，整段一次塞完，走普通（非分块）路径；
+一旦 <strong>超过</strong>，就进入分块分支：只截取 <span class="mono">trunc_len</span> 这么多 token（按 <span class="mono">page_size</span> 向下对齐，保证页整齐），
+把这一段标记为本拍要算的范围（<span class="mono">set_extend_range</span>），其余留到后续。这个请求被记为 <span class="mono">new_chunked_req</span>，
+下一拍它会带着已经填好的前缀回来，从断点处<strong>接着切下一块</strong>。如此往复，prompt 的 KV 缓存一块一块累积，
+直到最后一块填完，它才脱离 prefill、转入 decode。这里有个容易忽略的细节：每一块都要<strong>按 page_size 向下对齐</strong>，
+因为 KV 缓存是按页（page）管理的（第 4/6 课），切在半页中间会破坏分页结构，所以宁可少切一点、也要切在页边界上。
+另一个细节是“前缀”的累积：第 2 拍开始，这个请求的 <span class="mono">prefix_indices</span> 已经包含了前面几块算好的 KV，
+于是它每拍真正要算的只是“新的一块”，而不是从头重算——这和 RadixAttention 的前缀复用（第 7 课）是同一种“算过的不再算”的思想。
+下面这张图把一个 32k 的 prompt 在连续几拍里的切块过程画了出来。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>第 1 拍：chunk #1</h4><p>取队首的 32k prompt，<span class="mono">input_tokens &gt; rem_chunk_tokens</span> → 只截 <span class="mono">trunc_len</span>（如 8k，按 page_size 对齐）。填好前 8k 的 KV，混着别人的 decode 一起跑。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>第 2 拍：chunk #2</h4><p>同一请求作为 <span class="mono">new_chunked_req</span> 回来，从第 8k 处接着切下一个 8k 块。又是一个有界小步，decode 照常流动。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>第 3…N 拍：继续</h4><p>一块接一块把 KV 填满（第 4 课）。每一拍都不大，没有哪一步独占 GPU——尖峰被彻底摊平。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>最后一块：转 decode</h4><p>当剩余 token 一拍能装下，走普通路径整段塞完。此刻 prompt 全部 prefill 完毕，请求正式开始吐第一个 token。</p></div></div>
+</div>
+
+<h2>混合批：一拍里 prefill 与 decode 同框</h2>
+<p>
+分块之所以能保住别人的延迟，关键在<strong>混合批</strong>：被切出来的那一个 prefill chunk，并不是单独占一拍，而是和一堆正在 decode 的请求<strong>挤在同一个批</strong>里前向。
+于是每一拍的工作量 = 一个有界的 prefill 块 + 全体在跑请求各自的一个 decode token，规模可控、节奏稳定。
+这也回答了“为什么不直接让长请求排到最后再跑”——那样它会饿死、首字延迟无限长；而分块让它<strong>边切边混</strong>，
+既稳步推进自己的 prefill，又不抢光别人的吞吐。这里还藏着一个调度上的巧思：混合批让 GPU 在同一次前向里<strong>既做计算密集的 prefill、又做访存密集的 decode</strong>，
+两种负载的特性正好互补——prefill 吃算力、decode 吃显存带宽，混在一起反而能把 GPU 的算力和带宽都用得更满，而不是让某一种资源闲着。
+这也是为什么 SGLang 默认就开启分块预填充：它几乎是“免费的午餐”，既削平了延迟尖峰，又顺手提高了硬件利用率。
+下面这张图画的就是某一拍混合批的构成：高亮格是那个长请求的<strong>一个 prefill chunk</strong>，
+其余普通格是各个请求的 <strong>decode</strong>。chunk 的大小（高亮格的“宽度”）由 <span class="mono">chunked_prefill_size</span> 决定，正是平滑与步数之间那把可调的旋钮。
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">某一拍的混合批：1 个 prefill chunk（高亮）+ 多个 decode 同批前向</div>
+  <div class="cells">
+    <span class="lab">成员</span><span class="cell hl">长请求 · chunk#k</span><span class="cell">R2 decode</span><span class="cell">R3 decode</span><span class="cell">R4 decode</span><span class="cell">R5 decode</span><span class="sep"></span><span class="q">混合批</span>
+  </div>
+  <div class="cells">
+    <span class="lab">本拍干啥</span><span class="cell hl">填 8k KV</span><span class="cell">吐 1 token</span><span class="cell">吐 1 token</span><span class="cell">吐 1 token</span><span class="cell">吐 1 token</span><span class="sep"></span><span class="q">有界 + 流动</span>
+  </div>
+  <div class="cells">
+    <span class="lab">下一拍</span><span class="cell hl">chunk#k+1</span><span class="cell">继续 decode</span><span class="cell">继续 decode</span><span class="cell">继续 decode</span><span class="cell">继续 decode</span><span class="sep"></span><span class="q">节奏稳定</span>
+  </div>
+</div>
+
+<h2>取舍：chunk 大小是那把旋钮</h2>
+<p>
+分块不是免费的：它把一个 prefill 拆成多拍，<strong>总步数变多</strong>，那头鲸鱼自己的 TTFT 也被摊到好几拍、<strong>首字略慢</strong>。
+但换来的是<strong>所有人</strong>的延迟都平滑、达标吞吐（goodput-under-SLA）更高——在长短请求混跑的真实负载里，这笔买卖几乎总是值的。
+而 <span class="mono">chunked_prefill_size</span> 就是调这笔买卖的旋钮：<strong>切得越小</strong>，每拍 prefill 越轻、decode 越顺滑，但步数更多、长请求首字更慢、固定开销摊得更多；
+<strong>切得越大</strong>，步数更少、长请求更快收尾，但每拍更重、尖峰风险回升（退回第 8 课的吞吐/延迟权衡）。
+没有放之四海的最优值——它取决于你的延迟 SLA 和长短请求的比例。一个实用的心法是：<strong>先按你能接受的最坏单拍延迟反推 chunk 大小</strong>——
+你希望每一拍的 decode 顿挫不超过多少毫秒，就把 prefill 块控制在对应的 token 量级；再根据长请求占比微调。
+还要记得，chunk 太小也并非全是好处：步数变多意味着<strong>固定开销</strong>（每拍的组批、采样、内核启动等，第 21 课）被反复摊销，
+极端情况下调度本身的开销会反过来吃掉一部分收益。所以这把旋钮的最佳点，往往落在“足够小到不制造尖峰、又足够大到不浪费步数”的中间地带。下面这张表把旋钮的两端效果摆在一起。
+</p>
+
+<table class="t">
+  <tr><th>chunk 大小</th><th>每拍 prefill</th><th>decode 平滑度</th><th>总步数 / 长请求 TTFT</th><th>适用</th></tr>
+  <tr><td class="mono">偏小</td><td>轻、有界</td><td><strong>很顺滑</strong>，尖峰小</td><td>步数多、长请求首字更慢</td><td>延迟敏感、decode 密集</td></tr>
+  <tr><td class="mono">偏大</td><td>重、接近整段</td><td>较差，<strong>尖峰回升</strong></td><td>步数少、长请求更快收尾</td><td>吞吐优先、长请求为主</td></tr>
+  <tr><td class="mono">关闭分块</td><td>整段一口吃</td><td><strong>最差</strong>，一拍 stall 所有人</td><td>步数最少、但延迟炸裂</td><td>几乎不推荐（短 prompt 才无所谓）</td></tr>
+</table>
+
+<h2>读源码：add_one_req 里的切块判断</h2>
+<p>
+分块的真身在 <span class="mono">schedule_policy.py</span> 的 <span class="inline">PrefillAdder.add_one_req</span>。
+它先算出本请求要吃多少 token，做完 token/显存预算检查后，用一个 <span class="mono">if / else</span> 决定：能整段塞就整段，
+否则进入 <strong>chunked prefill</strong> 分支，把 <span class="mono">trunc_len</span> 按 <span class="mono">page_size</span> 向下取整，
+只提交这一块、并把请求记为 <span class="mono">new_chunked_req</span> 等下一拍续上。读这段源码时，请抓住三个关键点：
+一是 <span class="mono">rem_chunk_tokens</span> 为 <span class="kw">None</span> 表示没开分块，此时整条 prompt 一拍算完；
+二是分块分支里那行 <span class="mono">// page_size * page_size</span> 就是“向下对齐到页边界”的惯用写法，保证不切在半页中间；
+三是 <span class="mono">new_chunked_req</span> 这个字段是“续上”的关键——调度器靠它在下一拍认出“这是上一拍没切完的那个请求”，从断点继续。下面截取最能说明问题的几行。
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::PrefillAdder.add_one_req</span><span class="ln">切块判断</span></div>
+<pre><span class="cm"># 整段能装下(input_tokens ≤ 剩余 chunk 预算) → 一次塞完，不切</span>
+<span class="kw">elif</span> self.rem_chunk_tokens <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> input_tokens &lt;= self.rem_chunk_tokens:
+    req.set_extend_range(<span class="cm"># 提交整条 prompt 这一拍算完</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.full_untruncated_fill_ids))
+    self.can_run_list.append(req)
+<span class="kw">else</span>:                                            <span class="cm"># 装不下 → 分块预填充</span>
+    trunc_len = self.rem_chunk_tokens // self.page_size * self.page_size  <span class="cm"># 按页对齐截断</span>
+    <span class="kw">if</span> trunc_len &lt;= 0:
+        <span class="kw">return</span> AddReqResult.OTHER
+    req.set_extend_range(<span class="cm"># 只算前 trunc_len 个 token，其余下一拍续</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.prefix_indices) + trunc_len)
+    self.can_run_list.append(req)
+    self.new_chunked_req = req                    <span class="cm"># 记住它，下一拍接着切下一块</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>要解决的问题</strong>：一个超长 prompt（如 32k）若在<strong>一拍里整段 prefill</strong>，会独占 GPU、让批里所有 decode 请求 <strong>stall</strong>，造成 TTFT/ITL 延迟尖峰（第 8 课）。一头鲸鱼堵死整池。</li>
+    <li><strong>分块的做法</strong>：把大 prefill 切成<strong>固定大小的 token 块</strong>（由 <span class="mono">chunked_prefill_size</span> 设定），分摊到<strong>多拍</strong>，并和别人的 decode <strong>混在同一个批</strong>里跑——没有哪一拍巨大，所有人的 token 持续流动。</li>
+    <li><strong>谁来切</strong>：<span class="inline">PrefillAdder</span>（第 20 课）在 <span class="mono">add_one_req</span> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<span class="mono">trunc_len</span> 按 page 对齐），记为 <span class="mono">new_chunked_req</span> 下一拍续；KV 一块块填（第 4 课），最后一块填完才转 decode。</li>
+    <li><strong>取舍与旋钮</strong>：分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，但换来<strong>全局延迟平滑</strong>与更高的达标吞吐。<span class="mono">chunked_prefill_size</span> 越小越顺滑但步数多，越大步数少但尖峰回升（第 8 课的权衡）。</li>
+    <li><strong>一句话收尾</strong>：别让一个长请求把一拍撑爆——把它切块、混着 decode 慢慢喂；用多花的几拍，换满桌人的顺滑。这也是后续 PD 分离（第 45 课）把 prefill 与 decode 彻底拆到不同实例的动机起点。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 为什么不分块时，一个 32k token 的超长 prompt 会成为大问题？</div>
+  <ol class="opts">
+    <li>因为 32k token 的 KV 缓存一定放不进显存，必然 OOM</li>
+    <li>因为调度器无法对超过 4k token 的请求排序</li>
+    <li>因为它若在<strong>一拍里整段 prefill</strong>，这一步的前向计算量暴涨、<strong>独占 GPU 几十毫秒</strong>，批里所有正在 decode 的请求<strong>全部 stall</strong>、token 吐不出来，于是 TTFT/ITL 延迟尖峰（第 8 课）——一头鲸鱼堵死整池</li>
+    <li>因为长 prompt 会让采样温度失效，输出乱码</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。这是<strong>时间维度的拥塞</strong>，不是显存问题——KV 槽位也许够，但“一拍算太多”让 GPU 被一个请求独占，批里其他人的 decode 只能干等。用户观感就是流式输出突然顿住（ITL 尖峰）、新请求首字变慢（TTFT 尖峰）。分块正是为摊平这种尖峰而生。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 分块预填充<strong>具体怎么工作</strong>，才能既推进长请求、又不卡住别人？</div>
+  <ol class="opts">
+    <li>为长请求单独开一张 GPU，和 decode 物理隔离</li>
+    <li>把 prompt 压缩到 4k token 以内再一次性 prefill</li>
+    <li>把长请求挪到队列最末尾，等所有 decode 都结束再单独整段 prefill</li>
+    <li>把大 prefill 切成<strong>固定大小的 token 块</strong>（由 <code>chunked_prefill_size</code> 设定），分摊到<strong>多拍</strong>，并和别人的 decode <strong>混在同一个批</strong>里前向；KV 一块块填，只有<strong>最后一块</strong>填完该请求才转入 decode</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。关键有二：① <strong>切块</strong>让每拍 prefill 有界、没有哪一步巨大；② <strong>混合批</strong>让这一个 chunk 和一堆 decode 同框前向，于是每拍 = 一个有界 prefill 块 + 全体各吐一个 token，规模可控、节奏稳定。排到最后会饿死长请求、首字延迟无限长，所以不可取。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <code>chunked_prefill_size</code> 这个旋钮调小或调大，分别意味着什么取舍？</div>
+  <ol class="opts">
+    <li><strong>调小</strong>：每拍 prefill 更轻、decode 更顺滑，但<strong>总步数更多</strong>、长请求自己的首字更慢；<strong>调大</strong>：步数更少、长请求更快收尾，但每拍更重、<strong>尖峰风险回升</strong>（退回第 8 课吞吐/延迟权衡）</li>
+    <li>它只控制日志频率，对性能没有影响</li>
+    <li>调小提升吞吐、调大降低吞吐，与延迟无关</li>
+    <li>它决定 KV 缓存的页大小（page_size），越大越省显存</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<code>chunked_prefill_size</code> 设定每拍能吃多少 prefill token，正是平滑与步数之间那把旋钮。没有放之四海的最优值——延迟敏感、decode 密集就偏小；吞吐优先、长请求为主就偏大。它控制的是“每一拍 prefill 的有界上限”，而非显存页大小或日志。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“吃巨无霸大餐还要继续聊天”的类比，完整讲清分块预填充。请逐一覆盖：①<strong>问题</strong>——一个 32k prompt 若一拍整段 prefill，会独占 GPU、让批里所有 decode <strong>stall</strong>，造成 TTFT/ITL 尖峰（第 8 课）；②<strong>做法</strong>——<code>PrefillAdder</code>（第 20 课）在 <code>add_one_req</code> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<code>trunc_len</code> 按 page 对齐）、记为 <code>new_chunked_req</code> 下一拍续，KV 一块块填（第 4 课），最后一块才转 decode；③<strong>混合批</strong>——这一个 chunk 和别人的 decode 同批前向，事件循环（第 18 课）照常推进。</li>
+    <li>讨论分块预填充的<strong>取舍</strong>与它在系统里的位置。分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，却换来<strong>全局延迟平滑</strong>与更高的达标吞吐（goodput-under-SLA）——请说明为什么在长短请求混跑的真实负载里这笔买卖通常值得，<code>chunked_prefill_size</code> 偏小/偏大各自的代价（联系第 8 课），以及为什么把 prefill 与 decode 混在一拍里仍有张力，从而引出 PD 分离（第 45 课）把两者彻底拆到不同实例的动机。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson we saw the scheduler's two-step move: order first, then throttle. This lesson zooms in on the trickiest throttling case: what happens when the head of the queue is a <strong>huge prompt</strong> (say a 32k-token document)?
+If you let it <strong>prefill entirely in ONE step</strong>, that step becomes a "whale"—it monopolizes the whole GPU for tens of milliseconds, and every other request that is <span class="inline">decoding</span> behind it <strong>stalls completely</strong>: nobody's tokens come out, and latency spikes (TTFT/ITL blow up, Lesson 8).
+<strong>Chunked prefill</strong> cuts that whale into <strong>fixed-size token chunks</strong>, spread over several steps, each step nibbling one small bite while <strong>mixed in the same batch</strong> with everyone else's decode. No step is enormous; everyone's tokens keep flowing.
+Remember one line: <strong>never let one long request blow up a step—chunk it and feed it slowly, mixed with decode</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Real-world analogy</div>
+  Picture this step's GPU as a <strong>lively dinner table</strong>. Everyone takes turns talking (each request's decode emits a token in turn), conversation flowing.
+  Then a <strong>giant meal</strong> arrives (a 32k-token prompt). The dumb move: have one person <strong>stuff the whole plate in their mouth at once</strong>—now they chew head-down for tens of seconds, during which <strong>nobody can get a word in</strong>; one person choked the whole table's chat.
+  The smart move is to <strong>eat the giant meal in small bites while still holding the conversation</strong>: each round you swallow just <strong>one bite (one chunk)</strong>, chew, say a line, then take the next bite. The meal still gets finished, and the table's chat (everyone else's decode) <strong>never stops</strong>.
+  The key discipline: <strong>each bite has a fixed size cap</strong>—nobody is ever allowed to cram their mouth full and block everyone's turn.
+  The cost is real too: the big meal takes several rounds to finish (a few extra steps, and its own first byte is slower), but in exchange <strong>the whole table stays smooth</strong>—nobody gets choked off.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  In one line: <strong>split a big prefill into many small per-step chunks, mix them with decode, and trade a few extra steps for globally smooth latency</strong>.
+  Who does the cutting? The very <span class="inline">PrefillAdder</span> from last lesson (Lesson 20). It holds a <strong>token budget</strong> (the server arg <span class="mono">chunked_prefill_size</span> sets how many prefill tokens fit per step) and, inside <span class="mono">add_one_req</span>, tries each request: if the whole thing fits, commit it; <strong>if it doesn't, slice off only the part that fits</strong> and leave the rest for the next step.
+  So a 32k prompt gets cut into several chunks across consecutive steps—its KV cache (Lesson 4) <strong>fills chunk by chunk</strong>, and only after the <strong>last chunk</strong> does that request switch into decode and emit its first token. And every such step runs a <strong>mixed batch</strong>: some requests prefilling a chunk, others decoding, with the event loop (Lesson 18) advancing as usual.
+  Pull back: chunked prefill and last lesson's throttling are two sides of one coin—throttling guarantees "don't eat too much in one step," chunking guarantees "what doesn't fit isn't choked down whole either; slice it and take it slow."
+  It tames an extreme that would otherwise spike latency into a stream of steady small steps—the key to SGLang staying smooth under <strong>mixed long/short traffic</strong>.
+</div>
+
+<h2>The problem: one whale clogs the whole pool</h2>
+<p>
+First, what happens without chunking. Continuous batching (Lesson 5) rests on a happy premise: "every step is fast, and the batch advances together."
+But the moment a 32k-token prefill jumps to the head and you make it <strong>finish in one step</strong>, that step's forward compute explodes tens of times over—
+the GPU is monopolized for tens of milliseconds, during which <strong>every other decode request in the batch just waits</strong>: they should emit one token per step, but now they stall alongside the whale.
+To the user this reads as a streaming answer that <strong>suddenly freezes</strong> (ITL spike), plus longer first-token latency for new requests (TTFT spike, Lesson 8).
+One overlong request ruined an entire batch's experience. This is not a "won't fit in memory" problem—KV slots may be plenty; it is a <strong>"too much compute in one step"</strong> problem,
+congestion along the time axis. Chunked prefill exists precisely to flatten this "one big fish stops the whole pool" spike.
+</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ One-step full prefill (spike)</h4><p>32k tokens finish in a <strong>single step</strong>: that step is enormous, monopolizing the GPU for tens of ms. Every other request's decode in the batch <strong>stalls</strong>, no tokens emitted. TTFT/ITL <strong>spike instantly</strong> (Lesson 8); users see output freeze. One whale clogs the pool.</p></div>
+  <div class="col"><h4>✅ Chunked prefill (smooth)</h4><p>The 32k is cut into <strong>fixed-size chunks</strong> over several steps. Each step computes one chunk + is <strong>mixed with everyone's decode</strong>; no step is huge. Everyone's tokens <strong>keep flowing</strong>, latency steady. A few extra steps buy <strong>global smoothness</strong> and better goodput-under-SLA.</p></div>
+</div>
+
+<h2>How to cut: split 32k into multi-step chunks</h2>
+<p>
+The mechanism is plain and effective: each step, <span class="inline">PrefillAdder</span> carries a fixed chunk-token budget (<span class="mono">rem_chunk_tokens</span>, derived from <span class="mono">chunked_prefill_size</span>).
+When a request's pending <span class="mono">input_tokens</span> is <strong>less than or equal to</strong> the remaining chunk budget, the whole thing is committed at once via the non-chunked path;
+once it <strong>exceeds</strong> it, the chunked branch kicks in: take only <span class="mono">trunc_len</span> tokens (floored to <span class="mono">page_size</span> for page alignment),
+mark that slice as this step's extend range (<span class="mono">set_extend_range</span>), and leave the rest. The request is recorded as <span class="mono">new_chunked_req</span>,
+and next step it returns with its filled prefix and <strong>slices the next chunk from the cut point</strong>. Round after round, the prompt's KV cache (Lesson 4) accumulates chunk by chunk,
+until the last chunk is filled and it finally leaves prefill and enters decode. The diagram below traces a 32k prompt being chunked across consecutive steps.
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Step 1: chunk #1</h4><p>Take the 32k prompt at the head; <span class="mono">input_tokens &gt; rem_chunk_tokens</span> → slice only <span class="mono">trunc_len</span> (e.g. 8k, page-aligned). Fill the first 8k of KV, running mixed with others' decode.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Step 2: chunk #2</h4><p>The same request returns as <span class="mono">new_chunked_req</span>, slicing the next 8k from offset 8k. Another bounded small step; decode keeps flowing.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Steps 3…N: continue</h4><p>Chunk after chunk fills the KV (Lesson 4). No step is large, none monopolizes the GPU—the spike is fully flattened.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Last chunk: enter decode</h4><p>When the remainder fits in one step, the non-chunked path commits it whole. The prompt is now fully prefilled, and the request emits its first token.</p></div></div>
+</div>
+
+<h2>Mixed batch: prefill and decode in the same step</h2>
+<p>
+The reason chunking protects others' latency is the <strong>mixed batch</strong>: the prefill chunk that was sliced off does not get a step to itself; it shares <strong>one batch</strong> with a crowd of decoding requests in the same forward pass.
+So each step's work = one bounded prefill chunk + one decode token from every running request—controlled in size, steady in rhythm.
+This also answers "why not just queue the long request last"—that would starve it, with unbounded first-token latency; chunking lets it <strong>slice-and-mix</strong>,
+making steady prefill progress without stealing everyone's throughput. The diagram below shows the makeup of one mixed-batch step: the highlighted cell is the long request's <strong>one prefill chunk</strong>,
+the rest are each request's <strong>decode</strong>. The chunk's size (the highlighted cell's "width") is set by <span class="mono">chunked_prefill_size</span>—the very knob between smoothness and step count.
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">One step's mixed batch: 1 prefill chunk (highlighted) + several decodes in the same forward</div>
+  <div class="cells">
+    <span class="lab">members</span><span class="cell hl">long req · chunk#k</span><span class="cell">R2 decode</span><span class="cell">R3 decode</span><span class="cell">R4 decode</span><span class="cell">R5 decode</span><span class="sep"></span><span class="q">mixed batch</span>
+  </div>
+  <div class="cells">
+    <span class="lab">this step</span><span class="cell hl">fill 8k KV</span><span class="cell">emit 1 tok</span><span class="cell">emit 1 tok</span><span class="cell">emit 1 tok</span><span class="cell">emit 1 tok</span><span class="sep"></span><span class="q">bounded + flowing</span>
+  </div>
+  <div class="cells">
+    <span class="lab">next step</span><span class="cell hl">chunk#k+1</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="sep"></span><span class="q">steady rhythm</span>
+  </div>
+</div>
+
+<h2>The trade-off: chunk size is the knob</h2>
+<p>
+Chunking isn't free: it splits a prefill across steps, so <strong>total step count rises</strong>, and the whale's own TTFT is spread over several steps—its <strong>first byte is a bit slower</strong>.
+What you buy is smooth latency for <strong>everyone</strong> and higher goodput-under-SLA—in real mixed long/short workloads this is almost always worth it.
+And <span class="mono">chunked_prefill_size</span> is the knob: <strong>smaller</strong> means lighter prefill per step and smoother decode, but more steps, a slower whale first-byte, and more fixed overhead amortized;
+<strong>larger</strong> means fewer steps and a faster whale finish, but heavier steps and the spike risk creeping back (back to Lesson 8's throughput/latency trade-off).
+There's no universal optimum—it depends on your latency SLA and your long/short mix. The table lays the two ends side by side.
+</p>
+
+<table class="t">
+  <tr><th>chunk size</th><th>prefill per step</th><th>decode smoothness</th><th>total steps / whale TTFT</th><th>fits</th></tr>
+  <tr><td class="mono">smaller</td><td>light, bounded</td><td><strong>very smooth</strong>, tiny spikes</td><td>more steps, slower whale first byte</td><td>latency-sensitive, decode-heavy</td></tr>
+  <tr><td class="mono">larger</td><td>heavy, near-whole</td><td>worse, <strong>spike returns</strong></td><td>fewer steps, faster whale finish</td><td>throughput-first, long-prompt-heavy</td></tr>
+  <tr><td class="mono">chunking off</td><td>whole in one bite</td><td><strong>worst</strong>, one step stalls all</td><td>fewest steps, but latency blows up</td><td>rarely advised (fine only for short prompts)</td></tr>
+</table>
+
+<h2>Read the source: the chunk decision in add_one_req</h2>
+<p>
+Chunking lives in <span class="mono">schedule_policy.py</span>'s <span class="inline">PrefillAdder.add_one_req</span>.
+It first computes how many tokens the request needs, runs the token/memory budget checks, then an <span class="mono">if / else</span> decides: commit the whole thing if it fits,
+otherwise take the <strong>chunked prefill</strong> branch—floor <span class="mono">trunc_len</span> to <span class="mono">page_size</span>,
+commit only that slice, and record the request as <span class="mono">new_chunked_req</span> to continue next step. The most telling lines follow.
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::PrefillAdder.add_one_req</span><span class="ln">chunk decision</span></div>
+<pre><span class="cm"># whole fits (input_tokens ≤ remaining chunk budget) → commit at once, no chunking</span>
+<span class="kw">elif</span> self.rem_chunk_tokens <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> input_tokens &lt;= self.rem_chunk_tokens:
+    req.set_extend_range(<span class="cm"># commit the whole prompt this step</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.full_untruncated_fill_ids))
+    self.can_run_list.append(req)
+<span class="kw">else</span>:                                            <span class="cm"># doesn't fit → chunked prefill</span>
+    trunc_len = self.rem_chunk_tokens // self.page_size * self.page_size  <span class="cm"># page-aligned cut</span>
+    <span class="kw">if</span> trunc_len &lt;= 0:
+        <span class="kw">return</span> AddReqResult.OTHER
+    req.set_extend_range(<span class="cm"># compute only the first trunc_len tokens; rest next step</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.prefix_indices) + trunc_len)
+    self.can_run_list.append(req)
+    self.new_chunked_req = req                    <span class="cm"># remember it; slice the next chunk next step</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The problem</strong>: a huge prompt (e.g. 32k) prefilled <strong>whole in one step</strong> monopolizes the GPU and <strong>stalls every decode</strong> in the batch, causing TTFT/ITL latency spikes (Lesson 8). One whale clogs the pool.</li>
+    <li><strong>The fix</strong>: split the big prefill into <strong>fixed-size token chunks</strong> (set by <span class="mono">chunked_prefill_size</span>) across <strong>several steps</strong>, <strong>mixed in the same batch</strong> with others' decode—no step is huge, everyone's tokens keep flowing.</li>
+    <li><strong>Who cuts</strong>: <span class="inline">PrefillAdder</span> (Lesson 20) enforces the per-step token budget in <span class="mono">add_one_req</span>, clamping a non-fitting request to the remaining budget (<span class="mono">trunc_len</span>, page-aligned) and recording <span class="mono">new_chunked_req</span> for next step; KV fills chunk by chunk (Lesson 4), and only after the last chunk does it enter decode.</li>
+    <li><strong>Trade-off &amp; knob</strong>: chunking costs <strong>more steps</strong> and a thinner whale TTFT, buying <strong>smooth global latency</strong> and higher goodput-under-SLA. <span class="mono">chunked_prefill_size</span> smaller = smoother but more steps; larger = fewer steps but the spike returns (Lesson 8's trade-off).</li>
+    <li><strong>One-line close</strong>: never let one long request blow up a step—chunk it and feed it slowly, mixed with decode; spend a few extra steps to keep the whole table smooth. This is also the seed of the motivation for PD disaggregation (Lesson 45), which splits prefill and decode onto separate instances entirely.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Without chunking, why does a 32k-token huge prompt become a big problem?</div>
+  <ol class="opts">
+    <li>Because a 32k-token KV cache can never fit in VRAM and must OOM</li>
+    <li>Because the scheduler cannot order requests longer than 4k tokens</li>
+    <li>Because if it is <strong>prefilled whole in one step</strong>, that step's forward compute explodes and <strong>monopolizes the GPU for tens of ms</strong>; every decoding request in the batch <strong>stalls</strong>, no tokens emitted, so TTFT/ITL spike (Lesson 8)—one whale clogs the whole pool</li>
+    <li>Because a long prompt breaks sampling temperature, producing garbage output</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. It's <strong>congestion along the time axis</strong>, not a memory problem—KV slots may be plenty, but 'too much compute in one step' lets one request monopolize the GPU while everyone else's decode waits. Users see streaming freeze (ITL spike) and slower first tokens (TTFT spike). Chunking exists to flatten exactly this spike.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. How does chunked prefill <strong>actually work</strong> so it advances the long request without stalling others?</div>
+  <ol class="opts">
+    <li>Give the long request its own dedicated GPU, physically isolated from decode</li>
+    <li>Compress the prompt to under 4k tokens then prefill it all at once</li>
+    <li>Move the long request to the very end of the queue and prefill it whole only after all decodes finish</li>
+    <li>Split the big prefill into <strong>fixed-size token chunks</strong> (set by <code>chunked_prefill_size</code>) across <strong>several steps</strong>, forwarded <strong>in the same batch mixed with</strong> others' decode; KV fills chunk by chunk, and only after the <strong>last chunk</strong> does the request enter decode</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Two keys: (1) <strong>chunking</strong> bounds prefill per step so no step is huge; (2) the <strong>mixed batch</strong> forwards that one chunk together with a crowd of decodes, so each step = one bounded prefill chunk + one token from everyone—controlled and steady. Queuing it last would starve the long request with unbounded first-token latency, so that's no good.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Tuning the <code>chunked_prefill_size</code> knob smaller vs larger means what trade-off?</div>
+  <ol class="opts">
+    <li><strong>Smaller</strong>: lighter prefill per step and smoother decode, but <strong>more total steps</strong> and a slower whale first byte; <strong>larger</strong>: fewer steps and a faster whale finish, but heavier steps and <strong>the spike risk returns</strong> (back to Lesson 8's throughput/latency trade-off)</li>
+    <li>It only controls logging frequency and has no performance effect</li>
+    <li>Smaller raises throughput, larger lowers it, with no latency effect</li>
+    <li>It sets the KV cache page size, where larger saves more VRAM</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <code>chunked_prefill_size</code> sets how many prefill tokens fit per step—the very knob between smoothness and step count. There's no universal optimum: go smaller for latency-sensitive, decode-heavy loads; larger for throughput-first, long-prompt-heavy ones. It controls the bounded per-step prefill cap, not the VRAM page size or logging.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'eating a giant meal while still chatting' analogy, fully explain chunked prefill. Cover each: (1) the <strong>problem</strong>—a 32k prompt prefilled whole in one step monopolizes the GPU and <strong>stalls</strong> every decode in the batch, causing TTFT/ITL spikes (Lesson 8); (2) the <strong>fix</strong>—<code>PrefillAdder</code> (Lesson 20) enforces the per-step token budget in <code>add_one_req</code>, clamping a non-fitting request to the remaining budget (<code>trunc_len</code>, page-aligned), recording <code>new_chunked_req</code> for next step, filling KV chunk by chunk (Lesson 4), entering decode only after the last chunk; (3) the <strong>mixed batch</strong>—that one chunk is forwarded alongside others' decode, the event loop (Lesson 18) advancing as usual.</li>
+    <li>Discuss chunked prefill's <strong>trade-off</strong> and its place in the system. Chunking costs <strong>a few extra steps</strong> and thins the whale's own TTFT, but buys <strong>smooth global latency</strong> and higher goodput-under-SLA—explain why this is usually worth it in real mixed long/short workloads, the costs of <code>chunked_prefill_size</code> being too small vs too large (tie to Lesson 8), and why mixing prefill and decode in one step still has tension, motivating PD disaggregation (Lesson 45) that splits the two onto separate instances entirely.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="21-zero-overhead-overlap-scheduler.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">零开销重叠调度器</span><span class="lang-en">Zero-overhead overlap scheduler</span></div></a><a class="next" href="23-dp-controller-and-pp-scheduling.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">DP 控制器与 PP 调度</span><span class="lang-en">DP controller &amp; PP scheduling</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

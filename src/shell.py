@@ -81,6 +81,18 @@ PAGES = [
      "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
     ("17-detokenizer-and-streaming.html", "Detokenizer 与流式输出", "Detokenizer & streaming",
      "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
+    ("18-scheduler-event-loop.html", "调度器事件循环", "The scheduler event loop",
+     "第五部分 · 调度器", "Part 5 · The scheduler"),
+    ("19-req-and-schedule-batch.html", "Req 与 ScheduleBatch", "Req & ScheduleBatch",
+     "第五部分 · 调度器", "Part 5 · The scheduler"),
+    ("20-schedule-policy.html", "调度策略", "The schedule policy",
+     "第五部分 · 调度器", "Part 5 · The scheduler"),
+    ("21-zero-overhead-overlap-scheduler.html", "零开销重叠调度器", "Zero-overhead overlap scheduler",
+     "第五部分 · 调度器", "Part 5 · The scheduler"),
+    ("22-chunked-prefill.html", "分块预填充", "Chunked prefill",
+     "第五部分 · 调度器", "Part 5 · The scheduler"),
+    ("23-dp-controller-and-pp-scheduling.html", "DP 控制器与 PP 调度", "DP controller & PP scheduling",
+     "第五部分 · 调度器", "Part 5 · The scheduler"),
 ]
 
 
@@ -564,6 +576,18 @@ SUBTITLES = {
                                    "the IPC type system · GenerateReqInput→Tokenized→batch outputs"),
     "17-detokenizer-and-streaming.html": ("增量反分词 · sent_offset 只发新增片段 · SSE",
                                           "incremental detok · sent_offset emits only the new slice · SSE"),
+    "18-scheduler-event-loop.html": ("引擎心跳 · recv→schedule→forward→output 的主循环",
+                                     "the engine's heartbeat · recv→schedule→forward→output loop"),
+    "19-req-and-schedule-batch.html": ("请求状态机 Req · 一步的批 ScheduleBatch（extend/decode）",
+                                       "the Req state machine · ScheduleBatch for one step (extend/decode)"),
+    "20-schedule-policy.html": ("谁先跑 · 缓存感知 LPM / FCFS / 优先级 · PrefillAdder 预算",
+                                "who runs next · cache-aware LPM / FCFS / priority · PrefillAdder budget"),
+    "21-zero-overhead-overlap-scheduler.html": ("CPU 调度与 GPU 计算重叠 · GPU 几乎不空转（招牌）",
+                                                "overlap CPU scheduling with GPU compute · GPU rarely idles (signature)"),
+    "22-chunked-prefill.html": ("长 prompt 分块 · 与 decode 混批 · 抹平延迟尖峰",
+                                "split long prefills into chunks · mix with decode · smooth latency spikes"),
+    "23-dp-controller-and-pp-scheduling.html": ("DP 控制器分发到 N 个调度器副本 · PP 流水线跨阶段",
+                                                "DP controller fans out to N scheduler replicas · PP pipelines across stages"),
 }
 
 

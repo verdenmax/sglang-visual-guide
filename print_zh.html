@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang 图解学习指南 - 打印版</h1>
-<p style="color:var(--muted)">全 17 课 - 逐课分页。用浏览器 Ctrl/Cmd+P 即可导出 PDF。</p>
+<p style="color:var(--muted)">全 23 课 - 逐课分页。用浏览器 Ctrl/Cmd+P 即可导出 PDF。</p>
 <div class="print-toc"><h2>目录</h2>
 <ol>
   <li>SGLang 是什么</li>
@@ -353,6 +353,12 @@ details[open] > summary { list-style: none; }
   <li>OpenAI/Anthropic/Ollama 兼容层</li>
   <li>IO 结构与进程间通信</li>
   <li>Detokenizer 与流式输出</li>
+  <li>调度器事件循环</li>
+  <li>Req 与 ScheduleBatch</li>
+  <li>调度策略</li>
+  <li>零开销重叠调度器</li>
+  <li>分块预填充</li>
+  <li>DP 控制器与 PP 调度</li>
 </ol></div>
 <section class="lesson-print">
 <h1>SGLang 是什么</h1>
@@ -3877,6 +3883,1354 @@ output_strs.append(incremental_output)</pre>
   <ul>
     <li>用“同声传译只说新增的词、并等完整词再出声”的类比，完整描述一条流式请求从 GPU 吐出 token id 到客户端看到“打字机”文字的全过程。请点明：<code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code>（第 16 课）的消息往返、反分词器为什么把结果发回 TokenizerManager（第 14 课）而不是直接给客户端、<code>sent_offset</code> 如何保证“只增不重”，以及不完整 UTF-8 为什么要先攒着。</li>
     <li>生成什么时候算结束？请列出三种停止条件（EOS token / 停止串 / max_new_tokens，详见第 28 课），分别说明它们对最终输出的影响，并解释反分词器在结束时为什么要调用 <code>trim_matched_stop</code> 把停止串裁掉、再发出最后一段 <code>output_str[sent_offset:]</code>。最后说明 <strong>HTTP 服务路由</strong>是如何用 <code>StreamingResponse</code>（<code>text/event-stream</code>）把 TokenizerManager 逐条 yield 的片段变成 SSE “打字机”的（离线 Engine 则不走 SSE）。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>调度器事件循环</h1>
+
+<p class="lead">
+欢迎来到 Part 5——整台引擎的<strong>心脏</strong>。前面四个 Part 我们看完了请求<strong>怎么进来</strong>（HTTP、分词、IPC）、
+又<strong>怎么出去</strong>（反分词、流式）。现在镜头对准中间那个真正<strong>做决策</strong>的角色：<strong>调度器（Scheduler）</strong>。
+它跑在自己<strong>独立的子进程</strong>里，核心是一段叫 <span class="inline">event_loop_normal</span> 的<strong>无限循环</strong>——
+这就是引擎的<strong>心跳</strong>。每跳动一次（我们叫一个 <strong>step</strong>），它都把"收请求 → 入队 → 组批 → 前向 → 处理结果"五件事
+飞快地做一遍，然后立刻进入下一跳。这一课，我们就趴在这颗心脏上，听清它每一次跳动的节奏。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把调度器想成<strong>机场塔台的雷达扫描（radar sweep）</strong>。雷达每转一圈，管制员都重复同一套动作：先<strong>接收新到达的航班</strong>、
+  把它们纳入<strong>盘旋等待区（holding pattern）</strong>；再<strong>决定这一圈让哪些飞机起飞/降落</strong>（跑道容量有限，不能全放）；
+  接着<strong>放行</strong>这些飞机、看着它们执行；最后<strong>处理刚发生的结果</strong>——谁落地了就清出跑道、谁飞走了就销号。然后雷达<strong>转下一圈</strong>，
+  周而复始。塔台<strong>只有一个</strong>、<strong>不亲自开飞机</strong>，但<strong>每一圈的调度全由它拍板</strong>。调度器的事件循环，就是这道永不停歇的雷达扫描。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>调度器 = 一个跑在独立子进程里、每秒钟跳动成千上万次的无限循环</strong>。每一次跳动（step），
+  它依次做五件事——<span class="inline">recv_requests</span>（收）、<span class="inline">process_input_requests</span>（入队）、
+  <span class="inline">get_next_batch_to_run</span>（组批）、<span class="inline">run_batch</span>（前向）、
+  <span class="inline">process_batch_result</span>（收尾）。它是引擎里<strong>唯一的决策者</strong>：独占 KV 缓存的<strong>账本</strong>，
+  决定每一步<strong>这一批由谁组成</strong>。它<strong>只决策、不计算</strong>——真正的 GPU 矩阵乘交给 TpWorker→ModelRunner（第 24 课）。
+  循环越短、转得越快，吞吐就越高，这也正是后面<strong>重叠调度器</strong>（第 21 课）要优化的根。
+</div>
+
+<h2>心跳的五个动作：一个 step 里发生了什么</h2>
+<p>事件循环本质是 <span class="inline">while True</span>。抛开退出与空闲分支，每一轮（一个 step）从头到尾就是<strong>五步流水</strong>。
+记住这个顺序，你就拿到了理解整个 Part 5 的<strong>主索引</strong>——后面每一课都是在把其中某一步<strong>放大讲细</strong>：</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests()——收</h4><p>从 ZMQ 收件箱里<strong>取空</strong>所有新到的 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课，由 TokenizerManager 发来）。没有就拿到空列表，绝不阻塞。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>process_input_requests()——入队</h4><p>把新请求挂进<strong>等待队列（waiting queue）</strong>；顺手处理控制消息（abort 中止 / flush 清缓存 / 更新权重等）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>get_next_batch_to_run()——组批</h4><p>组建<strong>这一步</strong>的批：预算够就从等待队列里组一个 <strong>prefill 批</strong>，否则把在跑的请求组成 <strong>decode 批</strong>（第 19/20 课）。连续批处理（第 5 课）就在这里<strong>每步重演</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>run_batch()——前向</h4><p>把这一批交给 TpWorker → <span class="mono">ModelRunner.forward</span> 上 GPU 跑一遍（第 24 课），拿到 logits 后<strong>采样</strong>出新 token。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>process_batch_result()——收尾</h4><p>把新 token 追加到各请求；检测<strong>完成</strong>的（命中停止条件）；<strong>释放它们的 KV 槽位</strong>；把输出发给 DetokenizerManager（第 17 课）。然后<strong>回到第 1 步</strong>。</p></div></div>
+</div>
+
+<p>这五步<strong>极短</strong>，却每秒钟跑成千上万遍。关键在于它是一条<strong>闭环</strong>：第 5 步收尾完，立刻又回到第 1 步收新请求——
+没有"等这批彻底跑完再接客"的概念。正因为每一圈都重新走第 3 步 <span class="inline">get_next_batch_to_run</span>，
+<strong>批才会被一遍遍重新组建</strong>，完成的请求当场离场、等待的请求即刻补入——这正是第 5 课<strong>连续批处理</strong>在物理层面发生的地方。</p>
+
+<p>还要厘清两个常被忽略的细节。其一，<strong>第 1 步 <span class="inline">recv_requests</span> 绝不阻塞</strong>：它只是把收件箱里<strong>此刻已到</strong>的请求一次性取空，
+收件箱空就拿到一个空列表、循环照常往下走。这一点至关重要——如果"收请求"会卡住等新请求，那已经在跑的几十条请求就会<strong>跟着一起被冻住</strong>，
+GPU 立刻饿死。所以事件循环采用的是<strong>轮询（poll）而非等待（block）</strong>的姿态：每圈瞥一眼收件箱，有就收、没有就算了，绝不为新请求耽误老请求。
+其二，当 <span class="inline">get_next_batch_to_run</span> 返回空（既没有 prefill 也没有 decode 要做，即服务器此刻空闲）时，
+循环不会傻转空圈，而是走 <span class="inline">on_idle</span> 分支做一次<strong>自检与状态回收</strong>——比如校验 KV 账本有没有泄漏、把空出来的缓存归位，
+为下一波流量做好准备。这就是代码里那个 <span class="inline">else</span> 分支的意义。</p>
+
+<p>把镜头再拉远一点接回第 2 课的<strong>三进程模型</strong>：TokenizerManager 在一个进程把文字变 token，Scheduler（连同 TpWorker）在中间这个进程做调度与前向，
+DetokenizerManager 在第三个进程把 token 拼回文字。本课讲的事件循环，就是<strong>中间这个进程的全部生命</strong>——它启动后就一头扎进 <span class="inline">while True</span>，
+直到 <span class="inline">gracefully_exit</span> 被置位才优雅退出。换句话说，<strong>"调度器进程"约等于"这段事件循环"</strong>：进程在，循环就在转；循环停，进程也就该收摊了。
+理解这一点，你就明白为什么说它是引擎的"心脏"——心脏一停，整台机器就死了。</p>
+
+<h2>把循环画成一张图：请求在心脏里的流动</h2>
+<p>如果把一个 step 里"数据怎么流"画出来，就是下面这条流水线：请求从收件箱进来，经调度组成批，上 GPU 前向，
+结果分两路——新 token 发去反分词、完成的请求清退释放显存——然后<strong>循环回到开头</strong>。注意那条<strong>回环箭头</strong>：
+它才是"心跳"的灵魂，意味着这条流水线<strong>永不停机</strong>。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">收件箱</div><div class="nd">ZMQ 收新请求<br>recv_requests</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">调度组批</div><div class="nd">get_next_batch<br>_to_run（决策）</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">GPU 前向</div><div class="nd">run_batch<br>forward+采样</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">结果收尾</div><div class="nd">追加 token<br>清退/发反分词</div></div>
+  <div class="arrow">↺</div>
+  <div class="node hl"><div class="nt">下一跳</div><div class="nd">回到收件箱<br>step + 1</div></div>
+</div>
+
+<p>这张图里只有<strong>"调度组批"</strong>那一格是<strong>纯 CPU 的决策</strong>，<strong>"GPU 前向"</strong>那一格才是真正烧算力的计算。
+这个区分至关重要：CPU 在组批时，GPU 是<strong>闲着</strong>的；GPU 在前向时，CPU 也<strong>闲着</strong>。
+朴素的 <span class="inline">event_loop_normal</span> 让两者<strong>严格串行</strong>——这就是为什么会有 <span class="inline">event_loop_overlap</span>（第 21 课）：
+它是<strong>同一条循环</strong>，但用<strong>流水线</strong>把 CPU 的组批/收尾<strong>藏进上一步 GPU 计算的时间里</strong>，让 GPU 永不空等。</p>
+
+<p>顺带说明流水线里那条<strong>分叉</strong>：第 5 步收尾时，结果其实分两路走。一路是<strong>给客户端的产出</strong>——把这一步新采样出的 token
+打包成 <span class="mono">BatchTokenIDOutput</span> 发给 DetokenizerManager（第 17 课），由它拼回文字、流式吐给用户；另一路是<strong>给引擎自己的回收</strong>——
+对那些命中停止条件（EOS / 停止串 / 达到 max_new_tokens）而<strong>完成</strong>的请求，把它们移出在跑批、<strong>释放各自的 KV 槽位</strong>归还内存池。
+正因为有这条"完成即释放"的回收路，第 3 步下一圈才有空间接纳等待队列里的新请求——<strong>收尾与组批，一退一进，咬合成连续批处理的齿轮</strong>。</p>
+
+<h2>每一步去了哪一课：循环就是 Part 5 的目录</h2>
+<p>这五步几乎一一对应接下来的每一课。把这张表当作<strong>导航图</strong>：你随时可以从"心跳的第几步"跳到对应的细节课，
+也能反过来在读细节课时，记得它在<strong>整个 step</strong> 里处在什么位置。</p>
+
+<table class="t">
+  <tr><th>阶段</th><th>它做什么</th><th>细节在哪一课</th></tr>
+  <tr><td><strong>recv_requests</strong></td><td>从 ZMQ 取空收件箱，收 TokenizedGenerateReqInput</td><td class="mono">第 16 课 io_struct / IPC</td></tr>
+  <tr><td><strong>process_input_requests</strong></td><td>新请求入<strong>等待队列</strong>，处理 abort/flush 等控制消息</td><td class="mono">第 19 课 Req / ScheduleBatch</td></tr>
+  <tr><td><strong>get_next_batch_to_run</strong></td><td>组这一步的批：优先 prefill，否则 decode（连续批处理）</td><td class="mono">第 20 课 调度策略 · 第 22 课分块预填充</td></tr>
+  <tr><td><strong>run_batch</strong></td><td>交 TpWorker→ModelRunner.forward 上 GPU，采样出 token</td><td class="mono">第 24 课 模型前向</td></tr>
+  <tr><td><strong>process_batch_result</strong></td><td>追加 token、检测完成、释放 KV、发去反分词</td><td class="mono">第 17 课 反分词与流式</td></tr>
+</table>
+
+<h2>谁决策、谁计算：单线程的唯一决策者</h2>
+<p>整台引擎里有很多角色，但<strong>每个 TP rank 只有一个调度器，且它是单线程的</strong>。这不是限制，而是<strong>设计</strong>：
+让<strong>唯一一个</strong>角色掌管 KV 缓存账本、独自决定每一步的批，就<strong>不会有两个人抢同一块显存</strong>、也不需要锁。
+分清"<strong>谁决策</strong>"和"<strong>谁计算</strong>"，是读懂调度器代码的钥匙：</p>
+
+<div class="cols">
+  <div class="col"><h4>调度器：决策但不计算</h4><p>单进程、单线程，是<strong>唯一决策者</strong>。它<strong>独占 KV 缓存的账本</strong>，
+  决定每一步<strong>这批由谁组成</strong>、谁该完成离场、谁能补入。它做的全是<strong>CPU 上的轻量记账与判断</strong>，<strong>不碰一次矩阵乘</strong>——
+  正因为轻，它才能每秒跳动上万次。</p></div>
+  <div class="col"><h4>TpWorker / ModelRunner：计算但不决策</h4><p>拿到调度器组好的批，老老实实在 <strong>GPU</strong> 上跑
+  <span class="mono">forward</span>（第 24 课），算出 logits 再采样。它<strong>不决定批是什么</strong>、也不碰调度策略，只负责<strong>把算力榨干</strong>。
+  决策与计算解耦，二者才能在重叠调度器里<strong>并行流水</strong>。</p></div>
+</div>
+
+<p>为什么"<strong>独占账本</strong>"这件事如此重要？因为显存是引擎里最稀缺的资源，KV 缓存的每一个槽位都要<strong>精确记账</strong>：哪些槽位正被在跑的请求占用、
+还剩多少可分配、某条请求完成后该回收哪几行。如果有<strong>两个</strong>角色都能改这本账，就必然出现"两条请求被分到同一块显存"的灾难，
+为了避免就得上锁，而锁又会拖慢这条每秒上万次的热循环。SGLang 的选择干脆利落：<strong>让唯一的、单线程的调度器独占这本账</strong>——
+它在第 3 步组批时按账本判断"显存够不够再收一条"，在第 5 步收尾时把完成请求的槽位<strong>当场划掉、还回池子</strong>。
+没有竞争、没有锁，决策因此既快又安全。这也解释了为什么<strong>每个 TP rank 各有一个独立调度器</strong>：每张卡的显存是各自的账，自然该由各自的决策者来管。</p>
+
+<p>再把第 3 步多说一句，因为它是整个循环里<strong>最有戏</strong>的一步。它不是简单地"把所有在跑的请求拼起来"，而是要做一个关键取舍：
+<strong>这一步到底做 prefill 还是 decode？</strong>预算（显存、token 数）允许时，它优先从等待队列里捞出新请求组一个 <strong>prefill 批</strong>，
+先把新 prompt 的 KV 算出来；否则就把当前在跑的请求组成一个 <strong>decode 批</strong>，各推进一个 token。"谁先上、上多少、prefill 还是 decode"
+这套取舍逻辑叫<strong>调度策略</strong>（第 20 课），而当某条 prompt 长到会<strong>霸占一整步</strong>、把别的请求卡住时，第 22 课的<strong>分块预填充</strong>
+会把它切成小块塞进 decode 步的缝隙里——这些都是在第 3 步这一格里发生的事，本课先记住它的<strong>位置</strong>，细节留给后面。</p>
+
+<h2>真实代码：event_loop_normal 的心跳</h2>
+<p>下面是调度器真正的循环骨架。注意它有多<strong>朴素</strong>——就是一个 <span class="inline">while True</span>，
+里面把我们讲的五步<strong>原样排开</strong>：收、入队、组批、（有批就）前向+收尾、否则空闲自检。读懂这十几行，
+你就读懂了整台引擎的心跳。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_normal</span><span class="ln">调度器的心跳：每个 step 跑一圈</span></div>
+  <pre><span class="kw">def</span> event_loop_normal(self):
+    <span class="cm"># A normal scheduler loop.</span>
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.gracefully_exit:
+            <span class="kw">break</span>
+
+        <span class="cm"># ① 收：取空 ZMQ 收件箱里的新请求</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        <span class="cm"># ② 入队：新请求进等待队列，处理控制消息</span>
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># ③ 组批：决定这一步跑什么（prefill 还是 decode）</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># ④ 前向：上 GPU 跑这一批，拿 logits 采样</span>
+            result = self.run_batch(batch)
+            <span class="cm"># ⑤ 收尾：追加 token、清退完成的、发去反分词</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            <span class="cm"># 没活干就自检、回收状态</span>
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>把这段和开头的雷达类比对齐：<span class="inline">recv_requests</span> 是"接收新到达"，
+<span class="inline">process_input_requests</span> 是"纳入盘旋等待区"，<span class="inline">get_next_batch_to_run</span> 是"决定这一圈放哪些飞机"，
+<span class="inline">run_batch</span> 是"放行执行"，<span class="inline">process_batch_result</span> 是"处理刚落地/飞走的"。雷达转下一圈，循环回到 <span class="inline">while True</span> 顶端。
+这套对应关系不是牵强的比喻，而是<strong>结构上的同构</strong>：塔台之所以高效，正因为它把"接收—决策—放行—善后"压缩成一套可以无限重复的固定动作；
+调度器之所以高吞吐，也正因为它把请求生命周期里的一切，都收敛进这五步、每秒重复上万遍。
+<span class="inline">event_loop_overlap</span> 是同一段逻辑的<strong>流水线版</strong>：用一个结果队列把上一步的 <span class="inline">process_batch_result</span>
+推迟到下一步与 GPU 计算重叠，从而把 CPU 时间<strong>藏起来</strong>（第 21 课细讲）。</p>
+
+<p>最后强调一个直觉：<strong>这个循环的速度，直接给吞吐封顶。</strong>循环每转一圈才前进一个 decode 步、各请求才各吐一个 token。
+如果第 3、5 步的 Python 记账太慢，GPU 就会在等 CPU 组批时<strong>空转</strong>，再强的卡也喂不饱。所以 SGLang 把这条循环
+<strong>当作最热的热路径</strong>来打磨——这正是第 21 课重叠调度器存在的全部理由，也是你往后读 Part 5 每一课时应当始终带着的那把尺子：
+<strong>任何设计，最终都要服务于"让这颗心脏跳得又快又满"。</strong></p>
+
+<p>把这条主线收个尾：第 18 课（本课）给出<strong>骨架</strong>——五步心跳的顺序与边界；第 19 课打开第 2、3 步，讲清楚一条请求在调度器内部到底长什么样
+（<span class="mono">Req</span> 与 <span class="mono">ScheduleBatch</span> 这两个核心数据结构）；第 20 课打开第 3 步的<strong>取舍大脑</strong>，讲调度策略怎么排序、怎么决定谁先上；
+第 21 课把整条循环<strong>流水线化</strong>，是吞吐优化的标志性一招；第 22 课处理"长 prompt 堵路"的特例；第 24 课则深入第 4 步，看 GPU 上的前向到底怎么算。
+换句话说，<strong>后面六课都是在本课这张五步图上做注解</strong>。只要你脑子里随时能默画出"收 → 入队 → 组批 → 前向 → 收尾 → 回环"这条闭环，
+无论读到哪一课，都能立刻定位它在<strong>整个 step</strong> 里的位置，不会迷路。这，就是把调度器当作"心脏"来理解的全部价值。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>调度器是引擎的心脏</strong>：跑在<strong>独立子进程</strong>里，核心是无限循环 <span class="mono">event_loop_normal</span>，每秒跳动成千上万次，每次叫一个 <strong>step</strong>。</li>
+    <li><strong>一个 step 的五步</strong>（记住顺序）：recv_requests 收 → process_input_requests 入队 → get_next_batch_to_run 组批 → run_batch 前向 → process_batch_result 收尾 → 回到开头。</li>
+    <li><strong>批每步重组</strong>：第 3 步每圈都重来，完成的请求当场离场释放 KV、等待的即刻补入——这就是第 5 课连续批处理的物理现场。</li>
+    <li><strong>决策 vs 计算</strong>：调度器单线程、唯一决策者，独占 KV 账本、只做 CPU 轻量记账；TpWorker/ModelRunner 才上 GPU 做 forward（第 24 课）。</li>
+    <li><strong>循环速度给吞吐封顶</strong>：CPU 组批与 GPU 计算在 normal 版里串行 ⇒ 第 21 课 <span class="mono">event_loop_overlap</span> 用流水线把 CPU 时间藏进 GPU 计算后。前接第 16/17 课，后接第 19/20/22/24 课。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 调度器 <code>event_loop_normal</code> 每一个 step（一圈）依次做哪五件事？<strong>顺序</strong>为什么重要？</div>
+  <ol class="opts">
+    <li>顺序无所谓，五步可以任意打乱并行执行</li>
+    <li>先 <code>run_batch</code> 再 <code>recv_requests</code>，因为要先算完才收新请求</li>
+    <li><code>recv_requests</code>（收）→ <code>process_input_requests</code>（入等待队列）→ <code>get_next_batch_to_run</code>（组这一步的批）→ <code>run_batch</code>（上 GPU 前向+采样）→ <code>process_batch_result</code>（追加 token/清退完成的/释放 KV/发反分词），然后回到开头；顺序重要是因为<strong>必须先收进新请求、再组批，组完批才能前向，前向出结果才能收尾</strong></li>
+    <li>只有 <code>get_next_batch_to_run</code> 一步，其余都在 GPU 内核里完成</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。事件循环是 <code>while True</code>，每圈五步有严格<strong>数据依赖</strong>：收件箱里没新请求就无从入队，等待队列里没请求就组不出 prefill 批，没组好批就无法前向，没前向结果就无法追加 token、判完成、释放 KV。打乱顺序会破坏依赖。记住这五步的顺序，就拿到了 Part 5 的主索引。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么调度器要在<strong>每一个 step</strong> 都重新调用 <code>get_next_batch_to_run</code> 把批重组一遍，而不是一次组好用到底？</div>
+  <ol class="opts">
+    <li>因为这正是<strong>连续批处理</strong>（第 5 课）的物理现场：每步重组才能让<strong>完成的请求当场离场、立刻释放 KV 槽</strong>，让<strong>等待的请求下一步就补入</strong>，批次始终满载，GPU 不为任何单条请求空转</li>
+    <li>因为重组批能提高单条请求的解码速度</li>
+    <li>纯粹是为了日志统计方便，没有性能意义</li>
+    <li>因为 GPU 要求每步换一个全新的 batch 对象，否则会报错</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。若一次组好绑死到底，就退化成静态批处理：整批要等最慢的那条，完成的槽位空转、新请求进不来。每步重组让批成为“被重新计算的结果”而非静态对象——完成的过滤离场、等待的接纳补入，批永远满。这就是连续批处理，也是高吞吐的第一引擎。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在一个 step 里，<strong>哪部分是调度器在 CPU 上的决策、哪部分是真正烧算力的 GPU 计算</strong>？这个区分如何引出 <code>event_loop_overlap</code>（第 21 课）？</div>
+  <ol class="opts">
+    <li>调度器本身就在 GPU 内核里跑，无所谓重叠</li>
+    <li><code>get_next_batch_to_run</code> / <code>process_batch_result</code> 是<strong>纯 CPU 的轻量记账与决策</strong>，<code>run_batch</code>（→ModelRunner.forward）才是<strong>GPU 计算</strong>；normal 版让两者<strong>串行</strong>，CPU 组批时 GPU 空等，所以第 21 课用<strong>流水线</strong>把 CPU 部分藏进上一步 GPU 计算里</li>
+    <li><code>run_batch</code> 是 CPU 决策，组批才是 GPU 计算</li>
+    <li>全部五步都在 GPU 上执行，没有 CPU 参与</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。调度器“只决策、不计算”：组批和收尾是 CPU 上的轻量记账，唯独 <code>run_batch</code> 把批交给 TpWorker→ModelRunner 在 GPU 上 forward（第 24 课）。normal 版严格串行，CPU 忙时 GPU 闲、反之亦然。由于循环速度直接给吞吐封顶，第 21 课的 overlap 版用结果队列把上一步收尾推迟、与本步 GPU 计算重叠，从而把 CPU 时间藏起来。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“机场塔台雷达扫描”的类比，完整描述调度器 <code>event_loop_normal</code> 一个 step 的全过程。请逐一对应五步：<code>recv_requests</code>（收 TokenizedGenerateReqInput，第 16 课）、<code>process_input_requests</code>（入等待队列、处理 abort/flush）、<code>get_next_batch_to_run</code>（prefill 优先否则 decode，第 19/20 课）、<code>run_batch</code>（→ModelRunner.forward，第 24 课）、<code>process_batch_result</code>（追加 token、检测完成、释放 KV、发 DetokenizerManager，第 17 课），并点明“回环”为什么是心跳的灵魂。</li>
+    <li>“循环速度直接给吞吐封顶”——请论证这句话，并解释为什么调度器是<strong>单线程、每 TP rank 唯一的决策者</strong>、独占 KV 缓存账本。在此基础上说明 <code>event_loop_overlap</code>（第 21 课）如何用流水线优化、长 prompt 为何需要分块预填充（第 22 课）来避免堵住这条循环。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Req 与 ScheduleBatch</h1>
+
+<p class="lead">
+上一课我们看清了调度器的<strong>心跳</strong>——那段 <span class="inline">while True</span> 的事件循环（第 18 课）。可它每一跳到底在
+<strong>操作什么东西</strong>？答案是两个贯穿整个 Part 5 的核心数据结构：<strong>Req</strong> 与 <strong>ScheduleBatch</strong>。
+<span class="inline">Req</span> 是<strong>一条请求自己的状态机</strong>，从生到死它都<strong>活着</strong>；<span class="inline">ScheduleBatch</strong>
+是<strong>某一个 step 里被打包一起前向的那一撮 Req</strong>，它<strong>转瞬即逝</strong>——每跳一次就重建一次。看懂这一对"持久 vs 临时"
+的分工，你才真正握住了调度器手里那两样工具。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把引擎想成一家<strong>航空公司</strong>。每位<strong>乘客（Req）</strong>都有一份<strong>持久的订单与状态</strong>：从哪上、要去哪、托运了什么、
+  现在值机了没、登机了没、到没到。这份记录<strong>从订票一直保留到落地</strong>，跨越很多个航班环节都不丢。而每一次起飞的
+  <strong>航班舱单（ScheduleBatch）</strong>则是<strong>临时拼出来</strong>的：它要么是一队<strong>正在登机的新乘客</strong>（extend/prefill 批，
+  把刚到的人按行李多少安排座位），要么是一舱<strong>正在巡航的老乘客</strong>（decode 批，所有人一起往前推进一步）。乘客是<strong>持久的</strong>，
+  舱单是<strong>每班现拼、落地即弃的</strong>；谁到站了就<strong>下飞机</strong>（filter_batch 把完成的请求清出舱单）。同一位乘客，会出现在
+  许多张<strong>连续的巡航舱单</strong>上——这正是 Req 与 ScheduleBatch 必须分开的原因。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>Req 记录"一条请求是谁、走到哪了"，ScheduleBatch 记录"这一步要把哪些 Req 怎样一起算"</strong>。
+  <span class="inline">Req</span> 装着输入 token、已生成的输出 token、采样参数、它占用的 KV 缓存索引（第 4/30 课）、前缀匹配信息
+  （RadixAttention 第 7 课）、以及完成/中止状态；它在 <strong>waiting → running → finished</strong> 三态间迁移。
+  <span class="inline">ScheduleBatch</span> 则带着一个<strong>模式（mode）</strong>：要么 <strong>EXTEND（预填充）</strong>——接纳<strong>新请求</strong>、
+  一次吃掉它们整段 prompt；要么 <strong>DECODE</strong>——让<strong>正在跑的请求</strong>每人各吐<strong>一个</strong>新 token。批还负责 KV 池的
+  <strong>分配（接纳时占）与释放（完成时还）</strong>，并用 <span class="inline">filter_batch()</span> 在飞行途中<strong>剔除已完成的请求</strong>
+  （连续批处理的"腾槽"现场，第 5 课）。一句话收束：<strong>Req 管"是谁、走到哪"，ScheduleBatch 管"这一步算谁、怎么算"</strong>，二者一持久一临时，正是调度器一切决策的支点。
+</div>
+
+<h2>一、Req：一条请求的状态机，从生到死都活着</h2>
+<p>
+<span class="inline">Req</span> 是 SGLang 里<strong>最贴身</strong>的对象——它就是"<strong>一条请求的全部身家</strong>"。源码里这个类的注释只有一句：
+<em>"The input and output status of a request."</em> 它至少握着这几样东西：<strong>原始输入 token（origin_input_ids）</strong>、
+<strong>逐步追加的输出 token（output_ids）</strong>、<strong>采样参数（sampling_params）</strong>、它在
+<strong>KV 缓存里占据的位置（req_pool_idx、kv_committed_len/kv_allocated_len 等）</strong>、以及命中前缀树时的
+<strong>prefix_indices（RadixAttention，第 7 课）</strong>。最关键的是，它带着自己的<strong>生命周期</strong>：
+被接纳前在 <strong>waiting</strong> 队列里排队，被选中预填充后进入 <strong>running</strong>，吐完最后一个 token（命中 EOS、达到 max_new_tokens 或被 abort）
+就变成 <strong>finished</strong>，随后它占的 KV 槽位被释放。下面这张图是它的一生。
+</p>
+
+<p>
+为什么这些状态非得"长在请求身上"，而不是记在别处？因为大模型推理是<strong>自回归</strong>的（第 4 课）：下一个 token 依赖前面所有 token，KV 缓存里逐格累积的正是这条请求<strong>自己的历史</strong>，
+换一条请求就完全对不上。所以 <code>output_ids</code> 必须随它一路增长、<code>req_pool_idx</code> 必须牢牢钉住它在 KV 池里的那块地、<code>sampling_params</code> 必须从头到尾跟着它——这些都是<strong>请求私有、不可共享</strong>的状态。
+唯一能被多条请求<strong>共享</strong>的，是命中前缀树的那段公共前缀（<code>prefix_indices</code>，RadixAttention，第 7 课），但那也只是"指向同一段只读 KV 的引用"，各自后续生成依旧泾渭分明。
+正是这种"私有状态贯穿一生"的本质，逼着 Req 成为一个持久对象——它装的不是某一拍的临时数据，而是一条请求<strong>从入队到完成</strong>的全部因果。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>waiting（等待）</h4><p>请求被分词、经 IPC 送进调度器（第 16 课），先入<strong>等待队列</strong>。此刻它还没占 KV，只是排队，等调度策略（第 20 课）来挑。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>running · 第一拍 extend（预填充）</h4><p>被选中后进入 running，在一个 <strong>EXTEND 批</strong>里一次性吃掉整段 prompt：<code>prepare_for_extend()</code> 为它分配 KV 槽、铺好变长 token 张量。前缀命中部分（第 7 课）直接复用，不再重算。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>running · 之后许多拍 decode（解码）</h4><p>同一个 Req 接着出现在<strong>一连串 DECODE 批</strong>里，每拍 <code>prepare_for_decode()</code> 给它要一个新 KV 槽、只算<strong>一个</strong>新 token，<code>output_ids</code> 追加一位。它在这里<strong>停留最久</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed（完成与释放）</h4><p>命中 EOS、到达 max_new_tokens 或被 abort，状态转 <strong>finished</strong>；<code>filter_batch()</code> 把它当场清出当前批，KV 槽归还内存池（第 30 课），结果发往反分词器（第 17 课）。</p></div></div>
+</div>
+
+<p>
+这条生命线里藏着一个常被忽略的事实：<strong>一条请求只 extend 一次，却 decode 很多很多次</strong>。一段几百 token 的 prompt，预填充时被一拍吃完；
+而生成阶段每拍只产一个 token，要生成几百 token 就意味着这条请求要在<strong>几百个连续的 decode 批</strong>里反复露面。正因如此，decode 才是引擎的主战场，
+也正因如此，Req 必须是一个能<strong>跨越成百上千拍</strong>而不丢失任何状态的持久对象——它得稳稳记着自己已经吐了哪些 token、KV 写到了第几格、采样到温度多少。
+把这一点记牢，你就理解了为什么"持久"二字对 Req 如此关键：它是一条贯穿请求一生的<strong>主线</strong>，而批不过是它途经的一个个<strong>驿站</strong>。
+</p>
+
+<h2>二、ScheduleBatch：这一步一起前向的那一撮，带着一个模式</h2>
+<p>
+如果说 Req 是"一个人"，<span class="inline">ScheduleBatch</span> 就是"<strong>这一趟航班的舱单</strong>"——源码注释：
+<em>"Store all information of a batch on the scheduler."</em> 它的<strong>第一字段就是 <code>reqs: List[Req]</code></strong>，
+即这一步要一起算的那几条请求；其余字段几乎都是为前向<strong>临时铺好</strong>的张量（input_ids、seq_lens、out_cache_loc 等）。
+它最重要的属性是 <strong>forward_mode</strong>，只有两种主形态，决定了这一拍"怎么算"：
+</p>
+
+<p>
+这里要破除一个常见误解：<strong>批不是"队列"，而是"快照"</strong>。等待队列是长期存在、不断有人进出的；而 ScheduleBatch 是调度器在某一拍<strong>临时从运行集合里挑出一撮、拍下的一张合影</strong>，
+照完这张相、送 GPU 算完、收尾完成，这张相片就作废了。下一拍要再算，就再拍一张新的。也正因为它是快照，批里那些 GPU 张量（input_ids、seq_lens、out_cache_loc 等）才敢<strong>每步推倒重来</strong>：
+反正没人指望它们活过这一拍。把"队列=长期居所、批=瞬时合影"这组对照刻进脑子，后面第 20 课的调度策略、第 21 课的重叠调度器、第 22 课的分块预填充就都有了统一的坐标系。
+顺便说一句，正因为批是瞬时合影，调度器才敢在第 21 课用<strong>流水线</strong>把"上一拍批的收尾"与"这一拍批的前向"叠在一起跑——反正两张合影本就互不相干，谁也不依赖谁的张量存活。
+</p>
+
+<div class="cols">
+  <div class="col">
+    <h4>EXTEND / prefill 批</h4>
+    <p>由 <code>prepare_for_extend()</code> 构造，<code>forward_mode = EXTEND</code>。它<strong>接纳新请求</strong>，把每条请求<strong>整段 prompt</strong>的
+    token 一次性前向。因为各请求 prompt 长度不同，它要铺<strong>变长（ragged）token 张量</strong>，并为每条新请求<strong>分配 KV 槽</strong>。
+    源码里 <code>input_ids</code> 取的是 <code>get_fill_ids()[len(prefix_indices):]</code>——<strong>只算前缀没命中的那截</strong>（第 7 课）。
+    长 prompt 太大装不下时，会切成 chunked prefill（第 22 课）。</p>
+  </div>
+  <div class="col">
+    <h4>DECODE 批</h4>
+    <p>由 <code>prepare_for_decode()</code> 构造，<code>forward_mode = DECODE</code>。它装的是<strong>正在跑的老请求</strong>，每条<strong>只吐一个</strong>新 token，
+    因此张量是规整的<strong>每请求 1 token</strong>，只需为每条请求<strong>再要一个 KV 槽</strong>放新 token。它<strong>反复出现</strong>——一条请求一生中绝大多数拍
+    都在 decode 批里度过。这正是吞吐的主战场：批越满，GPU 越划算（连续批处理，第 5 课）。</p>
+  </div>
+</div>
+
+<p>
+为什么非得把"接纳新人"和"推进老人"分成两种批，而不是混在一起？根本原因在于<strong>两种计算的形状天差地别</strong>。预填充要处理的是<strong>整段变长的 prompt</strong>，
+每条请求几十到几千 token 不等，张量是参差不齐的 ragged 布局，还要顺手为新来者在 KV 池里<strong>开辟新空间</strong>；而解码处理的是<strong>清一色每人一个</strong>的新 token，
+张量整整齐齐，只需在每条请求已有的 KV 末尾<strong>再追加一格</strong>。两者的访存模式、kernel 选择、显存压力都不同，硬塞进同一种批只会两头不讨好。
+所以 SGLang 让 <code>forward_mode</code> 当这个开关：组批时（第 18/20 课）先问一句"这一拍是接新人还是推老人"，再调对应的 <code>prepare_*</code> 把张量铺成该有的样子。
+顺带一提，当一段 prompt 长到一个 extend 批都装不下时，它会被切成几段、分多拍喂进去——这就是第 22 课要讲的<strong>分块预填充</strong>，本质仍是 EXTEND，只是把"一口吃完"改成"分几口吃"。
+</p>
+
+<h2>三、关键字段一览：各自装了什么、扮演什么角色</h2>
+<p>把两个结构的核心字段并排看，"持久 vs 临时"的分工一目了然——Req 的字段<strong>跟着请求走</strong>，ScheduleBatch 的字段<strong>跟着这一步走</strong>。</p>
+
+<table class="t">
+  <tr><th>结构</th><th>字段</th><th>扮演的角色</th></tr>
+  <tr><td class="mono">Req</td><td class="mono">origin_input_ids / output_ids</td><td>输入 token 与逐步追加的输出 token——请求的"内容"，持久</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">sampling_params</td><td>温度、top-p、max_new_tokens 等采样策略，决定怎么取下一个 token</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">req_pool_idx / kv_*_len</td><td>它在 KV 缓存里占的位置与长度（第 4/30 课），随生成增长</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">prefix_indices</td><td>前缀树命中的复用部分（RadixAttention 第 7 课），extend 时跳过不算</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">finished() 状态</td><td>EOS / max_new_tokens / abort——触发 filter_batch 清退与 KV 释放</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">reqs: List[Req]</td><td>这一步一起前向的请求列表——批的"骨架"，每步重建</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">forward_mode</td><td>EXTEND 还是 DECODE——决定这一拍"怎么算"</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">input_ids / seq_lens / out_cache_loc</td><td>为前向临时铺好的张量与 KV 输出位置，交给 ModelRunner（第 24 课）</td></tr>
+</table>
+
+<p>
+对着这张表再品一遍那条分界线：<strong>凡是"内容会随生成不断长大、必须一路记住"的，都在 Req 里</strong>——输出 token 一个个追加、KV 长度一格格增长、采样状态贯穿始终；
+<strong>凡是"只为这一拍前向临时拼出来、算完就扔"的，都在 ScheduleBatch 里</strong>——input_ids、seq_lens、out_cache_loc 这些张量每步都重新计算，从不指望跨步存活。
+有意思的是，ScheduleBatch 里那个 <code>reqs: List[Req]</code> 字段是连接两者的<strong>纽带</strong>：批不复制请求的内容，它只<strong>持有一串指向 Req 的引用</strong>，
+真正的 token、KV 索引始终长在 Req 身上。所以"批被销毁"从不意味着"请求丢失"——下一拍重建批时，<code>get_next_batch_to_run</code>（第 18/20 课）只是把仍然存活的那几条 Req
+重新收拢成一份新名单而已。理解了这层"引用而非拷贝"的关系，你就明白了为什么每步重建批的代价其实很轻：重建的只是一层薄薄的调度外壳，沉重的状态从头到尾都安放在 Req 里。
+</p>
+
+<h2>四、一个 decode 批长什么样：几条请求，这一拍各 +1</h2>
+<p>把镜头拉近到<strong>某一拍 decode</strong>：批里有好几条 Req，它们各自的序列已经长到不同位置，而<strong>这一步每条恰好再添一个新 token</strong>。
+下图每一行是一条请求，高亮格子就是<strong>本拍新生成、刚写进 KV 的那一个 token</strong>。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">一个 DECODE 批（本拍：每条请求各 +1 个新 token）</div>
+  <div class="cells">
+    <span class="lab">Req&nbsp;A</span><span class="cell">天</span><span class="cell">气</span><span class="cell">很</span><span class="cell hl">好</span><span class="sep"></span><span class="q">+1</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Req&nbsp;B</span><span class="cell">def</span><span class="cell">&nbsp;add</span><span class="cell hl">(a</span><span class="sep"></span><span class="q">+1</span>
+  </div>
+  <div class="cells">
+    <span class="lab">Req&nbsp;C</span><span class="cell">The</span><span class="cell">&nbsp;sky</span><span class="cell">&nbsp;is</span><span class="cell">&nbsp;very</span><span class="cell hl">&nbsp;blue</span><span class="sep"></span><span class="q">+1</span>
+  </div>
+</div>
+<p>注意三条请求<strong>已生成长度各不相同</strong>，却能同处一个 decode 批——因为 decode 张量是规整的"每请求 1 token"，长度差异由各自的
+<code>seq_lens</code> 记录。下一拍，假如 Req B 吐出了 EOS，<code>filter_batch()</code> 就把它<strong>当场剔除</strong>、释放它的 KV 槽，
+留下的 A、C 继续，空出来的容量还能接纳等待队列里的新请求（第 5 课、第 20 课）。</p>
+
+<p>
+把这幅画面与"持久 vs 临时"接起来，整条链路就活了：图里这一拍的三行，是<strong>这一个 step</strong> 临时拼出的 ScheduleBatch；而 A、B、C 三条 Req 早在前面某拍就被 extend 进来、
+此后已经走过了若干拍 decode，它们各自的"内容条"会一直加长到完成为止。下一拍的 ScheduleBatch 又是<strong>另一份新名单</strong>——也许 B 走了、也许等待队列里的 D 补了进来——但 A、C 这两条 Req
+还是原来那两个对象，带着它们一路攒下的 token 与 KV 继续往前。<strong>批在变，请求还在</strong>：这正是连续批处理（第 5 课）能让 GPU 始终满载的微观机理，也是调度器每一拍都要重算一次批的根本理由。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">两个数据结构的骨架</span></div>
+<pre><span class="kw">class</span> Req(ReqDllmMixin):
+    <span class="cm"># The input and output status of a request.（一条请求的输入/输出状态）</span>
+    <span class="kw">def</span> __init__(self, rid, origin_input_ids, sampling_params, ...):
+        self.rid = rid                      <span class="cm"># 请求 id</span>
+        self.origin_input_ids = origin_input_ids   <span class="cm"># 输入 token</span>
+        self.output_ids = array(<span class="st">"q"</span>)         <span class="cm"># 逐步追加的输出 token</span>
+        self.sampling_params = sampling_params     <span class="cm"># 采样参数</span>
+        self.req_pool_idx = <span class="kw">None</span>            <span class="cm"># 占用的 KV 槽位（第 4/30 课）</span>
+
+<span class="kw">class</span> ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+    <span class="cm"># Store all information of a batch on the scheduler.（一个批的全部信息）</span>
+    reqs: List[Req]                         <span class="cm"># 这一步一起前向的请求</span>
+
+    <span class="kw">def</span> prepare_for_extend(self):           <span class="cm"># 预填充：接纳新请求、吃整段 prompt</span>
+        self.forward_mode = ForwardMode.EXTEND
+        <span class="cm"># 只取前缀没命中的那截（RadixAttention 第 7 课）</span>
+        input_ids = [r.get_fill_ids()[len(r.prefix_indices):] <span class="kw">for</span> r <span class="kw">in</span> self.reqs]
+
+    <span class="kw">def</span> prepare_for_decode(self):           <span class="cm"># 解码：老请求每人各 +1 个 token</span>
+        self.forward_mode = ForwardMode.DECODE
+        <span class="cm"># 为每条请求再要一个 KV 槽放新 token，张量规整为每请求 1 token</span>
+
+    <span class="kw">def</span> filter_batch(self, ...):            <span class="cm"># 飞行途中剔除已完成的请求（第 5 课）</span>
+        keep_indices = [i <span class="kw">for</span> i <span class="kw">in</span> range(len(self.reqs))
+                        <span class="kw">if</span> <span class="kw">not</span> self.reqs[i].finished()]
+        self.reqs = [self.reqs[i] <span class="kw">for</span> i <span class="kw">in</span> keep_indices]</pre>
+</div>
+
+<p>
+这段骨架把全课浓缩成几行可读的代码：<code>Req.__init__</code> 里那几个 <code>self.</code> 字段，就是"随请求一生增长"的私有状态；<code>ScheduleBatch</code> 开头一句 <code>reqs: List[Req]</code>，
+道破了批<strong>只持有引用、不拷贝内容</strong>的本质。三个方法恰好对应三件大事：<code>prepare_for_extend</code> 把模式置为 EXTEND、并用 <code>get_fill_ids()[len(prefix_indices):]</code> <strong>只取前缀没命中的那截</strong>去前向；
+<code>prepare_for_decode</code> 把模式置为 DECODE、为每条请求各要一个新 KV 槽；<code>filter_batch</code> 则用一句列表推导 <strong>留下 <code>not finished()</code> 的请求、当场踢走已完成者</strong>。
+真实源码当然还有大量分支（投机解码、DLLM、PP 分块、DP 等），但抓住这四处骨架，你就握住了调度器手里这两样工具的<strong>主干</strong>，足以读懂后面整个 Part 5 的所有变体。
+</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>Req = 一条请求的状态机，持久</strong>：装着输入/输出 token、采样参数、占用的 KV 索引（第 4/30 课）、前缀匹配信息（第 7 课）与完成状态；在 <span class="mono">waiting → running → finished</span> 间迁移，从生到死一直活着。</li>
+    <li><strong>ScheduleBatch = 这一步一起前向的那一撮 Req，临时</strong>：第一字段就是 <span class="mono">reqs: List[Req]</span>，其余多是为前向铺好的张量；它<strong>每个 step 重建一次</strong>（第 18 课），用完即弃。</li>
+    <li><strong>批有两种模式</strong>：<span class="mono">EXTEND/prefill</span>（<code>prepare_for_extend()</code>，接纳新请求、吃整段 prompt、铺变长张量）对 <span class="mono">DECODE</span>（<code>prepare_for_decode()</code>，老请求每人各 +1 token、张量规整）。</li>
+    <li><strong>批管 KV 的占与还</strong>：接纳时分配、完成时释放；<span class="mono">filter_batch()</span> 在途中剔除已完成的请求，腾出槽位给等待者——这就是连续批处理（第 5 课）的现场。</li>
+    <li><strong>为何分开</strong>：同一条 Req 会出现在许多<strong>连续的 decode 批</strong>里——Req 持久、批临时。带着这对结构去看调度策略（第 20 课）、分块预填充（第 22 课）与模型前向（第 24 课），全 Part 5 一线贯通。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. <code>Req</code> 和 <code>ScheduleBatch</code> 在<strong>生命周期</strong>上最本质的区别是什么？</div>
+  <ol class="opts">
+    <li>两者都临时，每个 token 都重建一次，互为副本</li>
+    <li><code>Req</code> 是<strong>持久</strong>的——一条请求从 waiting 到 finished 一直活着；<code>ScheduleBatch</code> 是<strong>临时</strong>的——每个 step 重建一次、用完即弃，所以同一条 Req 会出现在许多<strong>连续的 decode 批</strong>里</li>
+    <li>两者都持久，整个会话只各有一个实例</li>
+    <li><code>Req</code> 临时、<code>ScheduleBatch</code> 持久，批一旦建好就用到引擎关停</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。这正是把两者拆开的原因：批是事件循环每步<strong>重新计算的结果</strong>（第 18 课），转瞬即逝；而一条请求要跨越几十上百拍 decode 才生成完，必须有个<strong>持久</strong>对象一路携带它的输出 token、KV 索引与状态。Req 持久、批临时，是 Part 5 的主轴。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <code>ScheduleBatch</code> 的 <strong>EXTEND（prefill）批</strong>和 <strong>DECODE 批</strong>本质差别是什么？</div>
+  <ol class="opts">
+    <li>DECODE 接纳新请求并处理整段 prompt，EXTEND 只吐一个 token</li>
+    <li>两者完全一样，只是名字不同</li>
+    <li>EXTEND 由 <code>prepare_for_extend()</code> 构造，<strong>接纳新请求</strong>、一次吃掉每条整段 prompt（变长张量、为新请求分配 KV）；DECODE 由 <code>prepare_for_decode()</code> 构造，<strong>老请求每人各 +1 个 token</strong>（规整的每请求 1 token、各再要一个 KV 槽）</li>
+    <li>EXTEND 在 GPU 上跑，DECODE 在 CPU 上跑，互不相干</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。<code>forward_mode</code> 决定这一拍“怎么算”。EXTEND 处理 prompt：长度各异 ⇒ 变长张量、为新请求分配 KV，且只算前缀没命中的那截（第 7 课）。DECODE 处理生成：每条只吐一个 token ⇒ 张量规整、各再要一个 KV 槽。一条请求一生只 extend 一次（或被切成几块，第 22 课），却 decode 很多次。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <code>filter_batch()</code> 在调度里干了什么？为什么它对吞吐至关重要？</div>
+  <ol class="opts">
+    <li>它把整批排序，让最长的请求排在最前面</li>
+    <li>它在飞行途中把<strong>已完成（finished）的请求当场从批里剔除</strong>、释放它们的 KV 槽，腾出的容量让等待队列的新请求补入——这就是<strong>连续批处理</strong>（第 5 课）的“腾槽”现场</li>
+    <li>它把批复制一份做备份，从不删除任何请求</li>
+    <li>它只在引擎关停时调用一次，用来清空所有请求</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。源码里 <code>filter_batch</code> 用 <code>keep_indices</code> 只保留 <code>not finished()</code> 的请求，重建 <code>reqs</code> 与对应张量。若不在途中剔除完成者，整批就退化成静态批处理——要等最慢那条、完成的槽位空转。当场清退 + 释放 KV + 接纳等待者，批才永远满载，这是高吞吐的根。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“航空公司：乘客（Req）vs 航班舱单（ScheduleBatch）”的类比，完整讲清这两个数据结构的分工。请覆盖：Req 携带哪些字段（输入/输出 token、采样参数、KV 索引、prefix_indices、finished 状态）、它的 waiting→running→finished 生命周期；以及 ScheduleBatch 为何<strong>每步重建</strong>、它的 EXTEND/DECODE 两种 <code>forward_mode</code> 各自如何铺张量与分配 KV。</li>
+    <li>顺着这一课往后想：<code>get_next_batch_to_run</code>（第 18/20 课）每步要在“组一个 EXTEND 批接纳新请求”和“组一个 DECODE 批推进老请求”之间抉择。请说明这个抉择如何与 KV 池容量、等待队列长度、<code>filter_batch</code> 腾出的空槽相互作用，并联系分块预填充（第 22 课）为何能避免一个超长 prompt 把这条循环堵死。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>调度策略</h1>
+
+<p class="lead">
+上一课我们看清了两个数据结构：持久的 <span class="inline">Req</span> 与临时的 <span class="inline">ScheduleBatch</span>。
+这一课回答两个最要命的问题：每一拍（step）里，等待队列那么多请求，<strong>该让谁先跑</strong>？又<strong>能塞下几个</strong>？
+答案藏在两个角色里——<span class="inline">SchedulePolicy</span> 负责<strong>排序</strong>（决定先后），
+<span class="inline">PrefillAdder</span> 负责<strong>限流</strong>（决定多少）。前者让“开头已经在缓存里”的请求插队，几乎白捡一份吞吐；
+后者拿着 token 预算和显存预算两把尺子，往这一拍的 prefill 批里一个一个塞，直到塞不下为止。
+调度器和缓存（第 7 课）就是这样<strong>协同设计</strong>的——这正是 SGLang 在真实流量下又快又省的秘密。
+把这一课记牢一句话：<strong>先排序、再限流，排序为了喂饱缓存，限流为了不撑爆显存</strong>。这两步合起来，
+就是事件循环（第 18 课）里 <span class="inline">get_next_batch_to_run</span> 每一拍真正在做的“拍板”动作，也是整台引擎吞吐与延迟平衡的关键所在。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把调度策略想成一家热门餐厅的<strong>聪明领位员（smart host / bouncer）</strong>。门口排着长队，他不傻乎乎地只按到店先后放人。
+  他先<strong>给队伍重新排序</strong>：哪几桌客人“桌子已经半摆好了”（食材备齐 = 缓存命中，对应 <strong>LPM 最长前缀匹配</strong>），就让他们插到前面——
+  因为招待他们几乎不费厨房功夫；要是大家都差不多，就按<strong>到店先后（FCFS）</strong>公平放行；遇到订了 VIP 套餐的，就按<strong>显式优先级（priority）</strong>提前。
+  排好序之后，他还要<strong>数着两个容量</strong>放人：餐厅<strong>座位</strong>够不够（显存 KV 预算）、后厨<strong>这一轮能炒几个菜</strong>（token 预算）——
+  两者哪个先满，这一轮就停止放人。下一拍再来一遍。<strong>排序 + 限流</strong>，就是调度策略的全部。
+  这位领位员有个铁律：<strong>绝不放进一个坐不下的客人</strong>——宁可让他多等一拍，也不能让满屋子在吃饭的客人因为超额而被挤掉、上菜变慢。
+  他也懂取舍：多放新客进门（多接 prefill）能提高翻台率（吞吐），却会让已经在吃的人上菜更慢（在跑 decode 的延迟变高）；
+  只顾招待在座的（只 decode）则上菜快、但门口的队伍迟迟不动。每一拍，他都在这架天平上重新放砝码。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>策略决定顺序，预算决定数量</strong>。<span class="inline">get_next_batch_to_run</span>（第 18 课）每拍先调
+  <span class="inline">SchedulePolicy.calc_priority</span> 把<strong>等待队列就地排序</strong>，再交给 <span class="inline">PrefillAdder</span>
+  在<strong>双预算</strong>下逐个 <span class="inline">add_one_req</span>，能塞则塞（必要时<strong>切块 chunk</strong>），塞满即止。
+  排序的核心模式是<strong>缓存感知的 LPM</strong>：优先让 prompt 前缀已落在 RadixAttention 缓存里的请求先跑——
+  接纳它们几乎是“免费”的，因为那段注意力早算过了（第 7 课）。这一步直接抬高缓存命中率，而命中率正是 SGLang 真实速度的来源。
+  与此同时，调度器每拍都在<strong>“多接新 prefill”与“只推老 decode”之间权衡</strong>：前者增吞吐却抬高在跑请求的延迟，后者保延迟（第 8 课）。
+  策略，就是这场天平每一拍的砝码。再把镜头拉远一点：这一课的两个角色，恰好对应一个朴素却深刻的工程直觉——
+  <strong>系统的快，一半来自“把对的活排在前面”，一半来自“别一口吃成胖子”</strong>。排序解决前者，预算解决后者。
+  前面我们讲过的连续批处理（第 5 课）让批永远满载、RadixAttention（第 7 课）让共享前缀只算一次，
+  而调度策略正是把这两件利器<strong>真正用起来</strong>的那只手：没有缓存感知排序，再好的缓存也喂不饱；没有双预算限流，再大的显存也会被一个超长请求撑爆。
+</div>
+
+<h2>谁先跑：三种排序策略各自优化什么</h2>
+<p>
+<span class="inline">SchedulePolicy</span> 把“先后”抽象成 <span class="mono">calc_priority</span> 一次调用：它就地<strong>重排等待队列</strong>。
+模式由工作负载决定——很多请求共享前缀时，<strong>缓存感知</strong>最划算；要公平简单，<strong>FCFS</strong>；要尊重业务优先级，<strong>priority</strong>。
+注意一个工程细节：当队列特别长（&gt;128）时，昂贵的前缀匹配会临时退回 FCFS，避免排序本身成为瓶颈。
+为什么排序如此关键？因为在连续批处理（第 5 课）里，每一拍能接纳的新请求名额有限，谁排在队首谁就先享受这有限的名额；
+而把“前缀已缓存”的请求顶到队首，等于让缓存命中的红利<strong>尽早兑现</strong>——这是一笔几乎不花算力就能拿到的吞吐。
+反过来，如果排序时无视缓存，热点前缀的请求散落在队尾，命中红利就被白白拖延甚至漏掉。所以排序的本质，
+不是“对谁更公平”，而是“怎样让这一拍跑得最划算”。这也解释了为什么 SGLang 把缓存感知作为默认追求，
+只有在缓存被禁用或队列过长时才退回到更朴素的 FCFS。
+</p>
+
+<table class="t">
+  <tr><th>策略</th><th>怎么排</th><th>优化什么</th><th>代价 / 适用</th></tr>
+  <tr><td class="mono">LPM（缓存感知）</td><td>最长前缀匹配在前：前缀已在缓存里的优先</td><td><strong>缓存命中率</strong>→近乎免费的吞吐</td><td>需算前缀；队列过长时退回 FCFS</td></tr>
+  <tr><td class="mono">FCFS</td><td>先到先服务，按到达顺序</td><td><strong>公平、简单、可预测</strong></td><td>忽略缓存，热点前缀红利拿不到</td></tr>
+  <tr><td class="mono">priority</td><td>按每请求显式优先级排序</td><td><strong>尊重业务轻重缓急</strong>（VIP 先行）</td><td>需上层赋值；可能饿死低优先级</td></tr>
+</table>
+
+<h2>能塞几个：PrefillAdder 在双预算下组批</h2>
+<p>
+排好序后，<span class="inline">PrefillAdder</span> 拿着两把尺子往这一拍的 prefill 批里塞请求：
+<strong>token 预算</strong>（<span class="mono">rem_total_tokens / rem_input_tokens</span>，别让这一步 prefill 太大，连着第 22 课的分块预填充），
+和<strong>显存预算</strong>（KV 池要有足够空闲槽，第 4/30 课——绝不接纳一个放不下的请求）。
+这里要厘清两者的“计量单位”：token 预算数的是<strong>这一拍要算多少个 token</strong>，它直接决定前向计算的规模与耗时；
+显存预算数的是<strong>这一拍要占多少个 KV 槽</strong>，它决定能不能把这些 token 的中间状态存下来。一个管“算得过来”，一个管“放得下”，
+缺一不可。而且这两个预算不是接纳完才检查，而是<strong>每接一个就当场扣减、当场判断</strong>，所以批是被“贪心地”一点点填满的：
+能塞就塞，直到下一个再也塞不进——这既保证了批尽量满载（高吞吐），又保证了永不超额（不崩）。
+<span class="mono">add_one_req</span> 逐个尝试，能整段塞就整段，塞不下就<strong>切块（chunk）</strong>，任一预算耗尽就返回 <span class="mono">NO_TOKEN / OTHER</span> 停手。
+这两把尺子缺一不可：只看 token 预算，可能算力够却没有 KV 槽存放它的缓存，结果接进来也跑不动；只看显存预算，
+可能槽位够却一拍吃进一个超长 prompt，把这一步 prefill 撑得过大、拖慢所有人。<span class="mono">_update_prefill_budget</span> 每接一个就同步扣减两个预算，
+保证“接纳”和“实际占用”始终对齐，绝不乐观超额。值得强调的是切块的妙处：当一个超长 prompt 装不进剩余 token 预算时，
+它不会被整条拒绝，而是只塞进能装下的前半段、剩下的下一拍续上（第 22 课），这样既不堵死循环，也不让长请求饿死。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>取队首请求</h4><p>从已排序的等待队列拿下一条，算出它要吃多少 token：<span class="mono">cand_extend_input_len + max_new + page_size</span>。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>查 token 预算</h4><p>若 <span class="mono">total_tokens ≥ rem_total_tokens</span> 直接 <span class="mono">NO_TOKEN</span>；这把尺子限制单拍 prefill 的总量。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>查显存 / 槽位</h4><p>KV 池剩余不足（含 SWA 等约束）同样拒绝——绝不超额接纳一个放不下的请求。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>整段或切块塞入</h4><p>预算够则整段加入 <span class="mono">can_run_list</span>；只够一半就 <strong>chunk</strong>，下一拍续上（第 22 课）。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>更新预算，回到 1</h4><p><span class="mono">_update_prefill_budget</span> 扣减两个预算，循环直到塞满或队列空——这一拍的批就定了。</p></div></div>
+</div>
+
+<h2>缓存感知 vs 公平：LPM 与 FCFS 的对照</h2>
+<p>
+为什么缓存感知排序这么重要？因为它<strong>直接抬高 RadixAttention 命中率</strong>——让“开头一样”的请求扎堆先跑，那段共享前缀只算一次。
+这就是调度器与缓存<strong>协同设计</strong>的意义：排序的目标不是抽象的公平，而是把缓存这台“省钱机器”喂到最饱。
+可以用一个数字直觉感受它的威力：假设线上一半请求共享同一段 2000 token 的系统提示，命中后这 2000 token 的注意力一次都不用重算，
+单条请求的 prefill 计算量可能直接砍掉大半。把这些请求排到前面、扎堆命中，整机吞吐的提升是成倍的——这就是为什么 SGLang 在“多请求共享长前缀”的真实场景里表现尤为亮眼。
+但缓存感知也有代价：要算前缀、可能让后到的请求等久一点。于是 FCFS 作为对照保留下来，简单、公平、可预测。
+怎么选？看负载画像：如果你的流量里成千上万请求都以同一段系统提示、同一套 few-shot 模板、或同一段对话历史开头，
+那 LPM 的命中红利会非常可观，是首选；如果请求之间几乎不共享前缀（比如各不相同的一次性查询），LPM 多花的前缀匹配就成了纯开销，
+此时朴素的 FCFS 反而更省、更稳；若有明确的业务分级（付费用户优先、实时接口优先），priority 让你把这份优先级直接写进调度。换句话说，<strong>策略不是越聪明越好，而是要和工作负载匹配</strong>——这正是 SGLang 把策略做成可切换、
+并按队列长度自动降级的原因。理解了这一点，你就能根据自己的业务，给调度器选对那把“尺子”，让排序与限流都服务于同一个目标：又快又稳地把每一拍的算力用在刀刃上。</p>
+
+<div class="cols">
+  <div class="col"><h4>LPM（缓存感知）</h4><p>把<strong>前缀已命中</strong>的请求顶到队首。优点：命中率高、招待近乎免费、真实流量提速巨大（共享系统提示 / few-shot / 对话历史）。代价：要算前缀；队列过长临时退回 FCFS。<strong>优化命中率</strong>。</p></div>
+  <div class="col"><h4>FCFS（先到先服务）</h4><p>严格按到达顺序，谁先来谁先跑。优点：<strong>公平、简单、延迟可预测</strong>，不会让后到的无限等待。代价：忽略缓存，热点前缀的红利白白漏掉。<strong>优化公平性</strong>。</p></div>
+</div>
+
+<h2>插队现场：被重排的等待队列</h2>
+<p>
+下面这张图把抽象的“排序”落到实处：原队列按到达顺序是 A、B、C、D；其中 B 和 D 的开头命中了缓存（半摆好的桌子）。
+LPM 把它们<strong>顶到前面</strong>——这一拍先跑 B、D，几乎白捡两份吞吐，A、C 顺延到后面。高亮格就是命中前缀、得以插队的请求。
+你可能会问：A、C 被一直往后推，会不会饿死？不会——一方面命中是动态的，A、C 跑过一轮后它们的前缀也会进缓存、下一拍可能反过来命中；
+另一方面队列过长时策略会自动退回 FCFS，给“等久了”的请求兜底。所以 LPM 不是无脑插队，而是<strong>在公平的底线之上，优先兑现缓存红利</strong>。
+这张图也直观解释了为什么“调度器 + 缓存协同设计”不是一句口号：缓存负责把共享前缀存下来，调度器负责把命中它的请求挑出来先跑，
+二者一存一取，缺了任何一半，命中率都上不去。
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">等待队列：LPM 让命中缓存的请求（高亮）插队到前面</div>
+  <div class="cells">
+    <span class="lab">原始</span><span class="cell">A 到达</span><span class="cell">B 到达</span><span class="cell">C 到达</span><span class="cell">D 到达</span><span class="sep"></span><span class="q">FCFS 顺序</span>
+  </div>
+  <div class="cells">
+    <span class="lab">命中</span><span class="cell">A 未命中</span><span class="cell hl">B 命中前缀</span><span class="cell">C 未命中</span><span class="cell hl">D 命中前缀</span><span class="sep"></span><span class="q">查缓存</span>
+  </div>
+  <div class="cells">
+    <span class="lab">重排</span><span class="cell hl">B 先跑</span><span class="cell hl">D 先跑</span><span class="cell">A 顺延</span><span class="cell">C 顺延</span><span class="sep"></span><span class="q">LPM 顺序</span>
+  </div>
+</div>
+
+<h2>读源码：calc_priority 与预算判断</h2>
+<p>
+策略与预算的真身都在 <span class="mono">schedule_policy.py</span>。<span class="mono">calc_priority</span> 先定活跃策略，再按分支排序；
+<span class="mono">PrefillAdder.add_one_req</span> 则用一连串预算判断决定接纳还是拒绝。下面截取最能说明问题的几行。
+读这段源码时，请抓住三个关键点：一是 <span class="mono">_determine_active_policy</span> 会在队列过长时把活跃策略悄悄换成 FCFS；
+二是 FCFS 分支直接按到达顺序（或叠加 priority）返回，几乎零成本；三是缓存感知分支先做 <span class="mono">_compute_prefix_matches</span> 算出每条请求的命中长度，
+再据此做最长前缀排序。预算这边，<span class="mono">total_tokens</span> 把“输入 + 预留输出 + 页对齐”一并算进去，
+任何一个超过剩余预算就立刻 <span class="mono">NO_TOKEN</span> 退出——这正是“绝不接纳放不下的请求”在代码里的落点。
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">排序 + 限流</span></div>
+<pre><span class="kw">def</span> calc_priority(self, waiting_queue, running_batch=<span class="kw">None</span>):
+    policy = self._determine_active_policy(waiting_queue)   <span class="cm"># 队列过长(&gt;128)临时退回 FCFS</span>
+
+    <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:          <span class="cm"># 公平：按到达顺序</span>
+        <span class="kw">if</span> self.enable_priority_scheduling:
+            SchedulePolicy._sort_by_priority_and_fcfs(waiting_queue, self.priority_sign)
+        <span class="kw">return</span>
+
+    <span class="kw">if</span> <span class="kw">isinstance</span>(policy, CacheAwarePolicy):           <span class="cm"># 缓存感知：抬高命中率</span>
+        temporary_deprioritized = self._compute_prefix_matches(waiting_queue, policy)
+        <span class="kw">if</span> policy == CacheAwarePolicy.LPM:               <span class="cm"># 最长前缀匹配在前</span>
+            SchedulePolicy._sort_by_longest_prefix(waiting_queue, temporary_deprioritized)
+
+<span class="cm"># —— PrefillAdder.add_one_req：双预算判断 ——</span>
+total_tokens = cand_extend_input_len + max_new + self.page_size
+<span class="kw">if</span> total_tokens &gt;= self.rem_total_tokens:            <span class="cm"># token/显存预算不足 → 拒绝</span>
+    <span class="kw">return</span> AddReqResult.NO_TOKEN                       <span class="cm"># 绝不接纳放不下的请求(第 4/30 课)</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>策略排序 + 预算限流是两件事</strong>：<span class="mono">SchedulePolicy.calc_priority</span> 决定<strong>谁先跑</strong>（就地重排等待队列），<span class="mono">PrefillAdder</span> 决定<strong>塞几个</strong>（双预算下逐个 add_one_req）。</li>
+    <li><strong>三种模式各有所长</strong>：<span class="mono">LPM</span>（缓存感知）优化<strong>命中率</strong>、让前缀已缓存的请求插队（第 7 课）；<span class="mono">FCFS</span> 优化<strong>公平</strong>、简单可预测；<span class="mono">priority</span> 尊重业务优先级。负载多共享前缀时选 LPM。</li>
+    <li><strong>PrefillAdder 的两把尺子</strong>：<strong>token 预算</strong>（单拍 prefill 不过大，连第 22 课分块预填充）+ <strong>显存预算</strong>（KV 池有空闲槽，第 4/30 课）；任一耗尽即停，必要时<strong>切块</strong>。</li>
+    <li><strong>prefill 与 decode 的接纳张力</strong>：每拍要在“多接新 prefill 增吞吐、抬延迟”与“只推老 decode 保延迟”之间权衡（第 18/8 课），策略就是这场天平的砝码。</li>
+    <li><strong>调度器与缓存协同设计</strong>：缓存感知排序直接抬高 RadixAttention 命中率，而命中率正是 SGLang 真实流量提速的根——排序的目标不是抽象公平，而是把缓存喂饱。一存一取、协同配合，缺任何一半命中率都上不去。</li>
+    <li><strong>记住一句话收尾</strong>：先排序、再限流；排序为了喂饱缓存、兑现命中红利，限流为了既满载又不撑爆显存。这一拍由谁组成、有多大，就此拍板，然后交给前向（第 24 课）去算。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 缓存感知的 <strong>LPM（最长前缀匹配）</strong>排序和 <strong>FCFS</strong> 各自优化的是什么？</div>
+  <ol class="opts">
+    <li>LPM 优化<strong>缓存命中率</strong>——把 prompt 前缀已在 RadixAttention 缓存里的请求顶到前面、接纳它们几乎免费；FCFS 优化<strong>公平性</strong>——严格按到达顺序，简单可预测</li>
+    <li>两者都只优化单请求延迟，不影响吞吐</li>
+    <li>LPM 优化公平、FCFS 优化命中率，正好相反</li>
+    <li>两者都优化显存占用，和缓存无关</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。LPM 让“开头已缓存”的请求插队，相同前缀只算一次，直接抬高 RadixAttention 命中率，这是真实流量提速的来源（第 7 课）；FCFS 不看缓存、只按到达顺序，换来的是公平、简单与可预测的延迟。队列过长时 LPM 还会临时退回 FCFS 以免排序成瓶颈。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <code>PrefillAdder</code> 决定“这一拍能塞几个请求”时，靠的是哪<strong>两个预算</strong>？</div>
+  <ol class="opts">
+    <li><strong>token 预算</strong>（别让这一步 prefill 太大，连着分块预填充）+ <strong>显存预算</strong>（KV 池要有足够空闲槽，绝不接纳放不下的请求）；任一耗尽即停</li>
+    <li>磁盘空间预算 + 进程数预算</li>
+    <li>CPU 核数预算 + 网络带宽预算</li>
+    <li>只有一个 token 预算，显存从不参与判断</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<code>add_one_req</code> 算出 <code>total_tokens = cand_extend_input_len + max_new + page_size</code>，若 <code>≥ rem_total_tokens</code> 就 <code>NO_TOKEN</code>；同时检查 KV 池空闲槽（第 4/30 课）。token 预算限制单拍 prefill 规模（第 22 课分块），显存预算保证放得下——两把尺子任一满即停手。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 调度器每一拍面对的“<strong>prefill 与 decode 的接纳张力</strong>”指的是什么？</div>
+  <ol class="opts">
+    <li>两者完全独立，从不互相影响</li>
+    <li>prefill 和 decode 必须在不同 GPU 上跑，调度器只是选卡</li>
+    <li>张力指的是 CPU 和磁盘之间的带宽争用</li>
+    <li>多接纳新 prefill 能<strong>增吞吐</strong>，却会<strong>抬高在跑请求的延迟</strong>；只推进老 decode 则<strong>保延迟</strong>但少了新吞吐——策略每拍在两者间权衡</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。prefill 吃整段 prompt、占算力，能把新请求拉进批里增吞吐，但和在跑的 decode 抢资源、抬高它们的延迟；只 decode 则延迟稳但吞吐不长。调度器每拍用策略在这架天平上加砝码（第 18/8 课），这正是组批决策的核心权衡。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“聪明领位员（host / bouncer）”的类比讲清调度策略的两个动作：<strong>排序</strong>（<code>SchedulePolicy.calc_priority</code> 怎样按 LPM / FCFS / priority 就地重排等待队列）与<strong>限流</strong>（<code>PrefillAdder</code> 怎样在 token + 显存双预算下逐个 <code>add_one_req</code>、必要时切块）。再说明为什么“缓存感知排序”会直接抬高 RadixAttention 命中率，从而体现调度器与缓存的<strong>协同设计</strong>。</li>
+    <li>顺着这一课往后想：若你的线上流量里成千上万请求共享同一段超长系统提示，你会选 LPM 还是 FCFS？为什么？再结合 <code>PrefillAdder</code> 的双预算，说明一个超长 prompt 如何被 token 预算与<strong>分块预填充（第 22 课）</strong>挡住、避免它独占一拍把 decode 全堵死，并联系 KV 池容量（第 4/30 课）与吞吐 / 延迟（第 8 课）的权衡。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>零开销重叠调度器</h1>
+
+<p class="lead">
+这是 Part 5 的<strong>招牌课</strong>，也是第 1 课、第 3 课都点过名的那项优化：<strong>零开销重叠调度器（zero-overhead overlap scheduler）</strong>。
+回忆第 18 课，调度器的每一拍（step）都掺着两种活：一种是 <strong>CPU 上的调度</strong>——组批、采样、记账、给下一步备料；
+另一种是 <strong>GPU 上的前向（forward）</strong>。在朴素的 <span class="inline">event_loop_normal</span> 里，这两件事是<strong>严格串行</strong>的：
+GPU 算完 → CPU 才动手组下一批 → GPU 再算。问题是，<strong>CPU 组批的那段时间，GPU 整个在干等</strong>。
+对解码（decode）这种单拍极快的步骤，CPU 的调度开销可能占到一拍的不小比例——于是相当一部分昂贵的 GPU 算力被白白晾着。
+这一课讲的，就是 SGLang 怎么用一招<strong>流水线（pipeline）</strong>把这段空等彻底抹掉：让 GPU <strong>永不停转</strong>。
+把这一课记牢一句话：<strong>当 GPU 在算这一步时，CPU 已经在为下一步铺路、并顺手收尾上一步</strong>——三件事咬合成一条永不停歇的传送带，
+这正是第 1 课提到的"零开销批调度器"、也是 SGLang 在 v0.4 里拿来当招牌讲的那项硬优化。理解了它，你就理解了为什么 SGLang 在高并发 decode 下能把 GPU 榨到几乎满载。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把一拍调度想成一场<strong>接力赛（relay race）/ 两段式流水线</strong>。朴素循环像只有一名选手在跑：他冲完这一棒，得先<strong>停下来</strong>走回起跑线、系好鞋带、调整呼吸，
+  然后才冲下一棒——这中间赛道（GPU）空着没人跑。重叠调度器换成<strong>两人接力</strong>：当前选手（GPU）正在全速冲刺这一棒时，
+  下一名选手（CPU）<strong>已经站在交接区把鞋带系好、做好起跑预备</strong>，交接棒时<strong>没有一丝停顿</strong>。
+  换个厨房的比方也一样：当前这道菜还在灶上（GPU）翻炒，备餐厨师（CPU）就已经把<strong>下一单</strong>的食材切配装盘、摆好待命——
+  <strong>灶台从不空烧</strong>。代价只有一个：你永远比"实时"<strong>慢半拍</strong>，因为收尾的总是上一棒的结果。但只要交接处不停顿，整支队伍的总成绩就由跑得最快的那条腿决定，而不再被换人的间隙拖累。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>把这一步的 CPU 调度，藏进上一步的 GPU 计算里</strong>。<span class="inline">event_loop_overlap</span> 不再"算完→收尾→再组下一批"地串行，
+  而是<strong>先发射</strong>本步（第 N 步）的 GPU 前向，<strong>不等它算完</strong>，立刻让 CPU 去组第 N+1 步的批、并<strong>顺手收尾上一步（第 N−1 步）</strong>的结果——
+  上一步的结果存在一个 <span class="mono">result_queue</span>（结果队列 / future）里，<strong>推迟一拍</strong>才处理。这样每一拍的 CPU 调度开销，
+  都正好落在 GPU 那一拍的计算"影子"里被<strong>完全遮住</strong>，对外表现为<strong>近乎零的调度开销</strong>、GPU 利用率拉满。
+  代价是<strong>多一拍延迟</strong>（你总是慢一步）外加更精细的状态管理——下一批要在当前结果还没出来时就先搭好，SGLang 用 <span class="mono">batch_overlap</span> 那套
+  future/event 机制替你扛住了依赖。这正是 v0.4 主打的"零开销批调度器"；它与连续批处理（第 5 课）是绝配：<strong>批永远满载，而把它喂满的调度还不要钱</strong>。
+</div>
+
+<h2>问题：串行循环里，GPU 在 CPU 组批时干等</h2>
+<p>
+先把账算清。一拍里 GPU 真正烧算力的只有 <span class="mono">run_batch</span>（→ ModelRunner.forward，第 24 课）；
+其余的 <span class="mono">get_next_batch_to_run</span>（组批）、<span class="mono">sample</span>（采样）、<span class="mono">process_batch_result</span>（追加 token、判完成、释放 KV、记账、给下一步备输入）
+全是<strong>CPU 上的轻量活</strong>。朴素的 <span class="inline">event_loop_normal</span> 把它们<strong>排成一条直线</strong>：CPU 组好批 → GPU 前向 → CPU 收尾 → CPU 再组下一批 → GPU 再前向……
+问题出在<strong>衔接处</strong>：每当 CPU 在组批、采样、记账时，<strong>GPU 没有任务可做，只能空转等待</strong>；反过来 GPU 前向时，CPU 也闲着。
+两个昂贵的资源<strong>轮流忙、轮流闲</strong>，谁也没吃饱。这种"你忙我闲、我忙你闲"的错峰，就是串行循环最大的浪费源头。对 prefill 这种 GPU 重活，CPU 那点开销占比还小；可一旦进入 decode——
+每拍只给每条请求生成一个 token，GPU 前向本身就极快——CPU 那段固定的调度开销立刻变成一拍里<strong>相当显眼的一块</strong>。
+循环转得越快、GPU 越闲不下来，这块固定开销就越扎眼：它直接给整机吞吐<strong>封了顶</strong>。
+再把这笔账具体化：假设一拍 decode 的 GPU 前向只要 8 毫秒，而 CPU 组批、采样、记账加起来要 4 毫秒，那么串行下一拍就是 12 毫秒，
+其中整整三分之一的时间 GPU 在睡觉——意味着你买的那张昂贵显卡，有三分之一的钱花在了等 CPU 上。请求并发越高、批越大，CPU 那段记账反而越重，
+这个比例还可能更难看。这正是问题的要害：<strong>不是 GPU 不够快，而是它被一段本可以并行的 CPU 工作活活拖住、轮流空转</strong>。
+只要能让这段 CPU 工作"躲"到 GPU 计算的背后去，理论上就能把一拍从 12 毫秒压回 8 毫秒——吞吐凭空多出一半，而且一行模型代码都不用改。
+</p>
+
+<div class="cols">
+  <div class="col"><h4>朴素串行：event_loop_normal（第 18 课）</h4><p>一拍内 <strong>CPU 组批 → GPU 前向 → CPU 收尾</strong> 顺序排队，互不重叠。GPU 在 CPU 组批/采样/记账时<strong>整段空等</strong>。decode 步 GPU 极快，CPU 开销占比大，<strong>算力被晾着</strong>，循环速度给吞吐封顶。</p></div>
+  <div class="col"><h4>重叠流水线：event_loop_overlap（本课）</h4><p>先<strong>发射</strong>本步 GPU 前向（不等它算完），CPU 立刻去组下一批并<strong>收尾上一步</strong>的结果。CPU 调度被<strong>藏进 GPU 计算的影子里</strong>，GPU <strong>不再有空隙</strong>——调度开销近乎归零。代价：慢一拍。</p></div>
+</div>
+
+<h2>修复：把下一步的调度，塞进这一步的 GPU 影子里</h2>
+<p>
+重叠循环的核心动作只有三步，但顺序极讲究。第一，<strong>发射</strong>本步（N）的前向：调用 <span class="mono">run_batch</span> 把批交给 GPU，
+但<strong>立即返回、不阻塞等结果</strong>，把这个"已发射、待收尾"的批连同它的结果句柄一起 <span class="mono">append</span> 进 <span class="mono">result_queue</span>。
+第二，趁 GPU 正埋头算 N，<strong>CPU 回头去组第 N+1 步的批</strong>（下一拍的 <span class="mono">get_next_batch_to_run</span> 其实是这一拍就开始铺路的）。
+第三，<strong>收尾上一步（N−1）</strong>：从 <span class="mono">result_queue</span> 里 <span class="mono">popleft</span> 出上一拍那个批和它<em>现在已经算好</em>的结果，做 <span class="mono">process_batch_result</span>——
+追加 token、判完成、释放 KV。注意这个错位：<strong>当我们处理 N−1 的结果时，GPU 正忙着算 N</strong>。于是 CPU 的每一段活，都精确地落在 GPU 计算的"影子"里。
+这就是"慢一拍"的由来，也是"零开销"的由来——你处理的永远是<strong>上一步</strong>的结果，但每一步的 CPU 时间都<strong>不再让 GPU 等</strong>。
+这里有个容易被忽略的精妙之处：发射前向用的是<strong>异步</strong>语义——<span class="mono">run_batch</span> 把核函数排进 GPU 队列后<strong>不等它跑完就返回</strong>，
+所以 CPU 才能立刻腾出手去组下一批。真正的"等待"被推迟到下一拍 <span class="mono">pop_and_process</span> 去队列里取结果时才隐式发生，而那时 GPU 早已算完，几乎不用真等。
+换句话说，<strong>CPU 和 GPU 像两条独立的传送带各自满速运转</strong>，只在每拍交接处对一次账：本拍发射的批进队列、上拍的批出队列收尾。
+正因为这种"发射—入队—下一拍再收尾"的错位，整条循环才不存在任何一方干等另一方的缝隙。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>发射本步前向（N），不等它</h4><p><span class="mono">batch = get_next_batch_to_run()</span> 组好第 N 批，<span class="mono">run_batch(batch)</span> 把它<strong>丢上 GPU 就走</strong>，把 <span class="mono">(batch.copy(), result)</span> 压进 <span class="mono">result_queue</span>。GPU 开始算，CPU 不阻塞。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>趁 GPU 忙，CPU 备下一批（N+1）</h4><p>GPU 还在算 N 的当口，CPU 已经在<strong>收新请求、组下一拍的批、采样备料</strong>。这段 CPU 时间<strong>不占用 GPU</strong>——它躲在 N 的计算影子里。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>收尾上一步（N−1）的结果</h4><p>从 <span class="mono">result_queue</span> <span class="mono">popleft</span> 出第 N−1 批——它<strong>现在已算完</strong>。<span class="mono">process_batch_result</span> 追加 token、判完成、<strong>释放 KV</strong>、发反分词（第 17 课）。处理的永远是<strong>上一步</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>更新 last_batch，回到 1</h4><p><span class="mono">last_batch = batch</span>，循环回到第 1 步发射 N+1。每一拍都是"发射这步 / 收尾上步"的错位流水，GPU 接力棒<strong>无停顿交接</strong>。</p></div></div>
+</div>
+
+<h2>GPU 永不空转：把每一拍画在时间轴上</h2>
+<p>
+下面这张图把"慢一拍"摊开看。把时间横着切成四拍（T1…T4），上面一行是 GPU、下面一行是 CPU。在<strong>朴素串行</strong>里，
+两行是<strong>错峰</strong>的——GPU 亮时 CPU 暗、CPU 亮时 GPU 暗，总有一方在空等。而在<strong>重叠</strong>里，<strong>GPU 那一行从头亮到尾、没有一个空格</strong>（高亮格就是"GPU 正在算"），
+CPU 那一行则在 GPU 的<strong>同一拍里同时工作</strong>：T2 这一拍，GPU 在算第 2 批，CPU<strong>同时</strong>在组第 3 批、并收尾第 1 批的结果。
+你能直观看到两点：其一，GPU<strong>从不空转</strong>，这正是吞吐拉满的根；其二，结果总是<strong>晚一拍</strong>落地——第 1 批的结果要等到 T2 才处理完，这就是多出来的那一拍延迟（第 8 课的吞吐/延迟权衡在这里现形）。
+还要点明一个常见误解：这"晚一拍"<strong>并不会让单条请求变慢一倍</strong>，它只是在整条生成的最前面<strong>一次性</strong>多压了一拍的固定延迟——
+后续每个 token 仍然是一拍一个、稳定吐出。对一条要生成几百个 token 的长回答来说，开头多等一拍几乎察觉不到；
+而它换来的是<strong>每一拍</strong>都把 GPU 喂满，吞吐的收益是持续累积的。所以这笔交易在绝大多数服务场景里都极其划算：用一次性的、微小的延迟，换走全程的算力浪费。
+只有在那种"只生成极少 token、且对首包时延锱铢必较"的场景里，才需要重新掂量这一拍是否值得。
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">朴素串行 vs 重叠流水线：高亮格 = GPU 正在算（看 GPU 那一行有没有空格）</div>
+  <div class="cells">
+    <span class="lab">串行·GPU</span><span class="cell">T1 算批1</span><span class="cell">T2 空等</span><span class="cell">T3 算批2</span><span class="cell">T4 空等</span><span class="sep"></span><span class="q">有空格→算力浪费</span>
+  </div>
+  <div class="cells">
+    <span class="lab">串行·CPU</span><span class="cell">T1 空等</span><span class="cell">T2 组批2</span><span class="cell">T3 空等</span><span class="cell">T4 组批3</span><span class="sep"></span><span class="q">两行错峰、轮流闲</span>
+  </div>
+  <div class="cells">
+    <span class="lab">重叠·GPU</span><span class="cell hl">T1 算批1</span><span class="cell hl">T2 算批2</span><span class="cell hl">T3 算批3</span><span class="cell hl">T4 算批4</span><span class="sep"></span><span class="q">无空格→满载</span>
+  </div>
+  <div class="cells">
+    <span class="lab">重叠·CPU</span><span class="cell">T1 组批2</span><span class="cell">T2 组批3·收尾1</span><span class="cell">T3 组批4·收尾2</span><span class="cell">T4 组批5·收尾3</span><span class="sep"></span><span class="q">藏进 GPU 影子里</span>
+  </div>
+</div>
+
+<h2>账要算清：零开销不是没代价</h2>
+<p>
+重叠不是免费午餐，它把"开销"从 GPU 空转<strong>换成了一拍延迟 + 复杂度</strong>。好处一栏很硬：<strong>调度开销近乎归零</strong>、<strong>GPU 利用率拉满</strong>，
+decode 密集场景吞吐显著抬升。好处之所以这么实在，是因为它榨的是<strong>本来就闲着的那段 CPU 时间</strong>，等于不花额外成本白捡吞吐。代价一栏也要看清：<strong>+1 拍延迟</strong>——你永远比实时慢一步，对单条请求的首 token / 末 token 时延略有影响（第 8 课）；
+还有<strong>状态管理更难</strong>——下一批要在当前结果<em>还没算出来</em>时就先搭好，意味着采样 token、KV 记账等存在<strong>跨拍依赖</strong>，
+SGLang 用 <span class="mono">batch_overlap</span> 目录里的 future/event 对象替你把这些依赖串好、保证正确。还有些场景（如某些需要立刻拿到上一步结果才能组下一批的情形，
+源码里的 <span class="mono">is_disable_overlap_for_batch</span>）会临时退回不重叠、先把上一批收尾。理解这张账，你就明白为什么这叫"零开销"——
+不是没有成本，而是<strong>把成本藏到了不影响吞吐的地方</strong>。
+最后再强调一句工程直觉：重叠之所以能成立，前提是"调度"和"计算"<strong>分属两种不同的硬件资源</strong>（CPU 与 GPU），它们能真正物理并行。
+如果两件事抢的是同一块资源，重叠就只是把先后顺序换了个写法、并不会更快。SGLang 这套设计精准地踩在了这个前提上：
+GPU 埋头做矩阵乘的几毫秒，对 CPU 来说是大把可用的空闲时间，正好拿来组下一批、采样、记账。
+把这块本就闲着的 CPU 时间利用起来，几乎是"无中生有"地榨出了吞吐——这也是为什么它被称作"零开销"而不仅仅是"低开销"。
+</p>
+
+<table class="t">
+  <tr><th>维度</th><th>朴素 event_loop_normal</th><th>重叠 event_loop_overlap</th></tr>
+  <tr><td>CPU 调度开销</td><td>暴露在关键路径，GPU 空等</td><td class="mono">≈ 0（藏进 GPU 影子）</td></tr>
+  <tr><td>GPU 利用率</td><td>decode 步明显有空隙</td><td><strong>满载、无空格</strong></td></tr>
+  <tr><td>吞吐</td><td>被循环速度封顶</td><td><strong>显著抬升</strong>（v0.4 招牌）</td></tr>
+  <tr><td>延迟</td><td>实时收尾</td><td><strong>+1 拍</strong>（总慢一步）</td></tr>
+  <tr><td>实现复杂度</td><td>简单、直来直去</td><td>需 <span class="mono">result_queue</span> + 跨拍依赖管理</td></tr>
+</table>
+
+<h2>读源码：event_loop_overlap 的错位流水</h2>
+<p>
+真身就在 <span class="mono">scheduler.py</span> 的 <span class="mono">event_loop_overlap</span>。抓三个关键点：一是 <span class="mono">result_queue</span> 这个双端队列，
+存放"已发射但还没收尾"的批；二是 <span class="mono">run_batch</span> 之后<strong>立刻 append、不阻塞</strong>，把收尾推迟到下一拍；
+三是 <span class="mono">pop_and_process</span> 从队首取出<strong>上一拍</strong>的批做 <span class="mono">process_batch_result</span>——这一句执行时，GPU 正忙着算本拍。错位，就是这么实现的。
+读这段时还可以留意一处细节：批入队前调用了 <span class="mono">batch.copy()</span>。为什么要拷贝？因为本拍的批对象接下来可能被 <span class="mono">get_next_batch_to_run</span> 复用或就地改写，
+而队列里那份必须保留"发射时的快照"，等下一拍收尾时才不会读到被篡改的状态——这正是跨拍依赖管理的一个缩影。源码里还有 <span class="mono">is_disable_overlap_for_batch</span> 的分支，
+在少数必须立刻拿到上一步结果才能继续的情形下，提前把上一批收尾、临时退回不重叠，保证正确性优先于性能。
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">错位流水 / 慢一拍</span></div>
+<pre><span class="kw">def</span> event_loop_overlap(self):
+    <span class="cm"># 重叠 CPU 调度与 GPU 计算的事件循环</span>
+    self.result_queue = deque()                  <span class="cm"># 存"已发射、待收尾"的批</span>
+
+    <span class="kw">def</span> pop_and_process():
+        <span class="cm"># 收尾上一步(N-1)的结果——推迟一拍处理</span>
+        tmp_batch, tmp_result = self.result_queue.popleft()
+        self.process_batch_result(tmp_batch, tmp_result)
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        batch = self.get_next_batch_to_run()     <span class="cm"># CPU：组本步(N)的批</span>
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:                                <span class="cm"># 发射本步前向，不等它算完</span>
+            batch_result = self.run_batch(batch)
+            self.result_queue.append((batch.copy(), batch_result))
+
+        <span class="kw">if</span> self.last_batch:                      <span class="cm"># GPU 算 N 时，CPU 回头收尾 N-1</span>
+            pop_and_process()
+
+        self.last_batch = batch                  <span class="cm"># 回到开头：下一拍发射 N+1</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>问题在串行</strong>：朴素 <span class="mono">event_loop_normal</span>（第 18 课）里 CPU 组批/采样/记账与 GPU 前向<strong>顺序排队</strong>，CPU 干活时 GPU 空等。decode 步 GPU 极快，CPU 开销占比大，循环速度给吞吐<strong>封顶</strong>。</li>
+    <li><strong>修复靠重叠</strong>：<span class="mono">event_loop_overlap</span> 先<strong>发射</strong>第 N 步前向（不等），CPU 立刻组第 N+1 批、并<strong>收尾第 N−1 步</strong>的结果（存在 <span class="mono">result_queue</span> / future 里，推迟一拍）。CPU 调度被<strong>藏进 GPU 计算的影子</strong>。</li>
+    <li><strong>什么叠什么</strong>：第 N 步的 <strong>GPU 前向</strong> ∥ 第 N+1 步的 <strong>CPU 组批</strong> + 第 N−1 步的 <strong>CPU 收尾</strong>。GPU <strong>从不空转</strong>，调度开销近乎归零。</li>
+    <li><strong>代价是慢一拍</strong>：你永远比实时<strong>晚一步</strong>处理结果（第 8 课的吞吐/延迟权衡），外加跨拍状态管理更难——下一批在当前结果未出时就搭好，SGLang 用 <span class="mono">batch_overlap</span> 的 future/event 扛依赖。</li>
+    <li><strong>与连续批处理是绝配</strong>：连续批处理（第 5 课）让批<strong>永远满载</strong>，重叠调度器让<strong>喂满批的调度不要钱</strong>。这是 v0.4 的招牌优化，也是第 1/3 课点名的那项"零开销"。配合 CUDA Graph（第 27 课）把单步再压薄。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 <code>event_loop_overlap</code> 里，<strong>什么和什么重叠</strong>？请精确说出哪部分在 GPU、哪部分在 CPU。</div>
+  <ol class="opts">
+    <li>两个不同请求的 GPU 前向在同一张卡上并行，CPU 不参与</li>
+    <li>第 N 步的 <strong>GPU 前向</strong>（<code>run_batch</code>→ModelRunner.forward）与 <strong>CPU 组第 N+1 步的批</strong> + <strong>CPU 收尾第 N−1 步的结果</strong>（<code>process_batch_result</code>）<strong>同拍并行</strong>：发射本步前向后不等它，CPU 立刻去组下一批、并从 <code>result_queue</code> 取出上一步结果做收尾</li>
+    <li>本步的 CPU 收尾与本步的 GPU 前向重叠（同一步内并行）</li>
+    <li>GPU 前向与 GPU 采样重叠，全程没有 CPU 工作</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。调度器“只决策、不计算”：组批/采样/收尾是 CPU 轻量活，唯独 <code>run_batch</code> 烧 GPU。overlap 版发射第 N 步前向后<strong>立刻 append 进 <code>result_queue</code> 不阻塞</strong>，趁 GPU 算 N 的当口，CPU 去组 N+1 的批、并 <code>popleft</code> 出 N−1 的结果做收尾。于是每一拍的 CPU 时间都藏进同拍 GPU 计算的影子里。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么这套重叠能把<strong>调度开销藏到近乎为零</strong>，让人称它“零开销”？</div>
+  <ol class="opts">
+    <li>因为重叠让 CPU 的调度代码运行得更快了</li>
+    <li>因为 CPU 的组批/采样/记账时间，正好落在 GPU 那一拍前向计算的“影子”里被<strong>完全遮住</strong>——GPU 从不为等 CPU 而空转，CPU 开销不再出现在关键路径上，所以对外表现为近乎零的调度开销、GPU 满载</li>
+    <li>因为它彻底删掉了组批和采样这两步</li>
+    <li>因为前向被搬到了 CPU 上，省掉了 GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。“零开销”不是没成本，而是把成本<strong>藏到不影响吞吐的地方</strong>。串行版里 CPU 干活时 GPU 空等，这段空等直接给吞吐封顶；overlap 把 CPU 调度与 GPU 前向并到同一拍，CPU 时间被 GPU 计算遮住，GPU 利用率拉满。decode 步 GPU 极快、CPU 占比大，收益尤其明显。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 重叠调度器的<strong>主要代价</strong>是什么？为什么需要一个 <code>result_queue</code>？</div>
+  <ol class="opts">
+    <li>代价是<strong>多一拍延迟</strong>——你处理的永远是<strong>上一步</strong>的结果，总比实时慢一步（第 8 课的吞吐/延迟权衡），外加跨拍状态管理更难；<code>result_queue</code> 正是用来暂存“已发射但还没收尾”的批，把收尾<strong>推迟一拍</strong>，等 GPU 算完再 <code>popleft</code> 处理</li>
+    <li>代价是显存翻倍，<code>result_queue</code> 缓存 KV</li>
+    <li>代价是吞吐下降，<code>result_queue</code> 用来限流</li>
+    <li>没有代价，<code>result_queue</code> 只是日志缓冲</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。源码里 <code>run_batch</code> 后立刻 <code>result_queue.append((batch.copy(), result))</code> 不阻塞，下一拍才 <code>popleft</code> 做 <code>process_batch_result</code>——所以收尾恒落后一拍，这就是 +1 拍延迟。下一批要在当前结果未出时就搭好，采样 token / KV 记账存在跨拍依赖，靠 <code>batch_overlap</code> 的 future/event 串好。某些必须先拿到上一步结果的情形会临时退回不重叠。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“接力赛 / 两段式流水线”的类比，完整讲清 <code>event_loop_overlap</code> 一个 step 的错位流水。请逐一覆盖：①<strong>发射</strong>第 N 步前向（<code>run_batch</code> 不等结果、把 <code>(batch.copy(), result)</code> 压进 <code>result_queue</code>）；②趁 GPU 算 N，CPU 组第 N+1 步的批；③<code>pop_and_process</code> 收尾第 N−1 步（<code>process_batch_result</code>：追加 token、判完成、释放 KV、发反分词第 17 课）。并解释“慢一拍”为何既是代价又是“零开销”的来源，对照朴素 <code>event_loop_normal</code>（第 18 课）说明 GPU 为什么从不空转。</li>
+    <li>论证“重叠调度器与连续批处理是绝配”：连续批处理（第 5 课）让批<strong>永远满载</strong>，重叠调度器让<strong>喂满批的调度不要钱</strong>。请说明两者各解决吞吐的哪一半，为什么 decode 密集场景下重叠收益最大（联系第 8 课吞吐/延迟、第 24 课模型前向），以及它如何与 CUDA Graph（第 27 课）叠加把单步成本进一步压薄。再讨论：在什么样的负载或延迟敏感场景下，+1 拍延迟可能是不可接受的取舍？</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>分块预填充</h1>
+
+<p class="lead">
+上一课我们看清了调度器“先排序、再限流”的双步动作。这一课盯住限流里最棘手的一种情况：当队首是一个<strong>超长 prompt</strong>（比如 32k token 的长文档）时，会发生什么？
+如果让它在<strong>一拍（step）里一口气全部 prefill</strong>，这一步就会变成一头“鲸鱼”——独占整张 GPU 几十毫秒，
+排在它后面所有正在 <span class="inline">decode</span> 的请求<strong>全部卡住</strong>，每个人的 token 都吐不出来，延迟瞬间炸裂（TTFT/ITL 飙升，第 8 课）。
+<strong>分块预填充（chunked prefill）</strong>就是把这头鲸鱼<strong>切成固定大小的小块</strong>，分摊到好几拍里，
+每一拍只啃一小口、并和别人的 decode <strong>混在同一个批</strong>里跑。没有哪一拍是巨大的，所有人的 token 都还在稳定流动。
+注意一个常见的误解：分块要解决的<strong>不是“放不下”，而是“算不过来”</strong>——显存里也许有的是 KV 槽位，
+真正被一个超长 prefill 卡住的是<strong>时间</strong>，是这一拍前向计算被一个请求独吞，害得别人寸步难行。
+理解了这一点，你就会发现分块和上一课的限流其实环环相扣：限流管的是“一拍别接太多请求”，分块管的是“接进来的那个超长请求也别一口吃完”。
+记住这一课一句话：<strong>别让一个长请求把一拍撑爆——把它切块，混着 decode 慢慢喂</strong>。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把这一拍的 GPU 想成一张<strong>正在热聊的饭桌</strong>。桌上每个人轮流说话（每个请求的 decode 在轮流吐 token），气氛流畅。
+  这时上来一道<strong>巨无霸大餐</strong>（32k token 的长 prompt）。笨办法是：让一个人<strong>把整盘菜一口塞进嘴里</strong>——
+  他得埋头猛嚼几十秒，这期间<strong>谁也插不上话</strong>，整桌的对话被他一个人噎停了。
+  聪明办法是<strong>把大餐切成小口、一口一口吃，同时还能继续聊天</strong>：每一轮只咽下<strong>一小口（一个 chunk）</strong>，
+  嚼一下、说句话，再来下一口。这样大餐照样吃得完，桌上的对话（别人的 decode）<strong>一刻也没断</strong>。
+  关键的纪律是：<strong>每一口的大小是固定上限的</strong>，绝不允许谁一口把嘴塞满、堵住所有人的发言。
+  代价也很实在：这顿大餐要吃好几轮才咽完（多花几拍、它自己的首字更慢一点），但换来的是<strong>满桌人的体验都顺滑</strong>——没人被噎停。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>把“大块 prefill”拆成“多拍小块”，再和 decode 混批，换全局延迟的平滑</strong>。
+  谁来切？正是上一课的 <span class="inline">PrefillAdder</span>（第 20 课）。它握着一个 <strong>token 预算</strong>
+  （由服务器参数 <span class="mono">chunked_prefill_size</span> 设定每拍能吃多少 prefill token），
+  在 <span class="mono">add_one_req</span> 里逐个尝试塞请求：能整段塞下就整段塞，<strong>塞不下就只切下能装的前半段</strong>，剩下的留到下一拍续上。
+  于是一个 32k 的 prompt 会被切成若干 chunk，分布在连续好几拍里——它的 KV 缓存（第 4 课）<strong>一块一块地填</strong>，
+  只有当<strong>最后一块</strong>填完，这个请求才正式转入 decode、开始吐第一个 token。而这每一拍，调度器跑的都是<strong>混合批（mixed batch）</strong>：
+  里面既有“正在 prefill 某一块”的长请求，也有“正在 decode”的其他请求，事件循环（第 18 课）每拍照常推进。
+  再把镜头拉远：分块预填充和上一课的限流是同一枚硬币的两面——限流保证“别一拍吃太多”，分块保证“吃不下的也别整条噎着，切开慢慢来”。
+  它把一个会制造延迟尖峰的极端情况，驯化成一串平稳的小步，这正是 SGLang 在<strong>长短请求混跑</strong>的真实流量里依然顺滑的关键。
+顺带一提，分块也为后面更激进的架构埋下伏笔：既然 prefill 和 decode 的负载特性如此不同，能不能干脆把它们拆到<strong>不同的实例</strong>上各自优化？
+那就是第 45 课要讲的 PD 分离。而在单实例内部，分块预填充是把这两种负载<strong>和平共处</strong>的最朴素也最实用的办法。
+</div>
+
+<h2>问题：一头鲸鱼堵死整个泳池</h2>
+<p>
+先看不分块会发生什么。连续批处理（第 5 课）的美好前提是“每一拍都很快、批里大家轮流前进”。
+可一旦队首挤进一个 32k token 的 prefill，而你让它<strong>一拍算完</strong>，这一拍的前向计算量就暴涨几十倍——
+GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求只能干等</strong>：它们本该每一拍吐一个 token，现在却要陪着这头鲸鱼一起卡住。
+对用户的直接观感就是：正在流式输出的回答<strong>突然顿住</strong>（ITL 尖峰），新请求的首字延迟也被拖长（TTFT 尖峰，第 8 课）。
+一个超长请求，毁掉了一整批人的体验。这不是显存放不下的问题——KV 槽位也许够；这是<strong>“一拍算太多”</strong>的问题，
+是时间维度上的拥塞。这里值得多想一层：连续批处理之所以高效，靠的是“每一拍都短、批里大家齐步走”，
+一旦某一拍因为一个巨型 prefill 而变得奇长，整条流水线的节奏就被打乱——后面所有拍都要为这一拍的失衡买单。
+更糟的是，线上流量往往<strong>长短混杂</strong>：99% 是几百 token 的短请求，偶尔混进一个几万 token 的长文档，
+而恰恰是这种偶发的长请求，会周期性地制造延迟毛刺，让 P99 延迟变得难看。分块预填充要解决的，正是这种“一条大鱼把整池水搅停”的尖峰。
+</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ 一拍整段 prefill（尖峰）</h4><p>32k token 在<strong>单拍</strong>算完：这一步巨大无比，独占 GPU 几十毫秒。批里其他请求的 decode <strong>全部 stall</strong>，token 吐不出来。TTFT/ITL <strong>瞬间飙升</strong>（第 8 课），用户看到输出顿住。一头鲸鱼堵死整池。</p></div>
+  <div class="col"><h4>✅ 分块 prefill（平滑）</h4><p>32k 被切成<strong>固定大小的 chunk</strong>，分摊到好几拍。每拍只算一个 chunk + <strong>混入大家的 decode</strong>，没有哪一拍巨大。所有人的 token <strong>持续流动</strong>，延迟平稳。多花几拍，换来<strong>全局顺滑</strong>与更好的达标吞吐。</p></div>
+</div>
+
+<h2>怎么切：把 32k 拆成多拍小块</h2>
+<p>
+分块的机制朴素而有效：<span class="inline">PrefillAdder</span> 每拍都带着一个固定的 chunk token 预算（<span class="mono">rem_chunk_tokens</span>，源自 <span class="mono">chunked_prefill_size</span>）。
+为什么是“每拍都带着”？因为预算是<strong>每接一个请求就当场扣减</strong>的：这一拍可能先塞了几个短请求的整段 prefill，
+剩下的预算才轮到队首那个长请求，于是它能切多大的一块，取决于<strong>这一拍前面已经被吃掉了多少</strong>。
+当一个请求的待算 token 数 <span class="mono">input_tokens</span> <strong>小于等于</strong>剩余 chunk 预算时，整段一次塞完，走普通（非分块）路径；
+一旦 <strong>超过</strong>，就进入分块分支：只截取 <span class="mono">trunc_len</span> 这么多 token（按 <span class="mono">page_size</span> 向下对齐，保证页整齐），
+把这一段标记为本拍要算的范围（<span class="mono">set_extend_range</span>），其余留到后续。这个请求被记为 <span class="mono">new_chunked_req</span>，
+下一拍它会带着已经填好的前缀回来，从断点处<strong>接着切下一块</strong>。如此往复，prompt 的 KV 缓存一块一块累积，
+直到最后一块填完，它才脱离 prefill、转入 decode。这里有个容易忽略的细节：每一块都要<strong>按 page_size 向下对齐</strong>，
+因为 KV 缓存是按页（page）管理的（第 4/6 课），切在半页中间会破坏分页结构，所以宁可少切一点、也要切在页边界上。
+另一个细节是“前缀”的累积：第 2 拍开始，这个请求的 <span class="mono">prefix_indices</span> 已经包含了前面几块算好的 KV，
+于是它每拍真正要算的只是“新的一块”，而不是从头重算——这和 RadixAttention 的前缀复用（第 7 课）是同一种“算过的不再算”的思想。
+下面这张图把一个 32k 的 prompt 在连续几拍里的切块过程画了出来。
+</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>第 1 拍：chunk #1</h4><p>取队首的 32k prompt，<span class="mono">input_tokens &gt; rem_chunk_tokens</span> → 只截 <span class="mono">trunc_len</span>（如 8k，按 page_size 对齐）。填好前 8k 的 KV，混着别人的 decode 一起跑。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>第 2 拍：chunk #2</h4><p>同一请求作为 <span class="mono">new_chunked_req</span> 回来，从第 8k 处接着切下一个 8k 块。又是一个有界小步，decode 照常流动。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>第 3…N 拍：继续</h4><p>一块接一块把 KV 填满（第 4 课）。每一拍都不大，没有哪一步独占 GPU——尖峰被彻底摊平。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>最后一块：转 decode</h4><p>当剩余 token 一拍能装下，走普通路径整段塞完。此刻 prompt 全部 prefill 完毕，请求正式开始吐第一个 token。</p></div></div>
+</div>
+
+<h2>混合批：一拍里 prefill 与 decode 同框</h2>
+<p>
+分块之所以能保住别人的延迟，关键在<strong>混合批</strong>：被切出来的那一个 prefill chunk，并不是单独占一拍，而是和一堆正在 decode 的请求<strong>挤在同一个批</strong>里前向。
+于是每一拍的工作量 = 一个有界的 prefill 块 + 全体在跑请求各自的一个 decode token，规模可控、节奏稳定。
+这也回答了“为什么不直接让长请求排到最后再跑”——那样它会饿死、首字延迟无限长；而分块让它<strong>边切边混</strong>，
+既稳步推进自己的 prefill，又不抢光别人的吞吐。这里还藏着一个调度上的巧思：混合批让 GPU 在同一次前向里<strong>既做计算密集的 prefill、又做访存密集的 decode</strong>，
+两种负载的特性正好互补——prefill 吃算力、decode 吃显存带宽，混在一起反而能把 GPU 的算力和带宽都用得更满，而不是让某一种资源闲着。
+这也是为什么 SGLang 默认就开启分块预填充：它几乎是“免费的午餐”，既削平了延迟尖峰，又顺手提高了硬件利用率。
+下面这张图画的就是某一拍混合批的构成：高亮格是那个长请求的<strong>一个 prefill chunk</strong>，
+其余普通格是各个请求的 <strong>decode</strong>。chunk 的大小（高亮格的“宽度”）由 <span class="mono">chunked_prefill_size</span> 决定，正是平滑与步数之间那把可调的旋钮。
+</p>
+
+<div class="cellgroup">
+  <div class="cg-cap">某一拍的混合批：1 个 prefill chunk（高亮）+ 多个 decode 同批前向</div>
+  <div class="cells">
+    <span class="lab">成员</span><span class="cell hl">长请求 · chunk#k</span><span class="cell">R2 decode</span><span class="cell">R3 decode</span><span class="cell">R4 decode</span><span class="cell">R5 decode</span><span class="sep"></span><span class="q">混合批</span>
+  </div>
+  <div class="cells">
+    <span class="lab">本拍干啥</span><span class="cell hl">填 8k KV</span><span class="cell">吐 1 token</span><span class="cell">吐 1 token</span><span class="cell">吐 1 token</span><span class="cell">吐 1 token</span><span class="sep"></span><span class="q">有界 + 流动</span>
+  </div>
+  <div class="cells">
+    <span class="lab">下一拍</span><span class="cell hl">chunk#k+1</span><span class="cell">继续 decode</span><span class="cell">继续 decode</span><span class="cell">继续 decode</span><span class="cell">继续 decode</span><span class="sep"></span><span class="q">节奏稳定</span>
+  </div>
+</div>
+
+<h2>取舍：chunk 大小是那把旋钮</h2>
+<p>
+分块不是免费的：它把一个 prefill 拆成多拍，<strong>总步数变多</strong>，那头鲸鱼自己的 TTFT 也被摊到好几拍、<strong>首字略慢</strong>。
+但换来的是<strong>所有人</strong>的延迟都平滑、达标吞吐（goodput-under-SLA）更高——在长短请求混跑的真实负载里，这笔买卖几乎总是值的。
+而 <span class="mono">chunked_prefill_size</span> 就是调这笔买卖的旋钮：<strong>切得越小</strong>，每拍 prefill 越轻、decode 越顺滑，但步数更多、长请求首字更慢、固定开销摊得更多；
+<strong>切得越大</strong>，步数更少、长请求更快收尾，但每拍更重、尖峰风险回升（退回第 8 课的吞吐/延迟权衡）。
+没有放之四海的最优值——它取决于你的延迟 SLA 和长短请求的比例。一个实用的心法是：<strong>先按你能接受的最坏单拍延迟反推 chunk 大小</strong>——
+你希望每一拍的 decode 顿挫不超过多少毫秒，就把 prefill 块控制在对应的 token 量级；再根据长请求占比微调。
+还要记得，chunk 太小也并非全是好处：步数变多意味着<strong>固定开销</strong>（每拍的组批、采样、内核启动等，第 21 课）被反复摊销，
+极端情况下调度本身的开销会反过来吃掉一部分收益。所以这把旋钮的最佳点，往往落在“足够小到不制造尖峰、又足够大到不浪费步数”的中间地带。下面这张表把旋钮的两端效果摆在一起。
+</p>
+
+<table class="t">
+  <tr><th>chunk 大小</th><th>每拍 prefill</th><th>decode 平滑度</th><th>总步数 / 长请求 TTFT</th><th>适用</th></tr>
+  <tr><td class="mono">偏小</td><td>轻、有界</td><td><strong>很顺滑</strong>，尖峰小</td><td>步数多、长请求首字更慢</td><td>延迟敏感、decode 密集</td></tr>
+  <tr><td class="mono">偏大</td><td>重、接近整段</td><td>较差，<strong>尖峰回升</strong></td><td>步数少、长请求更快收尾</td><td>吞吐优先、长请求为主</td></tr>
+  <tr><td class="mono">关闭分块</td><td>整段一口吃</td><td><strong>最差</strong>，一拍 stall 所有人</td><td>步数最少、但延迟炸裂</td><td>几乎不推荐（短 prompt 才无所谓）</td></tr>
+</table>
+
+<h2>读源码：add_one_req 里的切块判断</h2>
+<p>
+分块的真身在 <span class="mono">schedule_policy.py</span> 的 <span class="inline">PrefillAdder.add_one_req</span>。
+它先算出本请求要吃多少 token，做完 token/显存预算检查后，用一个 <span class="mono">if / else</span> 决定：能整段塞就整段，
+否则进入 <strong>chunked prefill</strong> 分支，把 <span class="mono">trunc_len</span> 按 <span class="mono">page_size</span> 向下取整，
+只提交这一块、并把请求记为 <span class="mono">new_chunked_req</span> 等下一拍续上。读这段源码时，请抓住三个关键点：
+一是 <span class="mono">rem_chunk_tokens</span> 为 <span class="kw">None</span> 表示没开分块，此时整条 prompt 一拍算完；
+二是分块分支里那行 <span class="mono">// page_size * page_size</span> 就是“向下对齐到页边界”的惯用写法，保证不切在半页中间；
+三是 <span class="mono">new_chunked_req</span> 这个字段是“续上”的关键——调度器靠它在下一拍认出“这是上一拍没切完的那个请求”，从断点继续。下面截取最能说明问题的几行。
+</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">schedule_policy.py ::PrefillAdder.add_one_req</span><span class="ln">切块判断</span></div>
+<pre><span class="cm"># 整段能装下(input_tokens ≤ 剩余 chunk 预算) → 一次塞完，不切</span>
+<span class="kw">elif</span> self.rem_chunk_tokens <span class="kw">is</span> <span class="kw">None</span> <span class="kw">or</span> input_tokens &lt;= self.rem_chunk_tokens:
+    req.set_extend_range(<span class="cm"># 提交整条 prompt 这一拍算完</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.full_untruncated_fill_ids))
+    self.can_run_list.append(req)
+<span class="kw">else</span>:                                            <span class="cm"># 装不下 → 分块预填充</span>
+    trunc_len = self.rem_chunk_tokens // self.page_size * self.page_size  <span class="cm"># 按页对齐截断</span>
+    <span class="kw">if</span> trunc_len &lt;= 0:
+        <span class="kw">return</span> AddReqResult.OTHER
+    req.set_extend_range(<span class="cm"># 只算前 trunc_len 个 token，其余下一拍续</span>
+        <span class="kw">len</span>(req.prefix_indices), <span class="kw">len</span>(req.prefix_indices) + trunc_len)
+    self.can_run_list.append(req)
+    self.new_chunked_req = req                    <span class="cm"># 记住它，下一拍接着切下一块</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>要解决的问题</strong>：一个超长 prompt（如 32k）若在<strong>一拍里整段 prefill</strong>，会独占 GPU、让批里所有 decode 请求 <strong>stall</strong>，造成 TTFT/ITL 延迟尖峰（第 8 课）。一头鲸鱼堵死整池。</li>
+    <li><strong>分块的做法</strong>：把大 prefill 切成<strong>固定大小的 token 块</strong>（由 <span class="mono">chunked_prefill_size</span> 设定），分摊到<strong>多拍</strong>，并和别人的 decode <strong>混在同一个批</strong>里跑——没有哪一拍巨大，所有人的 token 持续流动。</li>
+    <li><strong>谁来切</strong>：<span class="inline">PrefillAdder</span>（第 20 课）在 <span class="mono">add_one_req</span> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<span class="mono">trunc_len</span> 按 page 对齐），记为 <span class="mono">new_chunked_req</span> 下一拍续；KV 一块块填（第 4 课），最后一块填完才转 decode。</li>
+    <li><strong>取舍与旋钮</strong>：分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，但换来<strong>全局延迟平滑</strong>与更高的达标吞吐。<span class="mono">chunked_prefill_size</span> 越小越顺滑但步数多，越大步数少但尖峰回升（第 8 课的权衡）。</li>
+    <li><strong>一句话收尾</strong>：别让一个长请求把一拍撑爆——把它切块、混着 decode 慢慢喂；用多花的几拍，换满桌人的顺滑。这也是后续 PD 分离（第 45 课）把 prefill 与 decode 彻底拆到不同实例的动机起点。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 为什么不分块时，一个 32k token 的超长 prompt 会成为大问题？</div>
+  <ol class="opts">
+    <li>因为 32k token 的 KV 缓存一定放不进显存，必然 OOM</li>
+    <li>因为调度器无法对超过 4k token 的请求排序</li>
+    <li>因为它若在<strong>一拍里整段 prefill</strong>，这一步的前向计算量暴涨、<strong>独占 GPU 几十毫秒</strong>，批里所有正在 decode 的请求<strong>全部 stall</strong>、token 吐不出来，于是 TTFT/ITL 延迟尖峰（第 8 课）——一头鲸鱼堵死整池</li>
+    <li>因为长 prompt 会让采样温度失效，输出乱码</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。这是<strong>时间维度的拥塞</strong>，不是显存问题——KV 槽位也许够，但“一拍算太多”让 GPU 被一个请求独占，批里其他人的 decode 只能干等。用户观感就是流式输出突然顿住（ITL 尖峰）、新请求首字变慢（TTFT 尖峰）。分块正是为摊平这种尖峰而生。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 分块预填充<strong>具体怎么工作</strong>，才能既推进长请求、又不卡住别人？</div>
+  <ol class="opts">
+    <li>为长请求单独开一张 GPU，和 decode 物理隔离</li>
+    <li>把 prompt 压缩到 4k token 以内再一次性 prefill</li>
+    <li>把长请求挪到队列最末尾，等所有 decode 都结束再单独整段 prefill</li>
+    <li>把大 prefill 切成<strong>固定大小的 token 块</strong>（由 <code>chunked_prefill_size</code> 设定），分摊到<strong>多拍</strong>，并和别人的 decode <strong>混在同一个批</strong>里前向；KV 一块块填，只有<strong>最后一块</strong>填完该请求才转入 decode</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。关键有二：① <strong>切块</strong>让每拍 prefill 有界、没有哪一步巨大；② <strong>混合批</strong>让这一个 chunk 和一堆 decode 同框前向，于是每拍 = 一个有界 prefill 块 + 全体各吐一个 token，规模可控、节奏稳定。排到最后会饿死长请求、首字延迟无限长，所以不可取。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <code>chunked_prefill_size</code> 这个旋钮调小或调大，分别意味着什么取舍？</div>
+  <ol class="opts">
+    <li><strong>调小</strong>：每拍 prefill 更轻、decode 更顺滑，但<strong>总步数更多</strong>、长请求自己的首字更慢；<strong>调大</strong>：步数更少、长请求更快收尾，但每拍更重、<strong>尖峰风险回升</strong>（退回第 8 课吞吐/延迟权衡）</li>
+    <li>它只控制日志频率，对性能没有影响</li>
+    <li>调小提升吞吐、调大降低吞吐，与延迟无关</li>
+    <li>它决定 KV 缓存的页大小（page_size），越大越省显存</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<code>chunked_prefill_size</code> 设定每拍能吃多少 prefill token，正是平滑与步数之间那把旋钮。没有放之四海的最优值——延迟敏感、decode 密集就偏小；吞吐优先、长请求为主就偏大。它控制的是“每一拍 prefill 的有界上限”，而非显存页大小或日志。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“吃巨无霸大餐还要继续聊天”的类比，完整讲清分块预填充。请逐一覆盖：①<strong>问题</strong>——一个 32k prompt 若一拍整段 prefill，会独占 GPU、让批里所有 decode <strong>stall</strong>，造成 TTFT/ITL 尖峰（第 8 课）；②<strong>做法</strong>——<code>PrefillAdder</code>（第 20 课）在 <code>add_one_req</code> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<code>trunc_len</code> 按 page 对齐）、记为 <code>new_chunked_req</code> 下一拍续，KV 一块块填（第 4 课），最后一块才转 decode；③<strong>混合批</strong>——这一个 chunk 和别人的 decode 同批前向，事件循环（第 18 课）照常推进。</li>
+    <li>讨论分块预填充的<strong>取舍</strong>与它在系统里的位置。分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，却换来<strong>全局延迟平滑</strong>与更高的达标吞吐（goodput-under-SLA）——请说明为什么在长短请求混跑的真实负载里这笔买卖通常值得，<code>chunked_prefill_size</code> 偏小/偏大各自的代价（联系第 8 课），以及为什么把 prefill 与 decode 混在一拍里仍有张力，从而引出 PD 分离（第 45 课）把两者彻底拆到不同实例的动机。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>DP 控制器与 PP 调度</h1>
+
+<p class="lead">
+前面五课，我们一直盯着<strong>一个</strong>调度器进程在<strong>一张</strong>卡上的心跳：收请求、组批、前向、收尾。但真实部署里，一台机器常有 8 张卡，一个集群有上百张卡——
+模型可能<strong>大到一张卡装不下</strong>，流量也可能<strong>大到一个副本喂不饱</strong>。这一课收尾 Part 5，我们把镜头拉到<strong>多进程、多卡</strong>的尺度，看两种改变<strong>控制流</strong>的并行：
+<strong>数据并行 DP</strong>（把整个运行时复制 N 份、把请求分发出去）和<strong>流水线并行 PP</strong>（把模型的层切成几段、让多个 micro-batch 在段间同时流动）。
+注意：它们改变的不是矩阵怎么算，而是<strong>谁来分发、有几个 micro-batch 在飞</strong>——这正是调度器要操心的事，也是为什么这两件事会和事件循环、调度策略一起放进 Part 5 来讲。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 <strong>DP</strong> 想成超市里<strong>多条一模一样的收银通道</strong>：每条通道都<strong>设备齐全</strong>（自带收银员、扫码枪、钱箱），门口一个<strong>迎宾员</strong>把每位顾客指向某条通道；
+  通道之间互不干扰，开得越多、单位时间结的账越多。把 <strong>PP</strong> 想成<strong>一条带工位的长传送带</strong>：每个工位只做一道工序（贴标→装箱→封口），
+  多件商品<strong>同时</strong>骑在带上、各处在不同工位，于是没有哪个工位闲着。DP 是"复制整条通道扩吞吐"，PP 是"把一件活拆成接力让大家都忙起来"——一个管<strong>分发</strong>，一个管<strong>接力</strong>。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>DP 复制"整个模型"、把请求扇出到多个独立副本；PP 切分"模型的层"、让多个 micro-batch 在段间流水。</strong>
+  DP 的指挥者是 <span class="inline">DataParallelController</span>——它本身<strong>不做前向</strong>，只负责把进来的请求<strong>轮询或按负载</strong>分给 N 个<strong>完整运行时</strong>（每个副本都有自己的调度器 + TP worker + KV 缓存 + 一整份模型权重）。
+  PP 的执行者是 <span class="inline">SchedulerPPMixin.event_loop_pp</span>——它把第 18 课那条单段心跳改造成<strong>流水线循环</strong>，让 stage1 处理 micro-batch B 的同时 stage2 在处理 micro-batch A，
+  从而把流水线<strong>填充/排空的"气泡"</strong>摊薄。再叠加<strong>张量并行 TP</strong>（切每一层的矩阵，第 46 课深入），大部署就是 <strong>TP × PP × DP</strong> 三维拼起来的。
+</div>
+
+<h2>数据并行 DP：复制整个运行时，把请求扇出</h2>
+<p>DP 的思路最朴素：<strong>一个副本喂不饱流量，那就开 N 个副本</strong>。但关键在于——每个副本都是一台<strong>完整的引擎</strong>，
+不是共享某块权重，而是<strong>各自持有一整份模型副本</strong>、各自跑一条第 18 课讲的事件循环、各自管自己的 KV 账本。
+副本之间<strong>请求级隔离</strong>：顾客 A 在副本 1、顾客 B 在副本 2，两者从不交互。唯一需要的协调，就是门口那个<strong>分发器</strong>——
+<span class="inline">DataParallelController</span>。它在最前面接住所有进来的请求，按策略（轮询 <span class="mono">round_robin_scheduler</span>、
+或按在跑请求数/token 数的负载感知）挑一个副本，把请求<strong>原样转发</strong>过去，自己绝不碰 GPU。</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">DataParallelController</div><div class="nd">轮询 / 负载感知<br>round_robin_scheduler</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">副本 1（完整运行时）</div><div class="nd">调度器+TP+KV<br>一整份模型</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">副本 2（完整运行时）</div><div class="nd">调度器+TP+KV<br>一整份模型</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">副本 N（完整运行时）</div><div class="nd">调度器+TP+KV<br>一整份模型</div></div>
+</div>
+
+<p>这张图要读出三层意思。其一，<strong>控制器在所有副本之前</strong>，是请求进入系统的第一道岔路口，它只做"分给谁"这一个决定。
+其二，每个副本都是<strong>自包含</strong>的——它内部就是你前五课学到的全部：一条 <span class="inline">event_loop_normal</span>、一套 prefill/decode 取舍、一本独立 KV 账本。
+其三，DP 是<strong>吞吐的乘法器</strong>：N 个副本理论上把整机吞吐放大 N 倍，因为请求被均摊、彼此不抢资源。
+要提醒的是，这里讲的是<strong>请求级 DP</strong>；在 MoE 模型里还有更精细的<strong>注意力 DP / 专家 DP</strong>，控制流与通信更复杂，留到第 46/47 课展开，本课不涉及。</p>
+
+<p>再把"完整运行时"这四个字掰开说清楚，因为这是 DP 最容易被误解的地方。很多人初看 DP，会以为是"几张卡分着算同一个请求"——那是 TP，不是 DP。
+DP 的副本之间<strong>没有任何张量级的协同</strong>：副本一的 GPU 在算顾客甲的注意力时，副本二的 GPU 完全不知道、也不需要知道顾客甲的存在。
+每个副本从权重加载、KV 池初始化、到事件循环启动，都是<strong>独立完成</strong>的，就像把同一台引擎<strong>原封不动地复印</strong>了 N 台。
+正因如此，DP 的扩展几乎没有协同开销——加一个副本，就是多开一台完整引擎、在控制器的轮询表里多登记一个 worker，仅此而已。
+这种"近乎线性"的扩展性，正是大规模在线服务最看重 DP 的原因：只要单副本能装下模型、流量还在涨，<strong>加副本就能近线性加吞吐</strong>。</p>
+
+<p>顺带说清"负载感知"分发和"轮询"分发的差别，这在生产里很关键。纯轮询假设每条请求<strong>大小相近</strong>，于是雨露均沾、一人一条最公平；
+但真实流量里，请求长短悬殊——有人只问一句话，有人贴进来一篇长文档。若还死板地轮询，可能把一串长请求全堆到同一个副本，让它<strong>排长队</strong>，
+而隔壁副本早已闲得发慌。负载感知策略（按各副本<strong>在跑请求数</strong>或<strong>未完成 token 数</strong>挑最闲的那个）就是为此而生：它让分发<strong>跟着真实负载走</strong>，
+把新请求送到此刻最空的副本，从而把整机的排队延迟压平。代价只是控制器要多记一本<strong>各副本负载的小账</strong>——相比 GPU 前向，这点开销可以忽略不计。</p>
+
+<h2>流水线并行 PP：切层成段，让多个 micro-batch 在飞</h2>
+<p>当模型<strong>大到一张卡装不下</strong>时，DP 复制就行不通了——你连一份都放不下，谈何复制 N 份。这时换 PP：把模型的<strong>层</strong>纵向切成几<strong>段（stage）</strong>，
+第 1～10 层在 GPU0、第 11～20 层在 GPU1、第 21～30 层在 GPU2……每张卡只持有<strong>一段</strong>层。一个 batch 的前向就变成<strong>接力</strong>：
+数据先过 stage1、把激活值传给 stage2、再传 stage3……问题是，若只有一个 batch 在跑，stage2 工作时 stage1/stage3 都<strong>闲着等</strong>，
+GPU 利用率惨不忍睹——这就是<strong>流水线气泡（pipeline bubble）</strong>。解法是把一个大 batch 拆成多个 <strong>micro-batch</strong>，让它们<strong>错峰</strong>同时在管线里跑。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">t1</div><div class="sc"><h4>填充期</h4><p>micro-batch A 进 <strong>stage1</strong>；stage2、stage3 还空着——这一拍是气泡的一部分，只有一段在忙。</p></div></div>
+  <div class="step"><div class="num">t2</div><div class="sc"><h4>渐满</h4><p>A 推进到 <strong>stage2</strong>，同时 micro-batch B 进 <strong>stage1</strong>；两段在忙，管线开始填满。</p></div></div>
+  <div class="step"><div class="num">t3</div><div class="sc"><h4>满载（稳态）</h4><p>A 在 <strong>stage3</strong>、B 在 <strong>stage2</strong>、C 进 <strong>stage1</strong>——<strong>三段全忙</strong>，气泡被摊掉，这是 PP 想长期停留的状态。</p></div></div>
+  <div class="step"><div class="num">t4</div><div class="sc"><h4>排空期</h4><p>新 micro-batch 发完后，A 已产出、B/C 陆续走完末段；尾部又出现气泡。<strong>micro-batch 越多，满载占比越高</strong>，气泡越小。</p></div></div>
+</div>
+
+<p>看懂这张错峰图，就抓住了 PP 的灵魂：<strong>同一时刻，不同 stage 在处理不同的 micro-batch。</strong>
+正因为有<strong>多个 micro-batch 同时在飞</strong>，每段 GPU 才不会空等上一段——这也是为什么 <span class="inline">event_loop_pp</span> 必须比 normal 循环复杂：
+它要<strong>同时追踪</strong>好几个在不同 stage 的 micro-batch，管理段间激活值的发送/接收、协调"什么时候发下一个 micro-batch"。
+朴素的单段循环每拍只盯一个批；PP 循环每拍要盯一串。<strong>填充期</strong>和<strong>排空期</strong>那两头不可避免有气泡，但只要稳态够长（micro-batch 数远大于 stage 数），气泡占比就趋近于零。</p>
+
+<p>这里值得停下来算一笔直觉账，体会"micro-batch 数为什么要远大于 stage 数"。假设有 4 个 stage、只发 1 个 micro-batch：它要依次走完 4 段才出结果，
+这期间任意时刻都只有<strong>一段</strong>在忙，其余三段全闲——利用率约 1/4，气泡高达 3/4，等于白白浪费了四分之三的算力。
+若改发 16 个 micro-batch：头几拍仍在填充、尾几拍仍在排空，但中间会有<strong>很长一段</strong>四段全忙的稳态，平摊下来利用率能逼近满载。
+直觉就是：<strong>填充与排空的气泡是"固定成本"</strong>（约正比于 stage 数），而稳态满载的收益<strong>随 micro-batch 数增长</strong>——micro-batch 越多，固定气泡被摊得越薄。
+这也解释了 PP 的一个隐藏权衡：micro-batch 切得太碎，单个 batch 太小会让每次前向的 GPU 利用率下降；切得太粗，又填不满流水线。真实系统要在两者间找平衡。</p>
+
+<h2>三种并行怎么拼：TP × PP × DP</h2>
+<p>DP、PP、还有第 46 课要深讲的 <strong>TP（张量并行）</strong>，是三个<strong>正交</strong>的维度，可以叠在一起用。
+区分它们的最快办法，是问一句：<strong>"它复制什么、切分什么？"</strong></p>
+
+<table class="t">
+  <tr><th>维度</th><th>对模型做什么</th><th>切/复制的粒度</th><th>谁来编排</th></tr>
+  <tr><td><strong>DP 数据并行</strong></td><td><strong>整份模型复制</strong>多份，请求扇出到各副本</td><td class="mono">整个运行时（副本级）</td><td class="mono">DataParallelController</td></tr>
+  <tr><td><strong>PP 流水线并行</strong></td><td>把<strong>层切成段</strong>分到不同卡，micro-batch 接力</td><td class="mono">层（stage 级）</td><td class="mono">event_loop_pp（调度器内）</td></tr>
+  <tr><td><strong>TP 张量并行</strong></td><td>把<strong>每一层的矩阵</strong>横/纵切，多卡协同算一层</td><td class="mono">单层的权重矩阵</td><td class="mono">模型前向内部（第 24/46 课）</td></tr>
+</table>
+
+<p>把三者拼起来想：<strong>TP 在一层之内</strong>（多卡合算同一层的矩阵乘）、<strong>PP 跨层之间</strong>（不同段在不同卡）、<strong>DP 跨整个副本</strong>（整机复制扇出）。
+一个典型的大集群可能是 "TP=8、PP=2、DP=4"——即每个副本用 16 张卡（8 路 TP × 2 段 PP）装下一份大模型，再复制 4 份副本扛流量，总共 64 张卡。
+而<strong>调度器在其中编排的是 DP（靠控制器分发）和 PP（靠 pp 循环推进 micro-batch）</strong>这两个改变控制流的维度；
+TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——调度器把批交给 ModelRunner，TP 的多卡协同在 <span class="inline">forward</span> 里自动发生（第 24 课）。这就是为什么本课归在 Part 5：DP 与 PP 是<strong>调度</strong>问题，TP 是<strong>计算</strong>问题。</p>
+
+<h2>什么时候用 DP、什么时候用 PP</h2>
+<p>两者解决的是<strong>不同的瓶颈</strong>，别混为一谈：</p>
+
+<div class="cols">
+  <div class="col"><h4>DP：为吞吐而生（模型能装下）</h4><p>前提是<strong>一份模型已经能放进现有卡组</strong>。流量大、单副本排队严重时，复制 N 份、用控制器把请求摊开，
+  吞吐近似线性放大。代价是<strong>显存成倍占用</strong>（每副本一整份权重）。它<strong>不能</strong>帮你装下一个本来就放不下的模型——复制只会让"放不下"变成"放不下 N 次"。</p></div>
+  <div class="col"><h4>PP：为容量而生（模型太大）</h4><p>前提是<strong>模型大到一张卡（甚至一组 TP 卡）装不下</strong>。把层切成段、摊到多卡，每卡只扛一段权重，于是"放不下"变"放得下"。
+  代价是<strong>填充/排空的气泡</strong>和<strong>段间通信</strong>，要靠多 micro-batch 摊平。它<strong>不直接</strong>提升单请求延迟，主要是<strong>让超大模型跑得起来</strong>。</p></div>
+</div>
+
+<p>实践中两者常<strong>同时</strong>出现：先用 PP（和 TP）把一份大模型<strong>装进</strong>一组卡，再用 DP 把这组"装好的副本"<strong>复制</strong>多份扛流量。
+所以读到这里，你应当能把这句话翻译成具体动作了——<strong>"装得下"靠切分（PP/TP），"喂得饱"靠复制（DP）</strong>。</p>
+
+<p>最后再把这三维和你前面学过的整套调度知识接上，收一个干净的尾。Part 5 一路讲下来，从第 18 课的<strong>单段心跳</strong>，到第 19 课的请求与批数据结构、第 20 课的调度策略、
+第 21 课的重叠流水线、第 22 课的分块预填充——全都是<strong>一个调度器进程、一张卡</strong>之内的故事。本课做的，是把这套"单机心跳"<strong>沿两条新轴展开</strong>：
+沿 DP 轴，是把整台心脏<strong>复印多份</strong>、在前面加一个不跳动只分发的控制器；沿 PP 轴，是把一次心跳的前向<strong>拆成接力</strong>、让多个 micro-batch 错峰填满管线。
+两条轴都<strong>不改变单次前向的数学</strong>，只改变<strong>控制流</strong>——谁来分发、有几个 micro-batch 在飞——这正是它们归在"调度"这一 Part 的根本理由。
+带着这把尺子往后读：第 24 课会钻进单次 <span class="inline">forward</span> 看 TP 怎么在一层内切矩阵，第 46 课把 TP/PP/EP/DP 四维一次性讲透，第 47 课讲 MoE 的专家负载均衡 EPLB。
+至此，调度器这颗"心脏"从单卡跳动，到多卡多副本的协同编排，你已经有了完整的骨架图。</p>
+
+<h2>真实代码：控制器怎么轮询分发</h2>
+<p>下面是 <span class="inline">DataParallelController</span> 里最核心的轮询分发逻辑。注意它有多<strong>轻</strong>——
+就是维护一个 <span class="mono">round_robin_counter</span>，找到下一个<strong>就绪</strong>的 worker，把请求 <span class="mono">sock_send</span> 过去，指针前移取模回绕。它<strong>从不碰 GPU</strong>，只做"分给谁"这一个决定。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/data_parallel_controller.py ::DataParallelController</span><span class="ln">DP 控制器：轮询把请求分给下一个就绪副本</span></div>
+  <pre><span class="kw">def</span> round_robin_scheduler(self, req: Req):
+    <span class="cm"># 若指定了 DP rank 就直接路由，否则轮询</span>
+    <span class="kw">if</span> self.maybe_external_dp_rank_routing(req):
+        <span class="kw">return</span>
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.status[self.round_robin_counter]:
+            <span class="cm"># 这个 worker 就绪：把请求发过去</span>
+            sock_send(self.workers[self.round_robin_counter], req)
+            self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+                self.workers
+            )
+            <span class="kw">break</span>
+        <span class="cm"># 否则跳过它，看下一个</span>
+        self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+            self.workers
+        )</pre>
+</div>
+
+<p>把这段和扇出图对齐：<span class="inline">self.workers</span> 就是那 N 个副本的 socket，<span class="inline">round_robin_counter</span> 是迎宾员手里"该轮到第几条通道"的计数器，
+<span class="inline">self.status</span> 标记哪些副本就绪（没就绪就跳过）。<span class="inline">sock_send</span> 把请求<strong>原样投递</strong>给选中的副本——之后这条请求的命运就完全交给那个副本内部的调度器了，
+控制器立刻回头处理下一条。整段没有一行矩阵乘，这正印证了"<strong>控制器只决策分发、不参与计算</strong>"。负载感知策略（按在跑请求数/token 数挑最闲的副本）也只是把这里的"按指针轮"换成"按账本挑"，本质同样轻量。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>DP（数据并行）</strong>：复制<strong>整个运行时</strong>成 N 个独立副本（各有调度器+TP+KV+一整份模型），<span class="mono">DataParallelController</span> 用轮询/负载感知把请求<strong>扇出</strong>；是<strong>吞吐乘法器</strong>，请求级隔离、副本间不交互。</li>
+    <li><strong>PP（流水线并行）</strong>：把模型的<strong>层切成段</strong>分到多卡，<span class="mono">event_loop_pp</span> 让<strong>多个 micro-batch 同时在段间流水</strong>（stage1 跑 B 时 stage2 跑 A），靠 micro-batch 数摊平填充/排空的<strong>气泡</strong>；为<strong>装下超大模型</strong>而生。</li>
+    <li><strong>TP × PP × DP 三维正交</strong>：TP 切<strong>一层内的矩阵</strong>、PP 切<strong>跨层的段</strong>、DP 复制<strong>整个副本</strong>。调度器编排 DP（控制器）与 PP（pp 循环）；TP 藏在模型前向里、对调度器透明。</li>
+    <li><strong>选型口诀</strong>：模型太大用 PP/TP（切分，"装得下"）；流量太大用 DP（复制，"喂得饱"）；大部署常三者叠加。深入见第 46 课（TP/PP/EP/DP）、第 47 课（EPLB）、第 24 课（前向）、第 18 课（事件循环）、第 2 课（三进程模型）。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. <strong>数据并行 DP</strong> 里，每个副本和 <code>DataParallelController</code> 各自扮演什么角色？</div>
+  <ol class="opts">
+    <li>副本只持有部分层，控制器负责在副本间传递激活值</li>
+    <li>控制器把每个请求切成多段，分给不同副本各算一段再拼回</li>
+    <li>每个副本是一台<strong>完整运行时</strong>（自带调度器+TP worker+KV 缓存+<strong>一整份模型</strong>），副本间请求级隔离、互不交互；控制器<strong>不做前向</strong>，只按轮询/负载把进来的请求<strong>扇出</strong>给某个就绪副本</li>
+    <li>副本之间共享同一份模型权重，控制器负责合并它们的输出</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。DP 是<strong>复制整个运行时</strong>：每副本一整份模型、各跑各的事件循环、各管各的 KV 账本，请求落到哪个副本就由那个副本独立处理到底。控制器只做一件极轻的事——“分给谁”，从不碰 GPU。切层分激活那是 PP；共享权重合输出并非 DP 的工作方式。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <strong>流水线并行 PP</strong> 为什么要让<strong>多个 micro-batch 同时在飞</strong>，而不是一次只跑一个 batch？</div>
+  <ol class="opts">
+    <li>因为多个 micro-batch 能共享同一份 KV 缓存，省显存</li>
+    <li>因为层被切成段分到多卡，若只跑一个 batch，则某段工作时其它段全<strong>闲等</strong>（流水线<strong>气泡</strong>）；让多个 micro-batch 错峰流动，可使 stage1 跑 B 的同时 stage2 跑 A，<strong>各段都忙</strong>、气泡被摊薄</li>
+    <li>因为单个 batch 无法被采样，必须拆成 micro-batch</li>
+    <li>因为这样可以跳过段间通信，避免传激活值</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。PP 的瓶颈是<strong>填充/排空气泡</strong>：接力式前向里，单 batch 时总有段在空等。多 micro-batch 错峰让管线进入<strong>稳态满载</strong>（不同 stage 处理不同 micro-batch），micro-batch 越多、满载占比越高、气泡占比越趋近零。这也是 <code>event_loop_pp</code> 必须比 normal 循环复杂的原因——它要同时追踪一串在不同段的 micro-batch。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 把 <strong>TP、PP、DP</strong> 一句话区分，哪种说法最准确？</div>
+  <ol class="opts">
+    <li>三者都是切分模型的层，只是切的段数不同</li>
+    <li>三者都由 DataParallelController 统一编排</li>
+    <li><strong>TP</strong> 切<strong>一层内的矩阵</strong>、<strong>PP</strong> 切<strong>跨层的段</strong>、<strong>DP</strong> 复制<strong>整个副本</strong>；调度器编排 DP（控制器分发）与 PP（pp 循环），而 TP 藏在<strong>模型前向内部</strong>、对调度器基本透明</li>
+    <li>TP 复制整模型、PP 复制整模型、DP 切矩阵</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。三维正交，靠“复制什么/切分什么”区分：DP=整模型复制（副本级）、PP=层切段（stage 级）、TP=单层矩阵切分。大部署是 TP×PP×DP 叠加。关键是分清<strong>调度</strong>问题（DP/PP 改变控制流，归 Part 5）与<strong>计算</strong>问题（TP 在 forward 内部，第 24/46 课）。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“超市收银通道 vs 传送带工位”的类比，完整讲清 DP 与 PP 的区别。请逐一覆盖：①<strong>DP</strong>——为何复制<strong>整个运行时</strong>（每副本自带调度器+TP+KV+一整份模型）、<code>DataParallelController</code> 如何用 <code>round_robin_scheduler</code> 把请求<strong>轮询扇出</strong>且自己不碰 GPU、为什么它是<strong>吞吐乘法器</strong>但救不了“装不下”的模型；②<strong>PP</strong>——为何把<strong>层切成段</strong>能装下超大模型、<code>event_loop_pp</code> 为何要让<strong>多个 micro-batch 错峰在飞</strong>、<strong>填充/排空气泡</strong>从哪来又怎么靠 micro-batch 数摊平。</li>
+    <li>讨论 <strong>TP × PP × DP</strong> 如何在一个大集群里拼起来，以及为什么本课归在“调度”里。请说明：①一个“TP=8、PP=2、DP=4”的部署各维度分别在切/复制什么、总卡数如何算；②为什么调度器编排的是 <strong>DP（控制器分发）与 PP（pp 循环推进 micro-batch）</strong>，而 <strong>TP 对调度器透明</strong>（藏在 <code>forward</code> 里，第 24/46 课）；③据此给出选型口诀——模型太大、流量太大分别该上哪种并行，并指出深入课程（第 46 课 TP/PP/EP/DP、第 47 课 EPLB）。</li>
   </ul>
 </div>
 </div>

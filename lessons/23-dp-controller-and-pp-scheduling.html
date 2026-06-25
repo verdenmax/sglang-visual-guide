@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>23 · DP 控制器与 PP 调度 / DP controller &amp; PP scheduling - SGLang 图解教程</title>
+<meta name="description" content="第五部分 · 调度器｜DP 控制器与 PP 调度 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="23 · DP 控制器与 PP 调度 / DP controller &amp; PP scheduling - SGLang 图解教程">
+<meta property="og:description" content="第五部分 · 调度器｜DP 控制器与 PP 调度 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="23 · DP 控制器与 PP 调度 / DP controller &amp; PP scheduling - SGLang 图解教程">
+<meta name="twitter:description" content="第五部分 · 调度器｜DP 控制器与 PP 调度 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></span>
+    <span class="pill">23 / 23</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 调度器</span><span class="lang-en">Part 5 · The scheduler</span></div>
+    <h1><span class="lang-zh">DP 控制器与 PP 调度</span><span class="lang-en">DP controller &amp; PP scheduling</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+前面五课，我们一直盯着<strong>一个</strong>调度器进程在<strong>一张</strong>卡上的心跳：收请求、组批、前向、收尾。但真实部署里，一台机器常有 8 张卡，一个集群有上百张卡——
+模型可能<strong>大到一张卡装不下</strong>，流量也可能<strong>大到一个副本喂不饱</strong>。这一课收尾 Part 5，我们把镜头拉到<strong>多进程、多卡</strong>的尺度，看两种改变<strong>控制流</strong>的并行：
+<strong>数据并行 DP</strong>（把整个运行时复制 N 份、把请求分发出去）和<strong>流水线并行 PP</strong>（把模型的层切成几段、让多个 micro-batch 在段间同时流动）。
+注意：它们改变的不是矩阵怎么算，而是<strong>谁来分发、有几个 micro-batch 在飞</strong>——这正是调度器要操心的事，也是为什么这两件事会和事件循环、调度策略一起放进 Part 5 来讲。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 <strong>DP</strong> 想成超市里<strong>多条一模一样的收银通道</strong>：每条通道都<strong>设备齐全</strong>（自带收银员、扫码枪、钱箱），门口一个<strong>迎宾员</strong>把每位顾客指向某条通道；
+  通道之间互不干扰，开得越多、单位时间结的账越多。把 <strong>PP</strong> 想成<strong>一条带工位的长传送带</strong>：每个工位只做一道工序（贴标→装箱→封口），
+  多件商品<strong>同时</strong>骑在带上、各处在不同工位，于是没有哪个工位闲着。DP 是"复制整条通道扩吞吐"，PP 是"把一件活拆成接力让大家都忙起来"——一个管<strong>分发</strong>，一个管<strong>接力</strong>。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>DP 复制"整个模型"、把请求扇出到多个独立副本；PP 切分"模型的层"、让多个 micro-batch 在段间流水。</strong>
+  DP 的指挥者是 <span class="inline">DataParallelController</span>——它本身<strong>不做前向</strong>，只负责把进来的请求<strong>轮询或按负载</strong>分给 N 个<strong>完整运行时</strong>（每个副本都有自己的调度器 + TP worker + KV 缓存 + 一整份模型权重）。
+  PP 的执行者是 <span class="inline">SchedulerPPMixin.event_loop_pp</span>——它把第 18 课那条单段心跳改造成<strong>流水线循环</strong>，让 stage1 处理 micro-batch B 的同时 stage2 在处理 micro-batch A，
+  从而把流水线<strong>填充/排空的"气泡"</strong>摊薄。再叠加<strong>张量并行 TP</strong>（切每一层的矩阵，第 46 课深入），大部署就是 <strong>TP × PP × DP</strong> 三维拼起来的。
+</div>
+
+<h2>数据并行 DP：复制整个运行时，把请求扇出</h2>
+<p>DP 的思路最朴素：<strong>一个副本喂不饱流量，那就开 N 个副本</strong>。但关键在于——每个副本都是一台<strong>完整的引擎</strong>，
+不是共享某块权重，而是<strong>各自持有一整份模型副本</strong>、各自跑一条第 18 课讲的事件循环、各自管自己的 KV 账本。
+副本之间<strong>请求级隔离</strong>：顾客 A 在副本 1、顾客 B 在副本 2，两者从不交互。唯一需要的协调，就是门口那个<strong>分发器</strong>——
+<span class="inline">DataParallelController</span>。它在最前面接住所有进来的请求，按策略（轮询 <span class="mono">round_robin_scheduler</span>、
+或按在跑请求数/token 数的负载感知）挑一个副本，把请求<strong>原样转发</strong>过去，自己绝不碰 GPU。</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">DataParallelController</div><div class="nd">轮询 / 负载感知<br>round_robin_scheduler</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">副本 1（完整运行时）</div><div class="nd">调度器+TP+KV<br>一整份模型</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">副本 2（完整运行时）</div><div class="nd">调度器+TP+KV<br>一整份模型</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">副本 N（完整运行时）</div><div class="nd">调度器+TP+KV<br>一整份模型</div></div>
+</div>
+
+<p>这张图要读出三层意思。其一，<strong>控制器在所有副本之前</strong>，是请求进入系统的第一道岔路口，它只做"分给谁"这一个决定。
+其二，每个副本都是<strong>自包含</strong>的——它内部就是你前五课学到的全部：一条 <span class="inline">event_loop_normal</span>、一套 prefill/decode 取舍、一本独立 KV 账本。
+其三，DP 是<strong>吞吐的乘法器</strong>：N 个副本理论上把整机吞吐放大 N 倍，因为请求被均摊、彼此不抢资源。
+要提醒的是，这里讲的是<strong>请求级 DP</strong>；在 MoE 模型里还有更精细的<strong>注意力 DP / 专家 DP</strong>，控制流与通信更复杂，留到第 46/47 课展开，本课不涉及。</p>
+
+<p>再把"完整运行时"这四个字掰开说清楚，因为这是 DP 最容易被误解的地方。很多人初看 DP，会以为是"几张卡分着算同一个请求"——那是 TP，不是 DP。
+DP 的副本之间<strong>没有任何张量级的协同</strong>：副本一的 GPU 在算顾客甲的注意力时，副本二的 GPU 完全不知道、也不需要知道顾客甲的存在。
+每个副本从权重加载、KV 池初始化、到事件循环启动，都是<strong>独立完成</strong>的，就像把同一台引擎<strong>原封不动地复印</strong>了 N 台。
+正因如此，DP 的扩展几乎没有协同开销——加一个副本，就是多开一台完整引擎、在控制器的轮询表里多登记一个 worker，仅此而已。
+这种"近乎线性"的扩展性，正是大规模在线服务最看重 DP 的原因：只要单副本能装下模型、流量还在涨，<strong>加副本就能近线性加吞吐</strong>。</p>
+
+<p>顺带说清"负载感知"分发和"轮询"分发的差别，这在生产里很关键。纯轮询假设每条请求<strong>大小相近</strong>，于是雨露均沾、一人一条最公平；
+但真实流量里，请求长短悬殊——有人只问一句话，有人贴进来一篇长文档。若还死板地轮询，可能把一串长请求全堆到同一个副本，让它<strong>排长队</strong>，
+而隔壁副本早已闲得发慌。负载感知策略（按各副本<strong>在跑请求数</strong>或<strong>未完成 token 数</strong>挑最闲的那个）就是为此而生：它让分发<strong>跟着真实负载走</strong>，
+把新请求送到此刻最空的副本，从而把整机的排队延迟压平。代价只是控制器要多记一本<strong>各副本负载的小账</strong>——相比 GPU 前向，这点开销可以忽略不计。</p>
+
+<h2>流水线并行 PP：切层成段，让多个 micro-batch 在飞</h2>
+<p>当模型<strong>大到一张卡装不下</strong>时，DP 复制就行不通了——你连一份都放不下，谈何复制 N 份。这时换 PP：把模型的<strong>层</strong>纵向切成几<strong>段（stage）</strong>，
+第 1～10 层在 GPU0、第 11～20 层在 GPU1、第 21～30 层在 GPU2……每张卡只持有<strong>一段</strong>层。一个 batch 的前向就变成<strong>接力</strong>：
+数据先过 stage1、把激活值传给 stage2、再传 stage3……问题是，若只有一个 batch 在跑，stage2 工作时 stage1/stage3 都<strong>闲着等</strong>，
+GPU 利用率惨不忍睹——这就是<strong>流水线气泡（pipeline bubble）</strong>。解法是把一个大 batch 拆成多个 <strong>micro-batch</strong>，让它们<strong>错峰</strong>同时在管线里跑。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">t1</div><div class="sc"><h4>填充期</h4><p>micro-batch A 进 <strong>stage1</strong>；stage2、stage3 还空着——这一拍是气泡的一部分，只有一段在忙。</p></div></div>
+  <div class="step"><div class="num">t2</div><div class="sc"><h4>渐满</h4><p>A 推进到 <strong>stage2</strong>，同时 micro-batch B 进 <strong>stage1</strong>；两段在忙，管线开始填满。</p></div></div>
+  <div class="step"><div class="num">t3</div><div class="sc"><h4>满载（稳态）</h4><p>A 在 <strong>stage3</strong>、B 在 <strong>stage2</strong>、C 进 <strong>stage1</strong>——<strong>三段全忙</strong>，气泡被摊掉，这是 PP 想长期停留的状态。</p></div></div>
+  <div class="step"><div class="num">t4</div><div class="sc"><h4>排空期</h4><p>新 micro-batch 发完后，A 已产出、B/C 陆续走完末段；尾部又出现气泡。<strong>micro-batch 越多，满载占比越高</strong>，气泡越小。</p></div></div>
+</div>
+
+<p>看懂这张错峰图，就抓住了 PP 的灵魂：<strong>同一时刻，不同 stage 在处理不同的 micro-batch。</strong>
+正因为有<strong>多个 micro-batch 同时在飞</strong>，每段 GPU 才不会空等上一段——这也是为什么 <span class="inline">event_loop_pp</span> 必须比 normal 循环复杂：
+它要<strong>同时追踪</strong>好几个在不同 stage 的 micro-batch，管理段间激活值的发送/接收、协调"什么时候发下一个 micro-batch"。
+朴素的单段循环每拍只盯一个批；PP 循环每拍要盯一串。<strong>填充期</strong>和<strong>排空期</strong>那两头不可避免有气泡，但只要稳态够长（micro-batch 数远大于 stage 数），气泡占比就趋近于零。</p>
+
+<p>这里值得停下来算一笔直觉账，体会"micro-batch 数为什么要远大于 stage 数"。假设有 4 个 stage、只发 1 个 micro-batch：它要依次走完 4 段才出结果，
+这期间任意时刻都只有<strong>一段</strong>在忙，其余三段全闲——利用率约 1/4，气泡高达 3/4，等于白白浪费了四分之三的算力。
+若改发 16 个 micro-batch：头几拍仍在填充、尾几拍仍在排空，但中间会有<strong>很长一段</strong>四段全忙的稳态，平摊下来利用率能逼近满载。
+直觉就是：<strong>填充与排空的气泡是"固定成本"</strong>（约正比于 stage 数），而稳态满载的收益<strong>随 micro-batch 数增长</strong>——micro-batch 越多，固定气泡被摊得越薄。
+这也解释了 PP 的一个隐藏权衡：micro-batch 切得太碎，单个 batch 太小会让每次前向的 GPU 利用率下降；切得太粗，又填不满流水线。真实系统要在两者间找平衡。</p>
+
+<h2>三种并行怎么拼：TP × PP × DP</h2>
+<p>DP、PP、还有第 46 课要深讲的 <strong>TP（张量并行）</strong>，是三个<strong>正交</strong>的维度，可以叠在一起用。
+区分它们的最快办法，是问一句：<strong>"它复制什么、切分什么？"</strong></p>
+
+<table class="t">
+  <tr><th>维度</th><th>对模型做什么</th><th>切/复制的粒度</th><th>谁来编排</th></tr>
+  <tr><td><strong>DP 数据并行</strong></td><td><strong>整份模型复制</strong>多份，请求扇出到各副本</td><td class="mono">整个运行时（副本级）</td><td class="mono">DataParallelController</td></tr>
+  <tr><td><strong>PP 流水线并行</strong></td><td>把<strong>层切成段</strong>分到不同卡，micro-batch 接力</td><td class="mono">层（stage 级）</td><td class="mono">event_loop_pp（调度器内）</td></tr>
+  <tr><td><strong>TP 张量并行</strong></td><td>把<strong>每一层的矩阵</strong>横/纵切，多卡协同算一层</td><td class="mono">单层的权重矩阵</td><td class="mono">模型前向内部（第 24/46 课）</td></tr>
+</table>
+
+<p>把三者拼起来想：<strong>TP 在一层之内</strong>（多卡合算同一层的矩阵乘）、<strong>PP 跨层之间</strong>（不同段在不同卡）、<strong>DP 跨整个副本</strong>（整机复制扇出）。
+一个典型的大集群可能是 "TP=8、PP=2、DP=4"——即每个副本用 16 张卡（8 路 TP × 2 段 PP）装下一份大模型，再复制 4 份副本扛流量，总共 64 张卡。
+而<strong>调度器在其中编排的是 DP（靠控制器分发）和 PP（靠 pp 循环推进 micro-batch）</strong>这两个改变控制流的维度；
+TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——调度器把批交给 ModelRunner，TP 的多卡协同在 <span class="inline">forward</span> 里自动发生（第 24 课）。这就是为什么本课归在 Part 5：DP 与 PP 是<strong>调度</strong>问题，TP 是<strong>计算</strong>问题。</p>
+
+<h2>什么时候用 DP、什么时候用 PP</h2>
+<p>两者解决的是<strong>不同的瓶颈</strong>，别混为一谈：</p>
+
+<div class="cols">
+  <div class="col"><h4>DP：为吞吐而生（模型能装下）</h4><p>前提是<strong>一份模型已经能放进现有卡组</strong>。流量大、单副本排队严重时，复制 N 份、用控制器把请求摊开，
+  吞吐近似线性放大。代价是<strong>显存成倍占用</strong>（每副本一整份权重）。它<strong>不能</strong>帮你装下一个本来就放不下的模型——复制只会让"放不下"变成"放不下 N 次"。</p></div>
+  <div class="col"><h4>PP：为容量而生（模型太大）</h4><p>前提是<strong>模型大到一张卡（甚至一组 TP 卡）装不下</strong>。把层切成段、摊到多卡，每卡只扛一段权重，于是"放不下"变"放得下"。
+  代价是<strong>填充/排空的气泡</strong>和<strong>段间通信</strong>，要靠多 micro-batch 摊平。它<strong>不直接</strong>提升单请求延迟，主要是<strong>让超大模型跑得起来</strong>。</p></div>
+</div>
+
+<p>实践中两者常<strong>同时</strong>出现：先用 PP（和 TP）把一份大模型<strong>装进</strong>一组卡，再用 DP 把这组"装好的副本"<strong>复制</strong>多份扛流量。
+所以读到这里，你应当能把这句话翻译成具体动作了——<strong>"装得下"靠切分（PP/TP），"喂得饱"靠复制（DP）</strong>。</p>
+
+<p>最后再把这三维和你前面学过的整套调度知识接上，收一个干净的尾。Part 5 一路讲下来，从第 18 课的<strong>单段心跳</strong>，到第 19 课的请求与批数据结构、第 20 课的调度策略、
+第 21 课的重叠流水线、第 22 课的分块预填充——全都是<strong>一个调度器进程、一张卡</strong>之内的故事。本课做的，是把这套"单机心跳"<strong>沿两条新轴展开</strong>：
+沿 DP 轴，是把整台心脏<strong>复印多份</strong>、在前面加一个不跳动只分发的控制器；沿 PP 轴，是把一次心跳的前向<strong>拆成接力</strong>、让多个 micro-batch 错峰填满管线。
+两条轴都<strong>不改变单次前向的数学</strong>，只改变<strong>控制流</strong>——谁来分发、有几个 micro-batch 在飞——这正是它们归在"调度"这一 Part 的根本理由。
+带着这把尺子往后读：第 24 课会钻进单次 <span class="inline">forward</span> 看 TP 怎么在一层内切矩阵，第 46 课把 TP/PP/EP/DP 四维一次性讲透，第 47 课讲 MoE 的专家负载均衡 EPLB。
+至此，调度器这颗"心脏"从单卡跳动，到多卡多副本的协同编排，你已经有了完整的骨架图。</p>
+
+<h2>真实代码：控制器怎么轮询分发</h2>
+<p>下面是 <span class="inline">DataParallelController</span> 里最核心的轮询分发逻辑。注意它有多<strong>轻</strong>——
+就是维护一个 <span class="mono">round_robin_counter</span>，找到下一个<strong>就绪</strong>的 worker，把请求 <span class="mono">sock_send</span> 过去，指针前移取模回绕。它<strong>从不碰 GPU</strong>，只做"分给谁"这一个决定。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/data_parallel_controller.py ::DataParallelController</span><span class="ln">DP 控制器：轮询把请求分给下一个就绪副本</span></div>
+  <pre><span class="kw">def</span> round_robin_scheduler(self, req: Req):
+    <span class="cm"># 若指定了 DP rank 就直接路由，否则轮询</span>
+    <span class="kw">if</span> self.maybe_external_dp_rank_routing(req):
+        <span class="kw">return</span>
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.status[self.round_robin_counter]:
+            <span class="cm"># 这个 worker 就绪：把请求发过去</span>
+            sock_send(self.workers[self.round_robin_counter], req)
+            self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+                self.workers
+            )
+            <span class="kw">break</span>
+        <span class="cm"># 否则跳过它，看下一个</span>
+        self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+            self.workers
+        )</pre>
+</div>
+
+<p>把这段和扇出图对齐：<span class="inline">self.workers</span> 就是那 N 个副本的 socket，<span class="inline">round_robin_counter</span> 是迎宾员手里"该轮到第几条通道"的计数器，
+<span class="inline">self.status</span> 标记哪些副本就绪（没就绪就跳过）。<span class="inline">sock_send</span> 把请求<strong>原样投递</strong>给选中的副本——之后这条请求的命运就完全交给那个副本内部的调度器了，
+控制器立刻回头处理下一条。整段没有一行矩阵乘，这正印证了"<strong>控制器只决策分发、不参与计算</strong>"。负载感知策略（按在跑请求数/token 数挑最闲的副本）也只是把这里的"按指针轮"换成"按账本挑"，本质同样轻量。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>DP（数据并行）</strong>：复制<strong>整个运行时</strong>成 N 个独立副本（各有调度器+TP+KV+一整份模型），<span class="mono">DataParallelController</span> 用轮询/负载感知把请求<strong>扇出</strong>；是<strong>吞吐乘法器</strong>，请求级隔离、副本间不交互。</li>
+    <li><strong>PP（流水线并行）</strong>：把模型的<strong>层切成段</strong>分到多卡，<span class="mono">event_loop_pp</span> 让<strong>多个 micro-batch 同时在段间流水</strong>（stage1 跑 B 时 stage2 跑 A），靠 micro-batch 数摊平填充/排空的<strong>气泡</strong>；为<strong>装下超大模型</strong>而生。</li>
+    <li><strong>TP × PP × DP 三维正交</strong>：TP 切<strong>一层内的矩阵</strong>、PP 切<strong>跨层的段</strong>、DP 复制<strong>整个副本</strong>。调度器编排 DP（控制器）与 PP（pp 循环）；TP 藏在模型前向里、对调度器透明。</li>
+    <li><strong>选型口诀</strong>：模型太大用 PP/TP（切分，"装得下"）；流量太大用 DP（复制，"喂得饱"）；大部署常三者叠加。深入见第 46 课（TP/PP/EP/DP）、第 47 课（EPLB）、第 24 课（前向）、第 18 课（事件循环）、第 2 课（三进程模型）。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. <strong>数据并行 DP</strong> 里，每个副本和 <code>DataParallelController</code> 各自扮演什么角色？</div>
+  <ol class="opts">
+    <li>副本只持有部分层，控制器负责在副本间传递激活值</li>
+    <li>控制器把每个请求切成多段，分给不同副本各算一段再拼回</li>
+    <li>每个副本是一台<strong>完整运行时</strong>（自带调度器+TP worker+KV 缓存+<strong>一整份模型</strong>），副本间请求级隔离、互不交互；控制器<strong>不做前向</strong>，只按轮询/负载把进来的请求<strong>扇出</strong>给某个就绪副本</li>
+    <li>副本之间共享同一份模型权重，控制器负责合并它们的输出</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。DP 是<strong>复制整个运行时</strong>：每副本一整份模型、各跑各的事件循环、各管各的 KV 账本，请求落到哪个副本就由那个副本独立处理到底。控制器只做一件极轻的事——“分给谁”，从不碰 GPU。切层分激活那是 PP；共享权重合输出并非 DP 的工作方式。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <strong>流水线并行 PP</strong> 为什么要让<strong>多个 micro-batch 同时在飞</strong>，而不是一次只跑一个 batch？</div>
+  <ol class="opts">
+    <li>因为多个 micro-batch 能共享同一份 KV 缓存，省显存</li>
+    <li>因为层被切成段分到多卡，若只跑一个 batch，则某段工作时其它段全<strong>闲等</strong>（流水线<strong>气泡</strong>）；让多个 micro-batch 错峰流动，可使 stage1 跑 B 的同时 stage2 跑 A，<strong>各段都忙</strong>、气泡被摊薄</li>
+    <li>因为单个 batch 无法被采样，必须拆成 micro-batch</li>
+    <li>因为这样可以跳过段间通信，避免传激活值</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。PP 的瓶颈是<strong>填充/排空气泡</strong>：接力式前向里，单 batch 时总有段在空等。多 micro-batch 错峰让管线进入<strong>稳态满载</strong>（不同 stage 处理不同 micro-batch），micro-batch 越多、满载占比越高、气泡占比越趋近零。这也是 <code>event_loop_pp</code> 必须比 normal 循环复杂的原因——它要同时追踪一串在不同段的 micro-batch。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 把 <strong>TP、PP、DP</strong> 一句话区分，哪种说法最准确？</div>
+  <ol class="opts">
+    <li>三者都是切分模型的层，只是切的段数不同</li>
+    <li>三者都由 DataParallelController 统一编排</li>
+    <li><strong>TP</strong> 切<strong>一层内的矩阵</strong>、<strong>PP</strong> 切<strong>跨层的段</strong>、<strong>DP</strong> 复制<strong>整个副本</strong>；调度器编排 DP（控制器分发）与 PP（pp 循环），而 TP 藏在<strong>模型前向内部</strong>、对调度器基本透明</li>
+    <li>TP 复制整模型、PP 复制整模型、DP 切矩阵</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。三维正交，靠“复制什么/切分什么”区分：DP=整模型复制（副本级）、PP=层切段（stage 级）、TP=单层矩阵切分。大部署是 TP×PP×DP 叠加。关键是分清<strong>调度</strong>问题（DP/PP 改变控制流，归 Part 5）与<strong>计算</strong>问题（TP 在 forward 内部，第 24/46 课）。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“超市收银通道 vs 传送带工位”的类比，完整讲清 DP 与 PP 的区别。请逐一覆盖：①<strong>DP</strong>——为何复制<strong>整个运行时</strong>（每副本自带调度器+TP+KV+一整份模型）、<code>DataParallelController</code> 如何用 <code>round_robin_scheduler</code> 把请求<strong>轮询扇出</strong>且自己不碰 GPU、为什么它是<strong>吞吐乘法器</strong>但救不了“装不下”的模型；②<strong>PP</strong>——为何把<strong>层切成段</strong>能装下超大模型、<code>event_loop_pp</code> 为何要让<strong>多个 micro-batch 错峰在飞</strong>、<strong>填充/排空气泡</strong>从哪来又怎么靠 micro-batch 数摊平。</li>
+    <li>讨论 <strong>TP × PP × DP</strong> 如何在一个大集群里拼起来，以及为什么本课归在“调度”里。请说明：①一个“TP=8、PP=2、DP=4”的部署各维度分别在切/复制什么、总卡数如何算；②为什么调度器编排的是 <strong>DP（控制器分发）与 PP（pp 循环推进 micro-batch）</strong>，而 <strong>TP 对调度器透明</strong>（藏在 <code>forward</code> 里，第 24/46 课）；③据此给出选型口诀——模型太大、流量太大分别该上哪种并行，并指出深入课程（第 46 课 TP/PP/EP/DP、第 47 课 EPLB）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+For five lessons we watched <strong>one</strong> scheduler process beat on <strong>one</strong> card: receive, batch, forward, finish. But real deployments have 8 cards per box and hundreds per cluster—
+a model may be <strong>too big for one card</strong>, and traffic may be <strong>too heavy for one replica</strong>. Closing Part 5, we pull the camera back to the <strong>multi-process, multi-card</strong> scale and look at two parallelisms that change the <strong>control flow</strong>:
+<strong>data parallel (DP)</strong> (replicate the whole runtime N times and fan requests out) and <strong>pipeline parallel (PP)</strong> (split the model's layers into stages and keep multiple micro-batches flowing across them).
+Note: what they change is not how the matrices compute, but <strong>who dispatches and how many micro-batches are in flight</strong>—exactly the scheduler's concern.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of <strong>DP</strong> as <strong>multiple identical checkout lanes</strong> in a store: each lane is <strong>fully equipped</strong> (its own cashier, scanner, register), and a <strong>greeter</strong> at the door routes each customer to a lane;
+  lanes don't interfere, and the more you open, the more customers you ring up per minute. Think of <strong>PP</strong> as <strong>one long conveyor with stations</strong>: each station does just one step (label → box → seal),
+  and many items ride at once, each at a different station, so no station sits idle. DP is "replicate whole lanes for throughput", PP is "split one job into a relay so everyone stays busy"—one handles <strong>dispatch</strong>, one handles <strong>relay</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>DP replicates "the whole model" and fans requests out to many independent replicas; PP splits "the model's layers" and pipelines multiple micro-batches across stages.</strong>
+  DP's conductor is the <span class="inline">DataParallelController</span>—it does <strong>no forward</strong> itself, only dispatching incoming requests <strong>round-robin or load-aware</strong> to N <strong>full runtimes</strong> (each replica has its own scheduler + TP workers + KV cache + a full copy of the model weights).
+  PP's executor is <span class="inline">SchedulerPPMixin.event_loop_pp</span>—it reshapes Lesson 18's single-stage heartbeat into a <strong>pipelined loop</strong>, so stage1 processes micro-batch B while stage2 processes micro-batch A,
+  amortizing the fill/drain <strong>"bubble"</strong>. Layer on <strong>tensor parallel (TP)</strong> (split each layer's matrices, deep dive Lesson 46) and a big deployment is <strong>TP × PP × DP</strong> stitched in three dimensions.
+</div>
+
+<h2>Data parallel (DP): replicate the whole runtime, fan requests out</h2>
+<p>DP's idea is the plainest: <strong>if one replica can't keep up with traffic, run N replicas</strong>. The key is that each replica is a <strong>complete engine</strong>—
+not sharing some weights, but <strong>each holding a full model copy</strong>, each running a Lesson-18 event loop, each managing its own KV ledger.
+Replicas are <strong>request-isolated</strong>: customer A on replica 1, customer B on replica 2, never interacting. The only coordination needed is that <strong>dispatcher</strong> at the door—
+the <span class="inline">DataParallelController</span>. It catches all incoming requests up front, picks a replica by policy (round-robin <span class="mono">round_robin_scheduler</span>,
+or load-aware by in-flight requests/tokens), <strong>forwards the request as-is</strong>, and never touches the GPU.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">DataParallelController</div><div class="nd">round-robin / load-aware<br>round_robin_scheduler</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Replica 1 (full runtime)</div><div class="nd">scheduler+TP+KV<br>a full model</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Replica 2 (full runtime)</div><div class="nd">scheduler+TP+KV<br>a full model</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Replica N (full runtime)</div><div class="nd">scheduler+TP+KV<br>a full model</div></div>
+</div>
+
+<p>Read three things off this figure. First, <strong>the controller sits before all replicas</strong>, the first fork a request hits, making only the "to whom" decision.
+Second, each replica is <strong>self-contained</strong>—inside it is everything from the last five lessons: an <span class="inline">event_loop_normal</span>, a prefill/decode trade-off, an independent KV ledger.
+Third, DP is a <strong>throughput multiplier</strong>: N replicas can scale whole-box throughput N-fold, since requests are spread and don't contend.
+A caveat: this is <strong>request-level DP</strong>; in MoE models there is finer-grained <strong>attention DP / expert DP</strong>, with more nuanced control flow and communication, deferred to Lessons 46/47 and not covered here.</p>
+
+<h2>Pipeline parallel (PP): split layers into stages, keep micro-batches in flight</h2>
+<p>When a model is <strong>too big for one card</strong>, DP replication is hopeless—you can't even fit one copy, let alone N. Now use PP: cut the model's <strong>layers</strong> vertically into a few <strong>stages</strong>,
+layers 1–10 on GPU0, 11–20 on GPU1, 21–30 on GPU2…, so each card holds <strong>one stage</strong>. A batch's forward becomes a <strong>relay</strong>:
+data passes stage1, hands activations to stage2, then stage3… The catch: with only one batch in flight, while stage2 works, stage1/stage3 sit <strong>idle waiting</strong>,
+and GPU utilization is dismal—this is the <strong>pipeline bubble</strong>. The fix is to split a big batch into multiple <strong>micro-batches</strong> and run them <strong>staggered</strong>, in flight together.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">t1</div><div class="sc"><h4>Fill</h4><p>micro-batch A enters <strong>stage1</strong>; stage2, stage3 still empty—this tick is part of the bubble, only one stage busy.</p></div></div>
+  <div class="step"><div class="num">t2</div><div class="sc"><h4>Ramping</h4><p>A advances to <strong>stage2</strong> while micro-batch B enters <strong>stage1</strong>; two stages busy, the pipe begins to fill.</p></div></div>
+  <div class="step"><div class="num">t3</div><div class="sc"><h4>Full (steady state)</h4><p>A in <strong>stage3</strong>, B in <strong>stage2</strong>, C enters <strong>stage1</strong>—<strong>all three busy</strong>, bubble amortized; this is where PP wants to live.</p></div></div>
+  <div class="step"><div class="num">t4</div><div class="sc"><h4>Drain</h4><p>After the last micro-batch is launched, A has emitted and B/C walk off the tail stages; a tail bubble reappears. <strong>More micro-batches ⇒ higher full-load fraction</strong>, smaller bubble.</p></div></div>
+</div>
+
+<p>Grasp this staggered figure and you've got PP's soul: <strong>at any instant, different stages process different micro-batches.</strong>
+Precisely because <strong>multiple micro-batches are in flight</strong>, each stage's GPU never idles waiting on the previous—this is why <span class="inline">event_loop_pp</span> must be more complex than the normal loop:
+it <strong>tracks several</strong> micro-batches at different stages, manages inter-stage activation send/recv, and coordinates "when to launch the next micro-batch".
+A plain single-stage loop watches one batch per tick; the PP loop watches a string of them. The <strong>fill</strong> and <strong>drain</strong> ends carry unavoidable bubbles, but as long as steady state is long enough (micro-batches ≫ stages), the bubble fraction approaches zero.</p>
+
+<h2>How the three compose: TP × PP × DP</h2>
+<p>DP, PP, and the <strong>TP (tensor parallel)</strong> that Lesson 46 details are three <strong>orthogonal</strong> dimensions you can stack.
+The fastest way to tell them apart is to ask: <strong>"what does it replicate, what does it split?"</strong></p>
+
+<table class="t">
+  <tr><th>Dimension</th><th>What it does to the model</th><th>Granularity of split/replicate</th><th>Who orchestrates</th></tr>
+  <tr><td><strong>DP data parallel</strong></td><td><strong>Replicate the whole model</strong>, fan requests to replicas</td><td class="mono">whole runtime (replica level)</td><td class="mono">DataParallelController</td></tr>
+  <tr><td><strong>PP pipeline parallel</strong></td><td>Split <strong>layers into stages</strong> across cards, micro-batch relay</td><td class="mono">layers (stage level)</td><td class="mono">event_loop_pp (in scheduler)</td></tr>
+  <tr><td><strong>TP tensor parallel</strong></td><td>Split <strong>each layer's matrices</strong>, many cards compute one layer</td><td class="mono">a single layer's weight matrix</td><td class="mono">inside model forward (Lessons 24/46)</td></tr>
+</table>
+
+<p>Picture them stacked: <strong>TP within a layer</strong> (many cards co-compute one layer's matmul), <strong>PP across layers</strong> (different stages on different cards), <strong>DP across whole replicas</strong> (replicate the box and fan out).
+A typical large cluster might be "TP=8, PP=2, DP=4"—each replica uses 16 cards (8-way TP × 2 PP stages) to hold one copy of a big model, then 4 replicas to carry traffic, 64 cards in all.
+And <strong>what the scheduler orchestrates here is DP (via the controller's dispatch) and PP (via the pp loop advancing micro-batches)</strong>—the two dimensions that change control flow;
+TP <strong>hides inside the model forward</strong>, largely transparent to the scheduler—the scheduler hands the batch to ModelRunner and TP's multi-card cooperation happens automatically inside <span class="inline">forward</span> (Lesson 24). That's why this lesson belongs in Part 5: DP and PP are <strong>scheduling</strong> problems, TP is a <strong>compute</strong> problem.</p>
+
+<h2>When to use DP vs PP</h2>
+<p>They solve <strong>different bottlenecks</strong>—don't conflate them:</p>
+
+<div class="cols">
+  <div class="col"><h4>DP: for throughput (model fits)</h4><p>The premise is <strong>one copy already fits the existing cards</strong>. When traffic is high and a single replica queues badly, replicate N copies and let the controller spread requests,
+  scaling throughput near-linearly. The cost is <strong>VRAM multiplied</strong> (a full weight set per replica). It <strong>cannot</strong> help you fit a model that doesn't fit—replication just makes "doesn't fit" into "doesn't fit N times".</p></div>
+  <div class="col"><h4>PP: for capacity (model too big)</h4><p>The premise is <strong>the model is too big for one card</strong> (even one TP group). Split layers into stages across cards so each holds only one stage of weights, turning "doesn't fit" into "fits".
+  The cost is <strong>fill/drain bubbles</strong> and <strong>inter-stage communication</strong>, amortized by many micro-batches. It does <strong>not</strong> directly improve single-request latency—mainly it <strong>makes a huge model runnable</strong>.</p></div>
+</div>
+
+<p>In practice the two often appear <strong>together</strong>: first use PP (and TP) to <strong>fit</strong> one big model into a card group, then use DP to <strong>replicate</strong> that ready-made replica to carry traffic.
+So by now you should be able to translate this into concrete actions—<strong>"make it fit" via splitting (PP/TP), "keep it fed" via replication (DP)</strong>.</p>
+
+<h2>Real code: how the controller round-robins dispatch</h2>
+<p>Below is the core round-robin dispatch in <span class="inline">DataParallelController</span>. Note how <strong>light</strong> it is—
+it keeps a <span class="mono">round_robin_counter</span>, finds the next <strong>ready</strong> worker, <span class="mono">sock_send</span>s the request there, and advances the pointer modulo the worker count. It <strong>never touches the GPU</strong>, making only the "to whom" decision.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/data_parallel_controller.py ::DataParallelController</span><span class="ln">DP controller: round-robin to the next ready replica</span></div>
+  <pre><span class="kw">def</span> round_robin_scheduler(self, req: Req):
+    <span class="cm"># Direct-route if a DP rank is pinned, else round-robin</span>
+    <span class="kw">if</span> self.maybe_external_dp_rank_routing(req):
+        <span class="kw">return</span>
+
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">if</span> self.status[self.round_robin_counter]:
+            <span class="cm"># This worker is ready: send the request</span>
+            sock_send(self.workers[self.round_robin_counter], req)
+            self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+                self.workers
+            )
+            <span class="kw">break</span>
+        <span class="cm"># Otherwise skip it, look at the next</span>
+        self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(
+            self.workers
+        )</pre>
+</div>
+
+<p>Align this with the fan-out figure: <span class="inline">self.workers</span> are the N replicas' sockets, <span class="inline">round_robin_counter</span> is the greeter's "which lane is next" counter,
+<span class="inline">self.status</span> marks which replicas are ready (skip the ones that aren't). <span class="inline">sock_send</span> <strong>delivers the request as-is</strong> to the chosen replica—after that the request's fate is entirely up to that replica's internal scheduler,
+and the controller immediately turns to the next. Not one line of matmul, confirming "<strong>the controller only decides dispatch, never computes</strong>". Load-aware policy (pick the least-busy replica by in-flight requests/tokens) just swaps "advance the pointer" for "consult the ledger", equally lightweight.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>DP (data parallel)</strong>: replicate the <strong>whole runtime</strong> into N independent replicas (each with scheduler+TP+KV+a full model), with <span class="mono">DataParallelController</span> <strong>fanning out</strong> requests round-robin/load-aware; a <strong>throughput multiplier</strong>, request-isolated, replicas don't interact.</li>
+    <li><strong>PP (pipeline parallel)</strong>: split the model's <strong>layers into stages</strong> across cards; <span class="mono">event_loop_pp</span> keeps <strong>multiple micro-batches flowing across stages</strong> (stage1 on B while stage2 on A), amortizing the fill/drain <strong>bubble</strong> via micro-batch count; born to <strong>fit a huge model</strong>.</li>
+    <li><strong>TP × PP × DP are three orthogonal dims</strong>: TP splits <strong>matrices within a layer</strong>, PP splits <strong>stages across layers</strong>, DP replicates <strong>whole replicas</strong>. The scheduler orchestrates DP (controller) and PP (pp loop); TP hides in the model forward, transparent to the scheduler.</li>
+    <li><strong>Selection rule</strong>: model too big ⇒ PP/TP (split, "make it fit"); traffic too heavy ⇒ DP (replicate, "keep it fed"); big deployments stack all three. Deep dives: Lesson 46 (TP/PP/EP/DP), Lesson 47 (EPLB), Lesson 24 (forward), Lesson 18 (event loop), Lesson 2 (3-process model).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In <strong>data parallel (DP)</strong>, what role does each replica vs the <code>DataParallelController</code> play?</div>
+  <ol class="opts">
+    <li>Each replica holds only some layers, and the controller passes activations between them</li>
+    <li>The controller splits each request into pieces, one per replica, then stitches them back</li>
+    <li>Each replica is a <strong>full runtime</strong> (its own scheduler+TP worker+KV cache+<strong>a full model copy</strong>), request-isolated and non-interacting; the controller does <strong>no forward</strong>, only <strong>fanning out</strong> incoming requests round-robin/load-aware to a ready replica</li>
+    <li>Replicas share one set of weights, and the controller merges their outputs</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. DP <strong>replicates the whole runtime</strong>: each replica holds a full model, runs its own event loop, manages its own KV ledger, and whatever replica a request lands on handles it end-to-end. The controller does one ultra-light thing—'to whom'—never touching the GPU. Splitting layers/passing activations is PP; sharing weights and merging outputs is not how DP works.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does <strong>pipeline parallel (PP)</strong> keep <strong>multiple micro-batches in flight</strong> instead of running one batch at a time?</div>
+  <ol class="opts">
+    <li>Because multiple micro-batches can share one KV cache to save VRAM</li>
+    <li>Because layers are split into stages across cards; with one batch, while one stage works the others <strong>idle</strong> (the pipeline <strong>bubble</strong>). Staggering multiple micro-batches lets stage1 run B while stage2 runs A, so <strong>all stages stay busy</strong> and the bubble is amortized</li>
+    <li>Because a single batch cannot be sampled and must be split into micro-batches</li>
+    <li>Because it skips inter-stage communication and avoids passing activations</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. PP's bottleneck is the <strong>fill/drain bubble</strong>: in relay-style forward, with one batch some stage always idles. Staggered micro-batches drive the pipe into <strong>steady-state full load</strong> (different stages on different micro-batches); more micro-batches ⇒ higher full-load fraction ⇒ bubble approaching zero. That's why <code>event_loop_pp</code> must be more complex than the normal loop—it tracks a string of micro-batches at different stages.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Distinguishing <strong>TP, PP, DP</strong> in one line, which statement is most accurate?</div>
+  <ol class="opts">
+    <li>All three split the model's layers, differing only in stage count</li>
+    <li>All three are orchestrated uniformly by the DataParallelController</li>
+    <li><strong>TP</strong> splits <strong>matrices within a layer</strong>, <strong>PP</strong> splits <strong>stages across layers</strong>, <strong>DP</strong> replicates <strong>whole replicas</strong>; the scheduler orchestrates DP (controller dispatch) and PP (pp loop), while TP hides <strong>inside the model forward</strong>, largely transparent to the scheduler</li>
+    <li>TP replicates the whole model, PP replicates the whole model, DP splits matrices</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Three orthogonal dims, told apart by 'what it replicates/splits': DP=whole-model replicate (replica level), PP=layers into stages (stage level), TP=split a single layer's matrices. Big deployments stack TP×PP×DP. The key is separating the <strong>scheduling</strong> problem (DP/PP change control flow, hence Part 5) from the <strong>compute</strong> problem (TP inside forward, Lessons 24/46).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'supermarket checkout lanes vs conveyor stations' analogy, fully explain DP vs PP. Cover each: (1) <strong>DP</strong>—why it replicates the <strong>whole runtime</strong> (each replica with its own scheduler+TP+KV+a full model), how <code>DataParallelController</code> <strong>round-robins/fans out</strong> requests via <code>round_robin_scheduler</code> without touching the GPU, and why it is a <strong>throughput multiplier</strong> yet can't rescue a model that 'doesn't fit'; (2) <strong>PP</strong>—why <strong>splitting layers into stages</strong> fits a huge model, why <code>event_loop_pp</code> keeps <strong>multiple micro-batches staggered in flight</strong>, and where the <strong>fill/drain bubble</strong> comes from and how micro-batch count amortizes it.</li>
+    <li>Discuss how <strong>TP × PP × DP</strong> compose in a large cluster, and why this lesson belongs to 'scheduling'. Explain: (1) for a 'TP=8, PP=2, DP=4' deployment, what each dimension splits/replicates and how the total card count is computed; (2) why the scheduler orchestrates <strong>DP (controller dispatch) and PP (the pp loop advancing micro-batches)</strong> while <strong>TP is transparent to the scheduler</strong> (hidden in <code>forward</code>, Lessons 24/46); (3) from this, state the selection rule—which parallelism to reach for when the model is too big vs traffic too heavy—and point to the deep dives (Lesson 46 TP/PP/EP/DP, Lesson 47 EPLB).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="22-chunked-prefill.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">分块预填充</span><span class="lang-en">Chunked prefill</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
