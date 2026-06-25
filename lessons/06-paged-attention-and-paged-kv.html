@@ -342,8 +342,410 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <div class="part"><span class="lang-zh">第二部分 · 推理前置基础</span><span class="lang-en">Part 2 · Foundations</span></div>
     <h1><span class="lang-zh">PagedAttention 与分页 KV</span><span class="lang-en">PagedAttention &amp; paged KV</span></h1>
   </div>
-  <div class="lang-zh">PLACEHOLDER 分页 KV 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER 分页 KV 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER 分页 KV 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER 分页 KV 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。</div>
-  <div class="lang-en">PLACEHOLDER paged KV placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER paged KV placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER paged KV placeholder body, replaced later with the full lesson so the module imports and the build runs.</div>
+  <div class="lang-zh">
+<p class="lead">
+上一课我们让批次"<strong>永远满载</strong>"，可这背后藏着一个没说破的前提：完成的请求要能<strong>立刻释放显存</strong>、
+等待的请求要能<strong>立刻拿到显存</strong>。问题是——KV 缓存到底是怎么在显存里安家的？如果按老办法<strong>给每条请求预留一整块连续显存</strong>，
+你会发现显存被大把大把地浪费、并发数被死死卡住。本课讲的<strong>PagedAttention 与分页 KV</strong>，
+就是把操作系统几十年前解决内存碎片的"<strong>分页</strong>"老智慧搬到 KV 缓存上，让显存<strong>装得更紧、几乎零碎片</strong>。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  想象一家酒店有两种订房方式。老派做法是：每来一位客人，<strong>不管他住几晚，先把一整层连号的房间整片包给他</strong>——
+  按"可能住的最长天数"预留。客人大多只住两三晚，<strong>整层却一直锁着不让别人住</strong>；而且必须是<strong>连号的一整层</strong>，
+  东一间西一间的零散空房凑不成一层，只能干耗着。新派做法是：<strong>按晚、按单间出租</strong>，<strong>住几晚开几间</strong>，
+  房间<strong>不必相邻</strong>，前台用一本<strong>登记簿</strong>记下"<strong>张三 → 301、507、902 房</strong>"。客人退房，房间当晚就回收给下一位。
+  老派就是"<strong>连续预留</strong>"，新派就是"<strong>分页</strong>"——后者把同样的楼栋塞进多得多的客人。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>PagedAttention 把每条请求的 KV 缓存切成固定大小的"页（block）"，用一张"页表"把逻辑位置映射到物理页，按需分配、用完即还。</strong>
+  这正是操作系统<strong>虚拟内存 / 分页</strong>的翻版——进程看到的是连续的逻辑地址，物理上却散落在任意页框里，一张页表把两者对上。
+  因为页表负责"找页"，<strong>物理页根本不需要连续</strong>，于是碎片几乎消失、显存利用率逼近 100%。它由 vLLM 首创，如今被
+  SGLang 在内的几乎所有推理引擎广泛采用。
+</div>
+
+<h2>痛点：连续预留为什么烧显存</h2>
+<p>回到第 4 课：每条请求的 KV 缓存随着生成<strong>越长越大</strong>，但你<strong>事先并不知道</strong>它最终会生成多少 token。
+最朴素的做法是<strong>按"最大长度"给每条请求预留一整块连续显存</strong>——比如上限 2048，就先占满 2048 个 token 的 KV 空间。
+这种"<strong>连续预留</strong>"看似省事，却同时踩中两种经典的内存碎片，把宝贵的 HBM 大把浪费掉。</p>
+
+<div class="cols">
+  <div class="col"><h4>内部碎片（over-allocation）</h4><p>绝大多数请求<strong>远到不了最大长度</strong>：上限留 2048，实际可能只生成 60 个 token。
+  那剩下的<strong>近 2000 个槽位</strong>从头到尾<strong>空着、却被这条请求锁死</strong>，谁也用不了。预留越大、浪费越狠——这叫<strong>内部碎片</strong>。</p></div>
+  <div class="col"><h4>外部碎片（external fragmentation）</h4><p>请求来来去去，释放出的空闲块<strong>大小不一、夹在中间</strong>。
+  新请求要一整块<strong>连续</strong>显存，可剩下的全是<strong>东一小段西一小段</strong>的缝隙，<strong>加起来够、却拼不成一整块</strong>，只能眼睁睁闲置——这叫<strong>外部碎片</strong>。</p></div>
+</div>
+
+<p>两种碎片叠加，后果很直接：<strong>显存明明没用满，却已经塞不下新请求了</strong>。而在第 5 课我们说过，<strong>并发请求数（批大小）</strong>
+是吞吐的命门——批越大、权重读取的固定开销摊得越薄。连续预留把显存白白烧在空槽和缝隙上，<strong>等于直接砍掉了你能同时跑的请求数</strong>，
+吞吐天花板被死死压低。所以"怎么放 KV"不是细节，而是<strong>决定并发上限的大事</strong>。</p>
+
+<p>用一个具体的数字感受一下浪费有多狠。假设显存只够放 10000 个 token 的 KV，模型把最大长度设成 2048。连续预留下，
+每条请求一进来就独占 2048 个槽位，于是<strong>最多只能同时跑 4 条请求</strong>（4×2048≈8192，第 5 条就放不下了）。可现实里这 4 条平均
+也许只生成了 100 个 token——真正用到的总共才 400 个槽位，<strong>剩下 9600 个槽位全在空转</strong>，利用率不到 5%。换成分页按需分配，
+同样 10000 个槽位、平均每条 100 token，就能<strong>同时塞下近 100 条请求</strong>。并发从 4 跳到近 100，吞吐随之水涨船高——
+这就是"怎么放 KV"能左右整机吞吐的真实量级。</p>
+
+<table class="t">
+  <tr><th>浪费来源</th><th>连续预留（老派包整层）</th><th>分页 KV（按页出租）</th></tr>
+  <tr><td><strong>内部碎片</strong></td><td>按最大长度预留，没用到的槽位全锁死</td><td class="mono">按页<strong>按需</strong>分配，最多浪费<strong>不到一页</strong></td></tr>
+  <tr><td><strong>外部碎片</strong></td><td>要一整块连续显存，缝隙拼不起来</td><td class="mono">物理页<strong>无需连续</strong>，任意空页都能用</td></tr>
+  <tr><td><strong>能否提前定长</strong></td><td>必须预估上限，估大了浪费、估小了截断</td><td class="mono">边生成<strong>边长页</strong>，不必预知长度</td></tr>
+  <tr><td><strong>对并发的影响</strong></td><td>显存早早耗尽，<strong>并发被压低</strong></td><td class="mono">显存装得紧，<strong>并发显著提高</strong></td></tr>
+</table>
+
+<h2>分页的核心：固定页 + 页表</h2>
+<p>PagedAttention 的思路只有两件东西：<strong>固定大小的页</strong>，和<strong>一张把逻辑映射到物理的页表</strong>。
+把一条请求的 KV 序列想成一条<strong>逻辑上连续的 token 流</strong>，但底层把它切成每 <span class="mono">page_size</span> 个 token 一页，
+<strong>每页单独从显存池里领</strong>。哪一页放在物理显存的哪个位置完全无所谓——一张<strong>页表</strong>记下"第几页 → 物理块号"，需要时照着它去取。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>切页</h4><p>请求的 token 流按 <strong>page_size</strong>（如 16）切成一页页，<strong>逻辑上连续</strong>，物理上分开存。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>按需领页</h4><p>序列每长满一页，就向分配器<strong>再要一个空闲物理块</strong>——<strong>用多少领多少</strong>，绝不预留到顶。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>页表登记</h4><p>把"<strong>逻辑页号 → 物理块号</strong>"写进这条请求的页表（SGLang 里即 token→槽位的映射）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>用完即还</h4><p>请求一结束，它占的所有页<strong>整批回收进空闲池</strong>，下一秒就能分给别的请求。</p></div></div>
+</div>
+
+<p>关键在于第 3 步那张<strong>页表</strong>：注意力算子要回看历史 token 的 K/V 时，<strong>不直接按连续地址去取</strong>，
+而是<strong>先查页表、再去对应的物理块里把 K/V "捡（gather）"回来</strong>。正因为有了这层间接映射，<strong>物理块爱放哪放哪、根本不用连续</strong>——
+这就是分页能消灭外部碎片的根本原因。下面这张图把"逻辑连续、物理分散、页表牵线"画了出来：</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>页表把逻辑页映射到物理块</b>：同一条请求的 KV 在物理上散落各处，页表负责对上号——物理块<strong>无需相邻</strong></div>
+  <div class="cells"><span class="lab">逻辑页 0</span><span class="cell hl">tok 0–15</span><span class="sep">→</span><span class="cell q">物理块 #7</span></div>
+  <div class="cells"><span class="lab">逻辑页 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">物理块 #2</span></div>
+  <div class="cells"><span class="lab">逻辑页 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">物理块 #9</span></div>
+  <div class="cells"><span class="lab">逻辑页 3</span><span class="cell">tok 48–…（生成中）</span><span class="sep">→</span><span class="cell q">满页时再领一个空闲块</span></div>
+</div>
+
+<p>这里有个常被忽略的取舍：<strong>page_size 不是越小越好</strong>。页越小，内部浪费越少（最多浪费小半页），但页表更长、查表与算子里的间接寻址开销更大；
+页越大，寻址更省，但每条请求末尾"<strong>没填满的那一页</strong>"浪费就更多。常见取值是 <span class="mono">1、16、32</span> 这类，
+具体由模型与硬件权衡决定——这正是工程里"<strong>碎片 vs 开销</strong>"的经典折中。</p>
+
+<p>还要澄清一个容易混淆的点：<strong>页是按 token 切的，不是按字节切的</strong>。一页装 <span class="mono">page_size</span> 个 token 的 K 和 V，
+每个 token 的 KV 大小由层数、注意力头数、头维度决定，是固定的。所以"领一页"就是"领下 page_size 个 token 的 KV 空间"，
+回收时也以页为单位整批归还。正因为粒度统一、对齐干净，分配器才能用一句 <span class="mono">free_pages[:num_pages]</span> 这样的<strong>极轻量操作</strong>
+完成分配，而不必像通用内存分配器那样维护复杂的空闲链表、做首次适配或最佳适配的搜索——这也是分页在推理热路径上<strong>足够便宜</strong>的原因之一。</p>
+
+<h2>SGLang 里的落地：分页分配器与 req_to_token</h2>
+<p>在 SGLang 里，这套机制由一个<strong>分页的 token→KV 分配器</strong>承担：它管理着整池 KV 槽位，但<strong>以"页"为最小分配单位</strong>派发。
+配合第 4 课讲过的 KV 池，还有一张 <span class="inline">req_to_token</span> 映射，记录<strong>每条请求的 token → 物理槽位</strong>——
+它就是上面那张"页表"在代码里的化身。下面这段就是分页分配器的骨架，<strong>alloc 按页摘、free 按页还</strong>，全程以 <span class="mono">page_size</span> 为粒度：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/allocator/paged.py ::PagedTokenToKVPoolAllocator</span><span class="ln">allocator/paged.py ::PagedTokenToKVPoolAllocator</span></div>
+  <pre><span class="kw">class</span> <span class="st">PagedTokenToKVPoolAllocator</span>(BaseTokenToKVPoolAllocator):
+    <span class="cm"># 管理 KV cache 索引的分配器；每个请求的输出始终是 page 对齐的</span>
+    <span class="kw">def</span> __init__(self, size, page_size, dtype, device, kvcache, need_sort):
+        super().__init__(size, page_size, dtype, device, kvcache, need_sort)
+        self.num_pages = size // page_size        <span class="cm"># 总槽位数 ÷ 每页大小 = 页数</span>
+
+    <span class="kw">def</span> alloc(self, need_size):
+        <span class="cm"># page 对齐分配：返回若干页展开后的物理索引</span>
+        num_pages = need_size // self.page_size
+        out_pages = self.free_pages[:num_pages]   <span class="cm"># 从空闲页里摘走 num_pages 页</span>
+        self.free_pages = self.free_pages[num_pages:]
+        out_indices = (out_pages[:, <span class="kw">None</span>] * self.page_size
+                       + torch.arange(self.page_size, device=self.device)).reshape(-1)
+        <span class="kw">return</span> out_indices                        <span class="cm"># 展开成 token 级槽位索引</span>
+
+    <span class="kw">def</span> free(self, free_index):
+        <span class="cm"># 请求结束：把它占用的页号去重后整批还回空闲池</span>
+        free_page_indices = torch.unique(free_index // self.page_size)
+        self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<p>读懂这段就抓住了分页的精髓：<strong>显存不再按"请求"整片预留，而是按"页"零售。</strong>
+<span class="inline">alloc</span> 从 <span class="mono">free_pages</span> 里<strong>摘走</strong>几页、把页号乘 <span class="mono">page_size</span>
+再加页内偏移<strong>展开成 token 槽位索引</strong>；<span class="inline">free</span> 在请求结束时把那些索引<strong>除以 page_size 去重得到页号、整批还回</strong>。
+注意类的注释那句"输出始终 page 对齐"——这保证了页与页之间<strong>干净对齐、好回收</strong>，正是连续批处理（第 5 课）能"完成即释放、随到随补"的物理基础。</p>
+
+<h2>为什么这是第 7 课的跳板</h2>
+<p>分页最深远的意义，不止于省显存。一旦 KV 被切成<strong>固定大小、由页表索引的物理块</strong>，一件神奇的事就成为可能：
+<strong>不同请求的页表，可以指向同一个物理块</strong>。设想两条请求开头是同一段 system prompt——它们前几页的 KV <strong>逐字节相同</strong>，
+那为什么要各存一份？让两张页表<strong>都指向那同一批物理页</strong>不就行了？这正是<strong>第 7 课 RadixAttention 前缀共享</strong>要做的事。</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">固定页 + 页表</div><div class="nd">本课：按页索引、物理可分散</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">页可被多请求指向</div><div class="nd">页表间接层带来的自由</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">共享前缀 KV</div><div class="nd">第 7 课 RadixAttention</div></div>
+</div>
+
+<p>这层"<strong>多张页表指向同一块</strong>"的能力，正是间接寻址送给我们的红利。回想老派的连续预留：每条请求的 KV 是一整片私有显存，
+想共享也无从下手——你没法让两块连续区"部分重叠"。而分页把 KV 拆成独立的小块、用页表牵线之后，<strong>共享就退化成"两张表写同一个块号"这么简单</strong>。
+第 7 课会进一步用一棵<strong>基数树（radix tree）</strong>把所有请求的前缀组织起来，自动发现"谁和谁开头相同"，再让它们的页表复用同一批物理页——
+不仅省显存，<strong>相同前缀的 prefill 计算也只做一次</strong>。可以说，没有本课的分页地基，第 7 课的前缀共享根本无从谈起。</p>
+
+<p>把这一课放回 Part 2 主线：第 4 课建好 KV 池、按槽位独立管理；第 5 课靠连续批处理把批喂满；本课用<strong>分页</strong>把每个槽位<strong>装得更紧、碎片更少</strong>，
+解开"连续预留"对并发的枷锁；第 7 课则顺着页表这层间接，把"<strong>能否复用别人的 KV</strong>"变成现实。再往后，KV 缓存的更多内幕、
+以及把 KV 在显存/内存/磁盘间分层的 HiCache，会在<strong>第 29–32 课</strong>展开。带着"<strong>固定页、页表索引、按需分配、用完即还</strong>"这十二个字往下读，
+你会发现 SGLang 的内存系统几乎都建在这块地基上。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>痛点</strong>：给每条请求按最大长度预留一整块<strong>连续</strong>显存，会同时产生<strong>内部碎片</strong>（多数请求到不了最大长度，空槽锁死）和<strong>外部碎片</strong>（释放的缝隙拼不成连续块），把 HBM 大把烧掉、<strong>压低并发上限</strong>。</li>
+    <li><strong>PagedAttention</strong>：把 KV 切成<strong>固定大小的页</strong>，用一张<strong>页表</strong>把<strong>逻辑位置 → 物理块号</strong>映射起来（即操作系统虚拟内存 / 分页）。<strong>按需领页、用完即还</strong>，物理块<strong>无需连续</strong>，碎片几近消失。</li>
+    <li><strong>为何能非连续</strong>：注意力算子<strong>先查页表、再 gather</strong> 物理块里的 K/V，所以页放在哪都行——这是消灭外部碎片的根本。</li>
+    <li><strong>在 SGLang 里</strong>：<span class="mono">PagedTokenToKVPoolAllocator</span> 以 <span class="mono">page_size</span> 为粒度 <span class="mono">alloc</span>/<span class="mono">free</span>，配合 <span class="mono">req_to_token</span> 记录每条请求的 token→槽位（即页表，承接第 4 课 KV 池）。</li>
+    <li><strong>取舍 & 前瞻</strong>：page_size 小则碎片少但查表开销大，大则反之。分页让<strong>不同请求的页表指向同一物理块</strong>成为可能——这正是<strong>第 7 课 RadixAttention</strong> 前缀共享的跳板；KV 内幕与 HiCache 见<strong>第 29–32 课</strong>。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 为什么“给每条请求按最大长度预留一整块连续显存”会大把浪费 HBM？</div>
+  <ol class="opts">
+    <li>它把 decode 变成计算密集，吃满了 ALU</li>
+    <li>它会让模型权重占用更多显存</li>
+    <li>它同时造成内部碎片（多数请求远到不了最大长度，预留的空槽被锁死没人能用）和外部碎片（请求来去后剩下的零散缝隙拼不成一整块连续显存）</li>
+    <li>它强制每个 token 都重算注意力，浪费算力</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。连续预留按上限定大小，可绝大多数请求实际长度远低于上限，剩下的槽位空着却被锁死（内部碎片）；请求不断来去，释放出的空闲块大小不一、夹在中间，新请求要连续一整块却拼不出来（外部碎片）。两者叠加导致显存没用满就塞不下新请求，直接压低并发上限。它与权重大小、是否重算注意力、decode 的访存/计算属性都无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 在 PagedAttention 里，是什么让“一条请求的 KV 可以散落在物理上不相邻的块里”仍然能正确算注意力？</div>
+  <ol class="opts">
+    <li>页足够小，小到不可能不连续</li>
+    <li>所有请求其实共用同一块物理显存，无所谓位置</li>
+    <li>一张页表把“逻辑页号 → 物理块号”映射起来，注意力算子先查页表、再去对应物理块把 K/V gather 回来，所以物理块放哪都行、无需连续</li>
+    <li>硬件会在每步自动把散落的块搬到一起变连续</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。分页的核心是“固定页 + 页表”这层间接映射，正如操作系统虚拟内存。注意力不按连续地址直取，而是先查页表拿到物理块号、再 gather，所以物理块爱放哪放哪——这正是消灭外部碎片、并允许按需增长的根本。硬件不会自动整理碎片；各请求的页通常是各自独立的（除非第 7 课的前缀共享显式让页表指向同一块）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 分页为第 7 课的 RadixAttention 前缀共享铺了什么路？</div>
+  <ol class="opts">
+    <li>分页让每条请求都强制使用同一个固定前缀</li>
+    <li>分页把前缀缓存搬到了 CPU 内存里</li>
+    <li>分页把 KV 压缩了一半，所以省下的空间能放更多前缀</li>
+    <li>一旦 KV 是固定大小、由页表索引的物理块，不同请求的页表就能指向同一批物理块——相同前缀（如同一段 system prompt）的 KV 因此可以只存一份、被多请求共享</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。分页的页表间接层带来一个自由：多张页表可以指向同一物理块。若两条请求开头是逐字节相同的前缀，它们前几页的 KV 完全一样，与其各存一份，不如让两张页表都指向那同一批物理页——这就是 RadixAttention（第 7 课）前缀共享的物理基础。它不靠压缩、不强制统一前缀，也与是否搬到 CPU（HiCache 见第 29–32 课）无关。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>设 page_size=16、显存上限相当于能放 1000 个 token 的 KV。比较两种放法在“同时能跑多少条请求”上的差别：(a) 每条请求按最大长度 256 连续预留；(b) 分页按需分配，平均每条请求实际只生成 40 个 token。分别估算并发上限，并指出浪费分别发生在哪里。</li>
+    <li>page_size 该选大还是选小？请从“内部碎片（每条请求末尾未填满的那一页）”与“页表长度 / 算子里的间接寻址开销”两端，说明选 1、16、32 各自的取舍；如果你的工作负载是大量很短的请求，你会倾向哪一端，为什么？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson kept the batch <strong>always full</strong>, but that hides an unstated premise: a finished request must
+<strong>free its HBM immediately</strong>, and a waiting one must <strong>get HBM immediately</strong>. The question is —
+how does the KV cache actually live in HBM? If you use the old way and <strong>reserve a contiguous block of HBM per request</strong>,
+you'll find HBM wasted by the bucketload and concurrency capped hard. This lesson's <strong>PagedAttention and paged KV</strong>
+borrow the operating system's decades-old "<strong>paging</strong>" wisdom for fighting fragmentation and apply it to the KV cache,
+so HBM packs <strong>tighter, with near-zero fragmentation</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a hotel with two booking styles. The old way: for each guest, <strong>reserve a whole contiguous floor up front</strong>
+  no matter how many nights they stay — sized for the <strong>longest possible</strong> stay. Most guests stay two or three nights, yet
+  <strong>the whole floor stays locked away from everyone else</strong>; worse, it must be a <strong>contiguous floor</strong>, so scattered
+  empty rooms here and there can never add up to one. The new way: <strong>rent single rooms by the night</strong>, <strong>open as many as
+  you need</strong>, rooms <strong>need not be adjacent</strong>, and the front desk keeps a <strong>directory</strong>: "<strong>Zhang San → rooms
+  301, 507, 902</strong>." A guest checks out, the room is reclaimed that night. The old way is "<strong>contiguous reservation</strong>"; the new
+  one is "<strong>paging</strong>" — and it stuffs far more guests into the same building.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>PagedAttention cuts each request's KV cache into fixed-size "pages (blocks)" and uses a "page table" to map logical
+  positions to physical pages, allocating on demand and freeing when done.</strong> This is exactly the OS's <strong>virtual memory / paging</strong>:
+  a process sees a contiguous logical address space, but physically it's scattered across arbitrary page frames, with a page table tying the two
+  together. Because the page table does the "finding," <strong>physical pages need not be contiguous</strong>, so fragmentation nearly vanishes and
+  HBM utilization approaches 100%. Pioneered by vLLM, it's now broadly adopted by nearly every inference engine, SGLang included.
+</div>
+
+<h2>The pain: why contiguous reservation burns HBM</h2>
+<p>Back to Lesson 4: each request's KV cache <strong>grows as it generates</strong>, but you <strong>don't know in advance</strong> how many tokens
+it will produce. The naive approach is to <strong>reserve one contiguous block of HBM per request, sized for the max length</strong> — cap of 2048
+means grabbing KV space for 2048 tokens up front. This "<strong>contiguous reservation</strong>" looks convenient but hits two classic fragmentation
+problems at once, wasting precious HBM.</p>
+
+<div class="cols">
+  <div class="col"><h4>Internal fragmentation (over-allocation)</h4><p>Most requests <strong>never reach the max length</strong>: cap of 2048, but maybe only
+  60 tokens are generated. The remaining <strong>~2000 slots</strong> sit <strong>empty yet locked</strong> by that request — usable by no one. The bigger
+  the reservation, the worse the waste. That's <strong>internal fragmentation</strong>.</p></div>
+  <div class="col"><h4>External fragmentation</h4><p>Requests come and go, leaving free blocks of <strong>uneven sizes wedged in between</strong>. A new
+  request wants one <strong>contiguous</strong> block, but what's left is <strong>little gaps scattered around</strong> — <strong>enough in total, yet
+  un-assemblable into one block</strong>, so it idles. That's <strong>external fragmentation</strong>.</p></div>
+</div>
+
+<p>Stack the two and the consequence is blunt: <strong>HBM isn't even full, yet a new request no longer fits</strong>. And as Lesson 5 said, the number
+of <strong>concurrent requests (batch size)</strong> is the throughput lifeline — bigger batches amortize the fixed weight-read cost thinner. Contiguous
+reservation burns HBM on empty slots and gaps, which <strong>directly cuts how many requests you can run at once</strong>, pressing the throughput ceiling
+down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the concurrency limit</strong>.</p>
+
+<table class="t">
+  <tr><th>Waste source</th><th>Contiguous reservation (whole floor)</th><th>Paged KV (rent by page)</th></tr>
+  <tr><td><strong>Internal frag.</strong></td><td>Reserve for max length, unused slots locked</td><td class="mono"><strong>On-demand</strong> per page, waste <strong>&lt; one page</strong></td></tr>
+  <tr><td><strong>External frag.</strong></td><td>Wants one contiguous block, gaps don't combine</td><td class="mono">Physical pages <strong>need not be contiguous</strong>, any free page works</td></tr>
+  <tr><td><strong>Fixed length up front?</strong></td><td>Must estimate a cap; too big wastes, too small truncates</td><td class="mono">Grow <strong>page by page</strong> while generating, no need to know length</td></tr>
+  <tr><td><strong>Effect on concurrency</strong></td><td>HBM runs out early, <strong>concurrency capped</strong></td><td class="mono">HBM packs tight, <strong>concurrency rises notably</strong></td></tr>
+</table>
+
+<h2>The core of paging: fixed pages + a page table</h2>
+<p>PagedAttention needs just two things: <strong>fixed-size pages</strong> and <strong>a page table mapping logical to physical</strong>. Think of a request's
+KV as a <strong>logically contiguous token stream</strong>, but underneath it's sliced into pages of <span class="mono">page_size</span> tokens each, with
+<strong>every page drawn separately from the pool</strong>. Which page sits where in physical HBM is irrelevant — a <strong>page table</strong> records "page N →
+physical block id," and you follow it when you need to fetch.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Slice into pages</h4><p>The token stream is cut by <strong>page_size</strong> (e.g. 16) into pages — <strong>logically contiguous</strong>, physically separate.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Allocate on demand</h4><p>Each time the sequence fills a page, ask the allocator for <strong>one more free block</strong> — <strong>take only what you use</strong>, never reserve to the cap.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Record in the page table</h4><p>Write "<strong>logical page → physical block</strong>" into this request's page table (in SGLang, the token→slot mapping).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Free when done</h4><p>When a request ends, all its pages are <strong>reclaimed in one batch</strong> into the free pool, ready for the next request instantly.</p></div></div>
+</div>
+
+<p>The crux is the <strong>page table</strong> in step 3: when the attention kernel looks back at historical K/V, it <strong>doesn't fetch by contiguous address</strong>
+but <strong>first consults the page table, then "gathers" K/V from the corresponding physical blocks</strong>. Thanks to this indirection, <strong>physical blocks can
+go anywhere — they need not be contiguous</strong>, which is exactly why paging kills external fragmentation. The figure below shows "logically contiguous,
+physically scattered, page-table-linked":</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>The page table maps logical pages to physical blocks</b>: one request's KV is physically scattered, the table reconciles it — blocks <strong>need not be adjacent</strong></div>
+  <div class="cells"><span class="lab">logical page 0</span><span class="cell hl">tok 0–15</span><span class="sep">→</span><span class="cell q">phys block #7</span></div>
+  <div class="cells"><span class="lab">logical page 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">phys block #2</span></div>
+  <div class="cells"><span class="lab">logical page 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">phys block #9</span></div>
+  <div class="cells"><span class="lab">logical page 3</span><span class="cell">tok 48–… (generating)</span><span class="sep">→</span><span class="cell q">grab a free block when the page fills</span></div>
+</div>
+
+<p>One often-missed tradeoff: <strong>smaller page_size is not always better</strong>. Smaller pages waste less internally (at most a fraction of a page), but the
+page table grows longer and table lookups / kernel indirection cost more; bigger pages address more cheaply but waste more on each request's <strong>last unfilled page</strong>.
+Common values are <span class="mono">1, 16, 32</span> and the like, decided by model/hardware tradeoffs — the classic "<strong>fragmentation vs overhead</strong>" balance.</p>
+
+<h2>In SGLang: the paged allocator and req_to_token</h2>
+<p>In SGLang this mechanism is carried by a <strong>paged token→KV allocator</strong>: it manages a whole pool of KV slots but hands them out <strong>with the "page" as the
+minimum unit</strong>. Paired with the KV pool from Lesson 4, a <span class="inline">req_to_token</span> map records <strong>each request's token → physical slot</strong> — the
+in-code incarnation of that "page table." Below is the allocator's skeleton: <strong>alloc takes pages, free returns pages</strong>, all at <span class="mono">page_size</span> granularity:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/allocator/paged.py ::PagedTokenToKVPoolAllocator</span><span class="ln">allocator/paged.py ::PagedTokenToKVPoolAllocator</span></div>
+  <pre><span class="kw">class</span> <span class="st">PagedTokenToKVPoolAllocator</span>(BaseTokenToKVPoolAllocator):
+    <span class="cm"># An allocator managing the indices to kv cache data; output is page-aligned</span>
+    <span class="kw">def</span> __init__(self, size, page_size, dtype, device, kvcache, need_sort):
+        super().__init__(size, page_size, dtype, device, kvcache, need_sort)
+        self.num_pages = size // page_size        <span class="cm"># total slots / page_size = #pages</span>
+
+    <span class="kw">def</span> alloc(self, need_size):
+        <span class="cm"># page-aligned allocation: return the physical indices of some pages</span>
+        num_pages = need_size // self.page_size
+        out_pages = self.free_pages[:num_pages]   <span class="cm"># take num_pages off the free list</span>
+        self.free_pages = self.free_pages[num_pages:]
+        out_indices = (out_pages[:, <span class="kw">None</span>] * self.page_size
+                       + torch.arange(self.page_size, device=self.device)).reshape(-1)
+        <span class="kw">return</span> out_indices                        <span class="cm"># expand to token-level slot indices</span>
+
+    <span class="kw">def</span> free(self, free_index):
+        <span class="cm"># on finish: dedup the page ids it held and return them in one batch</span>
+        free_page_indices = torch.unique(free_index // self.page_size)
+        self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<p>Read this and you grasp the essence of paging: <strong>HBM is no longer reserved wholesale per "request" but retailed per "page."</strong>
+<span class="inline">alloc</span> <strong>takes</strong> some pages off <span class="mono">free_pages</span>, then multiplies page ids by <span class="mono">page_size</span> and adds the
+in-page offset to <strong>expand into token slot indices</strong>; <span class="inline">free</span> divides those indices by page_size, dedups to page ids, and
+<strong>returns them in one batch</strong> when the request ends. Note the class comment "output is page-aligned" — it guarantees pages stay <strong>cleanly aligned and easy to
+reclaim</strong>, the physical basis for continuous batching's (Lesson 5) "free on finish, fill on arrival."</p>
+
+<h2>Why this is the springboard to Lesson 7</h2>
+<p>Paging's deepest significance isn't just saving HBM. Once KV is cut into <strong>fixed-size, page-table-indexed physical blocks</strong>, something magical becomes possible:
+<strong>different requests' page tables can point at the same physical block</strong>. Imagine two requests starting with the same system prompt — their first few pages of KV are
+<strong>byte-for-byte identical</strong>, so why store two copies? Just let both page tables <strong>point at that same set of physical pages</strong>. That's exactly what
+<strong>Lesson 7's RadixAttention prefix sharing</strong> does.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">Fixed pages + page table</div><div class="nd">This lesson: indexed by page, physically scattered</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">A page can be pointed at by many requests</div><div class="nd">freedom from the page-table indirection</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Share prefix KV</div><div class="nd">Lesson 7 RadixAttention</div></div>
+</div>
+
+<p>Place this lesson back on Part 2's throughline: Lesson 4 built the KV pool with per-slot management; Lesson 5 kept the batch full via continuous batching; this lesson uses
+<strong>paging</strong> to pack each slot <strong>tighter with less fragmentation</strong>, unshackling concurrency from "contiguous reservation"; Lesson 7 then follows the page-table
+indirection to make "<strong>can I reuse someone else's KV</strong>" real. Further on, more KV-cache internals and HiCache — tiering KV across HBM/host/disk — unfold in
+<strong>Lessons 29–32</strong>. Read on holding twelve words — "<strong>fixed pages, page-table indexed, allocate on demand, free when done</strong>" — and you'll see SGLang's
+memory system is built almost entirely on this foundation.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The pain</strong>: reserving one <strong>contiguous</strong> HBM block per request sized for the max length causes both <strong>internal fragmentation</strong> (most requests never reach max, empty slots locked) and <strong>external fragmentation</strong> (freed gaps can't combine into a contiguous block), burning HBM and <strong>capping concurrency</strong>.</li>
+    <li><strong>PagedAttention</strong>: slice KV into <strong>fixed-size pages</strong> and use a <strong>page table</strong> to map <strong>logical position → physical block id</strong> (OS virtual memory / paging). <strong>Allocate on demand, free when done</strong>; physical blocks <strong>need not be contiguous</strong>, so fragmentation nearly vanishes.</li>
+    <li><strong>Why non-contiguous works</strong>: the attention kernel <strong>consults the page table, then gathers</strong> K/V from physical blocks, so a page can sit anywhere — the root of killing external fragmentation.</li>
+    <li><strong>In SGLang</strong>: <span class="mono">PagedTokenToKVPoolAllocator</span> does <span class="mono">alloc</span>/<span class="mono">free</span> at <span class="mono">page_size</span> granularity, with <span class="mono">req_to_token</span> recording each request's token→slot (the page table, building on Lesson 4's KV pool).</li>
+    <li><strong>Tradeoff &amp; forward look</strong>: small page_size means less fragmentation but more lookup overhead, large means the reverse. Paging makes <strong>different requests' page tables point at the same physical block</strong> possible — the springboard for <strong>Lesson 7's RadixAttention</strong> prefix sharing; KV internals and HiCache in <strong>Lessons 29–32</strong>.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why does 'reserving one contiguous HBM block per request, sized for the max length' waste so much HBM?</div>
+  <ol class="opts">
+    <li>It turns decode compute-bound and saturates the ALUs</li>
+    <li>It makes the model weights occupy more HBM</li>
+    <li>It causes both internal fragmentation (most requests never reach max length, so reserved empty slots are locked and unusable) and external fragmentation (scattered gaps left as requests come and go can't combine into one contiguous block)</li>
+    <li>It forces recomputing attention for every token, wasting compute</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Contiguous reservation sizes to the cap, but most requests run far shorter, so the leftover slots sit empty yet locked (internal fragmentation); as requests come and go, freed blocks of uneven sizes get wedged in between, and a new request needing one contiguous block can't assemble it (external fragmentation). Together they leave HBM 'full' before it's actually full, capping concurrency. It has nothing to do with weight size, recomputing attention, or decode's memory/compute nature.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. In PagedAttention, what lets a request's KV live in physically non-adjacent blocks while attention still computes correctly?</div>
+  <ol class="opts">
+    <li>Pages are so small that non-contiguity can't happen</li>
+    <li>All requests actually share one physical block, so position is irrelevant</li>
+    <li>A page table maps 'logical page → physical block id'; the attention kernel consults the table, then gathers K/V from the corresponding physical blocks, so blocks can sit anywhere and need not be contiguous</li>
+    <li>The hardware auto-defragments scattered blocks into a contiguous region every step</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Paging's core is the 'fixed pages + page table' indirection, just like OS virtual memory. Attention doesn't fetch by contiguous address; it consults the table for the physical block id, then gathers — so blocks can go anywhere, which is what kills external fragmentation and enables on-demand growth. Hardware does not auto-defragment; each request's pages are normally independent (unless Lesson 7's prefix sharing explicitly points page tables at the same block).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does paging pave the way for Lesson 7's RadixAttention prefix sharing?</div>
+  <ol class="opts">
+    <li>Paging forces every request to use the same fixed prefix</li>
+    <li>Paging moves the prefix cache into CPU memory</li>
+    <li>Paging halves KV size, so the saved space holds more prefixes</li>
+    <li>Once KV is fixed-size, page-table-indexed physical blocks, different requests' page tables can point at the same physical blocks — so identical prefixes (e.g. a shared system prompt) need only one KV copy, shared across requests</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The page-table indirection grants one freedom: many page tables can point at the same physical block. If two requests share a byte-identical prefix, their first pages of KV are identical, so instead of two copies you let both page tables point at the same physical pages — the physical basis for RadixAttention (Lesson 7) prefix sharing. It relies on neither compression nor forcing a common prefix, and is unrelated to moving to CPU (HiCache, Lessons 29–32).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Let page_size=16 and an HBM budget that holds KV for 1000 tokens. Compare the two layouts on 'how many requests can run at once': (a) each request reserves contiguously for max length 256; (b) paged on-demand allocation where each request actually generates ~40 tokens on average. Estimate the concurrency cap for each and pinpoint where the waste occurs.</li>
+    <li>Should page_size be large or small? From two ends — 'internal fragmentation (each request's last unfilled page)' and 'page-table length / kernel indirection overhead' — explain the tradeoff of choosing 1, 16, or 32; if your workload is many very short requests, which end would you lean toward, and why?</li>
+  </ul>
+</div>
+</div></div>
   <div class="footnav"><a class="prev" href="05-continuous-batching.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">连续批处理</span><span class="lang-en">Continuous batching</span></div></a><a class="next" href="07-radixattention-and-prefix-caching.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">RadixAttention 与前缀缓存</span><span class="lang-en">RadixAttention &amp; prefix caching</span></div></a></div>
 </div>
 <script>

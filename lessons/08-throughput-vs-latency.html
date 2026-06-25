@@ -342,8 +342,387 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <div class="part"><span class="lang-zh">第二部分 · 推理前置基础</span><span class="lang-en">Part 2 · Foundations</span></div>
     <h1><span class="lang-zh">吞吐 vs 延迟</span><span class="lang-en">Throughput vs latency</span></h1>
   </div>
-  <div class="lang-zh">PLACEHOLDER 吞吐 vs 延迟 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER 吞吐 vs 延迟 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER 吞吐 vs 延迟 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER 吞吐 vs 延迟 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。</div>
-  <div class="lang-en">PLACEHOLDER throughput vs latency placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER throughput vs latency placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER throughput vs latency placeholder body, replaced later with the full lesson so the module imports and the build runs.</div>
+  <div class="lang-zh">
+<p class="lead">
+从第 4 课到第 7 课，我们一路在堆"<strong>更快、更省</strong>"的招式：连续批处理把 GPU 喂满、分页让显存装得紧、
+RadixAttention 共享前缀。但这些优化最终都要回答一个无法回避的问题：你到底想要<strong>每秒服务最多的请求</strong>，
+还是<strong>让每个请求都回得最快</strong>？这两件事<strong>不能同时拉满</strong>。本课是 Part 2 的收尾，也是整个运行时的"<strong>定盘星</strong>"——
+理解了<strong>吞吐 vs 延迟</strong>这把天平，你才看得懂后面调度器（第 18 课）存在的全部意义。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  想象一家餐厅在纠结两种经营哲学。第一种<strong>"让每桌都快"</strong>：客人一坐下立刻上菜、吃完就走，<strong>单桌等待极短</strong>——
+  但厨房一次只伺候一两桌，<strong>每小时喂饱的总人数</strong>很有限。第二种<strong>"喂饱最多人"</strong>：攒够一大批客人一起开席、
+  厨房一锅出菜摊薄成本，<strong>每小时总产能</strong>拉满——可代价是任何<strong>单个</strong>客人都得排更久的队、等更大批的菜一起好。
+  <strong>"上菜快"就是低延迟，"喂人多"就是高吞吐</strong>，而那个"一批坐多少人"的旋钮，<strong>往哪拧都得牺牲另一头</strong>。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>吞吐和延迟是同一条曲线的两端，批大小是滑块。</strong>
+  批越大，权重读取被摊得越薄、GPU 越饱和，<strong>总吞吐越高</strong>；但每条请求要排在更多活后面、每一步更重，
+  <strong>单请求延迟越高</strong>。批越小则反过来：延迟低、吞吐低、GPU 空转。<strong>没有免费的午餐</strong>——你只能根据自己的
+  <strong>SLA（服务等级目标）</strong>在曲线上<strong>选一个工作点</strong>。SGLang 的调度器、内存池、分块预填充，
+  本质上都是<strong>帮你把这个工作点选得更好</strong>的工具。
+</div>
+
+<h2>四个指标：先把"快"和"多"说清楚</h2>
+<p>谈权衡之前，得先有<strong>能量化的尺子</strong>。推理服务里有四个核心指标，<strong>各自被不同的瓶颈支配</strong>，
+分清它们是理解一切调优的前提：</p>
+
+<table class="t">
+  <tr><th>指标</th><th>含义</th><th>主要被什么支配</th></tr>
+  <tr><td><strong>TTFT</strong><br><span class="mono">首 token 延迟</span></td><td>从请求到达，到吐出<strong>第一个</strong> token 的时间</td><td class="mono">prefill 计算量 + <strong>排队等待</strong>（队列里前面有多少活）</td></tr>
+  <tr><td><strong>ITL / TPOT</strong><br><span class="mono">token 间延迟</span></td><td>生成阶段<strong>相邻两个</strong> token 的间隔（每个输出 token 的时间）</td><td class="mono"><strong>decode 批大小</strong> + 显存带宽（批越大，单步越久）</td></tr>
+  <tr><td><strong>Throughput</strong><br><span class="mono">吞吐</span></td><td><strong>所有</strong>请求合计、每秒产出的 token 数</td><td class="mono">GPU 是否饱和、批是否够大够满</td></tr>
+  <tr><td><strong>Goodput</strong><br><span class="mono">有效吞吐</span></td><td>其中<strong>满足 SLA</strong> 的那部分吞吐才算数</td><td class="mono">吞吐与延迟的<strong>共同结果</strong></td></tr>
+</table>
+
+<p>这张表里藏着最关键的一组对照：<strong>TTFT 主要由 prefill 和排队决定，ITL 主要由 decode 批大小决定</strong>。
+为什么要分这么细？因为它们的"敌人"不同——TTFT 怕的是<strong>队列太长</strong>或某条 prompt 极长把大家堵住；
+ITL 怕的是<strong>批太大</strong>导致每一步算得太久。一个把 TTFT 压到极低的系统（小批、立刻服务），ITL 和吞吐未必好；
+反过来，一个吞吐爆表的系统（大批、攒一攒再发），TTFT 可能很难看。<strong>Goodput</strong> 之所以重要，是因为它逼你同时盯住两端：
+吞吐再高，如果一半请求都违反了延迟 SLA，那部分吞吐<strong>对用户毫无价值</strong>。真正要最大化的，是<strong>满足 SLA 前提下的吞吐</strong>。</p>
+
+<p>再把这四个指标放进"用户视角"里体会一遍：用户按下回车后，盯着光标等的那段空白，就是 <strong>TTFT</strong>——它最影响"<strong>这服务卡不卡</strong>"的第一印象；
+等文字开始往外蹦，<strong>一个字一个字冒出来的速度</strong>就是 <strong>ITL</strong>，它决定"<strong>读起来顺不顺</strong>"；而运维和老板真正关心的是
+<strong>throughput</strong>——同一张昂贵的 GPU，每秒能服务多少 token、摊到每个请求的成本是多少。<strong>goodput</strong> 则是把前三者捏合起来的"<strong>结账指标</strong>"：
+只有那些<strong>既产出了 token、又没违反延迟承诺</strong>的请求，才算"真正交付"。一个常见的认知误区是只盯着 throughput 这一个数字去优化，
+结果把批拉得过大、TTFT/ITL 双双爆表，<strong>跑分很好看、用户却在抱怨卡顿</strong>——这正是 goodput 要替你纠偏的地方。</p>
+
+<h2>核心张力：批大小这一个旋钮，两头不可兼得</h2>
+<p>所有的纠结都收敛到<strong>一个旋钮——批大小（同时在跑的请求数）</strong>上。把它从小往大拧，工作点就沿着曲线滑动，
+<strong>吞吐和延迟此消彼长</strong>，请看这条"操作点"的滑动：</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">批很小</div><div class="nd">延迟最低（每步轻、马上服务）<br>但吞吐低、<strong>GPU 大量空转</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">SLA 工作点</div><div class="nd">在<strong>满足延迟 SLA</strong> 的前提下<br>把批尽量调大 ⇒ <strong>goodput 最大</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">批很大</div><div class="nd">吞吐最高（权重读取摊到最薄、GPU 饱和）<br>但<strong>每请求延迟飙升</strong>、可能违反 SLA</div></div>
+</div>
+
+<p>为什么大批<strong>提升吞吐</strong>？回到第 4、5 课：decode 访存密集，读一次权重的开销<strong>不管批里 1 条还是 100 条几乎一样</strong>，
+批越大就把这笔固定开销摊得越薄，单位算力产出的有效 token 越多，GPU 越接近满载。为什么大批<strong>又伤延迟</strong>？因为同一个
+decode 步要为<strong>更多</strong>请求一起算，<strong>单步耗时变长</strong>（ITL 上升）；而且新来的请求要排在<strong>更多活</strong>后面才轮到，
+<strong>TTFT 也被拉长</strong>。这就是天平的两端——<strong>同一个动作，喂饱了吞吐，就拖慢了单请求</strong>。所以不存在"最优批大小"这种放之四海皆准的答案，
+<strong>只存在"对你的 SLA 而言最优的工作点"</strong>。</p>
+
+<p>这条曲线还有一个容易被忽略的细节：它<strong>不是一条直线，而是会"拐弯"的</strong>。在批很小的左半段，每往里加一条请求，吞吐几乎<strong>线性上涨</strong>、
+而延迟只是温和增加——这是"性价比最高"的一段，加并发近乎白赚吞吐。但一旦 GPU 接近<strong>饱和</strong>，曲线就进入<strong>收益递减区</strong>：
+再加请求，吞吐几乎不再涨（GPU 已经满了），延迟却开始<strong>陡峭飙升</strong>（每条都要排更久）。聪明的工作点，恰恰就落在这个<strong>"拐点"附近</strong>——
+在它之前你在浪费 GPU，在它之后你在白白牺牲延迟。SGLang 的调度器和这些旋钮，本质上就是在帮你<strong>稳稳地停在拐点上、并随负载漂移而实时微调</strong>。
+理解了这一点，你就明白为什么"把并发开到最大"几乎总是错的——那只会把你推到曲线最右端，吞吐没多换来多少，延迟却已崩了。</p>
+
+<h2>负载不同，平衡手段也不同</h2>
+<p>真实流量并不只有一种形状。<strong>prefill-heavy</strong>（长 prompt、短输出，如文档问答）和 <strong>decode-heavy</strong>（短 prompt、长输出，如长文生成）
+对这把天平的拉扯方向完全不同，需要不同的手段去稳住工作点：</p>
+
+<div class="cols">
+  <div class="col"><h4>分块预填充（第 22 课）</h4><p>一条<strong>超长 prompt</strong> 的 prefill 会霸占一整步，把所有人的 decode 卡住——
+  表现为<strong>突然的延迟尖峰</strong>（ITL 抖动）。分块预填充把长 prefill <strong>切成小块</strong>、穿插进 decode 步里，
+  让吞吐和延迟<strong>都不至于因一条长请求崩盘</strong>。</p></div>
+  <div class="col"><h4>PD 分离（第 45 课）</h4><p>prefill 和 decode 的瓶颈本就不同（一个算力密集、一个访存密集）。
+  <strong>PD 分离</strong>把两个阶段<strong>拆到不同的 GPU 池</strong>上，各自独立调批、独立调优——
+  prefill 那边追吞吐，decode 那边保延迟，<strong>互不拖累</strong>。</p></div>
+</div>
+
+<p>为什么"负载形状"会改变天平的玩法？因为 <strong>prefill 和 decode 占用的资源根本不是同一种</strong>。
+prefill 一次要并行处理 prompt 里成百上千个 token，是<strong>算力密集</strong>的——它能轻易把 GPU 的浮点单元喂满，但耗时长、会<strong>独占整步</strong>；
+decode 每步只算一个 token，是<strong>访存密集</strong>的，靠大批来摊薄权重读取。把这两种性格迥异的活混在同一个调度循环里，就会互相伤害：
+一条长 prompt 的 prefill 一插进来，正在顺畅 decode 的几十条请求<strong>集体卡顿一下</strong>，用户那头就是<strong>文字突然停顿</strong>的延迟尖峰。
+这正是分块预填充与 PD 分离要解决的问题——前者把"插队的大活"切碎、穿插着做，后者干脆把两种活<strong>请到不同的厨房</strong>。
+所以同样一句"平衡吞吐与延迟"，在 prefill-heavy 和 decode-heavy 两种负载下，你拧的旋钮、用的手段并不一样。</p>
+
+<h2>SGLang 的旋钮：你怎么在曲线上选点</h2>
+<p>这套理论在 SGLang 里落成几个具体的 <span class="inline">server_args</span> 旋钮，外加调度器的<strong>排队策略</strong>。
+它们合起来决定了你的工作点落在曲线哪儿：</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>SGLang 调延迟/吞吐的主要旋钮</b>：每个旋钮把工作点往"吞吐"或"延迟"一头推</div>
+  <div class="cells"><span class="lab mono">max_running_requests</span><span class="cell hl">并发上限</span><span class="sep">→</span><span class="cell q">调大 ⇒ 批更大、吞吐↑、延迟↑；调小则反之（直接限批）</span></div>
+  <div class="cells"><span class="lab mono">mem_fraction_static</span><span class="cell hl">KV 池占的显存比例</span><span class="sep">→</span><span class="cell q">占得多 ⇒ KV 池能装更多 token ⇒ 容得下更高并发 ⇒ 吞吐↑（但留给激活/图的显存变少）</span></div>
+  <div class="cells"><span class="lab mono">chunked_prefill_size</span><span class="cell hl">prefill 分块大小</span><span class="sep">→</span><span class="cell q">块越小 ⇒ 长 prompt 越不堵 decode ⇒ 延迟尖峰↓（吞吐略降）</span></div>
+  <div class="cells"><span class="lab">调度策略（第 20 课）</span><span class="cell">排队顺序</span><span class="sep">→</span><span class="cell q">决定等待队列里谁先上，平衡<strong>公平性 / 延迟 / 缓存命中</strong></span></div>
+</div>
+
+<p>其中 <span class="inline">mem_fraction_static</span> 和并发的关系值得点透：它划走多少 HBM 给 <strong>KV 缓存池</strong>，
+就直接决定了<strong>能同时容纳多少 token</strong>（回顾第 4 课），也就决定了<strong>并发上限的天花板</strong>——
+KV 池越大、能塞下的请求越多、批越能做大、吞吐越高；但显存是<strong>零和</strong>的，给 KV 多了，留给模型激活和 CUDA Graph 的就少了。
+而<strong>谁先从等待队列里被放进来</strong>，则由调度策略拍板。下面这段就是 SGLang 给等待队列<strong>排优先级</strong>的入口——
+每个调度步都会调用它，为"这一步先服务谁"定序：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">为等待队列排定本步优先级</span></div>
+  <pre><span class="kw">class</span> SchedulePolicy:
+    <span class="cm"># …根据策略为 waiting_queue 中的请求排定顺序…</span>
+
+    <span class="kw">def</span> calc_priority(
+        self, waiting_queue: List[Req], running_batch: Optional[ScheduleBatch] = <span class="kw">None</span>
+    ) -&gt; <span class="kw">None</span>:
+        policy = self._determine_active_policy(waiting_queue)
+
+        <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:
+            <span class="kw">if</span> self.enable_priority_scheduling:
+                SchedulePolicy._sort_by_priority_and_fcfs(
+                    waiting_queue, self.priority_sign
+                )
+            <span class="kw">return</span></pre>
+</div>
+
+<p>看懂这段，你就摸到了天平的"<strong>手柄</strong>"：<span class="inline">calc_priority</span> 不生产 token，它只决定<strong>等待队列里谁排在前面</strong>——
+而排队顺序直接影响每条请求的 <strong>TTFT</strong>、影响缓存命中、影响整体 goodput。把它和上面的旋钮放在一起，你就拥有了
+<strong>在吞吐-延迟曲线上选点</strong>的全套工具：旋钮决定批能多大、并发多高，策略决定批里<strong>先装谁</strong>。
+这正是 Part 5 整个调度器存在的理由——<strong>它就是为了在这条曲线上替你做最优选择而生的</strong>。</p>
+
+<p>最后把第 8 课放回整张地图收个尾。Part 2 这几课其实讲的是同一个故事的不同侧面：第 4 课告诉你 decode 为什么访存密集、KV 为什么按槽位管理；
+第 5 课用连续批处理把"批永远满"变现成吞吐；第 6、7 课用分页与前缀共享让显存装得更紧、算得更省。<strong>本课则把前面所有招式统一放上同一杆秤</strong>——
+它们最终都是在<strong>吞吐-延迟曲线</strong>上替你争取一个更好的工作点。带着这杆秤往后读，你会发现 Part 5 的调度器、Part 3 的内存设计、
+乃至分块预填充与 PD 分离，<strong>没有一个是为"炫技"而存在</strong>：它们要么把曲线整体往右上方推（同样延迟下吞吐更高），要么帮你在曲线上<strong>更稳、更准地选点</strong>。
+理解了"<strong>没有免费午餐、只有按 SLA 选点</strong>"这一句，你就拿到了读懂整个 SGLang 运行时的钥匙。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>四个指标</strong>：TTFT（首 token，受 prefill+排队 支配）、ITL/TPOT（token 间隔，受 decode 批大小 支配）、Throughput（全部请求每秒 token 数）、Goodput（满足 SLA 的那部分吞吐）。</li>
+    <li><strong>核心张力</strong>：批越大 ⇒ 摊薄权重读取、GPU 饱和 ⇒ 吞吐↑，但每请求排更久、单步更重 ⇒ 延迟↑。批越小则反之。<strong>没有免费午餐，只能按 SLA 选工作点。</strong></li>
+    <li><strong>负载相关</strong>：prefill-heavy 与 decode-heavy 拉扯方向不同；分块预填充（第 22 课）防长 prompt 引发延迟尖峰，PD 分离（第 45 课）让两阶段各自独立调优。</li>
+    <li><strong>SGLang 旋钮</strong>：<span class="mono">max_running_requests</span>（并发上限）、<span class="mono">mem_fraction_static</span>（KV 池显存 ⇒ 容得下多少并发）、<span class="mono">chunked_prefill_size</span>；调度策略（第 20 课）排队列顺序。</li>
+    <li><strong>承上启下</strong>：本课收尾 Part 2，并点明<strong>调度器（第 18 课）存在的全部意义</strong>就是在这条曲线上替你导航。前置：连续批处理（第 5 课）、KV 并发（第 4 课）。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 一条请求“从到达到吐出第一个 token”的时间（TTFT）主要被什么支配？</div>
+  <ol class="opts">
+    <li>prefill 的计算量，以及它在等待队列里的排队时间（前面还有多少活）</li>
+    <li>采样温度（temperature）的取值</li>
+    <li>模型权重的总字节数，与是否排队无关</li>
+    <li>decode 阶段的批大小——批越大首 token 越快</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。TTFT 是“首 token 延迟”：请求必须先被调度进来、完成它 prompt 的 prefill，才能产出第一个 token。所以它由两件事决定——prefill 本身的计算量，以及在等待队列里排了多久（前面活越多、排队越长，TTFT 越大）。decode 批大小支配的是 token 间延迟 ITL，不是 TTFT；权重字节数和温度都不是主因。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么把批（同时在跑的请求数）调大，能提升总吞吐，却又会拉高单请求延迟？</div>
+  <ol class="opts">
+    <li>因为吞吐和延迟其实互不相关，调大批两者都会变好</li>
+    <li>因为大批会自动降低模型精度，从而既快又省</li>
+    <li>因为 decode 访存密集，读一次权重对 1 条和 100 条代价几乎一样，大批把这笔固定开销摊薄（吞吐↑）；但同一步要为更多请求一起算、新请求排在更多活后面（每步更久、排队更长 ⇒ 延迟↑）</li>
+    <li>因为大批让每条请求各自独占一张 GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。这正是核心张力：decode 是访存密集的，权重读取的固定开销与批里请求数几乎无关，批越大摊得越薄、GPU 越饱和 ⇒ 吞吐↑。但同一个 decode 步要为更多请求一起前向，单步更久（ITL↑），新请求也要排在更多活后面（TTFT↑），于是单请求延迟上升。没有免费午餐，只能按 SLA 选工作点。其余选项都与机制不符。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在 SGLang 里，调大 mem_fraction_static 与调大 max_running_requests，主要各自换来什么？</div>
+  <ol class="opts">
+    <li>mem_fraction_static 给 KV 池更多显存 ⇒ 能装下更多 token ⇒ 抬高并发的天花板；max_running_requests 直接提高并发上限 ⇒ 批更大。两者都把工作点推向高吞吐、但也推高延迟，且 KV 占多了留给激活/CUDA Graph 的显存就少</li>
+    <li>两者都只影响日志详细程度，与性能无关</li>
+    <li>mem_fraction_static 控制学习率，max_running_requests 控制 batch 的精度</li>
+    <li>两者都会降低吞吐以换取更低延迟</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。mem_fraction_static 划走多少 HBM 给 KV 缓存池，就决定能同时容纳多少 token，也就抬高了并发的天花板（更多请求 ⇒ 批更大 ⇒ 吞吐↑）；但显存零和，给 KV 多了，留给模型激活和 CUDA Graph 就少。max_running_requests 则是并发上限的硬阀门，直接决定批能做多大。两者都把工作点往高吞吐推，同时推高延迟——这正是吞吐-延迟曲线上的选点动作。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用一句话分别定义 TTFT、ITL/TPOT、throughput、goodput，并指出每个指标“主要被什么支配”。然后解释：为什么一个吞吐很高的系统，goodput 仍可能很低？给出一个会发生这种情况的具体场景。</li>
+    <li>你的服务有“TTFT < 300ms”的 SLA，但当前为了冲吞吐把 max_running_requests 调得很大，导致部分请求 TTFT 超标。请描述你会怎样在吞吐-延迟曲线上重新选点（涉及 max_running_requests、mem_fraction_static、chunked_prefill_size 中至少两个），并说明分块预填充（第 22 课）在“长 prompt 引发延迟尖峰”时如何帮你稳住 SLA。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+From Lesson 4 to 7 we stacked tricks for "<strong>faster and cheaper</strong>": continuous batching keeps the GPU fed,
+paging packs HBM tightly, RadixAttention shares prefixes. But every one of these must answer one unavoidable question:
+do you want to <strong>serve the most requests per second</strong>, or <strong>return each request the fastest</strong>?
+You <strong>cannot max both</strong>. This lesson closes Part 2 and is the runtime's <strong>compass</strong> — only once you
+grasp the <strong>throughput vs latency</strong> balance does the scheduler (Lesson 18) make full sense.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a restaurant torn between two philosophies. First, <strong>"make every table fast"</strong>: seat a guest, serve
+  instantly, they leave — <strong>per-table wait is tiny</strong>, but the kitchen only handles a table or two at a time, so
+  <strong>total people fed per hour</strong> stays low. Second, <strong>"feed the most people"</strong>: gather a big group,
+  start a seating together, cook one big batch to amortize cost — <strong>hourly capacity</strong> is maxed, but any
+  <strong>single</strong> diner queues longer and waits for a bigger batch to finish. <strong>"Serve fast" is low latency,
+  "feed many" is high throughput</strong>, and the "how many per seating" knob <strong>sacrifices one end whichever way you turn it</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>throughput and latency are two ends of one curve, and batch size is the slider.</strong>
+  Bigger batches amortize the weight read and saturate the GPU ⇒ <strong>higher total throughput</strong>; but each request
+  waits behind more work and each step is heavier ⇒ <strong>higher per-request latency</strong>. Smaller batches flip it:
+  low latency, low throughput, idle GPU. <strong>No free lunch</strong> — you can only <strong>pick a point on the curve</strong>
+  for your <strong>SLA</strong>. SGLang's scheduler, memory pool, and chunked prefill are all tools to <strong>help you pick that point well</strong>.
+</div>
+
+<h2>Four metrics: pin down "fast" vs "many" first</h2>
+<p>Before trading off, you need <strong>measurable rulers</strong>. Serving has four core metrics, each <strong>dominated by a
+different bottleneck</strong>; telling them apart is the prerequisite for understanding any tuning:</p>
+
+<table class="t">
+  <tr><th>Metric</th><th>Meaning</th><th>Dominated by</th></tr>
+  <tr><td><strong>TTFT</strong><br><span class="mono">time to first token</span></td><td>From arrival to the <strong>first</strong> token emitted</td><td class="mono">prefill compute + <strong>queueing</strong> (work ahead in queue)</td></tr>
+  <tr><td><strong>ITL / TPOT</strong><br><span class="mono">inter-token latency</span></td><td>Gap between <strong>adjacent</strong> output tokens (time per output token)</td><td class="mono"><strong>decode batch size</strong> + memory bandwidth (bigger ⇒ slower step)</td></tr>
+  <tr><td><strong>Throughput</strong><br><span class="mono">tokens/sec</span></td><td>Tokens/sec produced across <strong>all</strong> requests</td><td class="mono">GPU saturation; is the batch big and full</td></tr>
+  <tr><td><strong>Goodput</strong><br><span class="mono">SLA-meeting tput</span></td><td>Only the throughput that <strong>meets the SLA</strong> counts</td><td class="mono"><strong>joint result</strong> of throughput and latency</td></tr>
+</table>
+
+<p>The table hides the key contrast: <strong>TTFT is set by prefill and queueing; ITL is set by decode batch size.</strong>
+Why split so finely? Their enemies differ — TTFT fears a <strong>long queue</strong> or one giant prompt blocking everyone;
+ITL fears a <strong>batch so big</strong> that each step drags. A system that crushes TTFT (small batch, serve now) may have
+poor ITL and throughput; one with sky-high throughput (gather, then send) may have ugly TTFT. <strong>Goodput</strong> matters
+because it forces you to watch both ends: however high throughput is, if half the requests violate the latency SLA, that
+throughput is <strong>worthless to users</strong>. What you truly maximize is <strong>throughput under the SLA</strong>.</p>
+
+<h2>The core tension: one knob, batch size, can't win both ends</h2>
+<p>All the agonizing converges onto <strong>one knob — batch size (requests running concurrently)</strong>. Turn it from small
+to large and the operating point slides along the curve, <strong>throughput and latency trading off</strong>:</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">Tiny batch</div><div class="nd">Lowest latency (light step, served now)<br>but low throughput, <strong>GPU idles a lot</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">SLA point</div><div class="nd">Grow the batch <strong>as large as the latency SLA allows</strong> ⇒ <strong>max goodput</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Huge batch</div><div class="nd">Max throughput (weight read amortized, GPU saturated)<br>but <strong>per-request latency spikes</strong>, may break SLA</div></div>
+</div>
+
+<p>Why do big batches <strong>raise throughput</strong>? Back to Lessons 4–5: decode is memory-bound, and the cost of reading
+weights once is <strong>nearly the same for 1 request or 100</strong>; a bigger batch amortizes that fixed cost thinner, yielding
+more useful tokens per unit of compute and pushing the GPU toward full load. Why do big batches <strong>hurt latency</strong>?
+Because one decode step now computes for <strong>more</strong> requests, so the <strong>step takes longer</strong> (ITL rises),
+and a new request waits behind <strong>more work</strong> before its turn (<strong>TTFT lengthens</strong>). That's the balance —
+<strong>the same move that feeds throughput slows each request</strong>. So there is no universal "optimal batch size",
+<strong>only the optimal operating point for your SLA</strong>.</p>
+
+<h2>Different loads, different balancing tools</h2>
+<p>Real traffic isn't one shape. <strong>Prefill-heavy</strong> (long prompt, short output, e.g. doc QA) and <strong>decode-heavy</strong>
+(short prompt, long output, e.g. long-form generation) pull the balance in different directions and need different tools:</p>
+
+<div class="cols">
+  <div class="col"><h4>Chunked prefill (Lesson 22)</h4><p>One <strong>giant prompt</strong>'s prefill can hog a whole step and stall
+  everyone's decode — showing up as a <strong>sudden latency spike</strong> (ITL jitter). Chunked prefill <strong>slices</strong>
+  the long prefill and interleaves it with decode steps, so neither throughput nor latency <strong>collapses over one long request</strong>.</p></div>
+  <div class="col"><h4>PD disaggregation (Lesson 45)</h4><p>Prefill and decode have different bottlenecks (compute- vs memory-bound).
+  <strong>PD disaggregation</strong> splits the two stages onto <strong>separate GPU pools</strong>, each batched and tuned
+  independently — prefill chases throughput, decode protects latency, <strong>without dragging each other</strong>.</p></div>
+</div>
+
+<h2>SGLang's knobs: how you pick a point on the curve</h2>
+<p>This theory lands as a few concrete <span class="inline">server_args</span> knobs in SGLang, plus the scheduler's
+<strong>queue policy</strong>. Together they decide where your operating point sits on the curve:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>SGLang's main latency/throughput knobs</b>: each pushes the operating point toward "throughput" or "latency"</div>
+  <div class="cells"><span class="lab mono">max_running_requests</span><span class="cell hl">concurrency cap</span><span class="sep">→</span><span class="cell q">Larger ⇒ bigger batch, tput↑, latency↑; smaller flips it (caps the batch directly)</span></div>
+  <div class="cells"><span class="lab mono">mem_fraction_static</span><span class="cell hl">HBM share for KV pool</span><span class="sep">→</span><span class="cell q">More ⇒ KV pool holds more tokens ⇒ higher concurrency fits ⇒ tput↑ (less HBM left for activations/graphs)</span></div>
+  <div class="cells"><span class="lab mono">chunked_prefill_size</span><span class="cell hl">prefill chunk size</span><span class="sep">→</span><span class="cell q">Smaller ⇒ long prompts stall decode less ⇒ latency spikes↓ (tput slightly lower)</span></div>
+  <div class="cells"><span class="lab">schedule policy (Lesson 20)</span><span class="cell">queue order</span><span class="sep">→</span><span class="cell q">Decides who in the waiting queue goes first, balancing <strong>fairness / latency / cache hit</strong></span></div>
+</div>
+
+<p>The link between <span class="inline">mem_fraction_static</span> and concurrency is worth spelling out: how much HBM it carves
+for the <strong>KV cache pool</strong> directly sets <strong>how many tokens fit at once</strong> (recall Lesson 4), hence the
+<strong>ceiling on concurrency</strong> — a larger KV pool fits more requests, allows bigger batches, raises throughput; but HBM
+is <strong>zero-sum</strong>, so more for KV means less for activations and CUDA Graphs. And <strong>who gets admitted from the
+waiting queue</strong> is decided by the schedule policy. Below is SGLang's entry point that <strong>prioritizes</strong> the
+waiting queue — called every schedule step to order "who to serve first this step":</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">orders the waiting queue this step</span></div>
+  <pre><span class="kw">class</span> SchedulePolicy:
+    <span class="cm"># …order the requests in waiting_queue per the active policy…</span>
+
+    <span class="kw">def</span> calc_priority(
+        self, waiting_queue: List[Req], running_batch: Optional[ScheduleBatch] = <span class="kw">None</span>
+    ) -&gt; <span class="kw">None</span>:
+        policy = self._determine_active_policy(waiting_queue)
+
+        <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:
+            <span class="kw">if</span> self.enable_priority_scheduling:
+                SchedulePolicy._sort_by_priority_and_fcfs(
+                    waiting_queue, self.priority_sign
+                )
+            <span class="kw">return</span></pre>
+</div>
+
+<p>Read this and you've grabbed the balance's <strong>handle</strong>: <span class="inline">calc_priority</span> produces no tokens —
+it only decides <strong>who sits at the front of the waiting queue</strong>, which directly shapes each request's <strong>TTFT</strong>,
+cache hits, and overall goodput. Put it alongside the knobs above and you hold the full toolkit for <strong>picking a point on the
+throughput-latency curve</strong>: the knobs set how big the batch and concurrency can be, the policy sets <strong>who gets loaded
+first</strong>. This is exactly why Part 5's scheduler exists — <strong>it is built to make that optimal choice on the curve for you</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Four metrics</strong>: TTFT (first token, set by prefill+queueing), ITL/TPOT (inter-token gap, set by decode batch size), Throughput (tokens/sec across all requests), Goodput (the throughput that meets the SLA).</li>
+    <li><strong>Core tension</strong>: bigger batch ⇒ amortized weight read, saturated GPU ⇒ tput↑, but each request waits longer and each step is heavier ⇒ latency↑. Smaller flips it. <strong>No free lunch — pick the operating point by SLA.</strong></li>
+    <li><strong>Load-dependent</strong>: prefill-heavy vs decode-heavy pull differently; chunked prefill (Lesson 22) stops long prompts from causing latency spikes, PD disaggregation (Lesson 45) tunes each stage independently.</li>
+    <li><strong>SGLang knobs</strong>: <span class="mono">max_running_requests</span> (concurrency cap), <span class="mono">mem_fraction_static</span> (KV-pool HBM ⇒ how much concurrency fits), <span class="mono">chunked_prefill_size</span>; schedule policy (Lesson 20) orders the queue.</li>
+    <li><strong>Closing Part 2</strong>: this lesson ends Part 2 and shows that <strong>the scheduler (Lesson 18) exists</strong> to navigate this very curve for you. Prereqs: continuous batching (Lesson 5), KV concurrency (Lesson 4).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What mainly dominates a request's TTFT (time from arrival to the first token)?</div>
+  <ol class="opts">
+    <li>The prefill compute, plus its queueing time in the waiting queue (how much work is ahead of it)</li>
+    <li>The value of the sampling temperature</li>
+    <li>The total bytes of model weights, independent of any queueing</li>
+    <li>The decode-stage batch size — bigger batch means a faster first token</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. TTFT is the time to first token: a request must be scheduled in and finish its prompt's prefill before emitting token one. So it is set by two things — the prefill compute itself, and how long it queued (more work ahead ⇒ longer queue ⇒ larger TTFT). Decode batch size governs ITL, not TTFT; weight bytes and temperature are not the drivers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does enlarging the batch (concurrent requests) raise total throughput yet also increase per-request latency?</div>
+  <ol class="opts">
+    <li>Because throughput and latency are unrelated, so a bigger batch improves both</li>
+    <li>Because a big batch automatically lowers model precision, making it both faster and cheaper</li>
+    <li>Because decode is memory-bound: reading weights once costs nearly the same for 1 or 100 requests, so a big batch amortizes that fixed cost (tput↑); but one step now computes for more requests and newcomers queue behind more work (heavier step, longer queue ⇒ latency↑)</li>
+    <li>Because a big batch gives each request its own dedicated GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. This is the core tension: decode is memory-bound, so the fixed cost of reading weights barely depends on how many requests share the batch; a bigger batch amortizes it thinner and saturates the GPU ⇒ tput↑. But one decode step now forwards more requests (longer step ⇒ ITL↑) and newcomers wait behind more work (TTFT↑), so per-request latency rises. No free lunch — pick the point by SLA. The other options misstate the mechanism.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. In SGLang, what do raising mem_fraction_static and raising max_running_requests each mainly buy you?</div>
+  <ol class="opts">
+    <li>mem_fraction_static gives the KV pool more HBM ⇒ more tokens fit ⇒ raises the concurrency ceiling; max_running_requests directly lifts the concurrency cap ⇒ bigger batch. Both push the point toward high throughput (and higher latency), and more KV leaves less HBM for activations/CUDA Graphs</li>
+    <li>Both only affect logging verbosity, unrelated to performance</li>
+    <li>mem_fraction_static controls the learning rate, max_running_requests controls batch precision</li>
+    <li>Both reduce throughput in exchange for lower latency</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. How much HBM mem_fraction_static carves for the KV cache pool sets how many tokens fit at once, raising the concurrency ceiling (more requests ⇒ bigger batch ⇒ tput↑); but HBM is zero-sum, so more for KV leaves less for activations and CUDA Graphs. max_running_requests is the hard cap on concurrency, directly bounding batch size. Both push the operating point toward high throughput while raising latency — exactly the act of picking a point on the curve.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Define TTFT, ITL/TPOT, throughput, and goodput each in one sentence, and state what mainly dominates each. Then explain: why can a system with very high throughput still have low goodput? Give a concrete scenario where this happens.</li>
+    <li>Your service has an SLA of 'TTFT < 300ms', but to chase throughput you set max_running_requests very large, causing some requests to blow past the TTFT bound. Describe how you would re-pick a point on the throughput-latency curve (touching at least two of max_running_requests, mem_fraction_static, chunked_prefill_size), and explain how chunked prefill (Lesson 22) helps hold the SLA when a long prompt triggers a latency spike.</li>
+  </ul>
+</div>
+</div></div>
   <div class="footnav"><a class="prev" href="07-radixattention-and-prefix-caching.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">RadixAttention 与前缀缓存</span><span class="lang-en">RadixAttention &amp; prefix caching</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
 </div>
 <script>

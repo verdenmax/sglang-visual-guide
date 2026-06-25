@@ -342,8 +342,388 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <div class="part"><span class="lang-zh">第二部分 · 推理前置基础</span><span class="lang-en">Part 2 · Foundations</span></div>
     <h1><span class="lang-zh">RadixAttention 与前缀缓存</span><span class="lang-en">RadixAttention &amp; prefix caching</span></h1>
   </div>
-  <div class="lang-zh">PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。</div>
-  <div class="lang-en">PLACEHOLDER RadixAttention placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER RadixAttention placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER RadixAttention placeholder body, replaced later with the full lesson so the module imports and the build runs.</div>
+  <div class="lang-zh">
+<p class="lead">
+上一课的分页给了我们一个意味深长的能力：<strong>不同请求的页表，可以指向同一批物理块</strong>。这一课就把这个能力<strong>用到极致</strong>。
+真实流量里有一个被反复忽视的事实——<strong>请求们的开头常常一模一样</strong>：同一段 system prompt、同一组 few-shot 示例、同一套 agent 脚手架，
+还有多轮对话里<strong>每一轮都要把整段历史重发一遍</strong>。如果每条请求、每一轮都把这段相同的开头<strong>从头算一遍 KV</strong>，那是天大的浪费。
+<strong>RadixAttention</strong> 的答案是：把所有请求的 KV 组织进一棵<strong>基数树</strong>，让相同前缀<strong>只算一次、自动跨请求跨轮复用</strong>。
+这正是 SGLang 在真实负载上"快得不讲道理"的核心秘密。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  想象一份团队<strong>共享的、不断被续写的"目录树"</strong>——有点像编辑器里的<strong>自动补全</strong>。许多文档的开头都一样：
+  "<strong>第一章 公司简介……</strong>"。第一个人把这段开头写进了树里、存成几页纸；第二个人要写的文档<strong>开头一字不差</strong>，
+  他<strong>根本不必重抄</strong>——顺着树往下走，发现"第一章 公司简介"这条路径已经写好了，<strong>直接复用那几页</strong>，
+  只在自己内容<strong>真正不同的地方</strong>另起一个分叉，续上属于自己的新页。谁的开头和别人相同，谁就<strong>白捡</strong>已经写好的部分；
+  只有<strong>发散之处</strong>才需要动笔。这棵<strong>共享、协作续写的目录树</strong>，就是 RadixAttention 的精神。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<strong>RadixAttention 把所有请求的 KV 缓存全部存进一棵基数树（压缩前缀树），以 token id 序列为键；
+  新请求沿树匹配最长前缀，命中部分的 KV 直接复用、绝不重算，发散的后缀作为新分支插入。</strong>
+  缓存键就是 <strong>token 序列本身</strong>，所以共享是<strong>全自动</strong>的——无需用户给任何提示，跨请求、跨对话轮都能命中。
+  树的叶子按 <strong>LRU 驱逐</strong>，并用<strong>引用计数</strong>保护：正在被运行中请求使用的 KV<strong>绝不会被驱逐</strong>。
+  树节点指向的，正是第 6 课那种<strong>分页物理块</strong>——共享前缀，本质就是<strong>多个节点路径共用同一批物理页</strong>。
+</div>
+
+<h2>真实负载都在共享前缀</h2>
+<p>先把"浪费"看清楚。生产环境里的请求<strong>极少是孤立的</strong>，它们的开头高度雷同，大致有四类共享来源：
+<strong>系统提示</strong>（每条请求都顶着同一段几百 token 的 system prompt）、<strong>few-shot 示例</strong>（同一批演示样例反复前置）、
+<strong>多轮对话</strong>（第 N 轮要把前 N−1 轮的全部历史重新发一遍）、<strong>agent 脚手架</strong>（同一套工具说明、格式约束、角色设定打头）。
+这些开头动辄数百上千 token，<strong>如果每条请求、每一轮都把它的 KV 从头算一遍</strong>，prefill 的算力就被<strong>大块大块地烧在重复内容上</strong>。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>两条请求共享同一段长前缀</b>：开头的 system prompt 逐 token 相同（高亮），只有结尾发散——共享段的 KV <strong>只算一次</strong>、被两条请求复用</div>
+  <div class="cells"><span class="lab">请求 A</span><span class="cell hl">You</span><span class="cell hl">are</span><span class="cell hl">a</span><span class="cell hl">helpful</span><span class="cell hl">assistant</span><span class="sep">|</span><span class="cell q">总结这篇财报</span></div>
+  <div class="cells"><span class="lab">请求 B</span><span class="cell hl">You</span><span class="cell hl">are</span><span class="cell hl">a</span><span class="cell hl">helpful</span><span class="cell hl">assistant</span><span class="sep">|</span><span class="cell q">翻成法语</span></div>
+  <div class="cells"><span class="lab">复用</span><span class="cell hl">↑ 共享前缀 KV：只 prefill 一次，两条请求都指向同一批物理页 ↑</span><span class="sep">|</span><span class="cell q">发散后缀各算各的</span></div>
+</div>
+
+<p>这里要接回第 6 课：因为分页让 KV 变成<strong>固定大小、由页表索引的物理块</strong>，"两条请求复用同一段前缀"才退化成<strong>两条树路径指向同一批物理页</strong>这么轻巧的事。
+省下的不止显存——<strong>相同前缀的 prefill 计算也彻底省掉了</strong>。命中率越高，省得越狠，这正是 RadixAttention 价值的来源。
+换个角度想：一段 500 token 的系统提示，若有 1000 条请求都顶着它，朴素做法要把这 500 token 的 KV <strong>算上 1000 遍</strong>；
+而 RadixAttention 只在<strong>第一条请求</strong>到来时算一次，后面 999 条全是<strong>查树命中、直接复用</strong>。省下的算力不是百分之几，而是<strong>成百上千倍</strong>地压缩了重复 prefill——
+这就是为什么命中率高的真实流量里，RadixAttention 几乎是"免费提速"。</p>
+
+<h2>RadixAttention：把 KV 存进基数树</h2>
+<p>核心数据结构是一棵<strong>基数树（radix tree）</strong>，也叫<strong>压缩前缀树</strong>：键是 <strong>token id 序列</strong>，
+每条<strong>边</strong>上挂着一段连续的 token 串（一个"token run"）以及对应的<strong>KV 物理块</strong>。一条新请求来了，它要做的事只有一个动词——<strong>沿树往下匹配</strong>：</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>match_prefix：沿树下行匹配</h4><p>拿请求的 token 序列当键，从根节点出发逐边比对，找出<strong>最长的已缓存前缀</strong>。命中多深，就有多少 KV 可以白拿。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>复用命中的前缀 KV</h4><p>匹配到的那段前缀，其 KV <strong>直接复用、零重算</strong>——注意力算子顺着节点拿到物理块索引，就像它本就属于这条请求。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>插入发散后缀为新分支</h4><p>从发散点往后是这条请求<strong>独有</strong>的内容，把它<strong>作为一条新分支插入</strong>树中，并为它新算、新分配 KV 块。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>必要时在发散点分裂边</h4><p>若匹配恰好停在某条边的<strong>中间</strong>，就在该处<strong>把这条边一分为二</strong>（split）：前半段成为共享父节点，后半段与新后缀各成一支。</p></div></div>
+</div>
+
+<p>"<strong>分裂边</strong>"是基数树的精髓所在。设树里已存着 <span class="mono">"You are a helpful assistant. Translate"</span> 这一长串，
+新请求只共享到 <span class="mono">"You are a helpful assistant. "</span> 就分道扬镳。此时不需要推倒重来，只要在分歧点把原来那条长边<strong>剪成两段</strong>：
+公共部分升格为<strong>共享祖先</strong>，原内容的剩余部分与新请求的后缀<strong>各挂一支</strong>。一次廉价的指针操作，就让两条请求<strong>精确共享到逐 token 的边界</strong>。</p>
+
+<h2>跨请求、跨轮自动复用</h2>
+<p>因为缓存键就是 <strong>token 序列本身</strong>，共享是<strong>全自动</strong>的：不仅不同请求之间能命中，<strong>同一段多轮对话的相邻轮之间</strong>更是命中大户。
+多轮对话的机制是——第 N 轮请求会把<strong>前面所有轮的历史原封不动重发一遍</strong>，再接上这一轮的新问题。于是<strong>前 N−1 轮的全部 KV 都是已缓存的前缀</strong>，
+match_prefix 一路命中到历史末尾，<strong>引擎只需为最新一轮真正付出算力</strong>。对话越长，复用的前缀越长，省下的越多。</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">第 1 轮</div><div class="nd">系统提示 + Q1 完成 prefill，整段进树</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">第 2 轮</div><div class="nd">重发"系统提示+Q1+A1"，前缀全命中，只算 Q2</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">第 3 轮</div><div class="nd">前缀更长、命中更多，只为最新一轮付算力</div></div>
+</div>
+
+<p>关键是这一切<strong>不需要用户给任何提示</strong>：你不必告诉引擎"这两条请求开头相同"或"这是同一段对话的第三轮"。
+引擎拿到 token 序列，<strong>查一次树就知道能复用多少</strong>。这种"无需配合、自动生效"的特性，让 RadixAttention 在<strong>任意真实流量</strong>上都能吃到红利，
+也是它被第 1 课、第 3 课反复点名为 SGLang 招牌特性的原因。配合<strong>缓存感知调度</strong>（第 20 课），引擎甚至会主动把"开头相同"的请求<strong>排到一起</strong>跑，进一步抬高命中率。
+值得强调的是，RadixAttention 与前几课的设计是<strong>层层叠加</strong>而非互相替代的：连续批处理负责"把批喂满"，分页负责"把每个槽位装紧"，
+而本课负责"<strong>让相同的开头只算一次</strong>"。三者一起作用时，同一张 GPU 在真实对话流量上的有效吞吐，往往是朴素实现的<strong>数倍乃至十几倍</strong>。</p>
+
+<h2>为什么是树而非哈希表，以及如何驱逐</h2>
+<p>你也许会问：要查"开头是否相同"，用一个<strong>哈希表</strong>把"整串 prompt → KV"映射起来不也行吗？答案是<strong>远远不够</strong>。
+前缀是<strong>层级化</strong>的：请求 A、B、C 可能共享 100 个 token，其中 A、B 又额外多共享 50 个。哈希表只认<strong>整串相等</strong>，
+做不到<strong>最长前缀匹配</strong>、做不到<strong>部分复用</strong>、更没有"共享祖先"和"廉价分裂"的概念。基数树则天生为前缀而生：</p>
+
+<table class="t">
+  <tr><th>能力</th><th>哈希表（整串映射）</th><th>基数树（压缩前缀树）</th></tr>
+  <tr><td><strong>匹配方式</strong></td><td>只命中<strong>完全相同</strong>的整串</td><td class="mono">沿树下行做<strong>最长前缀匹配</strong></td></tr>
+  <tr><td><strong>部分复用</strong></td><td>开头相同但结尾不同 ⇒ <strong>全部 miss</strong></td><td class="mono">命中多深复用多深，<strong>逐 token 共享</strong></td></tr>
+  <tr><td><strong>层级共享</strong></td><td>无法表达"共享祖先"</td><td class="mono">公共前缀自然成为<strong>共享父节点</strong></td></tr>
+  <tr><td><strong>发散处理</strong></td><td>只能新增一条独立条目</td><td class="mono">在分歧点<strong>廉价分裂一条边</strong></td></tr>
+</table>
+
+<p>缓存总会满，于是需要<strong>驱逐</strong>。RadixAttention 用 <strong>LRU 策略驱逐叶子</strong>：最久没被访问的叶子节点优先被踢，腾出物理块。
+但有一条<strong>铁律</strong>——<strong>引用计数</strong>：每条正在运行的请求会给它正在使用的那条路径<strong>加锁（lock_ref）</strong>，
+凡是<strong>引用计数大于 0</strong> 的节点，<strong>绝不会被驱逐</strong>。道理很直白：一条请求正靠着某段前缀 KV 做 decode，
+你若把它的 KV 驱逐了，这条请求就<strong>当场崩掉</strong>。所以驱逐只敢动那些<strong>没有任何在跑请求引用的叶子</strong>，安全与高命中率由此兼得。
+为什么只驱逐<strong>叶子</strong>而不是中间节点？因为内部节点是<strong>共享祖先</strong>，可能正被许多分支依赖；先从最外层、最久没人用的叶子下手，
+既不破坏别人的共享前缀，又能稳稳回收空间。驱逐之后那段前缀只是"忘掉了"，下次再有人用到，重新算一遍、重新进树即可——<strong>正确性永远不受影响，受影响的只是命中率</strong>。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">沿基数树匹配最长已缓存前缀</span></div>
+  <pre><span class="kw">def</span> match_prefix(self, params: MatchPrefixParams) -&gt; MatchResult:
+    <span class="cm"># Find the longest cached prefix of `key` in the radix tree.</span>
+    key = params.key
+    key, _ = key.maybe_to_bigram_view(self.is_eagle)
+
+    <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
+        <span class="kw">return</span> self._empty_match_result
+
+    key = key.page_aligned(self.page_size)        <span class="cm"># 截到 page_size 的整数倍</span>
+
+    <span class="cm"># 沿树下行，拿回命中前缀对应的 KV 块索引与终止节点</span>
+    value, last_node = self._match_prefix_helper(self.root_node, key)
+    <span class="kw">if</span> value:
+        value = torch.cat(value)                  <span class="cm"># 命中的各段 KV 索引拼成一条</span>
+    <span class="kw">return</span> MatchResult(
+        device_indices=value,                     <span class="cm"># 可复用的前缀 KV 索引（可能为空）</span>
+        last_device_node=last_node, last_host_node=last_node,
+        best_match_node=last_node,
+    )</pre>
+</div>
+
+<p>读懂这段就抓住了 RadixAttention 的灵魂：<strong>一次 match_prefix，就把"这条请求能白拿多少 KV"算清楚了</strong>。
+返回的 <span class="inline">device_indices</span> 是<strong>可复用前缀的物理块索引</strong>——长度可能为 0（全新请求），也可能一路命中到历史末尾（多轮对话第 N 轮）。
+注释里那句"匹配若停在某段内部会<strong>分裂一次节点</strong>"，正是上文说的廉价 split。把它和第 6 课的分页、第 5 课的连续批处理拼起来，
+你就看清了 SGLang 内存系统的三层底座：<strong>按槽独立（第 4 课）→ 分页紧凑（第 6 课）→ 前缀共享（本课）</strong>。</p>
+
+<p>把这一课放回主线：第 4 课建好 KV 池、第 5 课把批喂满、第 6 课用分页装得更紧——本课则让不同请求、不同对话轮<strong>共享同一批前缀 KV</strong>，
+把"重复计算"和"重复存储"<strong>一并消灭</strong>。再往后，<strong>缓存感知调度</strong>（第 20 课）会主动撮合"开头相同"的请求以抬高命中率，
+而把前缀缓存在<strong>显存/内存/磁盘间分层</strong>的 <strong>HiCache</strong> 会在<strong>第 29–32 课</strong>展开。带着"<strong>token 序列即缓存键、最长前缀即复用</strong>"这把尺子往下读，
+你会发现 SGLang 在真实流量上的高吞吐，几乎都源自这棵不起眼的基数树。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>痛点</strong>：真实负载大量<strong>共享前缀</strong>——系统提示、few-shot 示例、多轮对话（每轮重发全史）、agent 脚手架。逐请求/逐轮重算这段开头的 KV 是巨大浪费。</li>
+    <li><strong>RadixAttention</strong>：把所有 KV 存进<strong>基数树（压缩前缀树）</strong>，键为 token id 序列；<span class="mono">match_prefix</span> 命中的前缀 KV <strong>直接复用、零重算</strong>，发散后缀<strong>插入新分支</strong>，命中停在边中间则<strong>分裂该边</strong>。</li>
+    <li><strong>全自动</strong>：缓存键就是 token 序列，<strong>跨请求、跨对话轮</strong>自动命中，无需用户提示；树节点指向第 6 课的<strong>分页物理块</strong>，共享即多路径共用同一批物理页。</li>
+    <li><strong>驱逐</strong>：叶子按 <strong>LRU</strong> 驱逐，但用<strong>引用计数</strong>保护——正被运行中请求使用的 KV <strong>绝不驱逐</strong>，否则该请求会崩。</li>
+    <li><strong>为何用树非哈希表</strong>：前缀是<strong>层级化</strong>的，树支持<strong>最长前缀匹配、部分复用、共享祖先、廉价分裂</strong>；整串哈希只认完全相等，开头相同结尾不同即全 miss。前置：分页（第 6 课）、KV 缓存（第 4 课）；延伸：缓存感知调度（第 20 课）、HiCache（第 29–32 课）。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在一次 match_prefix 命中后，被“复用、零重算”的到底是什么？</div>
+  <ol class="opts">
+    <li>模型权重，省去了重新加载权重的开销</li>
+    <li>命中的那段前缀对应的 KV 缓存（物理块索引）——注意力算子顺着树节点拿到这些已算好的 K/V，直接当作本请求的一部分，省掉了这段前缀的 prefill 计算</li>
+    <li>上一条请求生成的最终文本，直接拷给新请求当输出</li>
+    <li>采样用的随机数种子，保证两条请求结果一致</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。RadixAttention 复用的是相同前缀的 KV 缓存：树的边上挂着 token 串与对应的物理 KV 块，命中后这些 K/V 无需重算，注意力直接 gather 使用，从而省掉这段前缀的 prefill 算力（也省了重复存储）。它复用的不是权重、不是文本输出、更不是随机种子。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么 RadixAttention 用一棵基数树来组织前缀缓存，而不是用一个“整串 prompt → KV”的哈希表？</div>
+  <ol class="opts">
+    <li>因为树能把 KV 压缩得更小，省显存</li>
+    <li>因为前缀是层级化的：树支持最长前缀匹配、部分复用、共享祖先与廉价分裂边，而整串哈希只认完全相等——开头相同但结尾不同就会整条 miss，无法部分复用</li>
+    <li>因为哈希表在 GPU 上无法实现</li>
+    <li>因为基数树查找的时间复杂度永远是 O(1)，比哈希表快</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。关键在于前缀的层级结构：请求们可能共享 100 个 token，其中一部分又额外共享更多。基数树天然支持沿树下行的最长前缀匹配、逐 token 的部分复用、把公共前缀升格为共享父节点、并在分歧点廉价地分裂一条边。整串哈希只能判断“是否完全相等”，开头相同结尾不同便全部 miss。这与“能否在 GPU 实现”“复杂度”“压缩”都无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 缓存满了要驱逐，为什么 RadixAttention 的 LRU 驱逐必须尊重引用计数？</div>
+  <ol class="opts">
+    <li>因为引用计数决定了 page_size 的大小</li>
+    <li>因为正在运行的请求会给它正在使用的前缀路径加锁（引用计数 > 0）；若驱逐了它正靠着 decode 的那段前缀 KV，这条请求会当场崩溃，所以只驱逐没有任何在跑请求引用的叶子</li>
+    <li>因为引用计数能让缓存命中率自动翻倍</li>
+    <li>因为不数引用计数，LRU 就无法判断哪个叶子最久未访问</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。驱逐会释放节点的物理 KV 块。但一条正在 decode 的请求，时刻依赖它前缀路径上的那批 KV；如果这些 KV 被驱逐，注意力就读到无效/被覆盖的数据，请求直接崩。引用计数（lock_ref）正是为此：在跑的请求给路径加锁，引用计数 > 0 的节点绝不被驱逐，LRU 只敢动无人引用的叶子。它与命中率翻倍、LRU 的时间判定、page_size 都无关。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用一个 5 轮的客服对话说明 RadixAttention 如何“跨轮自动复用”：写出第 3 轮请求的 token 序列大致由哪几部分组成，指出其中哪一段会被 match_prefix 命中、引擎真正要新算的是什么，并解释为什么这一切不需要用户给任何提示。</li>
+    <li>树里已存着前缀 “You are a helpful assistant. Translate the following” 这一条边；现在来了一条新请求，它只共享到 “You are a helpful assistant. ” 就发散成 “Summarize …”。请描述 match_prefix/insert 在这一步会对树做什么（包含“分裂边”），并说明分裂后哪个节点成为共享祖先、各挂哪一支。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson's paging handed us a loaded capability: <strong>different requests' page tables can point at the same physical blocks</strong>.
+This lesson pushes that to the limit. Real traffic hides one constantly-overlooked fact — <strong>requests usually start out identical</strong>:
+the same system prompt, the same few-shot examples, the same agent scaffold, and in multi-turn chat <strong>every turn resends the entire history</strong>.
+Recomputing that shared opening's KV for every request and every turn is enormous waste. <strong>RadixAttention</strong>'s answer: store every
+request's KV in a <strong>radix tree</strong>, so a shared prefix is <strong>computed once and reused automatically, across requests and across turns</strong>.
+This is the core secret behind SGLang being "unreasonably fast" on real workloads.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a team's <strong>shared, continuously-extended "filing tree"</strong> — a bit like editor <strong>autocomplete</strong>. Many documents
+  open the same way: "<strong>Chapter 1, Company Overview…</strong>". The first author writes that opening into the tree as a few stored pages;
+  the next author whose document <strong>starts word-for-word the same</strong> needn't recopy a thing — walking down the tree, they find the path
+  "Chapter 1, Company Overview" already written and <strong>reuse those pages</strong>, branching off only where their text <strong>actually diverges</strong>
+  to add their own new pages. Whoever starts like someone else <strong>gets that part for free</strong>; only the <strong>divergence</strong> needs fresh ink.
+  That shared, collaboratively-extended filing tree is the spirit of RadixAttention.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>RadixAttention stores every request's KV in a radix tree (compressed prefix trie) keyed by the token-id sequence;
+  a new request matches the longest prefix down the tree, reuses the matched KV with zero recompute, and inserts its divergent suffix as a new branch.</strong>
+  The cache key is the <strong>token sequence itself</strong>, so sharing is <strong>fully automatic</strong> — no user hints, hitting across requests and across chat turns.
+  Leaves are evicted by <strong>LRU</strong> but protected by <strong>reference counting</strong>: KV in use by a running request is <strong>never evicted</strong>.
+  Tree nodes point at Lesson 6's <strong>paged physical blocks</strong> — sharing a prefix just means <strong>multiple paths share the same physical pages</strong>.
+</div>
+
+<h2>Real workloads share prefixes</h2>
+<p>First, see the waste clearly. Production requests are <strong>rarely isolated</strong>; their openings are highly identical, from roughly four sources:
+<strong>system prompts</strong> (every request carries the same few-hundred-token preamble), <strong>few-shot examples</strong> (the same demos prepended over and over),
+<strong>multi-turn chat</strong> (turn N resends all of turns 1..N−1 verbatim), and <strong>agent scaffolds</strong> (the same tool specs, format rules, persona up front).
+These openings run hundreds-to-thousands of tokens; <strong>recomputing their KV from scratch per request and per turn</strong> burns prefill compute <strong>in huge blocks on duplicate content</strong>.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Two requests share one long prefix</b>: the leading system prompt is token-identical (highlighted); only the tail diverges — the shared KV is <strong>computed once</strong> and reused by both</div>
+  <div class="cells"><span class="lab">Req A</span><span class="cell hl">You</span><span class="cell hl">are</span><span class="cell hl">a</span><span class="cell hl">helpful</span><span class="cell hl">assistant</span><span class="sep">|</span><span class="cell q">summarize this report</span></div>
+  <div class="cells"><span class="lab">Req B</span><span class="cell hl">You</span><span class="cell hl">are</span><span class="cell hl">a</span><span class="cell hl">helpful</span><span class="cell hl">assistant</span><span class="sep">|</span><span class="cell q">translate to French</span></div>
+  <div class="cells"><span class="lab">reuse</span><span class="cell hl">↑ shared prefix KV: prefill once, both requests point at the same physical pages ↑</span><span class="sep">|</span><span class="cell q">divergent suffixes computed separately</span></div>
+</div>
+
+<p>Tie this back to Lesson 6: because paging turned KV into <strong>fixed-size, page-table-indexed physical blocks</strong>, "two requests reuse a prefix" collapses to
+<strong>two tree paths pointing at the same physical pages</strong> — trivially cheap. And it saves more than memory: <strong>the prefill compute for that shared prefix is gone too</strong>.
+The higher the hit rate, the bigger the win — that's where RadixAttention's value comes from.</p>
+
+<h2>RadixAttention: store KV in a radix tree</h2>
+<p>The core structure is a <strong>radix tree</strong> (a.k.a. <strong>compressed prefix trie</strong>): the key is the <strong>token-id sequence</strong>,
+and each <strong>edge</strong> carries a run of consecutive tokens plus the corresponding <strong>KV blocks</strong>. A new request does just one verb — <strong>match down the tree</strong>:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>match_prefix: walk down the tree</h4><p>Use the request's token sequence as the key; from the root, compare edge by edge to find the <strong>longest cached prefix</strong>. The deeper the hit, the more KV is free.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Reuse the matched prefix KV</h4><p>The matched prefix's KV is <strong>reused with zero recompute</strong> — the attention kernel follows the nodes to the physical block indices, as if it always belonged to this request.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Insert the divergent suffix as a new branch</h4><p>Everything past the divergence point is <strong>unique</strong> to this request; <strong>insert it as a new branch</strong> and compute/allocate fresh KV blocks for it.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Split an edge at the divergence if needed</h4><p>If the match ends in the <strong>middle</strong> of an edge, <strong>split that edge in two</strong>: the front becomes a shared parent, the back and the new suffix each form a branch.</p></div></div>
+</div>
+
+<p><strong>Splitting an edge</strong> is the essence of a radix tree. Suppose the tree already holds <span class="mono">"You are a helpful assistant. Translate"</span>,
+and a new request only shares up to <span class="mono">"You are a helpful assistant. "</span> before diverging. No need to rebuild — just <strong>cut that long edge in two</strong> at the split:
+the common part becomes a <strong>shared ancestor</strong>; the leftover and the new suffix <strong>each hang off it</strong>. One cheap pointer operation lets two requests <strong>share down to the exact token boundary</strong>.</p>
+
+<h2>Automatic reuse across requests and turns</h2>
+<p>Because the cache key is the <strong>token sequence itself</strong>, sharing is <strong>fully automatic</strong>: hits happen not only across different requests but —
+even more so — <strong>between adjacent turns of one chat</strong>. Multi-turn works like this: turn N resends <strong>all prior turns verbatim</strong>, then appends the new question.
+So <strong>all KV of turns 1..N−1 is an already-cached prefix</strong>; match_prefix hits all the way to the end of history, and <strong>the engine only pays compute for the latest turn</strong>.
+The longer the chat, the longer the reused prefix, the bigger the savings.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">Turn 1</div><div class="nd">system prompt + Q1 prefilled, whole thing enters the tree</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Turn 2</div><div class="nd">resends "prompt+Q1+A1", prefix all hits, only Q2 computed</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Turn 3</div><div class="nd">longer prefix, more hits, pay only for the newest turn</div></div>
+</div>
+
+<p>And all of this needs <strong>no hints from the user</strong>: you never tell the engine "these two requests start the same" or "this is turn three of one chat".
+It takes the token sequence and <strong>one tree lookup tells it how much can be reused</strong>. This "works automatically, no cooperation required" property lets RadixAttention
+profit on <strong>any real traffic</strong> — the reason Lessons 1 and 3 keep naming it a signature SGLang feature. Paired with <strong>cache-aware scheduling</strong> (Lesson 20),
+the engine even actively groups same-opening requests together to push hit rates higher.</p>
+
+<h2>Why a tree, not a hash map — and how eviction works</h2>
+<p>You might ask: to check "do the openings match", couldn't a <strong>hash map</strong> from "whole prompt → KV" do it? <strong>Far from enough</strong>.
+Prefixes are <strong>hierarchical</strong>: requests A, B, C may share 100 tokens, of which A and B share 50 more. A hash map only knows <strong>whole-string equality</strong> —
+no <strong>longest-prefix match</strong>, no <strong>partial reuse</strong>, and no notion of "shared ancestor" or "cheap split". A radix tree is built for prefixes:</p>
+
+<table class="t">
+  <tr><th>Capability</th><th>Hash map (whole-string)</th><th>Radix tree (compressed trie)</th></tr>
+  <tr><td><strong>Matching</strong></td><td>only hits an <strong>exact</strong> whole string</td><td class="mono">walks down for <strong>longest-prefix match</strong></td></tr>
+  <tr><td><strong>Partial reuse</strong></td><td>same start, different end ⇒ <strong>full miss</strong></td><td class="mono">reuse as deep as it hits, <strong>token by token</strong></td></tr>
+  <tr><td><strong>Hierarchical sharing</strong></td><td>can't express a "shared ancestor"</td><td class="mono">common prefix is a <strong>shared parent</strong> naturally</td></tr>
+  <tr><td><strong>Divergence</strong></td><td>only adds a separate entry</td><td class="mono"><strong>cheaply splits an edge</strong> at the fork</td></tr>
+</table>
+
+<p>The cache fills up, so it needs <strong>eviction</strong>. RadixAttention evicts <strong>leaves by LRU</strong>: the least-recently-accessed leaf goes first, freeing physical blocks.
+But one <strong>iron rule</strong> applies — <strong>reference counting</strong>: each running request <strong>locks (lock_ref)</strong> the path it is using, and any node with
+<strong>refcount &gt; 0</strong> is <strong>never evicted</strong>. The reason is plain: a request is decoding against some prefix's KV right now; evict that KV and the request
+<strong>crashes on the spot</strong>. So eviction only touches <strong>leaves no running request references</strong> — safety and high hit rate at once.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">match the longest cached prefix down the radix tree</span></div>
+  <pre><span class="kw">def</span> match_prefix(self, params: MatchPrefixParams) -&gt; MatchResult:
+    <span class="cm"># Find the longest cached prefix of `key` in the radix tree.</span>
+    key = params.key
+    key, _ = key.maybe_to_bigram_view(self.is_eagle)
+
+    <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
+        <span class="kw">return</span> self._empty_match_result
+
+    key = key.page_aligned(self.page_size)        <span class="cm"># truncate to a multiple of page_size</span>
+
+    <span class="cm"># walk down the tree; get matched-prefix KV indices + terminal node</span>
+    value, last_node = self._match_prefix_helper(self.root_node, key)
+    <span class="kw">if</span> value:
+        value = torch.cat(value)                  <span class="cm"># concat matched KV index segments</span>
+    <span class="kw">return</span> MatchResult(
+        device_indices=value,                     <span class="cm"># reusable prefix KV indices (may be empty)</span>
+        last_device_node=last_node, last_host_node=last_node,
+        best_match_node=last_node,
+    )</pre>
+</div>
+
+<p>Read this and you've got RadixAttention's soul: <strong>one match_prefix computes exactly how much KV this request gets for free</strong>.
+The returned <span class="inline">device_indices</span> are the <strong>physical block indices of the reusable prefix</strong> — possibly length 0 (a brand-new request),
+possibly hitting all the way to the end of history (turn N of a chat). The docstring's note that a match ending inside a segment <strong>splits a node once</strong> is exactly the cheap split above.
+Stack this with Lesson 6's paging and Lesson 5's continuous batching and you see SGLang's three-layer memory foundation: <strong>per-slot (L4) → paged (L6) → prefix-shared (this lesson)</strong>.</p>
+
+<p>Back to the main thread: Lesson 4 built the KV pool, Lesson 5 kept the batch full, Lesson 6 packed it tight with paging — this lesson lets different requests and turns
+<strong>share the same prefix KV</strong>, killing <strong>both duplicate compute and duplicate storage</strong>. Later, <strong>cache-aware scheduling</strong> (Lesson 20) actively matches up
+same-opening requests to raise hit rates, and <strong>HiCache</strong>, which tiers the prefix cache <strong>across HBM/host/disk</strong>, comes in <strong>Lessons 29–32</strong>.
+Read on with this yardstick — <strong>the token sequence is the cache key; the longest prefix is reuse</strong> — and you'll find SGLang's real-traffic throughput nearly all springs from this humble radix tree.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Pain</strong>: real workloads heavily <strong>share prefixes</strong> — system prompts, few-shot examples, multi-turn chat (each turn resends all history), agent scaffolds. Recomputing that opening's KV per request/turn is huge waste.</li>
+    <li><strong>RadixAttention</strong>: store all KV in a <strong>radix tree (compressed prefix trie)</strong> keyed by token ids; <span class="mono">match_prefix</span> reuses the matched prefix KV with <strong>zero recompute</strong>, <strong>inserts</strong> the divergent suffix as a new branch, and <strong>splits an edge</strong> when the match ends mid-edge.</li>
+    <li><strong>Automatic</strong>: the cache key is the token sequence, so hits happen <strong>across requests and across chat turns</strong> with no user hints; tree nodes point at Lesson 6's <strong>paged physical blocks</strong>, sharing = many paths reusing the same pages.</li>
+    <li><strong>Eviction</strong>: leaves go by <strong>LRU</strong> but are guarded by <strong>reference counting</strong> — KV in use by a running request is <strong>never evicted</strong>, or that request would crash.</li>
+    <li><strong>Why a tree not a hash map</strong>: prefixes are <strong>hierarchical</strong>; a tree gives <strong>longest-prefix match, partial reuse, shared ancestors, cheap splits</strong>; a whole-string hash only knows exact equality and misses entirely when starts match but ends differ. Prereqs: paging (L6), KV cache (L4); extensions: cache-aware scheduling (L20), HiCache (L29–32).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. After a match_prefix hit, what exactly gets 'reused with zero recompute'?</div>
+  <ol class="opts">
+    <li>The model weights, saving the cost of reloading weights</li>
+    <li>The KV cache (physical block indices) of the matched prefix — the attention kernel follows the tree nodes to those already-computed K/V and treats them as part of this request, skipping that prefix's prefill compute</li>
+    <li>The previous request's final text, copied over as the new request's output</li>
+    <li>The sampling random seed, so both requests produce identical results</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. RadixAttention reuses the matched prefix's KV cache: tree edges carry token runs and their physical KV blocks, so on a hit those K/V need no recompute and attention gathers them directly, saving that prefix's prefill compute (and duplicate storage). It is not the weights, not the text output, and not the random seed.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does RadixAttention organize the prefix cache as a radix tree instead of a hash map from 'whole prompt → KV'?</div>
+  <ol class="opts">
+    <li>Because a tree compresses KV smaller, saving HBM</li>
+    <li>Because prefixes are hierarchical: a tree supports longest-prefix match, partial reuse, shared ancestors, and cheap edge splits, whereas a whole-string hash only knows exact equality — same start but different end means a full miss with no partial reuse</li>
+    <li>Because hash maps can't be implemented on a GPU</li>
+    <li>Because radix-tree lookup is always O(1), faster than a hash map</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The point is the hierarchy of prefixes: requests may share 100 tokens, and some of them more on top. A radix tree naturally supports longest-prefix match down the tree, token-by-token partial reuse, promoting a common prefix to a shared parent, and cheaply splitting an edge at the fork. A whole-string hash only tests exact equality and misses entirely when starts match but ends differ. It has nothing to do with GPU feasibility, complexity, or compression.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When the cache is full and must evict, why must RadixAttention's LRU eviction respect reference counts?</div>
+  <ol class="opts">
+    <li>Because reference counts determine the page_size</li>
+    <li>Because a running request locks the prefix path it is using (refcount > 0); evicting the prefix KV it is decoding against would crash that request, so eviction only touches leaves no running request references</li>
+    <li>Because reference counts automatically double the cache hit rate</li>
+    <li>Because without counting references, LRU can't tell which leaf is least-recently-used</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Eviction frees a node's physical KV blocks. But a request currently decoding depends every step on the KV along its prefix path; if that KV is evicted, attention reads invalid/overwritten data and the request crashes. Reference counting (lock_ref) exists for exactly this: running requests lock the path, nodes with refcount > 0 are never evicted, and LRU only touches unreferenced leaves. It is unrelated to doubling hit rate, LRU's recency test, or page_size.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using a 5-turn customer-support chat, explain how RadixAttention 'auto-reuses across turns': sketch what the turn-3 request's token sequence is composed of, point out which part match_prefix hits and what the engine actually computes anew, and explain why none of this needs any user hint.</li>
+    <li>The tree already holds an edge for the prefix 'You are a helpful assistant. Translate the following'; now a new request arrives that only shares up to 'You are a helpful assistant. ' before diverging into 'Summarize …'. Describe what match_prefix/insert does to the tree at this step (including the edge split), and state which node becomes the shared ancestor and what branches hang off it.</li>
+  </ul>
+</div>
+</div></div>
   <div class="footnav"><a class="prev" href="06-paged-attention-and-paged-kv.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">PagedAttention 与分页 KV</span><span class="lang-en">PagedAttention &amp; paged KV</span></div></a><a class="next" href="08-throughput-vs-latency.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">吞吐 vs 延迟</span><span class="lang-en">Throughput vs latency</span></div></a></div>
 </div>
 <script>

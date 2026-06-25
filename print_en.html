@@ -333,12 +333,17 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 3 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 8 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
   <li>The project map</li>
   <li>Life of a request</li>
+  <li>Autoregressive decode & the KV cache</li>
+  <li>Continuous batching</li>
+  <li>PagedAttention & paged KV</li>
+  <li>RadixAttention & prefix caching</li>
+  <li>Throughput vs latency</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -1136,6 +1141,1021 @@ compute, decode races on memory</strong> — it is the key to understanding all 
   <ul>
     <li>Draw a generate request's whole path, marking the three process boundaries and each ZMQ hop. Then explain: while the Scheduler forwards token N, what might the Detokenizer and the main process each be doing? How does this cross-process pipeline improve both throughput and first-token latency experience?</li>
     <li>In a customer-service system, requests vary widely in prompt length and arrival time. Using the re-batch-every-turn loop and the prefill-vs-decode distinction, explain why the scheduler loop must be fast, what problem feeding one very long prompt at once causes, and how SGLang mitigates it (hint: chunked prefill).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Autoregressive decode & the KV cache</h1>
+
+<p class="lead">
+Part 1 gave you the bird's-eye view of SGLang. From here we fill in the <strong>"why these designs exist"</strong>
+foundations. The first cornerstone underlies nearly every LLM-inference optimization: the <strong>KV cache</strong>.
+To explain it we first need to see how a model emits text <strong>one token at a time</strong>: once you understand
+autoregressive generation, you'll see the KV cache isn't a nice-to-have — it's what makes generation
+<strong>go from "possible" to "practical."</strong>
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  When you do a long piece of <strong>long-hand multiplication</strong>, you <strong>write the partial products on
+  scratch paper</strong> and reuse them on the next step, instead of multiplying from scratch again. The KV cache is the
+  model's scratch paper: it <strong>stores the intermediate results</strong> (each word's Key/Value) so every new word
+  <strong>reuses history and never recomputes it</strong>. Throw the scratch paper away (no cache) and writing each new
+  letter means redoing all the previous ones — too slow to be usable.
+</div>
+
+<h2>Autoregressive generation: one token at a time</h2>
+<p>An LLM is <strong>autoregressive</strong>: it predicts only the <strong>next</strong> token, <strong>appends it to the
+input</strong>, predicts the next, and repeats until it emits an end token or hits a length limit. So the model doesn't
+"think the whole sentence up at once" — it loops <strong>one token at a time</strong>, and every step looks back at
+<strong>everything it has written so far</strong>.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Feed the current sequence</h4><p>Input = "prompt + already-generated tokens".</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>One forward pass</h4><p>The model outputs a <strong>probability distribution for the next token</strong> (logits).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Sample one token</h4><p>Pick the next token by temperature/top-p, etc.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Append, loop</h4><p>Append the new token to the sequence; back to step 1 — until done.</p></div></div>
+</div>
+
+<p>The crux is <strong>attention</strong>: each new token must "greet" (attend to) <strong>all previous tokens</strong> to
+know what to say in context. Which raises the question — that history is needed every single step, so <strong>do we recompute
+it every step?</strong></p>
+
+<p>One more essential point: autoregression is <strong>inherently serial</strong> — token N can't start until token N−1 has actually
+been sampled and appended. This is unlike training, where a whole known text is computed in parallel (a causal mask scores all
+positions at once). The <strong>serial nature of inference</strong> means you cannot amortize a single request's latency by
+"computing a few more tokens"; one request's speed is hard-capped by the <strong>per-token loop</strong>. Since a single request
+can't be sped up, the only engineering way out is to "<strong>pack more requests side by side and share each step's fixed cost</strong>"
+— which lands squarely on the doorstep of batching and caching, the intuition this whole Part 2 is built to give you.</p>
+
+<h2>Without a cache: O(t²) of repeated work</h2>
+<p>Attention has each token produce three things: <span class="inline">Q</span> (Query — what I'm looking for),
+<span class="inline">K</span> (Key — the label I can be found by), <span class="inline">V</span> (Value — the information I
+carry). A new token uses its <span class="mono">Q</span> against <strong>all historical tokens' <span class="mono">K</span></strong>
+to decide "whom to attend to", then sums their <span class="mono">V</span>.</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ Naive (no cache)</h4><p>For every new token, <strong>re-run the whole sequence from scratch</strong>:
+  recompute every historical token's Q/K/V and all the attention among them. Step t costs <span class="mono">O(t²)</span>,
+  and the historical K/V <strong>come out identical every time</strong> — pure waste.</p></div>
+  <div class="col"><h4>✅ With a cache</h4><p>Historical tokens' K/V are <strong>fixed the moment they were first generated</strong>.
+  Store them; a new token computes only <strong>its own</strong> Q/K/V, then attends its Q against the cached K/V. Each step is
+  just <span class="mono">O(t)</span>, dropping all the repeated work.</p></div>
+</div>
+
+<p>In one line: <strong>historical K/V are "read-only"</strong>, computed once and reused. Caching them squeezes each step
+from "recompute the whole sequence" to "just the new word's attention over history" — that is the KV cache.</p>
+
+<h2>Follow one decode step: what happens inside the cache</h2>
+<p>Abstract big-O is less convincing than a concrete trace. Let the prompt be "<strong>The capital of France is</strong>" and the
+model continue with "<strong>Paris</strong>". In prefill, the model computes all prompt tokens at once, so the cache holds
+<strong>6 rows of K/V</strong> and emits the 1st output token "Par". Then step-by-step decode begins, each step doing the same
+three actions — <strong>append a row, read everything, predict the next</strong>:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>decode, cache step by step</b>: each step adds one K/V row but attends to <strong>all</strong> history (the cache only grows, never changes)</div>
+  <div class="cells"><span class="lab">prefill</span><span class="cell hl">The</span><span class="cell hl">capital</span><span class="cell hl">of</span><span class="cell hl">France</span><span class="cell hl">is</span><span class="sep">→</span><span class="cell q">cache 5 rows, output "Par"</span></div>
+  <div class="cells"><span class="lab">decode①</span><span class="cell">…5 rows…</span><span class="cell hl">Par</span><span class="sep">→</span><span class="cell q">append 1 = 6 rows · "Par" Q reads 6 rows → "is"</span></div>
+  <div class="cells"><span class="lab">decode②</span><span class="cell">…6 rows…</span><span class="cell hl">is</span><span class="sep">→</span><span class="cell q">append 1 = 7 rows · "is" Q reads 7 rows → &lt;eos&gt;</span></div>
+</div>
+
+<p>Notice two details. First, <strong>each step computes only "one new token"</strong>, yet it attends to <strong>all of the cached
+history</strong> — so as generation grows, each step reads an ever-larger cache while doing tiny compute, spending its time
+"<strong>moving the cache from HBM into the compute units</strong>". That is the root of decode being <strong>memory-bound</strong>,
+and why the key to decode throughput isn't FLOPs but <strong>memory bandwidth and batch size</strong>. Second, the cache is
+<strong>append-only, never modified</strong> — once a history row is written it never moves. It is exactly this "read-only,
+shareable" property that lets later requests <strong>share the same prefix's KV</strong> (Lesson 7, RadixAttention). In other
+words, the "cache" here is not just a one-off optimization; its data-structure properties directly decide how many tricks the
+whole engine can pull off downstream.</p>
+
+<h2>An often-missed detail: GQA makes KV heads far fewer than Q heads</h2>
+<p>You may have noticed the ledger said "<strong>8 KV heads</strong>" while such models have 32 attention heads. That's
+<strong>Grouped-Query Attention (GQA)</strong>: many Q heads <strong>share one group of K/V heads</strong>. It barely affects
+quality yet shrinks the KV cache to about <strong>1/4</strong>. Why call it out in a foundations lesson? Because the KV cache is
+the HBM dominator, and GQA is the <strong>architectural</strong> way to slim it — complementary to SGLang's <strong>engineering</strong>
+HBM tricks (paging, prefix reuse, quantization): one changes "how big each token is", the others change "how to lay it out, how
+many copies, how many bits". When you read the memory-management lessons, remember these two lines advance in parallel and stack.</p>
+
+<h2>How it's stored: a "pool" in SGLang</h2>
+<p>In the SGLang runtime, all tokens' K/V don't hang off individual requests — they go into one big <strong>HBM pool</strong>.
+For ordinary multi-head attention that pool is managed by <span class="inline">MHATokenToKVPool</span>: at startup it carves
+out two big buffers for K and V sized by "<strong>how many tokens × layers × KV heads × head_dim</strong>", and every new token
+<strong>writes one row</strong>. Making the cache a "pool + per-row allocation" is the physical basis for the tricks in
+<strong>paging (Lesson 6)</strong> and <strong>prefix reuse (Lesson 7)</strong>.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">shape of the KV pool</span></div>
+  <pre><span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="kw">def</span> __init__(
+        self,
+        size: int,          <span class="cm"># total tokens the pool holds (concurrency × context cap)</span>
+        page_size: int,     <span class="cm"># paging granularity (Lesson 6)</span>
+        dtype: torch.dtype, <span class="cm"># fp16 / bf16 / fp8… (lower = cheaper)</span>
+        head_num: int,      <span class="cm"># KV heads (far fewer than Q heads under GQA)</span>
+        head_dim: int,      <span class="cm"># per-head dimension</span>
+        layer_num: int,     <span class="cm"># layers — each has its own K/V</span>
+        device: str,
+        ...
+    ):</pre>
+</div>
+
+<p>The constructor reveals the cache's "ledger": <strong>per token</strong> the bytes ≈
+<span class="mono">2(K and V) × layer_num × head_num × head_dim × dtype-bytes</span>. Note it <strong>doesn't scale directly with
+parameter count</strong> but with <strong>context length</strong> — longer context and more concurrency mean more cache HBM.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>A back-of-envelope ledger</b>: a 7B model, 32 layers, 8 KV heads (GQA), head_dim=128, fp16 (2 bytes), per token:</div>
+  <div class="cells"><span class="lab">per token</span><span class="cell">2</span><span class="sep">×</span><span class="cell">32 L</span><span class="sep">×</span><span class="cell">8 H</span><span class="sep">×</span><span class="cell">128</span><span class="sep">×</span><span class="cell">2B</span><span class="sep">=</span><span class="cell hl">≈128 KB</span></div>
+  <div class="cells"><span class="lab">2048 tok</span><span class="cell">128 KB</span><span class="sep">×</span><span class="cell">2048</span><span class="sep">=</span><span class="cell hl">≈256 MB (one request!)</span></div>
+</div>
+
+<p>A few hundred concurrent requests and the KV cache alone eats tens to hundreds of GB. <strong>That is why "save HBM" is an
+inference engine's number-one job</strong> — paging, prefix reuse, quantization and KV-cache quantization all fight over this ledger.</p>
+
+<p>There's a causal layer that's easy to miss: <strong>the cache's total capacity directly caps how many requests you can serve at
+once</strong>. The HBM pool is fixed, so the total number of tokens it can hold is fixed; every request consumes "context length ×
+bytes per token" of cache. Thus <strong>longer context means lower concurrency</strong> — the two contend for the same HBM. So the
+KV cache isn't just a performance issue but a <strong>hard capacity-vs-concurrency constraint</strong>: the SGLang scheduler (from
+Lesson 18) must answer "is there enough HBM to admit one more request?" every step, and how boldly it can answer depends on how
+frugally the cache is managed. Keep this chain in mind: <strong>save a bit of cache → admit a few more requests → higher whole-machine
+throughput</strong>. That is exactly why we spend a whole "memory management" part (Lessons 29–32) digging into it.</p>
+
+<h2>prefill vs decode: a request's two phases</h2>
+<p>With the KV-cache lens, generation naturally splits into <strong>two phases with opposite characters</strong>:</p>
+
+<table class="t">
+  <tr><th>Phase</th><th>What it does</th><th>Compute character</th><th>Cache action</th></tr>
+  <tr><td><strong>prefill</strong></td><td>Feed the <strong>whole prompt at once</strong>, compute all tokens' K/V in parallel, produce the 1st output token</td><td class="mono">compute-bound (big matmuls, GPU saturated)</td><td><strong>fills</strong> the whole history once</td></tr>
+  <tr><td><strong>decode</strong></td><td>Then generate <strong>token by token</strong>, one new token per step</td><td class="mono">memory-bound (little compute, reads the whole KV cache each step)</td><td><strong>appends one row</strong> per step</td></tr>
+</table>
+
+<p>Remember the iron rule: <strong>one request = one prefill + many decodes</strong>. The two phases have completely different
+personalities — prefill is like "<strong>reading a whole book in one breath</strong>" (throughput, compute-bound), decode like
+"<strong>writing it out line by line</strong>" (latency, memory-bound). Precisely because decode is memory-bound (its compute is
+tiny; the time goes to moving the KV cache and weights from HBM into the compute units), <strong>batching many requests together</strong>
+pays off — one weight read serves many requests so the GPU stops idling on a single one. That is the motivation for the next lesson,
+<strong>continuous batching</strong>; and the phase asymmetry ultimately motivates splitting them onto <strong>different machines</strong>
+in PD disaggregation (Lesson 45).</p>
+
+<p>Put this lesson back into Part 2's arc and you see why it comes first. Autoregression + the KV cache define inference's two
+<strong>fundamentals</strong>: a <strong>serial per-token loop</strong> (which sets the floor on single-request latency) and an
+<strong>append-only cache that grows linearly with context</strong> (which sets the ceiling on concurrency). The next four lessons
+are all moves on these two fundamentals — <strong>Lesson 5</strong> uses continuous batching to turn "serial single" into
+"parallel many", reclaiming the FLOPs wasted during decode; <strong>Lesson 6</strong> uses paging to pack that linearly-growing
+cache tighter with less fragmentation; <strong>Lesson 7</strong> uses RadixAttention to let <strong>different requests share a
+prefix's cache</strong>, cashing the "read-only" property into real compute and memory savings; <strong>Lesson 8</strong> puts it
+all on the <strong>throughput-vs-latency</strong> scale and tells you which end each trick pushes on. Read on with three rulers —
+"cache = money, concurrency = throughput, serial = latency floor" — and you'll see at a glance what every later design saves and trades.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Autoregressive</strong>: the model emits one token at a time, appends it, loops — each step looks back at all history.</li>
+    <li><strong>KV cache</strong>: historical K/V are read-only, so cache and reuse them; each step drops from re-running the whole sequence <span class="mono">O(t²)</span> to <span class="mono">O(t)</span>.</li>
+    <li><strong>HBM dominator</strong>: cache ≈ 2×layers×KV-heads×head_dim×bytes per token, growing with <strong>context length</strong> — saving HBM is job #1.</li>
+    <li><strong>Two phases</strong>: prefill is compute-bound (fills once), decode is memory-bound (appends a row); one request = 1 prefill + N decodes.</li>
+    <li><strong>Bridges</strong>: memory-bound decode ⇒ batching pays off (Lesson 5); pool/row-managed cache ⇒ paging (Lesson 6) and prefix reuse (Lesson 7) become possible.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What computation does the KV cache actually save?</div>
+  <ol class="opts">
+    <li>It avoids the tokenization cost</li>
+    <li>Historical tokens' K/V are read-only, so caching them avoids recomputing the whole history's K/V and attention for each new token</li>
+    <li>It avoids reloading model weights, loading them only once</li>
+    <li>It removes the sampling step</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Each token's K/V is fixed once generated. A new token computes only its own Q/K/V and attends against the cached history — squeezing each step from re-running the whole sequence O(t²) to O(t). Unrelated to weight loading, tokenization, or sampling.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which phase, prefill or decode, is memory-bound, and why does it matter?</div>
+  <ol class="opts">
+    <li>decode: each step computes just 1 token but reads the whole KV cache — little compute, bandwidth-bound — so batching many requests together pays off</li>
+    <li>prefill: because it processes the whole prompt at once</li>
+    <li>Neither; the bottleneck is always the network</li>
+    <li>Both are purely compute-bound, unrelated to memory</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. decode does tiny compute per step; time goes to moving the cache and weights from HBM, so it's memory-bound. That's exactly why continuous batching (one weight read serving many requests) lifts throughput. prefill is compute-bound (big matmuls).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does the size of the KV cache cap the number of concurrent requests?</div>
+  <ol class="opts">
+    <li>The HBM pool is fixed; each request consumes 'context length × bytes/token' of cache, so longer context means fewer concurrent requests — they contend for the same HBM</li>
+    <li>Because the number of CPU cores is limited</li>
+    <li>Because network bandwidth is limited</li>
+    <li>Because each request needs its own GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Per-token cache ≈ 2×layers×KV-heads×head_dim×bytes, growing linearly with context. Fixed HBM holds a fixed token budget, so concurrency is decided by how frugal the cache is — which is why the scheduler checks 'enough HBM to admit one more?' each step.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>For a 7B model with 32 layers, 8 KV heads, head_dim=128, fp16, estimate one request's KV-cache footprint at a 4096-token context. Then: if you store KV in fp8, how much do you save, and what does that mean for concurrency?</li>
+    <li>Autoregression is inherently serial — one request's latency is pinned by the per-token loop and can't be amortized. Since a single request can't be sped up, why is 'packing more requests side by side' almost the only way out, and which later lessons does that point you to?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Continuous batching</h1>
+
+<p class="lead">
+Last lesson nailed one iron law: decode is <strong>memory-bound</strong> — each step computes just one new token while the
+compute units idle, with time spent moving weights and the KV cache out of HBM. That seeds this lesson's core motivation:
+since a single request can't be sped up, <strong>pack more requests together</strong> so one "weight read" serves as many
+requests as possible. <em>How</em> you pack them decides whether the GPU sprints at full load or idles — and that is exactly
+what <strong>continuous batching</strong> solves, the first cornerstone of SGLang's high throughput.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture two buses. A <strong>charter bus</strong> <strong>won't leave until it's full</strong> and <strong>makes no stops</strong>
+  — everyone must ride all the way to the terminus. Even if your stop is third, you ride the whole route; passengers who
+  arrived early just sit in seats that produce nothing. A <strong>hop-on/hop-off shuttle</strong> <strong>stops at every stop</strong>:
+  whoever has arrived gets off and frees a seat, and whoever is waiting hops on instantly. The bus stays <strong>always full</strong> —
+  no empty seats, no idle waiting. Static batching is the charter bus; continuous batching is the shuttle — and the shuttle
+  pushes that one bus (the GPU) to its utilization limit.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>continuous batching = the scheduler re-forms the batch at every decode step</strong>.
+  A finished request <strong>leaves on the spot and frees its KV slot immediately</strong>; a waiting request
+  <strong>joins on the very next step</strong> — so the batch stays <strong>full</strong> and the GPU never idles on any single
+  request. It's also called <strong>iteration-level batching</strong> or <strong>in-flight batching</strong>. In SGLang, the
+  scheduler loop calls <span class="inline">get_next_batch_to_run()</span> each round to "form the batch for this step."
+</div>
+
+<h2>Static batching: waiting on the slowest one</h2>
+<p>The naive approach is <strong>static (padded) batching</strong>: gather a few requests that arrive together into a batch,
+push them through the model, and <strong>run them start to finish as a group</strong>. It sounds reasonable, but it has three
+fatal wastes — all rooted in "<strong>a batch of requests being chained together</strong>."</p>
+
+<p>First, <strong>the whole batch waits for the slowest</strong>. Within one batch, some requests hit their end token after 10
+tokens, others need 500. But static batching only finishes when the <strong>longest</strong> one does. Requests that finished
+early just <strong>ride along</strong>, holding their slot while producing nothing. Second, <strong>padding waste</strong>: finished
+sequences are meaningless, yet their slots tag along through every forward pass — pure wasted compute. Third, <strong>new requests
+wait for the whole batch to drain</strong>: even if the GPU has free capacity right now, an arriving request can't enter until the
+current batch <strong>fully ends</strong>. The result: GPU utilization is dragged down — the later the batch, the fewer requests are
+still doing real work.</p>
+
+<table class="t">
+  <tr><th>Dimension</th><th>Static batching (charter bus)</th><th>Continuous batching (shuttle)</th></tr>
+  <tr><td><strong>When batched</strong></td><td>Formed once, <strong>chained to the end</strong></td><td class="mono"><strong>Re-formed every decode step</strong></td></tr>
+  <tr><td><strong>On finish</strong></td><td>Wait for slowest, <strong>whole batch ends together</strong></td><td class="mono">Whoever finishes <strong>leaves on the spot</strong>, frees its KV slot</td></tr>
+  <tr><td><strong>New request joins</strong></td><td>Must <strong>wait for the batch to drain</strong></td><td class="mono">Can join on the <strong>next step</strong></td></tr>
+  <tr><td><strong>GPU utilization</strong></td><td>Idles late in the batch (padding waste)</td><td class="mono">Batch always full, <strong>stays saturated</strong></td></tr>
+</table>
+
+<h2>Continuous batching: re-form the batch every step</h2>
+<p>The core action is one sentence: <strong>don't form the batch once and freeze it — re-assemble the batch at every decode step.</strong>
+Think of generation as a never-ending loop; each round the scheduler does four things — <strong>evict the finished, admit the waiting,
+form a new batch, forward one step</strong>:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Evict finished requests</h4><p>Whoever emitted an end token or hit the length limit last step is <strong>removed from the batch</strong>, <strong>freeing its KV-cache slot immediately</strong>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Admit waiting requests</h4><p>Check whether HBM allows it and which the policy lets in first, then <strong>fill the freed slots</strong> from the queue (running its prefill first if needed).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Form this step's batch</h4><p>Assemble all currently-running requests into one batch — <strong>do prefill first if there's prefill work, else a decode batch</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Forward one step, loop</h4><p>Forward the whole batch one token, update each KV cache, back to step 1 — the batch stays <strong>full and flowing</strong>.</p></div></div>
+</div>
+
+<p>The key insight is that <strong>a finished request can leave mid-flight, instantly</strong>. Why can it leave — and free its
+HBM — right away? Because, as last lesson showed, each request's KV cache is <strong>managed independently by row/slot</strong>;
+one request's K/V is not entangled with another's. So the moment a request ends, its KV slots can be <strong>reclaimed in place</strong>
+and handed to the next queued request — no waiting for the whole batch, no reshuffling. The figure below traces a 4-slot batch over
+consecutive steps: the finished (✓) are replaced by newcomers (★), so the batch is always full.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Flow of a 4-slot batch</b>: each decode step, finished requests (✓) yield and waiting ones (★) fill in on the spot — slots never sit empty</div>
+  <div class="cells"><span class="lab">step t</span><span class="cell hl">R1</span><span class="cell hl">R2</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R2 emits end token ✓</span></div>
+  <div class="cells"><span class="lab">step t+1</span><span class="cell hl">R1</span><span class="cell">★R5</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R5 fills R2's slot, starts at once</span></div>
+  <div class="cells"><span class="lab">step t+2</span><span class="cell hl">R1</span><span class="cell hl">R5</span><span class="cell hl">R3</span><span class="cell">★R6</span><span class="sep">→</span><span class="cell q">R4 finishes ✓, R6 steps in</span></div>
+</div>
+
+<h2>Why it wins: back to "memory-bound"</h2>
+<p>Continuous batching is a <strong>throughput weapon</strong>, and the root reason traces back to Lesson 4. decode is
+<strong>memory-bound</strong>: to produce one token you read the <strong>entire model's weights</strong> from HBM, yet the actual
+matmul serves just <strong>one</strong> token — compute is badly underused. And reading the weights <strong>costs about the same
+whether the batch holds 1 request or 100</strong> — one weight read can forward a whole batch at once. So <strong>stacking requests
+together</strong> amortizes that fixed "read the weights" cost <strong>across every request</strong>: the bigger the batch, the thinner
+the amortization, the more useful tokens per unit of compute.</p>
+
+<p>Static batching wants this dividend too, but it <strong>can't keep the batch full</strong>: as requests finish one by one, the
+batch's effective size shrinks, the amortization decays fast, and the back half practically idles over empty slots. The entire value
+of continuous batching is <strong>refilling the batch every step</strong> — making "read weights once, serve a big batch" happen
+<strong>continuously, end to end</strong>. Intuitively: on the same GPU, static batching might do real work only ~60–70% of the time,
+while continuous batching approaches full load. That's why it's widely seen as the <strong>single most important throughput technique</strong>
+in modern inference engines — it changes no model and loses no accuracy, lifting utilization purely by <em>how</em> it batches.</p>
+
+<h2>In SGLang: calling get_next_batch_to_run every round</h2>
+<p>In SGLang's runtime, the scheduler (its event loop is detailed in Lesson 18) calls
+<span class="inline">get_next_batch_to_run()</span> <strong>once per iteration</strong> to "<strong>form the batch for this step</strong>."
+The method first filters out requests that finished last step and merges newly arrived prefill into the running batch, then makes a key
+decision: <strong>is there prefill work? If so, return a prefill batch; otherwise, build a decode batch.</strong> That one "decide the
+batch afresh each step" is exactly how continuous batching lands in code.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">form this step's batch every schedule round</span></div>
+  <pre><span class="kw">def</span> get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
+    <span class="cm"># …first filter out last step's finished reqs, merge prefill into running_batch…</span>
+
+    <span class="cm"># Try to form a prefill batch first (do new prompts' prefill if any)</span>
+    new_batch = self.get_new_batch_prefill()
+
+    <span class="kw">if</span> new_batch <span class="kw">is not</span> <span class="kw">None</span>:
+        <span class="cm"># Run prefill first if possible</span>
+        ret = new_batch
+    <span class="kw">else</span>:
+        <span class="cm"># Otherwise build a decode batch from the currently running requests</span>
+        self.running_batch = self.update_running_batch(self.running_batch)
+        ret = self.running_batch <span class="kw">if not</span> self.running_batch.is_empty() <span class="kw">else</span> <span class="kw">None</span>
+    <span class="kw">return</span> ret</pre>
+</div>
+
+<p>Read this and you grasp the soul of continuous batching: <strong>the batch is not a static object but a result recomputed every step</strong>.
+Finished requests leave during the filter phase and free their KV slots; waiting requests are admitted in the
+<span class="inline">get_new_batch_prefill</span> phase — each loop refreshes the batch. <strong>Who joins, and how many</strong> is decided
+by the <strong>schedule policy</strong> (Lesson 20), and the <strong>prefill-vs-decode priority</strong> tradeoff is settled right here too.</p>
+
+<h2>The cost and tradeoff: no free lunch</h2>
+<p>Continuous batching maxes out utilization, but the price is <strong>more "bookkeeping" every step</strong>: filtering the finished,
+admitting the waiting, re-forming the batch, reclaiming and allocating KV slots one by one. This means <strong>the scheduler itself must
+be cheap enough</strong> — if the per-step Python scheduling overhead is too large, the GPU ends up idling while the CPU forms the batch,
+defeating the purpose. That motivates two key SGLang follow-ups:</p>
+
+<div class="cols">
+  <div class="col"><h4>Scheduling must be "zero-overhead"</h4><p>Since the batch is re-formed every step, the scheduling logic is on the
+  <strong>hot path</strong>. SGLang's <strong>zero-overhead overlap scheduler</strong> (Lesson 21) <strong>hides the CPU batch-forming cost
+  inside the previous step's GPU compute</strong>, so the GPU never idles on scheduling — the prerequisite for actually cashing in the
+  throughput dividend.</p></div>
+  <div class="col"><h4>Long prompts mustn't clog the queue</h4><p>If a request's prompt is extremely long, its prefill can <strong>hog a whole
+  step</strong> and stall every decoding request, breaking the batch's flow. SGLang's <strong>chunked prefill</strong> (Lesson 22) <strong>slices
+  a long prefill into chunks</strong>, interleaving them with decode steps to keep the batch smooth.</p></div>
+</div>
+
+<p>Place this lesson back on Part 2's throughline: Lesson 4 taught that decode is memory-bound and the KV cache is managed independently
+per slot; this lesson <strong>cashes both properties in</strong> — because decode is memory-bound, batching pays; because KV is per-slot
+independent, a finished request can leave mid-flight and free HBM at once. Continuous batching thus becomes the engine's <strong>first
+throughput engine</strong>. Next, Lesson 6 packs KV slots <strong>tighter with less fragmentation</strong> via paging, Lesson 7 lets requests
+<strong>share prefix cache</strong> with RadixAttention, and Lesson 8 weighs all of this on the <strong>throughput vs latency</strong> scale.
+Read on with two rulers — "keep the batch full" and "keep scheduling cheap" — and you'll see how every later scheduling and memory design
+exists to safeguard continuous batching.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Static batching</strong>: formed once, chained to the end — the batch waits on the slowest, finished slots idle (padding waste), new requests wait for the batch to drain. Low GPU utilization.</li>
+    <li><strong>Continuous batching</strong>: a.k.a. iteration-level / in-flight batching, <strong>re-forms the batch every decode step</strong>. Finished requests leave on the spot and free KV slots; waiting ones join next step; the batch stays <strong>full</strong>.</li>
+    <li><strong>Why it wins</strong>: decode is memory-bound, one weight read serves a whole batch; continuous batching keeps the batch full, <strong>continuously amortizing</strong> the fixed weight-read cost across every request.</li>
+    <li><strong>In SGLang</strong>: the scheduler loop calls <span class="mono">get_next_batch_to_run()</span> each round — prefill first if there's prefill work, else build a decode batch.</li>
+    <li><strong>Cost</strong>: heavier per-step bookkeeping ⇒ scheduling must be cheap (Lesson 21 zero-overhead overlap scheduler), long prompts must be chunked (Lesson 22 chunked prefill). Prereq: KV slots (Lesson 4).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the most fundamental reason continuous batching beats static (padded) batching?</div>
+  <ol class="opts">
+    <li>It compresses the model weights so they read faster</li>
+    <li>It turns decode into a compute-bound phase to saturate the ALUs</li>
+    <li>It skips sampling and always takes the argmax token</li>
+    <li>It re-forms the batch every decode step — finished requests leave on the spot, waiting ones fill in at once — so the batch stays full and the GPU never idles on any single request</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Static batching forms the batch once and chains it: the batch waits on the slowest, finished slots idle (padding waste), new requests wait for the drain. Continuous batching re-forms the batch each step to keep it full — and since decode is memory-bound, one weight read serves a whole batch, so a fuller batch amortizes the fixed cost more, lifting throughput. It changes no weights, loses no accuracy, skips no sampling.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What makes it possible for a finished request to leave the batch mid-flight and free its HBM immediately?</div>
+  <ol class="opts">
+    <li>Because static batching already supports leaving mid-batch</li>
+    <li>Because the GPU auto garbage-collects all HBM every step</li>
+    <li>Each request's KV cache is managed independently by row/slot and isn't entangled with others, so when one ends its slots are reclaimed in place and handed to the next queued request at once</li>
+    <li>Because all requests share one KV cache, so deleting one doesn't affect others</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Lesson 4 showed the KV cache lives in a big HBM pool, allocated by row/slot, with one request's K/V not entangled with others'. So the moment a request ends, its slots are reclaimed and given to the next waiter — no waiting for the whole batch, no reshuffle. That's the physical prerequisite for the batch to flow at full load.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why must the scheduler itself be cheap for continuous batching to pay off?</div>
+  <ol class="opts">
+    <li>Because a cheaper scheduler is more accurate</li>
+    <li>Because the scheduler reloads model weights each step</li>
+    <li>Because every decode step re-forms the batch (filter finished, admit waiting, reclaim/allocate slots); if per-step CPU scheduling is too costly, the GPU ends up idling while waiting for the batch to be formed</li>
+    <li>Because the scheduler performs the matmuls</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Continuous batching puts batch-forming on the hot path — bookkeeping every step. If that CPU work is slow, the GPU idles waiting for the batch, eating the throughput dividend. That's why SGLang's zero-overhead overlap scheduler (Lesson 21) hides the batch-forming cost inside the previous step's GPU compute, and chunked prefill (Lesson 22) keeps long prompts from clogging the queue.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Suppose a batch holds 8 requests with output lengths 5, 5, 6, 500, 5, 5, 6, 5 tokens. Run it with static vs continuous batching and estimate the 'useful tokens / (slots × steps)' utilization gap; explain where exactly the waste occurs.</li>
+    <li>Continuous batching asks each step 'is there prefill work to do first? if not, do decode.' If prefill is always prioritized, how does that affect the latency of already-decoding requests? And if decode is always prioritized? Which tradeoff in Lesson 20 does this lead you to?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>PagedAttention & paged KV</h1>
+
+<p class="lead">
+Last lesson kept the batch <strong>always full</strong>, but that hides an unstated premise: a finished request must
+<strong>free its HBM immediately</strong>, and a waiting one must <strong>get HBM immediately</strong>. The question is —
+how does the KV cache actually live in HBM? If you use the old way and <strong>reserve a contiguous block of HBM per request</strong>,
+you'll find HBM wasted by the bucketload and concurrency capped hard. This lesson's <strong>PagedAttention and paged KV</strong>
+borrow the operating system's decades-old "<strong>paging</strong>" wisdom for fighting fragmentation and apply it to the KV cache,
+so HBM packs <strong>tighter, with near-zero fragmentation</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a hotel with two booking styles. The old way: for each guest, <strong>reserve a whole contiguous floor up front</strong>
+  no matter how many nights they stay — sized for the <strong>longest possible</strong> stay. Most guests stay two or three nights, yet
+  <strong>the whole floor stays locked away from everyone else</strong>; worse, it must be a <strong>contiguous floor</strong>, so scattered
+  empty rooms here and there can never add up to one. The new way: <strong>rent single rooms by the night</strong>, <strong>open as many as
+  you need</strong>, rooms <strong>need not be adjacent</strong>, and the front desk keeps a <strong>directory</strong>: "<strong>Zhang San → rooms
+  301, 507, 902</strong>." A guest checks out, the room is reclaimed that night. The old way is "<strong>contiguous reservation</strong>"; the new
+  one is "<strong>paging</strong>" — and it stuffs far more guests into the same building.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>PagedAttention cuts each request's KV cache into fixed-size "pages (blocks)" and uses a "page table" to map logical
+  positions to physical pages, allocating on demand and freeing when done.</strong> This is exactly the OS's <strong>virtual memory / paging</strong>:
+  a process sees a contiguous logical address space, but physically it's scattered across arbitrary page frames, with a page table tying the two
+  together. Because the page table does the "finding," <strong>physical pages need not be contiguous</strong>, so fragmentation nearly vanishes and
+  HBM utilization approaches 100%. Pioneered by vLLM, it's now broadly adopted by nearly every inference engine, SGLang included.
+</div>
+
+<h2>The pain: why contiguous reservation burns HBM</h2>
+<p>Back to Lesson 4: each request's KV cache <strong>grows as it generates</strong>, but you <strong>don't know in advance</strong> how many tokens
+it will produce. The naive approach is to <strong>reserve one contiguous block of HBM per request, sized for the max length</strong> — cap of 2048
+means grabbing KV space for 2048 tokens up front. This "<strong>contiguous reservation</strong>" looks convenient but hits two classic fragmentation
+problems at once, wasting precious HBM.</p>
+
+<div class="cols">
+  <div class="col"><h4>Internal fragmentation (over-allocation)</h4><p>Most requests <strong>never reach the max length</strong>: cap of 2048, but maybe only
+  60 tokens are generated. The remaining <strong>~2000 slots</strong> sit <strong>empty yet locked</strong> by that request — usable by no one. The bigger
+  the reservation, the worse the waste. That's <strong>internal fragmentation</strong>.</p></div>
+  <div class="col"><h4>External fragmentation</h4><p>Requests come and go, leaving free blocks of <strong>uneven sizes wedged in between</strong>. A new
+  request wants one <strong>contiguous</strong> block, but what's left is <strong>little gaps scattered around</strong> — <strong>enough in total, yet
+  un-assemblable into one block</strong>, so it idles. That's <strong>external fragmentation</strong>.</p></div>
+</div>
+
+<p>Stack the two and the consequence is blunt: <strong>HBM isn't even full, yet a new request no longer fits</strong>. And as Lesson 5 said, the number
+of <strong>concurrent requests (batch size)</strong> is the throughput lifeline — bigger batches amortize the fixed weight-read cost thinner. Contiguous
+reservation burns HBM on empty slots and gaps, which <strong>directly cuts how many requests you can run at once</strong>, pressing the throughput ceiling
+down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the concurrency limit</strong>.</p>
+
+<table class="t">
+  <tr><th>Waste source</th><th>Contiguous reservation (whole floor)</th><th>Paged KV (rent by page)</th></tr>
+  <tr><td><strong>Internal frag.</strong></td><td>Reserve for max length, unused slots locked</td><td class="mono"><strong>On-demand</strong> per page, waste <strong>&lt; one page</strong></td></tr>
+  <tr><td><strong>External frag.</strong></td><td>Wants one contiguous block, gaps don't combine</td><td class="mono">Physical pages <strong>need not be contiguous</strong>, any free page works</td></tr>
+  <tr><td><strong>Fixed length up front?</strong></td><td>Must estimate a cap; too big wastes, too small truncates</td><td class="mono">Grow <strong>page by page</strong> while generating, no need to know length</td></tr>
+  <tr><td><strong>Effect on concurrency</strong></td><td>HBM runs out early, <strong>concurrency capped</strong></td><td class="mono">HBM packs tight, <strong>concurrency rises notably</strong></td></tr>
+</table>
+
+<h2>The core of paging: fixed pages + a page table</h2>
+<p>PagedAttention needs just two things: <strong>fixed-size pages</strong> and <strong>a page table mapping logical to physical</strong>. Think of a request's
+KV as a <strong>logically contiguous token stream</strong>, but underneath it's sliced into pages of <span class="mono">page_size</span> tokens each, with
+<strong>every page drawn separately from the pool</strong>. Which page sits where in physical HBM is irrelevant — a <strong>page table</strong> records "page N →
+physical block id," and you follow it when you need to fetch.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Slice into pages</h4><p>The token stream is cut by <strong>page_size</strong> (e.g. 16) into pages — <strong>logically contiguous</strong>, physically separate.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Allocate on demand</h4><p>Each time the sequence fills a page, ask the allocator for <strong>one more free block</strong> — <strong>take only what you use</strong>, never reserve to the cap.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Record in the page table</h4><p>Write "<strong>logical page → physical block</strong>" into this request's page table (in SGLang, the token→slot mapping).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Free when done</h4><p>When a request ends, all its pages are <strong>reclaimed in one batch</strong> into the free pool, ready for the next request instantly.</p></div></div>
+</div>
+
+<p>The crux is the <strong>page table</strong> in step 3: when the attention kernel looks back at historical K/V, it <strong>doesn't fetch by contiguous address</strong>
+but <strong>first consults the page table, then "gathers" K/V from the corresponding physical blocks</strong>. Thanks to this indirection, <strong>physical blocks can
+go anywhere — they need not be contiguous</strong>, which is exactly why paging kills external fragmentation. The figure below shows "logically contiguous,
+physically scattered, page-table-linked":</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>The page table maps logical pages to physical blocks</b>: one request's KV is physically scattered, the table reconciles it — blocks <strong>need not be adjacent</strong></div>
+  <div class="cells"><span class="lab">logical page 0</span><span class="cell hl">tok 0–15</span><span class="sep">→</span><span class="cell q">phys block #7</span></div>
+  <div class="cells"><span class="lab">logical page 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">phys block #2</span></div>
+  <div class="cells"><span class="lab">logical page 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">phys block #9</span></div>
+  <div class="cells"><span class="lab">logical page 3</span><span class="cell">tok 48–… (generating)</span><span class="sep">→</span><span class="cell q">grab a free block when the page fills</span></div>
+</div>
+
+<p>One often-missed tradeoff: <strong>smaller page_size is not always better</strong>. Smaller pages waste less internally (at most a fraction of a page), but the
+page table grows longer and table lookups / kernel indirection cost more; bigger pages address more cheaply but waste more on each request's <strong>last unfilled page</strong>.
+Common values are <span class="mono">1, 16, 32</span> and the like, decided by model/hardware tradeoffs — the classic "<strong>fragmentation vs overhead</strong>" balance.</p>
+
+<h2>In SGLang: the paged allocator and req_to_token</h2>
+<p>In SGLang this mechanism is carried by a <strong>paged token→KV allocator</strong>: it manages a whole pool of KV slots but hands them out <strong>with the "page" as the
+minimum unit</strong>. Paired with the KV pool from Lesson 4, a <span class="inline">req_to_token</span> map records <strong>each request's token → physical slot</strong> — the
+in-code incarnation of that "page table." Below is the allocator's skeleton: <strong>alloc takes pages, free returns pages</strong>, all at <span class="mono">page_size</span> granularity:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/allocator/paged.py ::PagedTokenToKVPoolAllocator</span><span class="ln">allocator/paged.py ::PagedTokenToKVPoolAllocator</span></div>
+  <pre><span class="kw">class</span> <span class="st">PagedTokenToKVPoolAllocator</span>(BaseTokenToKVPoolAllocator):
+    <span class="cm"># An allocator managing the indices to kv cache data; output is page-aligned</span>
+    <span class="kw">def</span> __init__(self, size, page_size, dtype, device, kvcache, need_sort):
+        super().__init__(size, page_size, dtype, device, kvcache, need_sort)
+        self.num_pages = size // page_size        <span class="cm"># total slots / page_size = #pages</span>
+
+    <span class="kw">def</span> alloc(self, need_size):
+        <span class="cm"># page-aligned allocation: return the physical indices of some pages</span>
+        num_pages = need_size // self.page_size
+        out_pages = self.free_pages[:num_pages]   <span class="cm"># take num_pages off the free list</span>
+        self.free_pages = self.free_pages[num_pages:]
+        out_indices = (out_pages[:, <span class="kw">None</span>] * self.page_size
+                       + torch.arange(self.page_size, device=self.device)).reshape(-1)
+        <span class="kw">return</span> out_indices                        <span class="cm"># expand to token-level slot indices</span>
+
+    <span class="kw">def</span> free(self, free_index):
+        <span class="cm"># on finish: dedup the page ids it held and return them in one batch</span>
+        free_page_indices = torch.unique(free_index // self.page_size)
+        self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<p>Read this and you grasp the essence of paging: <strong>HBM is no longer reserved wholesale per "request" but retailed per "page."</strong>
+<span class="inline">alloc</span> <strong>takes</strong> some pages off <span class="mono">free_pages</span>, then multiplies page ids by <span class="mono">page_size</span> and adds the
+in-page offset to <strong>expand into token slot indices</strong>; <span class="inline">free</span> divides those indices by page_size, dedups to page ids, and
+<strong>returns them in one batch</strong> when the request ends. Note the class comment "output is page-aligned" — it guarantees pages stay <strong>cleanly aligned and easy to
+reclaim</strong>, the physical basis for continuous batching's (Lesson 5) "free on finish, fill on arrival."</p>
+
+<h2>Why this is the springboard to Lesson 7</h2>
+<p>Paging's deepest significance isn't just saving HBM. Once KV is cut into <strong>fixed-size, page-table-indexed physical blocks</strong>, something magical becomes possible:
+<strong>different requests' page tables can point at the same physical block</strong>. Imagine two requests starting with the same system prompt — their first few pages of KV are
+<strong>byte-for-byte identical</strong>, so why store two copies? Just let both page tables <strong>point at that same set of physical pages</strong>. That's exactly what
+<strong>Lesson 7's RadixAttention prefix sharing</strong> does.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">Fixed pages + page table</div><div class="nd">This lesson: indexed by page, physically scattered</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">A page can be pointed at by many requests</div><div class="nd">freedom from the page-table indirection</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Share prefix KV</div><div class="nd">Lesson 7 RadixAttention</div></div>
+</div>
+
+<p>Place this lesson back on Part 2's throughline: Lesson 4 built the KV pool with per-slot management; Lesson 5 kept the batch full via continuous batching; this lesson uses
+<strong>paging</strong> to pack each slot <strong>tighter with less fragmentation</strong>, unshackling concurrency from "contiguous reservation"; Lesson 7 then follows the page-table
+indirection to make "<strong>can I reuse someone else's KV</strong>" real. Further on, more KV-cache internals and HiCache — tiering KV across HBM/host/disk — unfold in
+<strong>Lessons 29–32</strong>. Read on holding twelve words — "<strong>fixed pages, page-table indexed, allocate on demand, free when done</strong>" — and you'll see SGLang's
+memory system is built almost entirely on this foundation.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>The pain</strong>: reserving one <strong>contiguous</strong> HBM block per request sized for the max length causes both <strong>internal fragmentation</strong> (most requests never reach max, empty slots locked) and <strong>external fragmentation</strong> (freed gaps can't combine into a contiguous block), burning HBM and <strong>capping concurrency</strong>.</li>
+    <li><strong>PagedAttention</strong>: slice KV into <strong>fixed-size pages</strong> and use a <strong>page table</strong> to map <strong>logical position → physical block id</strong> (OS virtual memory / paging). <strong>Allocate on demand, free when done</strong>; physical blocks <strong>need not be contiguous</strong>, so fragmentation nearly vanishes.</li>
+    <li><strong>Why non-contiguous works</strong>: the attention kernel <strong>consults the page table, then gathers</strong> K/V from physical blocks, so a page can sit anywhere — the root of killing external fragmentation.</li>
+    <li><strong>In SGLang</strong>: <span class="mono">PagedTokenToKVPoolAllocator</span> does <span class="mono">alloc</span>/<span class="mono">free</span> at <span class="mono">page_size</span> granularity, with <span class="mono">req_to_token</span> recording each request's token→slot (the page table, building on Lesson 4's KV pool).</li>
+    <li><strong>Tradeoff &amp; forward look</strong>: small page_size means less fragmentation but more lookup overhead, large means the reverse. Paging makes <strong>different requests' page tables point at the same physical block</strong> possible — the springboard for <strong>Lesson 7's RadixAttention</strong> prefix sharing; KV internals and HiCache in <strong>Lessons 29–32</strong>.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why does 'reserving one contiguous HBM block per request, sized for the max length' waste so much HBM?</div>
+  <ol class="opts">
+    <li>It turns decode compute-bound and saturates the ALUs</li>
+    <li>It makes the model weights occupy more HBM</li>
+    <li>It causes both internal fragmentation (most requests never reach max length, so reserved empty slots are locked and unusable) and external fragmentation (scattered gaps left as requests come and go can't combine into one contiguous block)</li>
+    <li>It forces recomputing attention for every token, wasting compute</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Contiguous reservation sizes to the cap, but most requests run far shorter, so the leftover slots sit empty yet locked (internal fragmentation); as requests come and go, freed blocks of uneven sizes get wedged in between, and a new request needing one contiguous block can't assemble it (external fragmentation). Together they leave HBM 'full' before it's actually full, capping concurrency. It has nothing to do with weight size, recomputing attention, or decode's memory/compute nature.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. In PagedAttention, what lets a request's KV live in physically non-adjacent blocks while attention still computes correctly?</div>
+  <ol class="opts">
+    <li>Pages are so small that non-contiguity can't happen</li>
+    <li>All requests actually share one physical block, so position is irrelevant</li>
+    <li>A page table maps 'logical page → physical block id'; the attention kernel consults the table, then gathers K/V from the corresponding physical blocks, so blocks can sit anywhere and need not be contiguous</li>
+    <li>The hardware auto-defragments scattered blocks into a contiguous region every step</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Paging's core is the 'fixed pages + page table' indirection, just like OS virtual memory. Attention doesn't fetch by contiguous address; it consults the table for the physical block id, then gathers — so blocks can go anywhere, which is what kills external fragmentation and enables on-demand growth. Hardware does not auto-defragment; each request's pages are normally independent (unless Lesson 7's prefix sharing explicitly points page tables at the same block).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does paging pave the way for Lesson 7's RadixAttention prefix sharing?</div>
+  <ol class="opts">
+    <li>Paging forces every request to use the same fixed prefix</li>
+    <li>Paging moves the prefix cache into CPU memory</li>
+    <li>Paging halves KV size, so the saved space holds more prefixes</li>
+    <li>Once KV is fixed-size, page-table-indexed physical blocks, different requests' page tables can point at the same physical blocks — so identical prefixes (e.g. a shared system prompt) need only one KV copy, shared across requests</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The page-table indirection grants one freedom: many page tables can point at the same physical block. If two requests share a byte-identical prefix, their first pages of KV are identical, so instead of two copies you let both page tables point at the same physical pages — the physical basis for RadixAttention (Lesson 7) prefix sharing. It relies on neither compression nor forcing a common prefix, and is unrelated to moving to CPU (HiCache, Lessons 29–32).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Let page_size=16 and an HBM budget that holds KV for 1000 tokens. Compare the two layouts on 'how many requests can run at once': (a) each request reserves contiguously for max length 256; (b) paged on-demand allocation where each request actually generates ~40 tokens on average. Estimate the concurrency cap for each and pinpoint where the waste occurs.</li>
+    <li>Should page_size be large or small? From two ends — 'internal fragmentation (each request's last unfilled page)' and 'page-table length / kernel indirection overhead' — explain the tradeoff of choosing 1, 16, or 32; if your workload is many very short requests, which end would you lean toward, and why?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>RadixAttention & prefix caching</h1>
+
+<p class="lead">
+Last lesson's paging handed us a loaded capability: <strong>different requests' page tables can point at the same physical blocks</strong>.
+This lesson pushes that to the limit. Real traffic hides one constantly-overlooked fact — <strong>requests usually start out identical</strong>:
+the same system prompt, the same few-shot examples, the same agent scaffold, and in multi-turn chat <strong>every turn resends the entire history</strong>.
+Recomputing that shared opening's KV for every request and every turn is enormous waste. <strong>RadixAttention</strong>'s answer: store every
+request's KV in a <strong>radix tree</strong>, so a shared prefix is <strong>computed once and reused automatically, across requests and across turns</strong>.
+This is the core secret behind SGLang being "unreasonably fast" on real workloads.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a team's <strong>shared, continuously-extended "filing tree"</strong> — a bit like editor <strong>autocomplete</strong>. Many documents
+  open the same way: "<strong>Chapter 1, Company Overview…</strong>". The first author writes that opening into the tree as a few stored pages;
+  the next author whose document <strong>starts word-for-word the same</strong> needn't recopy a thing — walking down the tree, they find the path
+  "Chapter 1, Company Overview" already written and <strong>reuse those pages</strong>, branching off only where their text <strong>actually diverges</strong>
+  to add their own new pages. Whoever starts like someone else <strong>gets that part for free</strong>; only the <strong>divergence</strong> needs fresh ink.
+  That shared, collaboratively-extended filing tree is the spirit of RadixAttention.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>RadixAttention stores every request's KV in a radix tree (compressed prefix trie) keyed by the token-id sequence;
+  a new request matches the longest prefix down the tree, reuses the matched KV with zero recompute, and inserts its divergent suffix as a new branch.</strong>
+  The cache key is the <strong>token sequence itself</strong>, so sharing is <strong>fully automatic</strong> — no user hints, hitting across requests and across chat turns.
+  Leaves are evicted by <strong>LRU</strong> but protected by <strong>reference counting</strong>: KV in use by a running request is <strong>never evicted</strong>.
+  Tree nodes point at Lesson 6's <strong>paged physical blocks</strong> — sharing a prefix just means <strong>multiple paths share the same physical pages</strong>.
+</div>
+
+<h2>Real workloads share prefixes</h2>
+<p>First, see the waste clearly. Production requests are <strong>rarely isolated</strong>; their openings are highly identical, from roughly four sources:
+<strong>system prompts</strong> (every request carries the same few-hundred-token preamble), <strong>few-shot examples</strong> (the same demos prepended over and over),
+<strong>multi-turn chat</strong> (turn N resends all of turns 1..N−1 verbatim), and <strong>agent scaffolds</strong> (the same tool specs, format rules, persona up front).
+These openings run hundreds-to-thousands of tokens; <strong>recomputing their KV from scratch per request and per turn</strong> burns prefill compute <strong>in huge blocks on duplicate content</strong>.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Two requests share one long prefix</b>: the leading system prompt is token-identical (highlighted); only the tail diverges — the shared KV is <strong>computed once</strong> and reused by both</div>
+  <div class="cells"><span class="lab">Req A</span><span class="cell hl">You</span><span class="cell hl">are</span><span class="cell hl">a</span><span class="cell hl">helpful</span><span class="cell hl">assistant</span><span class="sep">|</span><span class="cell q">summarize this report</span></div>
+  <div class="cells"><span class="lab">Req B</span><span class="cell hl">You</span><span class="cell hl">are</span><span class="cell hl">a</span><span class="cell hl">helpful</span><span class="cell hl">assistant</span><span class="sep">|</span><span class="cell q">translate to French</span></div>
+  <div class="cells"><span class="lab">reuse</span><span class="cell hl">↑ shared prefix KV: prefill once, both requests point at the same physical pages ↑</span><span class="sep">|</span><span class="cell q">divergent suffixes computed separately</span></div>
+</div>
+
+<p>Tie this back to Lesson 6: because paging turned KV into <strong>fixed-size, page-table-indexed physical blocks</strong>, "two requests reuse a prefix" collapses to
+<strong>two tree paths pointing at the same physical pages</strong> — trivially cheap. And it saves more than memory: <strong>the prefill compute for that shared prefix is gone too</strong>.
+The higher the hit rate, the bigger the win — that's where RadixAttention's value comes from.</p>
+
+<h2>RadixAttention: store KV in a radix tree</h2>
+<p>The core structure is a <strong>radix tree</strong> (a.k.a. <strong>compressed prefix trie</strong>): the key is the <strong>token-id sequence</strong>,
+and each <strong>edge</strong> carries a run of consecutive tokens plus the corresponding <strong>KV blocks</strong>. A new request does just one verb — <strong>match down the tree</strong>:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>match_prefix: walk down the tree</h4><p>Use the request's token sequence as the key; from the root, compare edge by edge to find the <strong>longest cached prefix</strong>. The deeper the hit, the more KV is free.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Reuse the matched prefix KV</h4><p>The matched prefix's KV is <strong>reused with zero recompute</strong> — the attention kernel follows the nodes to the physical block indices, as if it always belonged to this request.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Insert the divergent suffix as a new branch</h4><p>Everything past the divergence point is <strong>unique</strong> to this request; <strong>insert it as a new branch</strong> and compute/allocate fresh KV blocks for it.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Split an edge at the divergence if needed</h4><p>If the match ends in the <strong>middle</strong> of an edge, <strong>split that edge in two</strong>: the front becomes a shared parent, the back and the new suffix each form a branch.</p></div></div>
+</div>
+
+<p><strong>Splitting an edge</strong> is the essence of a radix tree. Suppose the tree already holds <span class="mono">"You are a helpful assistant. Translate"</span>,
+and a new request only shares up to <span class="mono">"You are a helpful assistant. "</span> before diverging. No need to rebuild — just <strong>cut that long edge in two</strong> at the split:
+the common part becomes a <strong>shared ancestor</strong>; the leftover and the new suffix <strong>each hang off it</strong>. One cheap pointer operation lets two requests <strong>share down to the exact token boundary</strong>.</p>
+
+<h2>Automatic reuse across requests and turns</h2>
+<p>Because the cache key is the <strong>token sequence itself</strong>, sharing is <strong>fully automatic</strong>: hits happen not only across different requests but —
+even more so — <strong>between adjacent turns of one chat</strong>. Multi-turn works like this: turn N resends <strong>all prior turns verbatim</strong>, then appends the new question.
+So <strong>all KV of turns 1..N−1 is an already-cached prefix</strong>; match_prefix hits all the way to the end of history, and <strong>the engine only pays compute for the latest turn</strong>.
+The longer the chat, the longer the reused prefix, the bigger the savings.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">Turn 1</div><div class="nd">system prompt + Q1 prefilled, whole thing enters the tree</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Turn 2</div><div class="nd">resends "prompt+Q1+A1", prefix all hits, only Q2 computed</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Turn 3</div><div class="nd">longer prefix, more hits, pay only for the newest turn</div></div>
+</div>
+
+<p>And all of this needs <strong>no hints from the user</strong>: you never tell the engine "these two requests start the same" or "this is turn three of one chat".
+It takes the token sequence and <strong>one tree lookup tells it how much can be reused</strong>. This "works automatically, no cooperation required" property lets RadixAttention
+profit on <strong>any real traffic</strong> — the reason Lessons 1 and 3 keep naming it a signature SGLang feature. Paired with <strong>cache-aware scheduling</strong> (Lesson 20),
+the engine even actively groups same-opening requests together to push hit rates higher.</p>
+
+<h2>Why a tree, not a hash map — and how eviction works</h2>
+<p>You might ask: to check "do the openings match", couldn't a <strong>hash map</strong> from "whole prompt → KV" do it? <strong>Far from enough</strong>.
+Prefixes are <strong>hierarchical</strong>: requests A, B, C may share 100 tokens, of which A and B share 50 more. A hash map only knows <strong>whole-string equality</strong> —
+no <strong>longest-prefix match</strong>, no <strong>partial reuse</strong>, and no notion of "shared ancestor" or "cheap split". A radix tree is built for prefixes:</p>
+
+<table class="t">
+  <tr><th>Capability</th><th>Hash map (whole-string)</th><th>Radix tree (compressed trie)</th></tr>
+  <tr><td><strong>Matching</strong></td><td>only hits an <strong>exact</strong> whole string</td><td class="mono">walks down for <strong>longest-prefix match</strong></td></tr>
+  <tr><td><strong>Partial reuse</strong></td><td>same start, different end ⇒ <strong>full miss</strong></td><td class="mono">reuse as deep as it hits, <strong>token by token</strong></td></tr>
+  <tr><td><strong>Hierarchical sharing</strong></td><td>can't express a "shared ancestor"</td><td class="mono">common prefix is a <strong>shared parent</strong> naturally</td></tr>
+  <tr><td><strong>Divergence</strong></td><td>only adds a separate entry</td><td class="mono"><strong>cheaply splits an edge</strong> at the fork</td></tr>
+</table>
+
+<p>The cache fills up, so it needs <strong>eviction</strong>. RadixAttention evicts <strong>leaves by LRU</strong>: the least-recently-accessed leaf goes first, freeing physical blocks.
+But one <strong>iron rule</strong> applies — <strong>reference counting</strong>: each running request <strong>locks (lock_ref)</strong> the path it is using, and any node with
+<strong>refcount &gt; 0</strong> is <strong>never evicted</strong>. The reason is plain: a request is decoding against some prefix's KV right now; evict that KV and the request
+<strong>crashes on the spot</strong>. So eviction only touches <strong>leaves no running request references</strong> — safety and high hit rate at once.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">match the longest cached prefix down the radix tree</span></div>
+  <pre><span class="kw">def</span> match_prefix(self, params: MatchPrefixParams) -&gt; MatchResult:
+    <span class="cm"># Find the longest cached prefix of `key` in the radix tree.</span>
+    key = params.key
+    key, _ = key.maybe_to_bigram_view(self.is_eagle)
+
+    <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
+        <span class="kw">return</span> self._empty_match_result
+
+    key = key.page_aligned(self.page_size)        <span class="cm"># truncate to a multiple of page_size</span>
+
+    <span class="cm"># walk down the tree; get matched-prefix KV indices + terminal node</span>
+    value, last_node = self._match_prefix_helper(self.root_node, key)
+    <span class="kw">if</span> value:
+        value = torch.cat(value)                  <span class="cm"># concat matched KV index segments</span>
+    <span class="kw">return</span> MatchResult(
+        device_indices=value,                     <span class="cm"># reusable prefix KV indices (may be empty)</span>
+        last_device_node=last_node, last_host_node=last_node,
+        best_match_node=last_node,
+    )</pre>
+</div>
+
+<p>Read this and you've got RadixAttention's soul: <strong>one match_prefix computes exactly how much KV this request gets for free</strong>.
+The returned <span class="inline">device_indices</span> are the <strong>physical block indices of the reusable prefix</strong> — possibly length 0 (a brand-new request),
+possibly hitting all the way to the end of history (turn N of a chat). The docstring's note that a match ending inside a segment <strong>splits a node once</strong> is exactly the cheap split above.
+Stack this with Lesson 6's paging and Lesson 5's continuous batching and you see SGLang's three-layer memory foundation: <strong>per-slot (L4) → paged (L6) → prefix-shared (this lesson)</strong>.</p>
+
+<p>Back to the main thread: Lesson 4 built the KV pool, Lesson 5 kept the batch full, Lesson 6 packed it tight with paging — this lesson lets different requests and turns
+<strong>share the same prefix KV</strong>, killing <strong>both duplicate compute and duplicate storage</strong>. Later, <strong>cache-aware scheduling</strong> (Lesson 20) actively matches up
+same-opening requests to raise hit rates, and <strong>HiCache</strong>, which tiers the prefix cache <strong>across HBM/host/disk</strong>, comes in <strong>Lessons 29–32</strong>.
+Read on with this yardstick — <strong>the token sequence is the cache key; the longest prefix is reuse</strong> — and you'll find SGLang's real-traffic throughput nearly all springs from this humble radix tree.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Pain</strong>: real workloads heavily <strong>share prefixes</strong> — system prompts, few-shot examples, multi-turn chat (each turn resends all history), agent scaffolds. Recomputing that opening's KV per request/turn is huge waste.</li>
+    <li><strong>RadixAttention</strong>: store all KV in a <strong>radix tree (compressed prefix trie)</strong> keyed by token ids; <span class="mono">match_prefix</span> reuses the matched prefix KV with <strong>zero recompute</strong>, <strong>inserts</strong> the divergent suffix as a new branch, and <strong>splits an edge</strong> when the match ends mid-edge.</li>
+    <li><strong>Automatic</strong>: the cache key is the token sequence, so hits happen <strong>across requests and across chat turns</strong> with no user hints; tree nodes point at Lesson 6's <strong>paged physical blocks</strong>, sharing = many paths reusing the same pages.</li>
+    <li><strong>Eviction</strong>: leaves go by <strong>LRU</strong> but are guarded by <strong>reference counting</strong> — KV in use by a running request is <strong>never evicted</strong>, or that request would crash.</li>
+    <li><strong>Why a tree not a hash map</strong>: prefixes are <strong>hierarchical</strong>; a tree gives <strong>longest-prefix match, partial reuse, shared ancestors, cheap splits</strong>; a whole-string hash only knows exact equality and misses entirely when starts match but ends differ. Prereqs: paging (L6), KV cache (L4); extensions: cache-aware scheduling (L20), HiCache (L29–32).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. After a match_prefix hit, what exactly gets 'reused with zero recompute'?</div>
+  <ol class="opts">
+    <li>The model weights, saving the cost of reloading weights</li>
+    <li>The KV cache (physical block indices) of the matched prefix — the attention kernel follows the tree nodes to those already-computed K/V and treats them as part of this request, skipping that prefix's prefill compute</li>
+    <li>The previous request's final text, copied over as the new request's output</li>
+    <li>The sampling random seed, so both requests produce identical results</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. RadixAttention reuses the matched prefix's KV cache: tree edges carry token runs and their physical KV blocks, so on a hit those K/V need no recompute and attention gathers them directly, saving that prefix's prefill compute (and duplicate storage). It is not the weights, not the text output, and not the random seed.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does RadixAttention organize the prefix cache as a radix tree instead of a hash map from 'whole prompt → KV'?</div>
+  <ol class="opts">
+    <li>Because a tree compresses KV smaller, saving HBM</li>
+    <li>Because prefixes are hierarchical: a tree supports longest-prefix match, partial reuse, shared ancestors, and cheap edge splits, whereas a whole-string hash only knows exact equality — same start but different end means a full miss with no partial reuse</li>
+    <li>Because hash maps can't be implemented on a GPU</li>
+    <li>Because radix-tree lookup is always O(1), faster than a hash map</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The point is the hierarchy of prefixes: requests may share 100 tokens, and some of them more on top. A radix tree naturally supports longest-prefix match down the tree, token-by-token partial reuse, promoting a common prefix to a shared parent, and cheaply splitting an edge at the fork. A whole-string hash only tests exact equality and misses entirely when starts match but ends differ. It has nothing to do with GPU feasibility, complexity, or compression.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When the cache is full and must evict, why must RadixAttention's LRU eviction respect reference counts?</div>
+  <ol class="opts">
+    <li>Because reference counts determine the page_size</li>
+    <li>Because a running request locks the prefix path it is using (refcount > 0); evicting the prefix KV it is decoding against would crash that request, so eviction only touches leaves no running request references</li>
+    <li>Because reference counts automatically double the cache hit rate</li>
+    <li>Because without counting references, LRU can't tell which leaf is least-recently-used</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Eviction frees a node's physical KV blocks. But a request currently decoding depends every step on the KV along its prefix path; if that KV is evicted, attention reads invalid/overwritten data and the request crashes. Reference counting (lock_ref) exists for exactly this: running requests lock the path, nodes with refcount > 0 are never evicted, and LRU only touches unreferenced leaves. It is unrelated to doubling hit rate, LRU's recency test, or page_size.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using a 5-turn customer-support chat, explain how RadixAttention 'auto-reuses across turns': sketch what the turn-3 request's token sequence is composed of, point out which part match_prefix hits and what the engine actually computes anew, and explain why none of this needs any user hint.</li>
+    <li>The tree already holds an edge for the prefix 'You are a helpful assistant. Translate the following'; now a new request arrives that only shares up to 'You are a helpful assistant. ' before diverging into 'Summarize …'. Describe what match_prefix/insert does to the tree at this step (including the edge split), and state which node becomes the shared ancestor and what branches hang off it.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Throughput vs latency</h1>
+
+<p class="lead">
+From Lesson 4 to 7 we stacked tricks for "<strong>faster and cheaper</strong>": continuous batching keeps the GPU fed,
+paging packs HBM tightly, RadixAttention shares prefixes. But every one of these must answer one unavoidable question:
+do you want to <strong>serve the most requests per second</strong>, or <strong>return each request the fastest</strong>?
+You <strong>cannot max both</strong>. This lesson closes Part 2 and is the runtime's <strong>compass</strong> — only once you
+grasp the <strong>throughput vs latency</strong> balance does the scheduler (Lesson 18) make full sense.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a restaurant torn between two philosophies. First, <strong>"make every table fast"</strong>: seat a guest, serve
+  instantly, they leave — <strong>per-table wait is tiny</strong>, but the kitchen only handles a table or two at a time, so
+  <strong>total people fed per hour</strong> stays low. Second, <strong>"feed the most people"</strong>: gather a big group,
+  start a seating together, cook one big batch to amortize cost — <strong>hourly capacity</strong> is maxed, but any
+  <strong>single</strong> diner queues longer and waits for a bigger batch to finish. <strong>"Serve fast" is low latency,
+  "feed many" is high throughput</strong>, and the "how many per seating" knob <strong>sacrifices one end whichever way you turn it</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>throughput and latency are two ends of one curve, and batch size is the slider.</strong>
+  Bigger batches amortize the weight read and saturate the GPU ⇒ <strong>higher total throughput</strong>; but each request
+  waits behind more work and each step is heavier ⇒ <strong>higher per-request latency</strong>. Smaller batches flip it:
+  low latency, low throughput, idle GPU. <strong>No free lunch</strong> — you can only <strong>pick a point on the curve</strong>
+  for your <strong>SLA</strong>. SGLang's scheduler, memory pool, and chunked prefill are all tools to <strong>help you pick that point well</strong>.
+</div>
+
+<h2>Four metrics: pin down "fast" vs "many" first</h2>
+<p>Before trading off, you need <strong>measurable rulers</strong>. Serving has four core metrics, each <strong>dominated by a
+different bottleneck</strong>; telling them apart is the prerequisite for understanding any tuning:</p>
+
+<table class="t">
+  <tr><th>Metric</th><th>Meaning</th><th>Dominated by</th></tr>
+  <tr><td><strong>TTFT</strong><br><span class="mono">time to first token</span></td><td>From arrival to the <strong>first</strong> token emitted</td><td class="mono">prefill compute + <strong>queueing</strong> (work ahead in queue)</td></tr>
+  <tr><td><strong>ITL / TPOT</strong><br><span class="mono">inter-token latency</span></td><td>Gap between <strong>adjacent</strong> output tokens (time per output token)</td><td class="mono"><strong>decode batch size</strong> + memory bandwidth (bigger ⇒ slower step)</td></tr>
+  <tr><td><strong>Throughput</strong><br><span class="mono">tokens/sec</span></td><td>Tokens/sec produced across <strong>all</strong> requests</td><td class="mono">GPU saturation; is the batch big and full</td></tr>
+  <tr><td><strong>Goodput</strong><br><span class="mono">SLA-meeting tput</span></td><td>Only the throughput that <strong>meets the SLA</strong> counts</td><td class="mono"><strong>joint result</strong> of throughput and latency</td></tr>
+</table>
+
+<p>The table hides the key contrast: <strong>TTFT is set by prefill and queueing; ITL is set by decode batch size.</strong>
+Why split so finely? Their enemies differ — TTFT fears a <strong>long queue</strong> or one giant prompt blocking everyone;
+ITL fears a <strong>batch so big</strong> that each step drags. A system that crushes TTFT (small batch, serve now) may have
+poor ITL and throughput; one with sky-high throughput (gather, then send) may have ugly TTFT. <strong>Goodput</strong> matters
+because it forces you to watch both ends: however high throughput is, if half the requests violate the latency SLA, that
+throughput is <strong>worthless to users</strong>. What you truly maximize is <strong>throughput under the SLA</strong>.</p>
+
+<h2>The core tension: one knob, batch size, can't win both ends</h2>
+<p>All the agonizing converges onto <strong>one knob — batch size (requests running concurrently)</strong>. Turn it from small
+to large and the operating point slides along the curve, <strong>throughput and latency trading off</strong>:</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">Tiny batch</div><div class="nd">Lowest latency (light step, served now)<br>but low throughput, <strong>GPU idles a lot</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">SLA point</div><div class="nd">Grow the batch <strong>as large as the latency SLA allows</strong> ⇒ <strong>max goodput</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Huge batch</div><div class="nd">Max throughput (weight read amortized, GPU saturated)<br>but <strong>per-request latency spikes</strong>, may break SLA</div></div>
+</div>
+
+<p>Why do big batches <strong>raise throughput</strong>? Back to Lessons 4–5: decode is memory-bound, and the cost of reading
+weights once is <strong>nearly the same for 1 request or 100</strong>; a bigger batch amortizes that fixed cost thinner, yielding
+more useful tokens per unit of compute and pushing the GPU toward full load. Why do big batches <strong>hurt latency</strong>?
+Because one decode step now computes for <strong>more</strong> requests, so the <strong>step takes longer</strong> (ITL rises),
+and a new request waits behind <strong>more work</strong> before its turn (<strong>TTFT lengthens</strong>). That's the balance —
+<strong>the same move that feeds throughput slows each request</strong>. So there is no universal "optimal batch size",
+<strong>only the optimal operating point for your SLA</strong>.</p>
+
+<h2>Different loads, different balancing tools</h2>
+<p>Real traffic isn't one shape. <strong>Prefill-heavy</strong> (long prompt, short output, e.g. doc QA) and <strong>decode-heavy</strong>
+(short prompt, long output, e.g. long-form generation) pull the balance in different directions and need different tools:</p>
+
+<div class="cols">
+  <div class="col"><h4>Chunked prefill (Lesson 22)</h4><p>One <strong>giant prompt</strong>'s prefill can hog a whole step and stall
+  everyone's decode — showing up as a <strong>sudden latency spike</strong> (ITL jitter). Chunked prefill <strong>slices</strong>
+  the long prefill and interleaves it with decode steps, so neither throughput nor latency <strong>collapses over one long request</strong>.</p></div>
+  <div class="col"><h4>PD disaggregation (Lesson 45)</h4><p>Prefill and decode have different bottlenecks (compute- vs memory-bound).
+  <strong>PD disaggregation</strong> splits the two stages onto <strong>separate GPU pools</strong>, each batched and tuned
+  independently — prefill chases throughput, decode protects latency, <strong>without dragging each other</strong>.</p></div>
+</div>
+
+<h2>SGLang's knobs: how you pick a point on the curve</h2>
+<p>This theory lands as a few concrete <span class="inline">server_args</span> knobs in SGLang, plus the scheduler's
+<strong>queue policy</strong>. Together they decide where your operating point sits on the curve:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>SGLang's main latency/throughput knobs</b>: each pushes the operating point toward "throughput" or "latency"</div>
+  <div class="cells"><span class="lab mono">max_running_requests</span><span class="cell hl">concurrency cap</span><span class="sep">→</span><span class="cell q">Larger ⇒ bigger batch, tput↑, latency↑; smaller flips it (caps the batch directly)</span></div>
+  <div class="cells"><span class="lab mono">mem_fraction_static</span><span class="cell hl">HBM share for KV pool</span><span class="sep">→</span><span class="cell q">More ⇒ KV pool holds more tokens ⇒ higher concurrency fits ⇒ tput↑ (less HBM left for activations/graphs)</span></div>
+  <div class="cells"><span class="lab mono">chunked_prefill_size</span><span class="cell hl">prefill chunk size</span><span class="sep">→</span><span class="cell q">Smaller ⇒ long prompts stall decode less ⇒ latency spikes↓ (tput slightly lower)</span></div>
+  <div class="cells"><span class="lab">schedule policy (Lesson 20)</span><span class="cell">queue order</span><span class="sep">→</span><span class="cell q">Decides who in the waiting queue goes first, balancing <strong>fairness / latency / cache hit</strong></span></div>
+</div>
+
+<p>The link between <span class="inline">mem_fraction_static</span> and concurrency is worth spelling out: how much HBM it carves
+for the <strong>KV cache pool</strong> directly sets <strong>how many tokens fit at once</strong> (recall Lesson 4), hence the
+<strong>ceiling on concurrency</strong> — a larger KV pool fits more requests, allows bigger batches, raises throughput; but HBM
+is <strong>zero-sum</strong>, so more for KV means less for activations and CUDA Graphs. And <strong>who gets admitted from the
+waiting queue</strong> is decided by the schedule policy. Below is SGLang's entry point that <strong>prioritizes</strong> the
+waiting queue — called every schedule step to order "who to serve first this step":</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_policy.py ::SchedulePolicy.calc_priority</span><span class="ln">orders the waiting queue this step</span></div>
+  <pre><span class="kw">class</span> SchedulePolicy:
+    <span class="cm"># …order the requests in waiting_queue per the active policy…</span>
+
+    <span class="kw">def</span> calc_priority(
+        self, waiting_queue: List[Req], running_batch: Optional[ScheduleBatch] = <span class="kw">None</span>
+    ) -&gt; <span class="kw">None</span>:
+        policy = self._determine_active_policy(waiting_queue)
+
+        <span class="kw">if</span> self.policy == CacheAgnosticPolicy.FCFS:
+            <span class="kw">if</span> self.enable_priority_scheduling:
+                SchedulePolicy._sort_by_priority_and_fcfs(
+                    waiting_queue, self.priority_sign
+                )
+            <span class="kw">return</span></pre>
+</div>
+
+<p>Read this and you've grabbed the balance's <strong>handle</strong>: <span class="inline">calc_priority</span> produces no tokens —
+it only decides <strong>who sits at the front of the waiting queue</strong>, which directly shapes each request's <strong>TTFT</strong>,
+cache hits, and overall goodput. Put it alongside the knobs above and you hold the full toolkit for <strong>picking a point on the
+throughput-latency curve</strong>: the knobs set how big the batch and concurrency can be, the policy sets <strong>who gets loaded
+first</strong>. This is exactly why Part 5's scheduler exists — <strong>it is built to make that optimal choice on the curve for you</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Four metrics</strong>: TTFT (first token, set by prefill+queueing), ITL/TPOT (inter-token gap, set by decode batch size), Throughput (tokens/sec across all requests), Goodput (the throughput that meets the SLA).</li>
+    <li><strong>Core tension</strong>: bigger batch ⇒ amortized weight read, saturated GPU ⇒ tput↑, but each request waits longer and each step is heavier ⇒ latency↑. Smaller flips it. <strong>No free lunch — pick the operating point by SLA.</strong></li>
+    <li><strong>Load-dependent</strong>: prefill-heavy vs decode-heavy pull differently; chunked prefill (Lesson 22) stops long prompts from causing latency spikes, PD disaggregation (Lesson 45) tunes each stage independently.</li>
+    <li><strong>SGLang knobs</strong>: <span class="mono">max_running_requests</span> (concurrency cap), <span class="mono">mem_fraction_static</span> (KV-pool HBM ⇒ how much concurrency fits), <span class="mono">chunked_prefill_size</span>; schedule policy (Lesson 20) orders the queue.</li>
+    <li><strong>Closing Part 2</strong>: this lesson ends Part 2 and shows that <strong>the scheduler (Lesson 18) exists</strong> to navigate this very curve for you. Prereqs: continuous batching (Lesson 5), KV concurrency (Lesson 4).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What mainly dominates a request's TTFT (time from arrival to the first token)?</div>
+  <ol class="opts">
+    <li>The prefill compute, plus its queueing time in the waiting queue (how much work is ahead of it)</li>
+    <li>The value of the sampling temperature</li>
+    <li>The total bytes of model weights, independent of any queueing</li>
+    <li>The decode-stage batch size — bigger batch means a faster first token</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. TTFT is the time to first token: a request must be scheduled in and finish its prompt's prefill before emitting token one. So it is set by two things — the prefill compute itself, and how long it queued (more work ahead ⇒ longer queue ⇒ larger TTFT). Decode batch size governs ITL, not TTFT; weight bytes and temperature are not the drivers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does enlarging the batch (concurrent requests) raise total throughput yet also increase per-request latency?</div>
+  <ol class="opts">
+    <li>Because throughput and latency are unrelated, so a bigger batch improves both</li>
+    <li>Because a big batch automatically lowers model precision, making it both faster and cheaper</li>
+    <li>Because decode is memory-bound: reading weights once costs nearly the same for 1 or 100 requests, so a big batch amortizes that fixed cost (tput↑); but one step now computes for more requests and newcomers queue behind more work (heavier step, longer queue ⇒ latency↑)</li>
+    <li>Because a big batch gives each request its own dedicated GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. This is the core tension: decode is memory-bound, so the fixed cost of reading weights barely depends on how many requests share the batch; a bigger batch amortizes it thinner and saturates the GPU ⇒ tput↑. But one decode step now forwards more requests (longer step ⇒ ITL↑) and newcomers wait behind more work (TTFT↑), so per-request latency rises. No free lunch — pick the point by SLA. The other options misstate the mechanism.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. In SGLang, what do raising mem_fraction_static and raising max_running_requests each mainly buy you?</div>
+  <ol class="opts">
+    <li>mem_fraction_static gives the KV pool more HBM ⇒ more tokens fit ⇒ raises the concurrency ceiling; max_running_requests directly lifts the concurrency cap ⇒ bigger batch. Both push the point toward high throughput (and higher latency), and more KV leaves less HBM for activations/CUDA Graphs</li>
+    <li>Both only affect logging verbosity, unrelated to performance</li>
+    <li>mem_fraction_static controls the learning rate, max_running_requests controls batch precision</li>
+    <li>Both reduce throughput in exchange for lower latency</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. How much HBM mem_fraction_static carves for the KV cache pool sets how many tokens fit at once, raising the concurrency ceiling (more requests ⇒ bigger batch ⇒ tput↑); but HBM is zero-sum, so more for KV leaves less for activations and CUDA Graphs. max_running_requests is the hard cap on concurrency, directly bounding batch size. Both push the operating point toward high throughput while raising latency — exactly the act of picking a point on the curve.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Define TTFT, ITL/TPOT, throughput, and goodput each in one sentence, and state what mainly dominates each. Then explain: why can a system with very high throughput still have low goodput? Give a concrete scenario where this happens.</li>
+    <li>Your service has an SLA of 'TTFT < 300ms', but to chase throughput you set max_running_requests very large, causing some requests to blow past the TTFT bound. Describe how you would re-pick a point on the throughput-latency curve (touching at least two of max_running_requests, mem_fraction_static, chunked_prefill_size), and explain how chunked prefill (Lesson 22) helps hold the SLA when a long prompt triggers a latency spike.</li>
   </ul>
 </div>
 </div>
