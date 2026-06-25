@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>17 · Detokenizer 与流式输出 / Detokenizer &amp; streaming - SGLang 图解教程</title>
+<meta name="description" content="第四部分 · 服务入口与编排｜Detokenizer 与流式输出 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="17 · Detokenizer 与流式输出 / Detokenizer &amp; streaming - SGLang 图解教程">
+<meta property="og:description" content="第四部分 · 服务入口与编排｜Detokenizer 与流式输出 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="17 · Detokenizer 与流式输出 / Detokenizer &amp; streaming - SGLang 图解教程">
+<meta name="twitter:description" content="第四部分 · 服务入口与编排｜Detokenizer 与流式输出 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></span>
+    <span class="pill">17 / 17</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></div>
+    <h1><span class="lang-zh">Detokenizer 与流式输出</span><span class="lang-en">Detokenizer &amp; streaming</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+第 14 课讲了运行时的<strong>入口</strong>——TokenizerManager 把人类文本变成 token id 送进 GPU。
+这一课讲<strong>出口</strong>：GPU 一个个吐出来的 token id，怎样变回人类能读的文字，再像打字机一样
+<strong>一段一段</strong>流回客户端。负责这件事的，是一个独立的子进程——<strong>DetokenizerManager（反分词器）</strong>。
+它是整条链路上<strong>最后一个会说人话的组件</strong>，也是 Part 4 的收尾。读懂它，你就完整走完了一条请求<strong>从文本进、到文本出</strong>的全程。
+</p>
+
+<p>为什么单独开一进程、单独讲一课？因为把 token id 拼回文本，远不是“查个词表”那么简单。
+它要解决两个真正棘手的问题：一是<strong>增量</strong>——每一步只该把<strong>新增的那一小段</strong>发出去，
+而不是把整段已生成的文本重新解码、重新发一遍；二是<strong>多字节边界</strong>——一个 token 可能只解码出半个汉字、
+半个 emoji，必须<strong>攒够一个完整字符</strong>再吐，绝不能把半个字符喂给屏幕。把这两件事彻底想透，你就懂了
+为什么流式输出看起来那么自然顺滑，背后却需要一套精巧而严密的<strong>偏移量记账</strong>。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把反分词器想成一位<strong>同声传译</strong>。讲者（GPU）滔滔不绝地往外蹦词，传译每隔几秒开口一次——
+  但他<strong>只说“上次开口之后新冒出来的那几个词”</strong>，绝不会把整段演讲从头再复述一遍（那是 <span class="mono">sent_offset</span> 在记“说到哪了”）。
+  更妙的是：当一个音节只说了一半时，他会<strong>先憋住</strong>，等这个词完整了再出声——绝不蹦出半个音节
+  （这正是“不完整 token 要先攒着”的处理）。于是听众耳朵里听到的，永远是<strong>连贯、完整、只增不重</strong>的句子。
+  反分词器干的，正是这位传译的活：<strong>只发新增、攒满才发、按号交付</strong>。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  回忆第 2 课的<strong>三进程模型</strong>：分词在主进程、调度+前向在调度器子进程、<strong>反分词在反分词器子进程</strong>。
+  调度器每跑完一步，就把这一批请求<strong>新生成的 token id</strong> 打包成 <span class="mono">BatchTokenIDOutput</span>（第 16 课）
+  发给反分词器；反分词器把 id 解码成文本，再打包成 <span class="mono">BatchStrOutput</span> 发回 <strong>TokenizerManager</strong>（第 14 课），
+  由它按 <span class="mono">rid</span> 投回正在 <span class="mono">await</span> 的协程，最终以 <strong>SSE</strong> 流给 HTTP 客户端。
+  之所以让反分词单独占一个进程，是因为它是<strong>纯 CPU 的字符串活</strong>——可以和 GPU 的前向循环<strong>重叠</strong>起来，
+  互不等待（零开销思想，第 21 课）。
+</div>
+
+<h2>它在哪：运行时的最后一道门</h2>
+<p>反分词器是这条流水线的<strong>出口闸门</strong>。它<strong>只认 token id，绝不碰 GPU</strong>：输入是调度器送来的一批批
+新 token，输出是一段段可读文本。它和分词器恰好镜像——一个把文本拆成数字（进），一个把数字拼回文本（出）。
+注意它把结果发回的是 <strong>TokenizerManager</strong> 而不是客户端：因为只有 TokenizerManager 那张
+<span class="mono">rid_to_state</span> 表知道“这个 rid 对应哪个正在等待的协程、该怎么 <span class="mono">yield</span> 给上层的 SSE”。</p>
+
+<p>这里还有一个容易被忽略的对称之美：分词器与反分词器是同一枚硬币的两面，却<strong>各自独立、互不知情</strong>。
+分词器在主进程把人类文本压成数字，反分词器在另一个子进程把数字还原成人类文本，两者之间隔着整条 GPU 流水线，
+靠的全是 <span class="mono">rid</span> 这枚“身份证”把进与出对上号。也正因为反分词器只在出口侧工作、不参与采样与前向，
+它可以做得非常<strong>轻、纯、可独立重启</strong>——万一它崩了，运行时甚至能在不影响 GPU 前向的前提下把它拉起来重连。
+把“面向人类文本的脏活”收束在进出两端的两个 CPU 进程里，正是这套架构清爽好维护的关键。</p>
+
+<p>把这条出口链路顺一遍：<strong>调度器</strong>（子进程）前向算完、吐出本步新生成的 token id；
+<strong>DetokenizerManager</strong>（子进程）把 id 解码成文本、做增量切片；切好的片段回到主进程的
+<strong>TokenizerManager</strong>，按 <span class="mono">rid</span> 投回正在等待的协程；最终以 <strong>SSE</strong>
+逐段流给 <strong>HTTP 客户端</strong>，呈现“打字机”式的逐字浮现。四个环节、三道进程边界，全靠 <span class="mono">rid</span> 串成一条闭环。</p>
+
+<h2>增量反分词：sent_offset 的妙处</h2>
+<p>这是本课<strong>最核心</strong>、也最容易被忽略的一环。最朴素的做法是：每一步都把<strong>到目前为止的全部 token</strong>
+解码成完整文本，整段发给客户端。这看似简单，却有两个致命问题：第一，每步都重发整段，传输量随长度<strong>平方级</strong>膨胀
+（O(n²)）；第二，客户端会反复收到<strong>重复</strong>的前缀，得自己去算“哪部分是新的”。</p>
+
+<p>正确做法是<strong>增量</strong>：每条请求维护一个偏移量 <span class="mono">sent_offset</span>，记录“已经发出去到哪个字符了”。
+每一步解码出当前的完整文本 <span class="mono">output_str</span> 后，<strong>只截取新增的那一小段</strong>
+<span class="mono">output_str[sent_offset:]</span> 发出去，然后把 <span class="mono">sent_offset</span> 推进到
+<span class="mono">len(output_str)</span>。下一步再来，又只发新的尾巴。这样每个字符<strong>只过线一次</strong>，传输量是线性的。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>收到新 token id</h4><p>调度器送来本步新生成的 token id（随 <span class="mono">BatchTokenIDOutput</span>，第 16 课），追加到该请求已有的 id 序列。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>解码出完整文本</h4><p>把当前 id 序列解码，得到到目前为止的完整文本 <span class="mono">output_str</span>（含多字节边界处理）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>只切新增片段</h4><p>取 <span class="mono">incremental = output_str[sent_offset:]</span>——只要上次发送之后<strong>新冒出来</strong>的那一小段。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>推进偏移量</h4><p><span class="mono">sent_offset = len(output_str)</span>，记下“已发到这”，保证下一步不会重复发送已发过的字符。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>打包成 SSE 片段</h4><p>新增片段随 <span class="mono">BatchStrOutput</span> 回到 TokenizerManager，再以一个 SSE chunk 流给客户端——这就是“打字机”效果。</p></div></div>
+</div>
+
+<p>把这套记账想象成一支<strong>不断右移的游标</strong>：游标左边是“已经交付、不再触碰”的历史，游标右边是“刚长出来、待交付”的新文本。
+每一步，反分词器先把游标右边的新文本切下来发走，再把游标推到文本末尾。于是无论生成多长，<strong>已发送的部分永远不会被重新计算或重新传输</strong>，
+这就是增量相对全量在工程上的根本胜利。源码里这枚游标就叫 <span class="mono">sent_offset</span>，它被存在每条请求的解码状态 <span class="mono">DecodeStatus</span> 里，
+和 <span class="mono">rid</span> 一一对应——成百上千条请求并发流式时，<strong>每条都有自己独立的游标</strong>，谁也不会串到谁的进度。</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ 每步全量重解码</h4><p>每步都解码全部 token 并发送整段文本。客户端反复收到重复前缀，传输量随长度<strong>平方膨胀（O(n²)）</strong>，长输出时尤其浪费，还把“算新增”的负担甩给客户端。</p></div>
+  <div class="col"><h4>✅ 增量切片（sent_offset）</h4><p>每步只发 <span class="mono">output_str[sent_offset:]</span> 这一小段新文本，并推进偏移量。每个字符<strong>只过线一次</strong>，传输量线性，客户端直接拼接即可，天然适配 SSE 流。</p></div>
+</div>
+
+<h2>多字节边界：为什么要先攒着</h2>
+<p>增量切片还有个隐藏难点：<strong>一个 token 不等于一个字符</strong>。一个汉字、一个 emoji 往往要好几个字节、
+有时跨好几个 token 才能拼完整。如果某一步解码出的尾部是<strong>不完整的 UTF-8 序列</strong>（半个汉字、坏掉的 emoji），
+直接发出去，客户端屏幕上就会闪出一个乱码方块 <span class="mono">�</span>。所以反分词器必须<strong>把还不构成完整字符的字节先扣住</strong>，
+等下一步更多 token 到来、拼成完整字符后再吐。下面这张表展示 <span class="mono">sent_offset</span> 如何随步推进，
+并在出现半个字符时<strong>按兵不动</strong>：</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>sent_offset 随步推进：高亮的是这一步<strong>新发出</strong>的片段</b></div>
+  <div class="cells"><span class="lab">第 1 步</span><span class="cell">output_str=<span class="mono">"你好"</span></span><span class="sep">→</span><span class="cell hl">发 "你好"</span><span class="q">sent_offset: 0 → 2</span></div>
+  <div class="cells"><span class="lab">第 2 步</span><span class="cell">尾部是半个字符</span><span class="sep">→</span><span class="cell">扣住不发</span><span class="q">sent_offset 不动: 2</span></div>
+  <div class="cells"><span class="lab">第 3 步</span><span class="cell">output_str=<span class="mono">"你好世界"</span></span><span class="sep">→</span><span class="cell hl">发 "世界"</span><span class="q">sent_offset: 2 → 4</span></div>
+  <div class="cells"><span class="lab">第 4 步</span><span class="cell">output_str=<span class="mono">"你好世界！"</span></span><span class="sep">→</span><span class="cell hl">发 "！"</span><span class="q">sent_offset: 4 → 5</span></div>
+</div>
+
+<p>这也解释了为什么 <span class="mono">sent_offset</span> 在“扣住半个字符”的那一步<strong>不能推进</strong>：偏移量代表“已经安全交付的边界”，
+而半个字符还没构成可显示的内容，自然不能算进“已交付”。等下一步 token 补齐了这个字符，反分词器会把从旧偏移量到新边界之间<strong>完整冒出来的那一段</strong>
+一次性发走，再推进游标。换句话说，<strong>偏移量只会停在完整字符的边界上</strong>，永远不会卡在一个字符的中间——这正是“绝不流出半个汉字、半个 emoji”的底层保证。
+理解了这一点，你就能体会到：流式输出顺滑的表象之下，是一套对<strong>字符边界</strong>极其小心的字节级记账。</p>
+<p>流式输出总要有个尽头。一条请求的生成会在三种情况下停下，反分词器/调度器据此在<strong>停止边界</strong>处把输出裁齐
+（采样与停止细节见第 28 课）：</p>
+
+<table class="t">
+  <tr><th>停止条件</th><th>含义</th><th>对输出的影响</th></tr>
+  <tr><td class="mono">EOS token</td><td>模型生成了序列结束符（end-of-sequence）</td><td>自然收尾，本条请求结束流式</td></tr>
+  <tr><td class="mono">stop string</td><td>命中用户指定的停止字符串（如 "\n\n"）</td><td>在匹配处<strong>裁掉</strong>停止串及其后内容</td></tr>
+  <tr><td class="mono">max_new_tokens</td><td>达到本条请求允许的最大新生成 token 数</td><td>强制截断，发出最后一段后结束</td></tr>
+</table>
+
+<p>为什么要在收尾时专门“裁齐”？因为<strong>停止串本身不应该出现在最终输出里</strong>。设想你设了停止串 <span class="mono">"\n\n"</span>，
+模型一旦生成出它，就说明“该停了”，但这两个换行只是<strong>触发信号</strong>，不是用户想要的内容；若原样发给客户端，就会在答案末尾拖出一截多余的空行。
+所以反分词器在物化完整文本后，用 <span class="mono">trim_matched_stop</span> 把<strong>匹配到的停止串及其之后</strong>统统切掉，只保留干净的正文。
+EOS 则相反——它是一个<strong>特殊 token</strong>，本就不会被解码成可见字符，所以无需额外裁剪，自然消失。这种“按停止原因区别处理”的细节，
+正是让最终输出既<strong>恰好停在该停的地方</strong>、又<strong>不带任何控制噪声</strong>的关键。</p>
+
+<p>还要厘清一个常见误解：<strong>停止判定本身不在反分词器做</strong>。是调度器在采样那一步（第 28 课）判断“这条请求该不该停、为什么停”，
+把 <span class="mono">finished_reasons</span> 随 <span class="mono">BatchTokenIDOutput</span> 一起告诉反分词器；反分词器只负责<strong>据此把文本裁齐并收尾</strong>。
+这又是一次清爽的职责分离：<strong>调度器决定“停不停”，反分词器决定“怎么把停的那一刻的文本交付干净”</strong>，两者各司其职，互不越界。
+这又是一次清爽的职责分离：把“做决定”和“干脏活”拆到不同组件，每一块都能保持简单、可测、可独立替换，这种模式在 SGLang 里随处可见。</p>
+
+<p>当生成结束时，反分词器会<strong>物化</strong>这条请求的完整文本、调用 <span class="mono">trim_matched_stop</span> 把停止串裁掉，
+再发出最后那一段尾巴（同样只发 <span class="mono">output_str[sent_offset:]</span>），然后清理掉这条请求的解码状态。
+而把每一段新增片段<strong>变成 SSE 流</strong>的，是 TokenizerManager：它用 <span class="mono">StreamingResponse</span>、
+<span class="mono">media_type="text/event-stream"</span>，把每个 chunk 作为一条 <strong>Server-Sent Events</strong> 推给浏览器——
+这就是你看到文字“一个个蹦出来”的打字机体验，也是大模型聊天界面那种逐字浮现的手感的真正来源。下面是反分词器增量逻辑的真实骨架：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/detokenizer_manager.py ::DetokenizerManager</span><span class="ln">增量切片：output_str[sent_offset:] + 推进 offset</span></div>
+  <pre><span class="cm"># 每条请求的解码状态里记着一个 sent_offset</span>
+<span class="kw">class</span> DecodeStatus:
+    decoded_text: str
+    sent_offset: int = <span class="st">0</span>   <span class="cm"># 已发送到的字符位置</span>
+
+<span class="cm"># 生成结束：物化完整文本、裁掉停止串、只发尾巴</span>
+output_str = self.trim_matched_stop(
+    s.get_decoded_text() + new_text,
+    recv_obj.finished_reasons[i],
+    recv_obj.no_stop_trim[i],
+)
+incremental_output = output_str[s.sent_offset :]  <span class="cm"># 只切新增片段</span>
+s.sent_offset = len(output_str)                   <span class="cm"># 推进偏移量</span>
+output_strs.append(incremental_output)</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>出口 / 独立子进程</strong>：DetokenizerManager 是运行时的出口，跑在<strong>自己的子进程</strong>里（第 2 课三进程模型），只认 token id、绝不碰 GPU。</li>
+    <li><strong>消息往返</strong>：调度器发来 <span class="mono">BatchTokenIDOutput</span>（新 token id），反分词器解码后回 <span class="mono">BatchStrOutput</span>（第 16 课）给 TokenizerManager（第 14 课），再按 <span class="mono">rid</span> 投回协程。</li>
+    <li><strong>增量是关键</strong>：每条请求记 <span class="mono">sent_offset</span>，每步只发 <span class="mono">output_str[sent_offset:]</span> 再推进偏移量；避免全量重发的 O(n²) 与重复前缀。</li>
+    <li><strong>多字节边界</strong>：半个汉字/坏 emoji 等不完整 UTF-8 要<strong>先扣住</strong>，攒成完整字符再吐，绝不流出半个字符。</li>
+    <li><strong>停止与 SSE</strong>：EOS / 停止串 / max_new_tokens 三选一收尾（第 28 课）；TokenizerManager 用 <span class="mono">StreamingResponse</span> 把每段变成 SSE “打字机”。独立成进程是为了和 GPU 重叠（零开销，第 21 课）。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 反分词器每跑一步都把<strong>到目前为止的全部 token</strong> 解码成整段文本、整段发给客户端——这种做法的根本问题是什么？正确做法又是什么？</div>
+  <ol class="opts">
+    <li>没有问题，全量重发最简单也最快，无需优化</li>
+    <li>问题在于 token id 不够多，应该等全部生成完再一次性发</li>
+    <li>全量重发让传输量随长度<strong>平方膨胀（O(n²)）</strong>，且客户端反复收到重复前缀；正确做法是<strong>增量</strong>：每条请求记一个 <code>sent_offset</code>，每步只发新增片段 <code>output_str[sent_offset:]</code> 再推进偏移量，每个字符<strong>只过线一次</strong></li>
+    <li>问题在于解码太慢，应该改用 GPU 来做反分词</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。朴素的“每步整段重发”有两个致命缺陷：传输量 O(n²) 平方膨胀，且重复前缀把“算新增”的负担甩给客户端。增量切片用 <code>sent_offset</code> 记“已发到哪”，每步只截 <code>output_str[sent_offset:]</code> 这一小段再推进偏移量，传输量线性、客户端直接拼接，天然适配 SSE 流。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 某一步解码后，文本尾部正好是<strong>半个汉字</strong>（不完整的 UTF-8 序列）。反分词器应该怎么做？为什么？</div>
+  <ol class="opts">
+    <li>丢弃这半个字符，继续解码后面的 token</li>
+    <li><strong>先把这半个字符扣住、不发</strong>，<code>sent_offset</code> 暂不推进，等下一步更多 token 到来拼成完整字符再吐——否则客户端屏幕会闪出乱码方块 <code>�</code>，流出半个字符</li>
+    <li>立刻终止这条请求的生成，报 UTF-8 错误</li>
+    <li>直接把半个字符发出去，客户端会自动修复乱码</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。一个 token ≠ 一个字符：汉字、emoji 常跨多个字节甚至多个 token。若把不完整 UTF-8 直接发出，屏幕会出现 <code>�</code>。所以反分词器必须把还不构成完整字符的字节<strong>先攒着</strong>，等拼成完整字符再发——这正是流式输出看起来顺滑、绝不蹦半个字的原因。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么 SGLang 要把反分词单独放进一个<strong>子进程</strong>，而不是在调度器或主进程里顺手做掉？</div>
+  <ol class="opts">
+    <li>因为反分词需要直接访问 GPU 显存，必须独立进程</li>
+    <li>因为反分词是<strong>纯 CPU 的字符串活</strong>，放进独立进程才能和 GPU 的前向循环<strong>重叠</strong>、互不等待（零开销思想，第 21 课）；这也呼应第 2 课的三进程模型——分词/调度+前向/反分词各占一进程</li>
+    <li>因为子进程比主进程拥有更高的 CPU 优先级</li>
+    <li>纯粹是历史遗留，没有实际意义</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。反分词把 token id 拼回文本是 CPU 密集的字符串工作，和 GPU 矩阵乘毫无关系。若塞进 GPU 进程，CPU 在拼字符串时 GPU 只能干等。拆成独立子进程后，反分词能和 GPU 前向<strong>真正并行重叠</strong>——这正是第 21 课零开销调度的根基，也和第 2 课的三进程边界一脉相承。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“同声传译只说新增的词、并等完整词再出声”的类比，完整描述一条流式请求从 GPU 吐出 token id 到客户端看到“打字机”文字的全过程。请点明：<code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code>（第 16 课）的消息往返、反分词器为什么把结果发回 TokenizerManager（第 14 课）而不是直接给客户端、<code>sent_offset</code> 如何保证“只增不重”，以及不完整 UTF-8 为什么要先攒着。</li>
+    <li>生成什么时候算结束？请列出三种停止条件（EOS token / 停止串 / max_new_tokens，详见第 28 课），分别说明它们对最终输出的影响，并解释反分词器在结束时为什么要调用 <code>trim_matched_stop</code> 把停止串裁掉、再发出最后一段 <code>output_str[sent_offset:]</code>。最后说明 TokenizerManager 是如何用 <code>StreamingResponse</code>（<code>text/event-stream</code>）把每段变成 SSE “打字机”的。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Lesson 14 covered the runtime's <strong>entrance</strong> — the TokenizerManager turns human text into token ids and sends them to the GPU.
+This lesson covers the <strong>exit</strong>: how the token ids the GPU emits one at a time become readable text again, then stream back to the
+client <strong>piece by piece</strong>, like a typewriter. The component responsible is its own subprocess — the
+<strong>DetokenizerManager</strong>. It is the <strong>last component in the chain that speaks human language</strong>, and it closes Part 4.
+</p>
+
+<p>Why give it its own process and its own lesson? Because stitching token ids back into text is far more than a table lookup. It solves two
+genuinely tricky problems: first, <strong>incrementality</strong> — each step must emit only the <strong>small new slice</strong>, not re-decode
+and re-send the whole generated text every time; second, <strong>multi-byte boundaries</strong> — a token may decode to only half a Chinese
+character or half an emoji, so it must <strong>wait for a complete character</strong> before emitting, never feeding a half-character to the
+screen. Grasp these two and you'll see why streaming looks so smooth while quietly relying on careful <strong>offset bookkeeping</strong>.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of the detokenizer as a <strong>simultaneous interpreter</strong>. The speaker (GPU) keeps spilling out words; every few seconds the
+  interpreter opens their mouth — but speaks <strong>only the words that appeared since they last spoke</strong>, never replaying the whole
+  speech (that's <span class="mono">sent_offset</span> remembering "how far I've spoken"). Better still: when a syllable is only half out, the
+  interpreter <strong>holds back</strong> and waits for the full word before voicing it — never a half-syllable (that's the "hold incomplete
+  tokens" handling). So the audience always hears <strong>coherent, complete, never-repeated</strong> sentences. That's exactly the
+  detokenizer's job: <strong>emit only the new, wait until whole, deliver by id</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Recall Lesson 2's <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
+  <strong>detokenize in the detokenizer subprocess</strong>. After each step, the scheduler packs the batch's <strong>newly generated token
+  ids</strong> into a <span class="mono">BatchTokenIDOutput</span> (Lesson 16) and sends it to the detokenizer; the detokenizer decodes ids into
+  text, packs a <span class="mono">BatchStrOutput</span>, and sends it back to the <strong>TokenizerManager</strong> (Lesson 14), which routes it
+  by <span class="mono">rid</span> to the <span class="mono">await</span>ing coroutine, finally streaming it to the HTTP client via
+  <strong>SSE</strong>. Detokenize gets its own process because it is <strong>pure CPU string work</strong> that can <strong>overlap</strong> with
+  the GPU forward loop without either waiting on the other (the zero-overhead idea, Lesson 21).
+</div>
+
+<h2>Where it lives: the runtime's last door</h2>
+<p>The detokenizer is the pipeline's <strong>exit gate</strong>. It <strong>only speaks token ids and never touches the GPU</strong>: input is
+the batches of new tokens from the scheduler, output is slices of readable text. It mirrors the tokenizer exactly — one splits text into numbers
+(in), the other stitches numbers back into text (out). Note it sends results back to the <strong>TokenizerManager</strong>, not the client:
+only the TokenizerManager's <span class="mono">rid_to_state</span> map knows "which awaiting coroutine this rid belongs to and how to
+<span class="mono">yield</span> it to the upstream SSE".</p>
+
+<p>Trace the exit path: the <strong>scheduler</strong> (subproc) finishes its forward and emits this step's new token ids; the
+<strong>DetokenizerManager</strong> (subproc) decodes ids into text and does the incremental slice; the slice returns to the main process's
+<strong>TokenizerManager</strong>, routed by <span class="mono">rid</span> to the awaiting coroutine; and finally it streams piece by piece via
+<strong>SSE</strong> to the <strong>HTTP client</strong>, surfacing as a "typewriter". Four stages, three process boundaries, all stitched into a
+loop by the <span class="mono">rid</span>.</p>
+
+<h2>Incremental detokenize: the magic of sent_offset</h2>
+<p>This is the lesson's <strong>most central</strong> — and most overlooked — piece. The naive approach: every step, decode <strong>all tokens
+so far</strong> into the full text and send the whole thing. It looks simple but has two fatal flaws: first, resending the whole string each step
+makes traffic grow <strong>quadratically</strong> (O(n²)) with length; second, the client repeatedly receives <strong>duplicate</strong> prefixes
+and must itself figure out "which part is new".</p>
+
+<p>The right approach is <strong>incremental</strong>: each request keeps an offset <span class="mono">sent_offset</span> recording "which
+character I've sent up to". After decoding the current full text <span class="mono">output_str</span> each step, emit <strong>only the new
+slice</strong> <span class="mono">output_str[sent_offset:]</span>, then advance <span class="mono">sent_offset</span> to
+<span class="mono">len(output_str)</span>. Next step, again emit only the new tail. Every character <strong>crosses the wire exactly once</strong>;
+traffic is linear.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>receive new token ids</h4><p>The scheduler delivers this step's newly generated token ids (in a <span class="mono">BatchTokenIDOutput</span>, Lesson 16), appended to the request's existing id sequence.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>decode the full text</h4><p>Decode the current id sequence into the full-text-so-far <span class="mono">output_str</span> (with multi-byte boundary handling).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>slice only the new part</h4><p>Take <span class="mono">incremental = output_str[sent_offset:]</span> — only the small slice that <strong>appeared since</strong> the last send.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>advance the offset</h4><p><span class="mono">sent_offset = len(output_str)</span>, recording "sent up to here" so the next step never re-sends already-sent characters.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>pack as an SSE chunk</h4><p>The new slice rides a <span class="mono">BatchStrOutput</span> back to the TokenizerManager, then streams to the client as one SSE chunk — the "typewriter" effect.</p></div></div>
+</div>
+
+<p>To make the difference between "resend everything" and "send only the new" obvious, compare them side by side:</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ Re-decode all each step</h4><p>Decode all tokens and send the whole text every step. The client keeps receiving duplicate prefixes, traffic grows <strong>quadratically (O(n²))</strong> with length — especially wasteful for long outputs — and the burden of "finding the new part" is dumped on the client.</p></div>
+  <div class="col"><h4>✅ Incremental slice (sent_offset)</h4><p>Each step sends only the small new slice <span class="mono">output_str[sent_offset:]</span> and advances the offset. Every character <strong>crosses the wire once</strong>, traffic is linear, the client just concatenates, and it maps naturally onto an SSE stream.</p></div>
+</div>
+
+<h2>Multi-byte boundaries: why hold back</h2>
+<p>Incremental slicing hides another difficulty: <strong>one token is not one character</strong>. A Chinese character or an emoji often takes
+several bytes — sometimes spanning several tokens — to complete. If a step decodes a tail that is an <strong>incomplete UTF-8 sequence</strong>
+(half a character, a broken emoji) and sends it as-is, the client flashes a garbled box <span class="mono">�</span>. So the detokenizer must
+<strong>hold back bytes that don't yet form a complete character</strong> and wait until more tokens arrive to complete it. The table below shows
+how <span class="mono">sent_offset</span> advances per step and <strong>stays put</strong> when only half a character is available:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>sent_offset advancing per step: the highlight is the slice <strong>newly emitted</strong> this step</b></div>
+  <div class="cells"><span class="lab">Step 1</span><span class="cell">output_str=<span class="mono">"你好"</span></span><span class="sep">→</span><span class="cell hl">emit "你好"</span><span class="q">sent_offset: 0 → 2</span></div>
+  <div class="cells"><span class="lab">Step 2</span><span class="cell">tail is half a char</span><span class="sep">→</span><span class="cell">hold, emit nothing</span><span class="q">sent_offset stays: 2</span></div>
+  <div class="cells"><span class="lab">Step 3</span><span class="cell">output_str=<span class="mono">"你好世界"</span></span><span class="sep">→</span><span class="cell hl">emit "世界"</span><span class="q">sent_offset: 2 → 4</span></div>
+  <div class="cells"><span class="lab">Step 4</span><span class="cell">output_str=<span class="mono">"你好世界！"</span></span><span class="sep">→</span><span class="cell hl">emit "！"</span><span class="q">sent_offset: 4 → 5</span></div>
+</div>
+
+<h2>Stop conditions and SSE: when generation ends</h2>
+<p>Streaming always needs an end. A request's generation halts under one of three conditions, and the detokenizer/scheduler trims the output at
+the <strong>stop boundary</strong> accordingly (sampling and stop details in Lesson 28):</p>
+
+<table class="t">
+  <tr><th>Stop condition</th><th>Meaning</th><th>Effect on output</th></tr>
+  <tr><td class="mono">EOS token</td><td>the model generated the end-of-sequence token</td><td>natural finish, this request ends streaming</td></tr>
+  <tr><td class="mono">stop string</td><td>a user-specified stop string is matched (e.g. "\n\n")</td><td><strong>trim off</strong> the stop string and everything after it</td></tr>
+  <tr><td class="mono">max_new_tokens</td><td>reached this request's max allowed new tokens</td><td>force-truncate, emit the final slice and end</td></tr>
+</table>
+
+<p>When generation ends, the detokenizer <strong>materializes</strong> the request's full text, calls <span class="mono">trim_matched_stop</span>
+to cut off the stop string, emits that last tail (again only <span class="mono">output_str[sent_offset:]</span>), and then deletes the request's
+decode state. Turning each new slice <strong>into an SSE stream</strong> is the TokenizerManager's job: it uses
+<span class="mono">StreamingResponse</span> with <span class="mono">media_type="text/event-stream"</span>, pushing each chunk as one
+<strong>Server-Sent Event</strong> to the browser — that's the typewriter experience of text "popping out one bit at a time". Below is the real
+skeleton of the detokenizer's incremental logic:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/detokenizer_manager.py ::DetokenizerManager</span><span class="ln">incremental slice: output_str[sent_offset:] + advance offset</span></div>
+  <pre><span class="cm"># each request's decode state carries a sent_offset</span>
+<span class="kw">class</span> DecodeStatus:
+    decoded_text: str
+    sent_offset: int = <span class="st">0</span>   <span class="cm"># character position already sent</span>
+
+<span class="cm"># finished: materialize full text, trim the stop, emit the tail</span>
+output_str = self.trim_matched_stop(
+    s.get_decoded_text() + new_text,
+    recv_obj.finished_reasons[i],
+    recv_obj.no_stop_trim[i],
+)
+incremental_output = output_str[s.sent_offset :]  <span class="cm"># slice only the new part</span>
+s.sent_offset = len(output_str)                   <span class="cm"># advance the offset</span>
+output_strs.append(incremental_output)</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Exit / own subprocess</strong>: the DetokenizerManager is the runtime's exit, running in <strong>its own subprocess</strong> (Lesson 2's three-process model); it only speaks token ids and never touches the GPU.</li>
+    <li><strong>Message round-trip</strong>: the scheduler sends <span class="mono">BatchTokenIDOutput</span> (new token ids); the detokenizer decodes and returns <span class="mono">BatchStrOutput</span> (Lesson 16) to the TokenizerManager (Lesson 14), routed back by <span class="mono">rid</span>.</li>
+    <li><strong>Incremental is key</strong>: each request keeps a <span class="mono">sent_offset</span>; each step emits only <span class="mono">output_str[sent_offset:]</span> then advances the offset — avoiding the O(n²) and duplicate prefixes of full resends.</li>
+    <li><strong>Multi-byte boundaries</strong>: incomplete UTF-8 (half a Chinese character / broken emoji) must be <strong>held back</strong> until a full character forms — never stream half a character.</li>
+    <li><strong>Stop and SSE</strong>: generation ends on EOS / stop string / max_new_tokens (Lesson 28); the TokenizerManager wraps each slice into an SSE "typewriter" via <span class="mono">StreamingResponse</span>. A separate process so it can overlap the GPU (zero-overhead, Lesson 21).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Each step, the detokenizer decodes <strong>all tokens so far</strong> into the full text and sends the whole thing to the client. What's the fundamental problem, and what's the right approach?</div>
+  <ol class="opts">
+    <li>No problem at all — full resends are simplest and fastest, no optimization needed</li>
+    <li>The problem is too few token ids; you should wait until all are generated and send once</li>
+    <li>Resending everything makes traffic grow <strong>quadratically (O(n²))</strong> with length, and the client keeps receiving duplicate prefixes; the right approach is <strong>incremental</strong>: each request keeps a <code>sent_offset</code> and each step emits only the new slice <code>output_str[sent_offset:]</code> then advances the offset, so every character <strong>crosses the wire once</strong></li>
+    <li>The problem is decoding is too slow; detokenize should be moved to the GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Naive full resends have two fatal flaws: O(n²) traffic and duplicate prefixes that dump the 'find the new part' burden on the client. Incremental slicing uses <code>sent_offset</code> to track 'how far sent', emitting only <code>output_str[sent_offset:]</code> each step then advancing — linear traffic, the client just concatenates, and it fits SSE naturally.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. After a step, the tail of the text is exactly <strong>half a Chinese character</strong> (an incomplete UTF-8 sequence). What should the detokenizer do, and why?</div>
+  <ol class="opts">
+    <li>Discard the half-character and keep decoding later tokens</li>
+    <li><strong>Hold the half-character back, emit nothing</strong>, and don't advance <code>sent_offset</code> yet — wait for more tokens next step to complete the character before emitting; otherwise the client flashes a garbled box <code>�</code>, streaming half a character</li>
+    <li>Immediately terminate this request's generation and raise a UTF-8 error</li>
+    <li>Just send the half-character; the client will auto-repair the garbling</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. One token ≠ one character: Chinese characters and emojis often span multiple bytes or even tokens. Sending incomplete UTF-8 as-is shows a <code>�</code>. So the detokenizer must <strong>hold back</strong> bytes that don't yet form a complete character and emit only once whole — exactly why streaming looks smooth and never spits half a character.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does SGLang put detokenize in its <strong>own subprocess</strong> rather than doing it inside the scheduler or main process?</div>
+  <ol class="opts">
+    <li>Because detokenize needs direct GPU VRAM access, requiring a separate process</li>
+    <li>Because detokenize is <strong>pure CPU string work</strong>; isolating it in its own process lets it <strong>overlap</strong> the GPU forward loop without either waiting (the zero-overhead idea, Lesson 21) — echoing Lesson 2's three-process model: tokenize / schedule+forward / detokenize each in one process</li>
+    <li>Because subprocesses get higher CPU priority than the main process</li>
+    <li>Purely a historical accident with no real significance</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Stitching token ids back into text is CPU-bound string work, unrelated to GPU matmuls. Inside the GPU process, the GPU would idle while the CPU builds strings. As a separate subprocess, detokenize <strong>truly overlaps</strong> the GPU forward — the foundation of Lesson 21's zero-overhead scheduling and consistent with Lesson 2's three-process boundaries.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (Lesson 16) round-trip, why the detokenizer sends results back to the TokenizerManager (Lesson 14) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.</li>
+    <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the TokenizerManager turns each slice into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="16-io-structs-and-ipc.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">IO 结构与进程间通信</span><span class="lang-en">IO structs &amp; IPC</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

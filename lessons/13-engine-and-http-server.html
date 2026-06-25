@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>13 · Engine 与 HTTP Server / Engine &amp; HTTP server - SGLang 图解教程</title>
+<meta name="description" content="第四部分 · 服务入口与编排｜Engine 与 HTTP Server - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="13 · Engine 与 HTTP Server / Engine &amp; HTTP server - SGLang 图解教程">
+<meta property="og:description" content="第四部分 · 服务入口与编排｜Engine 与 HTTP Server - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="13 · Engine 与 HTTP Server / Engine &amp; HTTP server - SGLang 图解教程">
+<meta name="twitter:description" content="第四部分 · 服务入口与编排｜Engine 与 HTTP Server - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></span>
+    <span class="pill">13 / 17</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:76%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></div>
+    <h1><span class="lang-zh">Engine 与 HTTP Server</span><span class="lang-en">Engine &amp; HTTP server</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+欢迎来到 Part 4——我们终于从前端 DSL 走进了<strong>运行时（runtime）</strong>的大门。这一课先回答一个最基本的问题：
+你写好的程序，到底通过<strong>什么入口</strong>把请求喂给 SGLang 的引擎？答案有两个，而且只有两个：<strong>离线的
+<span class="inline">Engine</span></strong>（纯进程内 Python API）和<strong>在线的 HTTP server</strong>（FastAPI 服务）。
+看懂这两扇门、以及它们<strong>共享同一套运行时</strong>这件事，是读懂后面每一课的钥匙。
+</p>
+
+<p>为什么先讲入口？因为 Part 1–3 我们一直站在“调用者”的视角：写 DSL、写 prompt、选后端。从这一课起视角翻转——
+我们要钻进运行时<strong>内部</strong>，看请求进来之后究竟发生了什么。而一切的起点，就是这两个入口：它们是<strong>外部世界与引擎内部的边界</strong>。
+搞清楚边界在哪、有几种形态、它们背后是不是同一套机器，你才不会在后面十几课的组件细节里迷失方向。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  想象一家餐馆有两种点单方式。一种是<strong>堂食柜台</strong>：你直接走到窗口、隔着台面冲后厨喊单，没有电话、没有中间人——
+  这就是<strong>离线 Engine</strong>，在同一个进程里直接调用，开销最低。另一种是<strong>电话外卖热线</strong>：你拨号、报地址、
+  话务员替你把单子转给后厨——这就是<strong>在线 server</strong>，多了一层网络与协议，但任何人、任何客户端都能远程下单。
+  关键是：<strong>后厨只有一个</strong>。无论你走柜台还是打电话，做菜的厨房一模一样——server 不过是给同一个 Engine
+  套了个“接电话的前台”。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  SGLang 提供两条驱动运行时的路径，它们都继承自同一个抽象基类 <span class="inline">EngineBase</span>：
+  <strong>离线 <span class="mono">Engine</span></strong> 是纯 Python 对象，<span class="mono">llm.generate(...)</span> 直接返回结果，
+  适合批量任务、评测、以及 RL rollout（训练器进程内直接调）；<strong>在线 server</strong> 用
+  <span class="mono">launch_server()</span> 起一个 FastAPI/uvicorn 应用，把一个 Engine 包起来，对外暴露原生
+  <span class="mono">POST /generate</span> 和 OpenAI 兼容路由。<strong>底层运行时完全相同</strong>：server 只是 Engine 的 HTTP 外壳。
+</div>
+
+<p>为什么要专门设两扇门，而不是只留一个 HTTP server？因为这两类需求<strong>天差地别</strong>。一类是“把推理<strong>嵌进</strong>我的程序里”——
+训练循环、评测脚本、数据流水线，它们本来就是 Python 进程，最不想要的就是再起一个网络服务、自己当客户端去打 HTTP，平白多出延迟和运维。
+另一类是“把推理<strong>开放</strong>给外界”——要面对未知数量的并发客户端、跨机器、跨语言，这时 HTTP 才是刚需。SGLang 没有逼你二选一，
+而是用 <span class="mono">EngineBase</span> 把<strong>同一套运行时核心</strong>包装成两种入口，各取所需。理解这一点，本课其余内容都是它的展开。</p>
+
+<h2>离线 Engine：一个纯进程内的 Python API</h2>
+<p>离线 <span class="inline">Engine</span> 是最“素”的入口：没有 HTTP、没有端口、没有网络。你在自己的 Python 脚本里
+<span class="mono">import sglang as sgl</span>，构造一个 <span class="mono">sgl.Engine(model_path=...)</span>，然后调用
+<span class="mono">llm.generate(prompts, sampling_params)</span>，结果<strong>当场以 Python 字典/列表返回</strong>。整个过程跑在
+<strong>同一个进程</strong>里（准确说，主进程里还有 TokenizerManager，调度器与反分词器是子进程，这点马上展开）。
+因为少了序列化、HTTP 解析、网络往返这几层开销，Engine 是<strong>延迟最低、最适合嵌入</strong>的方式。</p>
+
+<p>这里要澄清一个常见误解：“离线”并<strong>不</strong>意味着“单进程单线程”。即便是离线 Engine，内部依然是第 2 课讲过的
+<strong>三进程模型</strong>——主进程里跑 TokenizerManager，调度器（Scheduler）和反分词器（DetokenizerManager）各自是独立子进程，
+彼此用 ZMQ 通信。所谓“纯进程内 Python API”，指的是<strong>你的调用代码</strong>和 Engine 在同一进程，<span class="mono">generate()</span>
+是一次普通的 Python 函数调用、直接拿到返回值，<strong>而不需要经过 HTTP 这一圈</strong>。换句话说，离线/在线的区别只在“最外面那层门”，
+不在引擎内部的并行结构。</p>
+
+<p>还有一点值得点明：离线 Engine 的返回是<strong>同步</strong>的——<span class="mono">generate(prompts, ...)</span> 传入一批 prompt，
+它内部会把这批请求送进调度器、连续批处理、再把每条的结果收齐，<strong>一次性返回一个列表</strong>。你也可以传单条 prompt 拿单条结果。
+正因为接口这么“朴素”，它和 NumPy、PyTorch 那样的库一样好嵌入：没有 server 要启动、没有端口要协调、没有客户端要写，
+一个 import、一次构造、一次调用，就拿到了 SGLang 全部的运行时能力。这正是批处理与 RL 场景偏爱它的根本原因。</p>
+
+<div class="cols">
+  <div class="col"><h4>离线 Engine</h4><p><span class="mono">sgl.Engine(model_path=...)</span> + <span class="mono">.generate(...)</span>。
+  纯进程内调用、<strong>无 HTTP</strong>、无网络往返。适合<strong>批量推理、离线评测、RL rollout</strong>（训练器进程内直接调，开销最低）。
+  缺点：只能在<strong>本进程的 Python</strong> 里用，跨机/跨语言无能为力。</p></div>
+  <div class="col"><h4>在线 server</h4><p><span class="mono">launch_server(server_args)</span> 起 FastAPI 应用，暴露
+  <strong>HTTP 接口</strong>。适合<strong>生产部署、多客户端、跨语言</strong>访问——任何能发 HTTP 的客户端都能接入。
+  代价：多一层网络与序列化开销，要管端口、并发与鉴权。</p></div>
+</div>
+
+<h2>在线 server：给 Engine 套一层 HTTP</h2>
+<p>在线 server 用一条命令就能拉起：<span class="mono">python -m sglang.launch_server --model-path ...</span>。它在内部
+<strong>构造一个 Engine</strong>，再用 FastAPI/uvicorn 把它包起来，对外开放两类路由：一是 SGLang 的<strong>原生接口</strong>
+<span class="mono">POST /generate</span>；二是一整套 <strong>OpenAI 兼容路由</strong>，如 <span class="mono">/v1/chat/completions</span>、
+<span class="mono">/v1/completions</span> 等（第 15 课专门讲兼容层）。于是一个 HTTP 请求进来，会被翻译成对内部 Engine 的调用，
+再把结果（可流式）写回响应。下面这张表把三类入口和“谁在用”对齐：</p>
+
+<p>为什么生产环境几乎都用 server 而不是 Engine？因为真实部署面对的是<strong>很多并发客户端、来自不同机器甚至不同语言</strong>的访问。
+HTTP 是天然的跨语言、跨网络协议：Python、Go、前端 JavaScript、甚至 curl 都能直接打过来。更重要的是 OpenAI 兼容层让你的私有部署
+<strong>无缝接入现成生态</strong>——别人的 OpenAI SDK、LangChain 只要把 <span class="mono">base_url</span> 一改就能用（这正是第 12 课讲的
+“OpenAI 客户端 → SGLang 服务器”那个方向）。这些都是离线 Engine 给不了的：它只活在<strong>你自己那一个 Python 进程</strong>里。</p>
+
+<table class="t">
+  <tr><th>入口</th><th>形态</th><th>典型使用者</th></tr>
+  <tr><td class="mono">sgl.Engine().generate()</td><td>进程内 Python 调用，无 HTTP</td><td>批处理脚本、评测、RL 训练器（第 51 课）</td></tr>
+  <tr><td class="mono">POST /generate</td><td>SGLang 原生 HTTP 接口</td><td>前端 RuntimeEndpoint、自定义客户端</td></tr>
+  <tr><td class="mono">/v1/chat/completions</td><td>OpenAI 兼容 HTTP 路由</td><td>OpenAI SDK / LangChain 等现成生态（第 15 课）</td></tr>
+</table>
+
+<h2>同一套运行时：server 只是外壳</h2>
+<p>这是本课<strong>最重要</strong>的一句话：无论从哪扇门进来，<strong>底层运行时是同一套</strong>。HTTP 请求经过 FastAPI 应用后，
+最终落到一个 Engine 上；而这个 Engine 内部，就是我们后面要逐课拆解的那几个组件——<strong>TokenizerManager</strong>（第 14 课，
+负责分词与请求登记）、<strong>Scheduler</strong>（第 18 课，组批与调度）、<strong>DetokenizerManager</strong>（反分词与流式回传）。
+也就是说，从第 14 课起学的所有东西，<strong>离线 Engine 和在线 server 完全共用</strong>，你只需理解一遍。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">HTTP 请求</div><div class="nd">/generate · /v1/chat/...</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">FastAPI 应用</div><div class="nd">launch_server 包的壳</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Engine</div><div class="nd">共享运行时核心</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">三大组件</div><div class="nd">Tokenizer · Scheduler · Detokenizer</div></div>
+</div>
+
+<p>注意离线 Engine 走的是<strong>同一条链路的后半段</strong>：它直接构造 Engine、跳过了最左边的“HTTP 请求 + FastAPI 应用”两格，
+其余完全一致。这正是为什么我们说<strong>server = Engine + 一层 HTTP 外壳</strong>——server 没有<strong>重新实现</strong>任何运行时逻辑，
+它只负责“接电话、转单、回话”。</p>
+
+<p>把这层关系想透，对学习路线有一个极大的好处：<strong>你不必为“离线”和“在线”各学一遍内部机制</strong>。第 14 课的
+TokenizerManager 怎么分词与登记请求、第 18 课的 Scheduler 怎么连续批处理、反分词器怎么增量流式回传——这些<strong>对两扇门是同一套</strong>。
+server 端额外要操心的只是 HTTP 层面的事：路由、并发、鉴权、SSE 流式响应的封装。所以读完 Part 4 之后，无论你将来用 Engine 嵌进训练框架，
+还是用 server 对外提供服务，<strong>底层那套运行时你都已经懂了</strong>。这也是 SGLang 用 <span class="mono">EngineBase</span> 抽象基类
+把两条路径统一起来的工程意图：把“入口形态”和“运行时核心”解耦，核心只写一遍、复用到底。</p>
+
+<h2>Engine.__init__ 启动三进程</h2>
+<p>回忆第 2 课的“三进程模型”：SGLang 把<strong>分词、调度+前向、反分词</strong>拆到不同进程，用 ZMQ 做进程间通信。
+而<strong>拉起这三个进程的，正是 <span class="inline">Engine.__init__</span></strong>（server 也是先构造 Engine，所以同样经过这一步）。
+构造一个 Engine，就等于把整套运行时“点火”：</p>
+
+<p>为什么要拆成三个进程、而不是塞进一个进程的三个线程？根子在 Python 的全局解释器锁（GIL）：分词、调度、反分词若挤在同一进程，
+会互相抢锁、串行排队。拆成独立进程后，三者能<strong>真正并行</strong>、用 ZMQ 异步传消息，形成一条流水线——这也是第 2 课反复强调的设计动机。
+你只需记住：构造 Engine 这一下，背后是“起进程 + 连通道 + 载模型”的一整套点火流程，而非简单的对象初始化。这套流程一旦跑完，引擎就进入随时待命、可以接单的状态。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>解析 ServerArgs</h4><p>把 <span class="mono">model_path</span> 等关键字参数收成一个 <span class="mono">ServerArgs</span>，决定并行度、显存、后端等一切配置。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>启动子进程</h4><p>调用 <span class="mono">_launch_subprocesses()</span>：在<strong>主进程</strong>内建 TokenizerManager，并<strong>各起一个子进程</strong>跑 Scheduler 与 DetokenizerManager。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>建立 ZMQ 通道</h4><p>为进程间通信建好 socket，把主进程与两个子进程<strong>连成一条流水线</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>就绪等单</h4><p>三进程各就各位，<span class="mono">generate()</span> 一调用，请求就能沿链路跑起来。</p></div></div>
+</div>
+
+<p>这一步之所以重要，是因为它揭示了“构造一个 Engine 的代价”：<span class="mono">sgl.Engine(...)</span> 不是一行轻量赋值，
+而是<strong>把整套运行时点火</strong>——拉起子进程、加载模型权重、分配 KV 缓存、建立 ZMQ 通道，全在 <span class="mono">__init__</span> 里完成。
+所以 Engine 对象应当<strong>构造一次、长期复用</strong>，而不是每来一个请求就 new 一个。在线 server 同样是先构造一个 Engine、长期持有，
+再用 FastAPI 把它对外暴露——这又一次印证了“server = 长期持有的 Engine + HTTP 壳”。下面这段就是 Engine 类的真实定义与点火逻辑：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::Engine</span><span class="ln">构造 Engine = 点火整套运行时</span></div>
+  <pre><span class="kw">class</span> Engine(EngineScoreMixin, EngineBase):
+    <span class="cm"># 推理引擎的入口，由三个组件构成：</span>
+    <span class="cm"># 1. TokenizerManager  分词并把请求发给调度器（主进程）</span>
+    <span class="cm"># 2. Scheduler  子进程：收请求、组批、前向、把 token 发给反分词器</span>
+    <span class="cm"># 3. DetokenizerManager  子进程：反分词并把结果送回 TokenizerManager</span>
+
+    <span class="kw">def</span> __init__(self, **kwargs):
+        server_args = self.server_args_class(**kwargs)   <span class="cm"># 解析配置</span>
+        <span class="cm"># 启动子进程：主进程内的 TokenizerManager + Scheduler/Detokenizer 子进程</span>
+        (tokenizer_manager, template_manager, port_args,
+         scheduler_init_result, subprocess_watchdog) = self._launch_subprocesses(
+            server_args=server_args, ...)
+        self.tokenizer_manager = tokenizer_manager       <span class="cm"># 之后 generate() 走它入口</span></pre>
+</div>
+
+<h2>什么时候用哪个</h2>
+<p>选择其实很直观：<strong>要不要跨进程/跨网络？</strong>如果你的代码就在<strong>同一个 Python 进程</strong>里、追求最低开销——比如
+批量跑评测集、做离线数据生成、或在 RL 训练里让训练器<strong>进程内直接 rollout</strong>（第 51 课），那就用<strong>离线 Engine</strong>。
+如果你要把模型<strong>作为服务</strong>对外提供、面对很多并发客户端、或客户端是别的语言/别的机器，那就用<strong>在线 server</strong>，
+让它的 HTTP 与 OpenAI 兼容层替你接住整个生态。记住：两者性能核心一致，差别只在<strong>那层 HTTP 要不要</strong>。</p>
+
+<p>再举两个具体例子把这个判断落地。例子一：你要在一万条评测样本上批量跑模型、统计准确率。这是典型的离线批处理——没有外部客户端、
+追求吞吐与最低开销，<strong>离线 Engine</strong> 是首选，一段 Python 脚本里 <span class="mono">generate</span> 一把全收。例子二：你要上线一个
+面向公网的聊天产品，前端是浏览器、移动端可能是 Swift/Kotlin，还想让合作方用现成的 OpenAI SDK 接入。这是典型的在线服务——多并发、
+跨语言、要 OpenAI 兼容，<strong>在线 server</strong> 当仁不让。值得强调的是，从评测脚本切到生产服务，你<strong>不需要重学引擎内部</strong>，
+只是把“入口”从一个 Python 对象换成一个 HTTP 端点而已——这正是本课想让你建立的最终直觉。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>两扇门</strong>：离线 <span class="mono">Engine</span>（纯进程内 Python API，无 HTTP）与在线 server（<span class="mono">launch_server</span> 起的 FastAPI 应用），都继承自 <span class="mono">EngineBase</span>。</li>
+    <li><strong>离线 Engine</strong>：<span class="mono">sgl.Engine(model_path=...).generate(prompts, sampling_params)</span>，开销最低，适合批处理、评测、RL rollout（训练器进程内直接调，第 51 课）。</li>
+    <li><strong>在线 server</strong>：<span class="mono">python -m sglang.launch_server</span> 暴露原生 <span class="mono">POST /generate</span> 与 OpenAI 兼容路由（<span class="mono">/v1/chat/completions</span>，第 15 课），适合生产/多客户端/跨语言。</li>
+    <li><strong>同一套运行时</strong>：server 不重写任何逻辑，只是 Engine 的 HTTP 外壳；从第 14 课起的 TokenizerManager（第 14 课）、Scheduler（第 18 课）、Detokenizer 两者共用。</li>
+    <li><strong>点火</strong>：<span class="mono">Engine.__init__</span> 解析 ServerArgs 并 <span class="mono">_launch_subprocesses</span> 拉起三进程（第 2 课的三进程模型）。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 关于离线 <code>Engine</code> 和在线 server，下面哪种说法最准确？</div>
+  <ol class="opts">
+    <li>两者底层运行时不同，所以要分别学两遍</li>
+    <li>离线 Engine 也走 HTTP，只是端口不对外暴露</li>
+    <li>在线 server 重新实现了一套独立的调度与前向逻辑，和 Engine 互不相干</li>
+    <li>在线 server 用 <code>launch_server</code> 起一个 FastAPI 应用，<strong>包住一个 Engine</strong> 并暴露 HTTP 路由；离线 Engine 是纯进程内 Python API，跳过 HTTP 直接调 <code>generate</code>。两者<strong>共享同一套运行时</strong>，server 没有重新实现任何运行时逻辑</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。server = Engine + 一层 HTTP 外壳。<code>launch_server</code> 内部构造一个 Engine，再用 FastAPI/uvicorn 包起来，暴露原生 <code>POST /generate</code> 与 OpenAI 兼容路由；离线 Engine 直接走链路后半段、跳过 HTTP。底层运行时（TokenizerManager、Scheduler、Detokenizer）完全相同，所以从第 14 课起的内容两者共用，只需学一遍。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 你要在强化学习训练里做 rollout（让训练器频繁生成样本）。为什么通常优先选离线 <code>Engine</code> 而不是起一个 HTTP server？</div>
+  <ol class="opts">
+    <li>因为只有 Engine 支持采样参数</li>
+    <li>因为离线 Engine 是<strong>进程内直接调用</strong>，没有 HTTP 解析、序列化和网络往返的开销，延迟最低；训练器可以在同一个进程里直接 <code>generate</code>，最适合高频 rollout</li>
+    <li>因为离线 Engine 生成质量更高、精度不同</li>
+    <li>因为 HTTP server 无法加载大模型</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。RL rollout 调用极其频繁，每多一层 HTTP+序列化+网络往返都会被放大成可观的开销。离线 Engine 在同一进程内直接返回 Python 结果，省掉这几层，延迟最低；训练器可直接持有 Engine 对象做 rollout（第 51 课）。生成质量与采样能力两者一致——差别只在“要不要那层 HTTP”。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 构造 <code>sgl.Engine(model_path=...)</code> 时，<code>Engine.__init__</code> 主要做了什么？</div>
+  <ol class="opts">
+    <li>解析 <code>ServerArgs</code>，然后调用 <code>_launch_subprocesses</code> 拉起三进程：主进程内的 TokenizerManager，加上 Scheduler 与 DetokenizerManager 两个子进程，并建好 ZMQ 通道（即第 2 课的三进程模型）</li>
+    <li>仅仅把模型权重加载到 CPU 内存，不创建任何进程</li>
+    <li>什么都不做，等到第一次 generate 才初始化</li>
+    <li>启动一个 FastAPI 服务器并监听端口</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。构造 Engine 就是给整套运行时“点火”：先把 kwargs 收成 <code>ServerArgs</code>，再 <code>_launch_subprocesses</code> 在主进程建 TokenizerManager、各起一个子进程跑 Scheduler 与 Detokenizer，并连好 ZMQ 通道。注意它<strong>不</strong>启动 FastAPI——HTTP 那层是 server 的事。在线 server 也先构造 Engine，所以同样经过这一步（第 2 课）。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“同一个后厨、两种点单方式”的类比，向同事解释离线 Engine 与在线 server 的关系。请明确说出：server 是否重新实现了运行时？从第 14 课起学的 TokenizerManager、Scheduler、Detokenizer 对两者是不是同一套？以及为什么这意味着你“只需学一遍底层”。</li>
+    <li>给定两个场景：(a) 给一万条 prompt 批量打分做离线评测；(b) 给一个面向公网、多语言客户端的聊天产品提供服务。分别该选离线 Engine 还是在线 server？请从开销、并发、跨语言/跨机访问、OpenAI 兼容生态几个角度论证你的取舍。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Welcome to Part 4 — we finally step from the front-end DSL through the door of the <strong>runtime</strong>. This lesson
+answers the most basic question: through <strong>what entry point</strong> does your program feed requests into SGLang's
+engine? There are exactly two answers: the offline <strong><span class="inline">Engine</span></strong> (a pure in-process
+Python API) and the online <strong>HTTP server</strong> (a FastAPI app). Understanding these two doors — and that they
+<strong>share one runtime underneath</strong> — is the key to every later lesson.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a restaurant with two ways to order. One is the <strong>walk-in counter</strong>: you step to the window and call
+  your order straight to the kitchen — no phone, no middleman. That's the <strong>offline Engine</strong>: an in-process call
+  with the lowest overhead. The other is the <strong>phone-order hotline</strong>: you dial, give your address, and an
+  operator relays the ticket to the kitchen. That's the <strong>online server</strong>: a layer of network and protocol, but
+  anyone, any client, can order remotely. The point: <strong>there is only one kitchen</strong>. Counter or phone, the
+  kitchen is identical — the server is just a "front desk that answers calls" bolted onto the same Engine.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  SGLang offers two paths to drive the runtime, both inheriting from the same abstract base <span class="inline">EngineBase</span>:
+  the <strong>offline <span class="mono">Engine</span></strong> is a plain Python object whose <span class="mono">llm.generate(...)</span>
+  returns results directly — ideal for batch jobs, evaluation, and RL rollout (the trainer calls it in-process); the
+  <strong>online server</strong> uses <span class="mono">launch_server()</span> to start a FastAPI/uvicorn app wrapping an Engine,
+  exposing the native <span class="mono">POST /generate</span> plus OpenAI-compatible routes. <strong>The runtime underneath is
+  identical</strong>: the server is just an HTTP wrapper around the Engine.
+</div>
+
+<h2>Offline Engine: a pure in-process Python API</h2>
+<p>The offline <span class="inline">Engine</span> is the barest entry: no HTTP, no port, no network. In your own Python script
+you <span class="mono">import sglang as sgl</span>, build a <span class="mono">sgl.Engine(model_path=...)</span>, then call
+<span class="mono">llm.generate(prompts, sampling_params)</span> — results come back <strong>right away as Python dicts/lists</strong>.
+It all runs in <strong>one process</strong> (precisely: the main process also holds the TokenizerManager, with the scheduler and
+detokenizer as subprocesses — more on that soon). With no serialization, HTTP parsing, or network round-trip, the Engine is the
+<strong>lowest-latency, most embeddable</strong> way in.</p>
+
+<div class="cols">
+  <div class="col"><h4>Offline Engine</h4><p><span class="mono">sgl.Engine(model_path=...)</span> + <span class="mono">.generate(...)</span>.
+  Pure in-process call, <strong>no HTTP</strong>, no network round-trip. Best for <strong>batch inference, offline eval, RL rollout</strong>
+  (the trainer calls it in-process, lowest overhead). Downside: usable only from <strong>Python in this process</strong> — no cross-machine/cross-language.</p></div>
+  <div class="col"><h4>Online server</h4><p><span class="mono">launch_server(server_args)</span> starts a FastAPI app exposing an
+  <strong>HTTP interface</strong>. Best for <strong>production serving, multi-client, language-agnostic</strong> access — any HTTP
+  client connects. Cost: an extra network + serialization layer, plus ports, concurrency, and auth to manage.</p></div>
+</div>
+
+<h2>Online server: wrap the Engine in HTTP</h2>
+<p>The online server starts with one command: <span class="mono">python -m sglang.launch_server --model-path ...</span>. Internally
+it <strong>builds an Engine</strong>, then wraps it with FastAPI/uvicorn, exposing two kinds of routes: SGLang's <strong>native</strong>
+<span class="mono">POST /generate</span>, and a full set of <strong>OpenAI-compatible routes</strong> like
+<span class="mono">/v1/chat/completions</span> and <span class="mono">/v1/completions</span> (Lesson 15 covers the compat layer). So an
+incoming HTTP request is translated into a call on the inner Engine, and the result (optionally streamed) is written back. The table
+aligns the three entry points with "who uses each":</p>
+
+<table class="t">
+  <tr><th>Entry</th><th>Shape</th><th>Typical user</th></tr>
+  <tr><td class="mono">sgl.Engine().generate()</td><td>In-process Python call, no HTTP</td><td>Batch scripts, eval, RL trainer (Lesson 51)</td></tr>
+  <tr><td class="mono">POST /generate</td><td>SGLang's native HTTP interface</td><td>Front-end RuntimeEndpoint, custom clients</td></tr>
+  <tr><td class="mono">/v1/chat/completions</td><td>OpenAI-compatible HTTP route</td><td>OpenAI SDK / LangChain ecosystem (Lesson 15)</td></tr>
+</table>
+
+<h2>One runtime: the server is just a shell</h2>
+<p>This is the lesson's <strong>most important</strong> sentence: whichever door you enter, <strong>the runtime underneath is the same</strong>.
+After passing the FastAPI app, an HTTP request lands on an Engine; and inside that Engine are exactly the components we'll dissect lesson
+by lesson — <strong>TokenizerManager</strong> (Lesson 14, tokenizing and registering requests), <strong>Scheduler</strong> (Lesson 18,
+batching and scheduling), <strong>DetokenizerManager</strong> (detokenizing and streaming back). So everything from Lesson 14 onward is
+<strong>shared by both offline Engine and online server</strong> — you only learn it once.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">HTTP request</div><div class="nd">/generate · /v1/chat/...</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">FastAPI app</div><div class="nd">shell from launch_server</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Engine</div><div class="nd">shared runtime core</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Three components</div><div class="nd">Tokenizer · Scheduler · Detokenizer</div></div>
+</div>
+
+<p>Note the offline Engine walks the <strong>same chain's back half</strong>: it builds the Engine directly, skipping the leftmost two
+cells ("HTTP request + FastAPI app"), and the rest is identical. That's exactly why we say <strong>server = Engine + an HTTP shell</strong> —
+the server <strong>reimplements no</strong> runtime logic; it only "answers the call, relays the ticket, replies."</p>
+
+<h2>Engine.__init__ launches three processes</h2>
+<p>Recall Lesson 2's "three-process model": SGLang splits <strong>tokenizing, scheduling+forward, detokenizing</strong> across processes,
+talking over ZMQ. And <strong>what spins those processes up is <span class="inline">Engine.__init__</span></strong> (the server builds an
+Engine first, so it goes through this too). Constructing an Engine is igniting the whole runtime:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Parse ServerArgs</h4><p>Collect kwargs like <span class="mono">model_path</span> into a <span class="mono">ServerArgs</span> deciding parallelism, memory, backend — every config.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Launch subprocesses</h4><p>Call <span class="mono">_launch_subprocesses()</span>: build TokenizerManager in the <strong>main process</strong>, and start <strong>one subprocess each</strong> for Scheduler and DetokenizerManager.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Wire up ZMQ</h4><p>Create the sockets for inter-process communication, stringing the main process and the two subprocesses into <strong>one pipeline</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Ready to serve</h4><p>All three processes in place; the moment <span class="mono">generate()</span> is called, a request runs down the chain.</p></div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::Engine</span><span class="ln">building an Engine = igniting the whole runtime</span></div>
+  <pre><span class="kw">class</span> Engine(EngineScoreMixin, EngineBase):
+    <span class="cm"># Entry point to the inference engine, made of three components:</span>
+    <span class="cm"># 1. TokenizerManager  tokenizes and sends requests to the scheduler (main proc)</span>
+    <span class="cm"># 2. Scheduler  subprocess: receives, batches, forwards, sends tokens to detokenizer</span>
+    <span class="cm"># 3. DetokenizerManager  subprocess: detokenizes and sends results back</span>
+
+    <span class="kw">def</span> __init__(self, **kwargs):
+        server_args = self.server_args_class(**kwargs)   <span class="cm"># parse config</span>
+        <span class="cm"># launch subprocesses: TokenizerManager (main) + Scheduler/Detokenizer (subprocs)</span>
+        (tokenizer_manager, template_manager, port_args,
+         scheduler_init_result, subprocess_watchdog) = self._launch_subprocesses(
+            server_args=server_args, ...)
+        self.tokenizer_manager = tokenizer_manager       <span class="cm"># generate() goes through it</span></pre>
+</div>
+
+<h2>When to use which</h2>
+<p>The choice is intuitive: <strong>do you need to cross processes/network?</strong> If your code is in the <strong>same Python process</strong>
+and wants the lowest overhead — running an eval set in batch, generating offline data, or letting an RL trainer <strong>roll out in-process</strong>
+(Lesson 51) — use the <strong>offline Engine</strong>. If you want to serve the model <strong>as a service</strong> to many concurrent clients, or
+clients in another language/machine, use the <strong>online server</strong> and let its HTTP and OpenAI-compat layer catch the whole ecosystem.
+Remember: their performance core is identical; the only difference is <strong>whether you want that HTTP layer</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Two doors</strong>: offline <span class="mono">Engine</span> (pure in-process Python API, no HTTP) and online server (a FastAPI app from <span class="mono">launch_server</span>), both inheriting <span class="mono">EngineBase</span>.</li>
+    <li><strong>Offline Engine</strong>: <span class="mono">sgl.Engine(model_path=...).generate(prompts, sampling_params)</span>, lowest overhead, best for batch, eval, RL rollout (trainer calls in-process, Lesson 51).</li>
+    <li><strong>Online server</strong>: <span class="mono">python -m sglang.launch_server</span> exposes native <span class="mono">POST /generate</span> plus OpenAI-compatible routes (<span class="mono">/v1/chat/completions</span>, Lesson 15); best for production/multi-client/cross-language.</li>
+    <li><strong>One runtime</strong>: the server rewrites no logic — just an HTTP shell over the Engine; from Lesson 14 on, TokenizerManager (Lesson 14), Scheduler (Lesson 18), Detokenizer are shared by both.</li>
+    <li><strong>Ignition</strong>: <span class="mono">Engine.__init__</span> parses ServerArgs and <span class="mono">_launch_subprocesses</span> spins up the three processes (Lesson 2's three-process model).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which statement about the offline <code>Engine</code> and the online server is most accurate?</div>
+  <ol class="opts">
+    <li>Their underlying runtimes differ, so you must learn each separately</li>
+    <li>The offline Engine also uses HTTP, just on a non-exposed port</li>
+    <li>The online server reimplements its own scheduling and forward logic, unrelated to the Engine</li>
+    <li>The online server uses <code>launch_server</code> to start a FastAPI app that <strong>wraps an Engine</strong> and exposes HTTP routes; the offline Engine is a pure in-process Python API calling <code>generate</code> without HTTP. Both <strong>share one runtime</strong>; the server reimplements no runtime logic</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. server = Engine + an HTTP shell. <code>launch_server</code> builds an Engine internally, then wraps it with FastAPI/uvicorn exposing native <code>POST /generate</code> and OpenAI-compatible routes; the offline Engine takes the back half of the chain, skipping HTTP. The underlying runtime (TokenizerManager, Scheduler, Detokenizer) is identical, so everything from Lesson 14 on is shared — learn it once.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. You need rollout in RL training (the trainer generates samples frequently). Why usually prefer the offline <code>Engine</code> over standing up an HTTP server?</div>
+  <ol class="opts">
+    <li>Because only the Engine supports sampling params</li>
+    <li>Because the offline Engine is an <strong>in-process direct call</strong> with no HTTP parsing, serialization, or network round-trip — lowest latency; the trainer can <code>generate</code> in the same process, ideal for high-frequency rollout</li>
+    <li>Because the offline Engine produces higher-quality, different-precision outputs</li>
+    <li>Because an HTTP server cannot load large models</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. RL rollout calls are extremely frequent, so every extra HTTP+serialization+network round-trip is magnified into real overhead. The offline Engine returns Python results in the same process, dropping those layers for lowest latency; the trainer can hold the Engine object directly for rollout (Lesson 51). Output quality and sampling are identical — the only difference is whether you want that HTTP layer.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When you construct <code>sgl.Engine(model_path=...)</code>, what does <code>Engine.__init__</code> mainly do?</div>
+  <ol class="opts">
+    <li>Parse <code>ServerArgs</code>, then call <code>_launch_subprocesses</code> to spin up three processes: TokenizerManager in the main process plus Scheduler and DetokenizerManager subprocesses, and wire up ZMQ (Lesson 2's three-process model)</li>
+    <li>Merely load model weights into CPU memory, creating no processes</li>
+    <li>Do nothing, initializing only on the first generate</li>
+    <li>Start a FastAPI server and listen on a port</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Constructing the Engine ignites the whole runtime: gather kwargs into <code>ServerArgs</code>, then <code>_launch_subprocesses</code> builds TokenizerManager in the main process, starts one subprocess each for Scheduler and Detokenizer, and wires ZMQ. Note it does <strong>not</strong> start FastAPI — the HTTP layer is the server's job. The online server also builds an Engine first, so it goes through this too (Lesson 2).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'one kitchen, two ways to order' analogy, explain to a colleague the relationship between the offline Engine and the online server. State clearly: does the server reimplement the runtime? Are the TokenizerManager, Scheduler, and Detokenizer (from Lesson 14 on) the same for both? And why does that mean you 'learn the internals only once'?</li>
+    <li>Two scenarios: (a) batch-score ten thousand prompts for offline eval; (b) serve a public-facing, multi-language chat product. For each, pick the offline Engine or the online server, and justify your choice from overhead, concurrency, cross-language/cross-machine access, and the OpenAI-compatible ecosystem.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="12-backends-and-openai-compat.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">后端与 OpenAI 兼容</span><span class="lang-en">Backends &amp; OpenAI compat</span></div></a><a class="next" href="14-tokenizer-manager.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">TokenizerManager</span><span class="lang-en">TokenizerManager</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

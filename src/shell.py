@@ -71,6 +71,16 @@ PAGES = [
      "第三部分 · 前端语言", "Part 3 · The frontend language"),
     ("12-backends-and-openai-compat.html", "后端与 OpenAI 兼容", "Backends & OpenAI compat",
      "第三部分 · 前端语言", "Part 3 · The frontend language"),
+    ("13-engine-and-http-server.html", "Engine 与 HTTP Server", "Engine & HTTP server",
+     "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
+    ("14-tokenizer-manager.html", "TokenizerManager", "TokenizerManager",
+     "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
+    ("15-openai-anthropic-ollama-compat.html", "OpenAI/Anthropic/Ollama 兼容层", "OpenAI/Anthropic/Ollama compat",
+     "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
+    ("16-io-structs-and-ipc.html", "IO 结构与进程间通信", "IO structs & IPC",
+     "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
+    ("17-detokenizer-and-streaming.html", "Detokenizer 与流式输出", "Detokenizer & streaming",
+     "第四部分 · 服务入口与编排", "Part 4 · Entrypoints & orchestration"),
 ]
 
 
@@ -544,6 +554,16 @@ SUBTITLES = {
                                              "fork's parallel branches share the prefix · two halves of RadixAttention"),
     "12-backends-and-openai-compat.html": ("后端无关 · 本地 runtime vs OpenAI/Anthropic · 通往运行时的接缝",
                                            "backend-agnostic · local runtime vs OpenAI/Anthropic · the seam to the runtime"),
+    "13-engine-and-http-server.html": ("离线 Engine vs 在线服务器 · 同一引擎两种入口",
+                                       "offline Engine vs online server · one engine, two entry points"),
+    "14-tokenizer-manager.html": ("前门：分词、组参数、ZMQ 入队、等回流",
+                                  "the front door: tokenize, build params, ZMQ enqueue, await outputs"),
+    "15-openai-anthropic-ollama-compat.html": ("多协议适配 · 把 OpenAI/Anthropic/Ollama 翻成原生请求",
+                                               "multi-protocol adapters · translate OpenAI/Anthropic/Ollama to native"),
+    "16-io-structs-and-ipc.html": ("进程间消息的类型系统 · GenerateReqInput→Tokenized→批输出",
+                                   "the IPC type system · GenerateReqInput→Tokenized→batch outputs"),
+    "17-detokenizer-and-streaming.html": ("增量反分词 · sent_offset 只发新增片段 · SSE",
+                                          "incremental detok · sent_offset emits only the new slice · SSE"),
 }
 
 

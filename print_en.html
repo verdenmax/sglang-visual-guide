@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 12 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 17 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -348,6 +348,11 @@ details[open] > summary { list-style: none; }
   <li>Interpreter & tracer</li>
   <li>fork/join & prefix sharing</li>
   <li>Backends & OpenAI compat</li>
+  <li>Engine & HTTP server</li>
+  <li>TokenizerManager</li>
+  <li>OpenAI/Anthropic/Ollama compat</li>
+  <li>IO structs & IPC</li>
+  <li>Detokenizer & streaming</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -2858,6 +2863,945 @@ Understand this and you understand the seam between Part 3 and Part 4 — <stron
   <ul>
     <li>In a sentence or two, explain to a colleague why switching backends for the same SGLang program takes only one line, <code>set_default_backend</code>. Point out the role of the <code>BaseBackend</code> abstract interface and why the program 'neither knows nor cares' which backend runs it.</li>
     <li><code>RuntimeEndpoint</code> is called 'the seam joining Part 3 (front-end) to Part 4+ (runtime).' Using the fact that it translates <code>gen/fork</code> into <code>POST /generate</code>, explain why only this backend can deliver RadixAttention prefix caching (Lesson 7) and fork branch sharing (Lesson 11), and which components from Lessons 13–17 will handle that HTTP request next.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Engine & HTTP server</h1>
+
+<p class="lead">
+Welcome to Part 4 — we finally step from the front-end DSL through the door of the <strong>runtime</strong>. This lesson
+answers the most basic question: through <strong>what entry point</strong> does your program feed requests into SGLang's
+engine? There are exactly two answers: the offline <strong><span class="inline">Engine</span></strong> (a pure in-process
+Python API) and the online <strong>HTTP server</strong> (a FastAPI app). Understanding these two doors — and that they
+<strong>share one runtime underneath</strong> — is the key to every later lesson.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a restaurant with two ways to order. One is the <strong>walk-in counter</strong>: you step to the window and call
+  your order straight to the kitchen — no phone, no middleman. That's the <strong>offline Engine</strong>: an in-process call
+  with the lowest overhead. The other is the <strong>phone-order hotline</strong>: you dial, give your address, and an
+  operator relays the ticket to the kitchen. That's the <strong>online server</strong>: a layer of network and protocol, but
+  anyone, any client, can order remotely. The point: <strong>there is only one kitchen</strong>. Counter or phone, the
+  kitchen is identical — the server is just a "front desk that answers calls" bolted onto the same Engine.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  SGLang offers two paths to drive the runtime, both inheriting from the same abstract base <span class="inline">EngineBase</span>:
+  the <strong>offline <span class="mono">Engine</span></strong> is a plain Python object whose <span class="mono">llm.generate(...)</span>
+  returns results directly — ideal for batch jobs, evaluation, and RL rollout (the trainer calls it in-process); the
+  <strong>online server</strong> uses <span class="mono">launch_server()</span> to start a FastAPI/uvicorn app wrapping an Engine,
+  exposing the native <span class="mono">POST /generate</span> plus OpenAI-compatible routes. <strong>The runtime underneath is
+  identical</strong>: the server is just an HTTP wrapper around the Engine.
+</div>
+
+<h2>Offline Engine: a pure in-process Python API</h2>
+<p>The offline <span class="inline">Engine</span> is the barest entry: no HTTP, no port, no network. In your own Python script
+you <span class="mono">import sglang as sgl</span>, build a <span class="mono">sgl.Engine(model_path=...)</span>, then call
+<span class="mono">llm.generate(prompts, sampling_params)</span> — results come back <strong>right away as Python dicts/lists</strong>.
+It all runs in <strong>one process</strong> (precisely: the main process also holds the TokenizerManager, with the scheduler and
+detokenizer as subprocesses — more on that soon). With no serialization, HTTP parsing, or network round-trip, the Engine is the
+<strong>lowest-latency, most embeddable</strong> way in.</p>
+
+<div class="cols">
+  <div class="col"><h4>Offline Engine</h4><p><span class="mono">sgl.Engine(model_path=...)</span> + <span class="mono">.generate(...)</span>.
+  Pure in-process call, <strong>no HTTP</strong>, no network round-trip. Best for <strong>batch inference, offline eval, RL rollout</strong>
+  (the trainer calls it in-process, lowest overhead). Downside: usable only from <strong>Python in this process</strong> — no cross-machine/cross-language.</p></div>
+  <div class="col"><h4>Online server</h4><p><span class="mono">launch_server(server_args)</span> starts a FastAPI app exposing an
+  <strong>HTTP interface</strong>. Best for <strong>production serving, multi-client, language-agnostic</strong> access — any HTTP
+  client connects. Cost: an extra network + serialization layer, plus ports, concurrency, and auth to manage.</p></div>
+</div>
+
+<h2>Online server: wrap the Engine in HTTP</h2>
+<p>The online server starts with one command: <span class="mono">python -m sglang.launch_server --model-path ...</span>. Internally
+it <strong>builds an Engine</strong>, then wraps it with FastAPI/uvicorn, exposing two kinds of routes: SGLang's <strong>native</strong>
+<span class="mono">POST /generate</span>, and a full set of <strong>OpenAI-compatible routes</strong> like
+<span class="mono">/v1/chat/completions</span> and <span class="mono">/v1/completions</span> (Lesson 15 covers the compat layer). So an
+incoming HTTP request is translated into a call on the inner Engine, and the result (optionally streamed) is written back. The table
+aligns the three entry points with "who uses each":</p>
+
+<table class="t">
+  <tr><th>Entry</th><th>Shape</th><th>Typical user</th></tr>
+  <tr><td class="mono">sgl.Engine().generate()</td><td>In-process Python call, no HTTP</td><td>Batch scripts, eval, RL trainer (Lesson 51)</td></tr>
+  <tr><td class="mono">POST /generate</td><td>SGLang's native HTTP interface</td><td>Front-end RuntimeEndpoint, custom clients</td></tr>
+  <tr><td class="mono">/v1/chat/completions</td><td>OpenAI-compatible HTTP route</td><td>OpenAI SDK / LangChain ecosystem (Lesson 15)</td></tr>
+</table>
+
+<h2>One runtime: the server is just a shell</h2>
+<p>This is the lesson's <strong>most important</strong> sentence: whichever door you enter, <strong>the runtime underneath is the same</strong>.
+After passing the FastAPI app, an HTTP request lands on an Engine; and inside that Engine are exactly the components we'll dissect lesson
+by lesson — <strong>TokenizerManager</strong> (Lesson 14, tokenizing and registering requests), <strong>Scheduler</strong> (Lesson 18,
+batching and scheduling), <strong>DetokenizerManager</strong> (detokenizing and streaming back). So everything from Lesson 14 onward is
+<strong>shared by both offline Engine and online server</strong> — you only learn it once.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">HTTP request</div><div class="nd">/generate · /v1/chat/...</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">FastAPI app</div><div class="nd">shell from launch_server</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Engine</div><div class="nd">shared runtime core</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Three components</div><div class="nd">Tokenizer · Scheduler · Detokenizer</div></div>
+</div>
+
+<p>Note the offline Engine walks the <strong>same chain's back half</strong>: it builds the Engine directly, skipping the leftmost two
+cells ("HTTP request + FastAPI app"), and the rest is identical. That's exactly why we say <strong>server = Engine + an HTTP shell</strong> —
+the server <strong>reimplements no</strong> runtime logic; it only "answers the call, relays the ticket, replies."</p>
+
+<h2>Engine.__init__ launches three processes</h2>
+<p>Recall Lesson 2's "three-process model": SGLang splits <strong>tokenizing, scheduling+forward, detokenizing</strong> across processes,
+talking over ZMQ. And <strong>what spins those processes up is <span class="inline">Engine.__init__</span></strong> (the server builds an
+Engine first, so it goes through this too). Constructing an Engine is igniting the whole runtime:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Parse ServerArgs</h4><p>Collect kwargs like <span class="mono">model_path</span> into a <span class="mono">ServerArgs</span> deciding parallelism, memory, backend — every config.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Launch subprocesses</h4><p>Call <span class="mono">_launch_subprocesses()</span>: build TokenizerManager in the <strong>main process</strong>, and start <strong>one subprocess each</strong> for Scheduler and DetokenizerManager.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Wire up ZMQ</h4><p>Create the sockets for inter-process communication, stringing the main process and the two subprocesses into <strong>one pipeline</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Ready to serve</h4><p>All three processes in place; the moment <span class="mono">generate()</span> is called, a request runs down the chain.</p></div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::Engine</span><span class="ln">building an Engine = igniting the whole runtime</span></div>
+  <pre><span class="kw">class</span> Engine(EngineScoreMixin, EngineBase):
+    <span class="cm"># Entry point to the inference engine, made of three components:</span>
+    <span class="cm"># 1. TokenizerManager  tokenizes and sends requests to the scheduler (main proc)</span>
+    <span class="cm"># 2. Scheduler  subprocess: receives, batches, forwards, sends tokens to detokenizer</span>
+    <span class="cm"># 3. DetokenizerManager  subprocess: detokenizes and sends results back</span>
+
+    <span class="kw">def</span> __init__(self, **kwargs):
+        server_args = self.server_args_class(**kwargs)   <span class="cm"># parse config</span>
+        <span class="cm"># launch subprocesses: TokenizerManager (main) + Scheduler/Detokenizer (subprocs)</span>
+        (tokenizer_manager, template_manager, port_args,
+         scheduler_init_result, subprocess_watchdog) = self._launch_subprocesses(
+            server_args=server_args, ...)
+        self.tokenizer_manager = tokenizer_manager       <span class="cm"># generate() goes through it</span></pre>
+</div>
+
+<h2>When to use which</h2>
+<p>The choice is intuitive: <strong>do you need to cross processes/network?</strong> If your code is in the <strong>same Python process</strong>
+and wants the lowest overhead — running an eval set in batch, generating offline data, or letting an RL trainer <strong>roll out in-process</strong>
+(Lesson 51) — use the <strong>offline Engine</strong>. If you want to serve the model <strong>as a service</strong> to many concurrent clients, or
+clients in another language/machine, use the <strong>online server</strong> and let its HTTP and OpenAI-compat layer catch the whole ecosystem.
+Remember: their performance core is identical; the only difference is <strong>whether you want that HTTP layer</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Two doors</strong>: offline <span class="mono">Engine</span> (pure in-process Python API, no HTTP) and online server (a FastAPI app from <span class="mono">launch_server</span>), both inheriting <span class="mono">EngineBase</span>.</li>
+    <li><strong>Offline Engine</strong>: <span class="mono">sgl.Engine(model_path=...).generate(prompts, sampling_params)</span>, lowest overhead, best for batch, eval, RL rollout (trainer calls in-process, Lesson 51).</li>
+    <li><strong>Online server</strong>: <span class="mono">python -m sglang.launch_server</span> exposes native <span class="mono">POST /generate</span> plus OpenAI-compatible routes (<span class="mono">/v1/chat/completions</span>, Lesson 15); best for production/multi-client/cross-language.</li>
+    <li><strong>One runtime</strong>: the server rewrites no logic — just an HTTP shell over the Engine; from Lesson 14 on, TokenizerManager (Lesson 14), Scheduler (Lesson 18), Detokenizer are shared by both.</li>
+    <li><strong>Ignition</strong>: <span class="mono">Engine.__init__</span> parses ServerArgs and <span class="mono">_launch_subprocesses</span> spins up the three processes (Lesson 2's three-process model).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which statement about the offline <code>Engine</code> and the online server is most accurate?</div>
+  <ol class="opts">
+    <li>Their underlying runtimes differ, so you must learn each separately</li>
+    <li>The offline Engine also uses HTTP, just on a non-exposed port</li>
+    <li>The online server reimplements its own scheduling and forward logic, unrelated to the Engine</li>
+    <li>The online server uses <code>launch_server</code> to start a FastAPI app that <strong>wraps an Engine</strong> and exposes HTTP routes; the offline Engine is a pure in-process Python API calling <code>generate</code> without HTTP. Both <strong>share one runtime</strong>; the server reimplements no runtime logic</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. server = Engine + an HTTP shell. <code>launch_server</code> builds an Engine internally, then wraps it with FastAPI/uvicorn exposing native <code>POST /generate</code> and OpenAI-compatible routes; the offline Engine takes the back half of the chain, skipping HTTP. The underlying runtime (TokenizerManager, Scheduler, Detokenizer) is identical, so everything from Lesson 14 on is shared — learn it once.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. You need rollout in RL training (the trainer generates samples frequently). Why usually prefer the offline <code>Engine</code> over standing up an HTTP server?</div>
+  <ol class="opts">
+    <li>Because only the Engine supports sampling params</li>
+    <li>Because the offline Engine is an <strong>in-process direct call</strong> with no HTTP parsing, serialization, or network round-trip — lowest latency; the trainer can <code>generate</code> in the same process, ideal for high-frequency rollout</li>
+    <li>Because the offline Engine produces higher-quality, different-precision outputs</li>
+    <li>Because an HTTP server cannot load large models</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. RL rollout calls are extremely frequent, so every extra HTTP+serialization+network round-trip is magnified into real overhead. The offline Engine returns Python results in the same process, dropping those layers for lowest latency; the trainer can hold the Engine object directly for rollout (Lesson 51). Output quality and sampling are identical — the only difference is whether you want that HTTP layer.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When you construct <code>sgl.Engine(model_path=...)</code>, what does <code>Engine.__init__</code> mainly do?</div>
+  <ol class="opts">
+    <li>Parse <code>ServerArgs</code>, then call <code>_launch_subprocesses</code> to spin up three processes: TokenizerManager in the main process plus Scheduler and DetokenizerManager subprocesses, and wire up ZMQ (Lesson 2's three-process model)</li>
+    <li>Merely load model weights into CPU memory, creating no processes</li>
+    <li>Do nothing, initializing only on the first generate</li>
+    <li>Start a FastAPI server and listen on a port</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Constructing the Engine ignites the whole runtime: gather kwargs into <code>ServerArgs</code>, then <code>_launch_subprocesses</code> builds TokenizerManager in the main process, starts one subprocess each for Scheduler and Detokenizer, and wires ZMQ. Note it does <strong>not</strong> start FastAPI — the HTTP layer is the server's job. The online server also builds an Engine first, so it goes through this too (Lesson 2).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'one kitchen, two ways to order' analogy, explain to a colleague the relationship between the offline Engine and the online server. State clearly: does the server reimplement the runtime? Are the TokenizerManager, Scheduler, and Detokenizer (from Lesson 14 on) the same for both? And why does that mean you 'learn the internals only once'?</li>
+    <li>Two scenarios: (a) batch-score ten thousand prompts for offline eval; (b) serve a public-facing, multi-language chat product. For each, pick the offline Engine or the online server, and justify your choice from overhead, concurrency, cross-language/cross-machine access, and the OpenAI-compatible ecosystem.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>TokenizerManager</h1>
+
+<p class="lead">
+Last lesson said: whether you enter through the offline <span class="inline">Engine</span> or the online server, requests land on
+<strong>one shared runtime</strong>. So once a request is inside, which component catches it <strong>first</strong>? That is today's star —
+the <strong>TokenizerManager</strong>. It is the runtime's <strong>front door</strong>: it runs in the <strong>main process</strong>
+(alongside the HTTP server / Engine), <strong>not</strong> in the GPU-hungry subprocess. Every request is first tokenized, packed and
+registered here before being sent on to the scheduler.
+</p>
+
+<p>Why give it its own lesson? Because the TokenizerManager is the translator between the outside <strong>text world</strong> and the inner
+<strong>token world</strong>, and the <strong>async concurrency hub</strong>. You send a string; the engine speaks token ids. Hundreds of
+requests pour in at once — whose reply goes back to whom is its job to coordinate. Understanding this front door is what lets Lesson 16's
+io_struct messages, Lesson 17's detokenize/streaming, and Lesson 18's scheduler chain into one coherent flow.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of the TokenizerManager as a hotel <strong>front-desk receptionist</strong>. A guest (request) walks up and states their need in
+  <strong>spoken words</strong> (raw text). The receptionist <strong>translates it into a standardized ticket</strong> — fills in the room
+  type and requests (sampling params), staples on a <strong>booking number</strong> (rid), and <strong>sends the ticket to the back office</strong>
+  (the scheduler subprocess) to actually arrange things. The guest never enters the kitchen; they just <strong>wait to be called</strong>.
+  Meanwhile the receptionist <strong>juggles dozens of guests at once</strong>, handing each reply back to exactly the right person. The desk
+  never cooks (never touches the GPU): it only <strong>translates, registers, forwards, awaits, and delivers</strong> — exactly the TokenizerManager's job.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The TokenizerManager lives in the <strong>main process</strong> as the CPU-side async coordinator. Its core method
+  <span class="mono">generate_request</span> is an <span class="mono">async</span> coroutine: it <strong>tokenizes</strong> the text into token ids
+  (pure CPU string work), builds the <strong>sampling params</strong>, packs everything into a <span class="mono">TokenizedGenerateReqInput</span>
+  (Lesson 16) carrying a unique <span class="mono">rid</span>, and sends it over <strong>ZMQ</strong> to the scheduler subprocess. It then
+  <strong>registers a per-request async state keyed by rid</strong> and <span class="mono">await</span>s the outputs streaming back from the
+  detokenizer (Lesson 17), <span class="mono">yield</span>ing them to the caller (HTTP SSE or the Engine). Isolating tokenize/detokenize from the
+  GPU loop in separate processes is what lets CPU and GPU <strong>overlap</strong> (the zero-overhead idea, Lesson 21).
+</div>
+
+<h2>Which process? Why is it CPU work</h2>
+<p>Recall Lesson 2's <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
+detokenize in the detokenizer subprocess. The TokenizerManager sits in the <strong>main process</strong> slot — same process as the HTTP
+server / Engine, <strong>not</strong> in the GPU subprocess. This is a deliberate <strong>process-boundary</strong> design, not an accident.</p>
+
+<p>The key: <strong>tokenize and detokenize are CPU-bound Python string work</strong> — table lookups, BPE merges, special-token handling,
+all CPU, nothing to do with GPU matmuls. If you crammed them into the GPU subprocess, the GPU would idle while the CPU tokenizes and vice
+versa — the two would serialize and drag each other down. By locking the GPU loop in its own process and letting the TokenizerManager do the
+CPU-side preprocessing in the main process, the two can <strong>truly overlap</strong>: while the GPU forwards the previous batch, the CPU is
+already tokenizing the next. This is the foundation of SGLang's zero-overhead scheduling (Lesson 21), and the TokenizerManager ↔ scheduler
+hop is exactly the <strong>ZMQ/IPC seam</strong>.</p>
+
+<div class="cols">
+  <div class="col"><h4>Main process · TokenizerManager</h4><p>CPU-side front door: <strong>tokenize</strong>, build sampling params, pack a <span class="mono">TokenizedGenerateReqInput</span>, register async state by <span class="mono">rid</span>, <span class="mono">await</span> replies. <strong>Never touches the GPU</strong> — pure Python strings and coroutine scheduling.</p></div>
+  <div class="col"><h4>Subprocess · Scheduler + GPU</h4><p>Given already-tokenized requests, it does <strong>continuous batching</strong> and forward passes (Lesson 18), burning VRAM and kernels. It <strong>only speaks token ids</strong>, never sees raw text, focused on keeping the GPU fed.</p></div>
+</div>
+
+<h2>generate_request: a request's journey</h2>
+<p>When a request arrives, the <span class="mono">async</span> coroutine <span class="mono">generate_request</span> pushes it down step by step:
+<strong>normalize</strong> the args, <strong>tokenize</strong> into token ids, <strong>build sampling params</strong>, pack a
+<span class="mono">TokenizedGenerateReqInput</span> with a <span class="mono">rid</span>, send over <strong>ZMQ</strong> to the scheduler, then
+<span class="mono">await</span> the streamed outputs and hand them back piece by piece. Here is the trunk in five steps:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>tokenize</h4><p><span class="mono">_tokenize_one_request</span> feeds text to the tokenizer, yielding <span class="mono">input_ids</span> (pure CPU work, deliberately kept off the GPU process).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>build sampling params</h4><p>Collect <span class="mono">temperature / top_p / max_new_tokens</span> into a <span class="mono">SamplingParams</span>, then <span class="mono">normalize / verify</span> it.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>pack + stamp rid</h4><p>Build a <span class="mono">TokenizedGenerateReqInput</span> (Lesson 16) carrying a unique <span class="mono">rid</span> — the cross-process "ID card".</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>ZMQ send</h4><p><span class="mono">_send_one_request</span> dispatches the object over a <strong>ZMQ socket</strong> to the scheduler subprocess; the main process does not block.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>register and await</h4><p>Register an async state in <span class="mono">rid_to_state</span>, <span class="mono">await</span> the outputs streaming back from the detokenizer, and <span class="mono">yield</span> them to the caller.</p></div></div>
+</div>
+
+<h2>The rid round-trip: how the hub routes replies</h2>
+<p>The TokenizerManager's cleverest part is its <strong>async routing</strong>. Hundreds of requests arrive concurrently, each assigned a unique
+<span class="mono">rid</span>; after sending, the main process <strong>does not block</strong> — it records <span class="mono">rid → coroutine state</span>
+in a map (<span class="mono">rid_to_state</span>). Outputs flow back <strong>interleaved and out of order</strong> — a token for #7 now, one for #3
+next — and the TokenizerManager uses the <span class="mono">rid</span> to <strong>route each chunk back</strong> to the exact coroutine that is
+<span class="mono">await</span>ing it. Without the <span class="mono">rid</span>, hundreds of concurrent replies would go to the wrong callers. It also
+handles <strong>abort</strong> and, for multimodal, <strong>image/audio preprocessing</strong>.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">TokenizerManager</div><div class="nd">tokenize + stamp rid, main proc</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Scheduler</div><div class="nd">batch + forward (subproc)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Detokenizer</div><div class="nd">tokens → text</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">back to TokenizerManager</div><div class="nd">route by rid to the coroutine</div></div>
+</div>
+
+<table class="t">
+  <tr><th>What the TokenizerManager owns</th><th>Meaning</th></tr>
+  <tr><td class="mono">tokenize</td><td>turn text into token ids (CPU work, kept off the GPU process)</td></tr>
+  <tr><td class="mono">sampling params</td><td>build and verify <span class="mono">SamplingParams</span> (temperature, top_p, max_new_tokens, ...)</td></tr>
+  <tr><td class="mono">rid</td><td>stamp each request with a unique id — cross-process identity and reply routing</td></tr>
+  <tr><td class="mono">async routing</td><td>maintain <span class="mono">rid_to_state</span>, route out-of-order replies to the right awaiting coroutine</td></tr>
+  <tr><td class="mono">abort</td><td>handle request cancellation, clean up the pending state</td></tr>
+  <tr><td class="mono">mm preprocess</td><td>image/audio preprocessing for multimodal requests</td></tr>
+</table>
+
+<p>Read the table as a whole: the TokenizerManager is an async hub that does <strong>only CPU-side coordination and never touches the GPU</strong>.
+It owns the whole front-door job — text→tokens, stamp, forward, await, deliver — so the GPU subprocess can <strong>speak only tokens and just
+compute</strong>. Below is the real skeleton of <span class="mono">generate_request</span>: tokenize, register, ZMQ send, then
+<span class="mono">await</span> the replies.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/tokenizer_manager.py ::TokenizerManager.generate_request</span><span class="ln">front door: tokenize → ZMQ send → await replies</span></div>
+  <pre><span class="kw">async def</span> generate_request(self, obj, request=None):
+    self.auto_create_handle_loop()
+    obj.normalize_batch_and_arguments()
+    self._init_req_state(obj, request)        <span class="cm"># register async state by rid</span>
+
+    <span class="kw">if</span> obj.is_single:
+        <span class="cm"># tokenize (CPU work, kept off the GPU process)</span>
+        tokenized_obj = <span class="kw">await</span> self._tokenize_one_request(obj)
+        state = self.rid_to_state[obj.rid]    <span class="cm"># find this request's state by rid</span>
+        self._send_one_request(tokenized_obj) <span class="cm"># send over ZMQ to the scheduler subproc</span>
+        <span class="kw">async for</span> response <span class="kw">in</span> self._wait_one_response(obj, request):
+            <span class="kw">yield</span> response                    <span class="cm"># await streamed outputs, hand back to caller</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Front door / main process</strong>: the TokenizerManager is the runtime's front door, running in the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> in the GPU subprocess.</li>
+    <li><strong>Five-step trunk</strong>: the <span class="mono">generate_request</span> coroutine — tokenize → build sampling params → pack a <span class="mono">TokenizedGenerateReqInput</span> with a <span class="mono">rid</span> (Lesson 16) → send over <strong>ZMQ</strong> to the scheduler → <span class="mono">await</span> replies and <span class="mono">yield</span> them.</li>
+    <li><strong>What the rid is for</strong>: the unique request id is the cross-process ID card; with hundreds of concurrent, out-of-order replies, <span class="mono">rid_to_state</span> routes each back to the right awaiting coroutine (streaming, Lesson 17).</li>
+    <li><strong>Why tokenize on CPU</strong>: tokenize/detokenize are CPU-bound string work; keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21).</li>
+    <li><strong>Also owns</strong>: request <span class="mono">abort</span> and multimodal image/audio preprocessing; it is the async concurrency hub and itself never touches the GPU.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which process does the TokenizerManager run in, and why?</div>
+  <ol class="opts">
+    <li>In the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> the GPU subprocess — because tokenize/detokenize are CPU-bound string work, and keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21)</li>
+    <li>In the GPU subprocess, doing forward passes alongside the Scheduler</li>
+    <li>It has no process of its own — just a function inside the Scheduler</li>
+    <li>A fresh process per request, destroyed after use</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The TokenizerManager is the runtime's front door, doing CPU-side preprocessing in the main process and never touching the GPU. With the GPU loop locked in its own subprocess, the CPU tokenizes the next batch while the GPU forwards the previous one — true overlap, the foundation of Lesson 21's zero-overhead scheduling. The hop to the scheduler is the ZMQ/IPC seam.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. With hundreds of concurrent requests, what is the most critical role of the <code>rid</code> (request id)?</div>
+  <ol class="opts">
+    <li>A cross-process 'ID card': when outputs flow back <strong>interleaved and out of order</strong>, the TokenizerManager uses the <code>rid</code> in <code>rid_to_state</code> to find the awaiting coroutine and <strong>route each chunk back</strong> to the right caller</li>
+    <li>It sets the request's sampling temperature and top_p</li>
+    <li>It prioritizes requests — smaller numbers compute first</li>
+    <li>It is an alias for token ids, generated after tokenization</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. After sending, the main process does not block — it records <code>rid → coroutine state</code> in <code>rid_to_state</code>. As replies stream back interleaved, only the unique <code>rid</code> can match each chunk to the correct awaiting coroutine (streaming, Lesson 17). Without it, hundreds of concurrent replies would go to the wrong callers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Inside <code>generate_request</code>, what exactly does the TokenizerManager send over ZMQ to the scheduler subprocess?</div>
+  <ol class="opts">
+    <li>An HTTP request object for the scheduler to parse</li>
+    <li>Model weights and KV-cache pointers</li>
+    <li>A tokenized <code>TokenizedGenerateReqInput</code> with a unique <code>rid</code> (token ids + sampling params, Lesson 16) — the scheduler only speaks tokens and never sees raw text</li>
+    <li>The raw prompt text string, leaving the scheduler to tokenize</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The TokenizerManager first runs <code>_tokenize_one_request</code> to get token ids, builds and verifies <code>SamplingParams</code>, then packs a <code>TokenizedGenerateReqInput</code> with a <code>rid</code> (Lesson 16's io_struct message) and dispatches it via <code>_send_one_request</code> over a ZMQ socket. The text→token translation is done in the main process, so the GPU subprocess only faces tokens and just computes.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'hotel front-desk receptionist' analogy, explain the TokenizerManager's job to a colleague. Make clear: what it translates spoken needs into (token ids + params + a booking number rid), why it never 'enters the kitchen' (never touches the GPU), and how it juggles dozens of guests without mixing up replies.</li>
+    <li>Suppose someone proposes moving tokenization into the GPU subprocess to drop the ZMQ hop between the TokenizerManager and the scheduler. Argue what would be lost, from the angles of CPU/GPU overlap (Lesson 21), the GIL, and the main-process vs subprocess separation of duties.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>OpenAI/Anthropic/Ollama compat</h1>
+
+<p class="lead">
+Last lesson we saw the runtime's <strong>front door</strong> — the TokenizerManager. But one question it can't answer: out there
+are clients speaking the <strong>OpenAI dialect</strong>, the <strong>Anthropic dialect</strong>, the <strong>Ollama dialect</strong>
+— how can they plug into one runtime <strong>without changing a line</strong>? The answer is today's star — the
+<strong>compat layer</strong>. It makes the SGLang server <strong>speak several protocols at once</strong>, so <strong>existing
+clients work unchanged</strong>.
+</p>
+
+<p>Why a whole lesson on the compat layer? Because it is the <strong>seam</strong> that lets SGLang drop into the existing ecosystem.
+You don't rewrite an SDK for SGLang, nor make your team learn a new API — just point an OpenAI client's
+<span class="mono">base_url</span> at your SGLang deployment and <strong>it runs immediately</strong>. LangChain, the
+<span class="mono">openai</span> Python package, any tool built around the OpenAI API — all plug in seamlessly. This thin adapter
+layer is the <strong>master key</strong> by which a private deployment takes over the whole ecosystem.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the compat layer as <strong>a row of multilingual translators standing at the door</strong>. Guests each speak their own
+  dialect: some OpenAI, some Anthropic, some Ollama. The translators convert <strong>each dialect into the one house language</strong>
+  the kitchen understands — the native <span class="mono">GenerateReqInput</span> (Lesson 16). The kitchen (the runtime) has no idea
+  which dialect a guest originally spoke; it just cooks from that standard ticket. When the dish is ready, the translators
+  <strong>translate the same dish back into each guest's dialect</strong> and serve it. Guests think "this place speaks my language!"
+  — but there is only one kitchen and one house language; only <strong>the translators at the door</strong> are multilingual.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The compat layer lives under <span class="mono">entrypoints/openai/</span> and friends, built from a set of <strong>serving classes</strong>.
+  Take OpenAI: <span class="mono">/v1/chat/completions</span> is handled by <span class="mono">OpenAIServingChat</span>,
+  <span class="mono">/v1/completions</span> by <span class="mono">OpenAIServingCompletion</span>, plus <span class="mono">/v1/embeddings</span> and more.
+  Every serving class does the same job: <strong>translate</strong> an <strong>OpenAI-shaped</strong> request — apply the chat template,
+  build sampling params — into a <strong>native <span class="mono">GenerateReqInput</span></strong> (Lesson 16) handed to the
+  TokenizerManager (Lesson 14); then <strong>map</strong> the runtime's outputs <strong>back</strong> into OpenAI response objects or SSE
+  chunks (<span class="mono">chat.completion.chunk</span>). The Anthropic (<span class="mono">/v1/messages</span>) and Ollama adapters do the
+  same for their own schemas.
+</div>
+
+<h2>A request's protocol journey</h2>
+<p>Walk the whole path in your head first. A request's journey is: <strong>client SDK → protocol adapter → native request → the same
+runtime → adapter formats the response</strong>. Note the middle stretch — <strong>"the same runtime"</strong> — whichever dialect the
+entry spoke, it converges here onto one shared fast path. The adapter only translates at the <strong>outermost layer</strong>; it never
+reimplements the engine.</p>
+
+<p>That is the essence of the compat-layer design: the runtime itself is <strong>protocol-agnostic</strong> — it only knows
+<span class="mono">GenerateReqInput</span>. The adapter does just two things — <strong>schema translation</strong> (map OpenAI/Anthropic/Ollama
+fields onto native fields) and <strong>chat templating</strong> (assemble the messages list into a single prompt per the model's template).
+Because its job is so narrow, <strong>adding a protocol is cheap</strong>: write one new adapter. The hottest inference fast path stays
+<strong>shared and optimized once</strong>. If every new protocol meant rewriting the engine, that would be an engineering disaster — the
+compat layer sidesteps it elegantly with "thin adapters + shared core."</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Client</span><span class="name">OpenAI SDK / LangChain / curl</span></div><div class="ld">Speaks the OpenAI dialect: posts <span class="mono">/v1/chat/completions</span> with a <span class="mono">messages</span> list. Just point <span class="mono">base_url</span> at SGLang — <strong>no code change</strong>.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Adapter</span><span class="name">Protocol layer OpenAI / Anthropic / Ollama</span></div><div class="ld">The serving class does <strong>schema translation + chat templating</strong>, shaping the dialect request into native form. New protocol = one more adapter.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">House language</span><span class="name">GenerateReqInput (Lesson 16)</span></div><div class="ld">The only native request the runtime understands: token/text + sampling params + rid. <strong>Protocol-agnostic</strong>; three dialects converge into one here.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Front door</span><span class="name">TokenizerManager (Lesson 14)</span></div><div class="ld">Takes the native request, tokenizes, stamps a rid, ships it to the scheduler via ZMQ. The <strong>shared fast path</strong> starts here, identical for all protocols.</div></div>
+</div>
+
+<h2>Route → serving class → native mapping</h2>
+<p>In code, each HTTP route is bound to a serving class that does the translating. The table below aligns "the route the world sees"
+with "the class that takes it inside" — at a glance you see the compat layer's <strong>division-of-labor map</strong>: different dialects
+take different adapters, but every arrow ends at the same <span class="mono">GenerateReqInput</span>.</p>
+
+<table class="t">
+  <tr><th>HTTP route</th><th>Serving class</th><th>Native form produced</th></tr>
+  <tr><td class="mono">/v1/chat/completions</td><td class="mono">OpenAIServingChat</td><td>apply chat template → <span class="mono">GenerateReqInput</span></td></tr>
+  <tr><td class="mono">/v1/completions</td><td class="mono">OpenAIServingCompletion</td><td>raw prompt → <span class="mono">GenerateReqInput</span></td></tr>
+  <tr><td class="mono">/v1/messages</td><td>Anthropic adapter</td><td>messages → <span class="mono">GenerateReqInput</span></td></tr>
+  <tr><td class="mono">/api/generate</td><td>Ollama adapter</td><td>Ollama fields → <span class="mono">GenerateReqInput</span></td></tr>
+</table>
+
+<p>A consistent pattern is worth naming: <strong>routes differ in shape, the destination is identical</strong>.
+<span class="mono">OpenAIServingChat</span> must "apply the chat template" first, because the chat endpoint gives a list of role messages that
+must be assembled into a single prompt per the model's own template; <span class="mono">/v1/completions</span> gets prompt text directly,
+so its adapter skips templating. Anthropic's <span class="mono">/v1/messages</span> names fields differently (system kept separate,
+<span class="mono">max_tokens</span> required), and Ollama's <span class="mono">/api/generate</span> is yet another shape — but
+<strong>every adapter emits the same <span class="mono">GenerateReqInput</span></strong>. That is "many dialects, one core" at the code level.</p>
+
+<h2>Native /generate vs /v1/chat/completions</h2>
+<p>To really feel <em>where</em> the "translation" happens, put the <strong>native interface</strong> and the <strong>OpenAI-compatible
+interface</strong> side by side. They ultimately drive the same runtime; the difference is only <strong>what the request/response envelope
+looks like</strong> — native is SGLang's own shape, OpenAI is a shape mimicked for ecosystem compatibility.</p>
+
+<div class="cols">
+  <div class="col"><h4>Native <span class="mono">POST /generate</span></h4><p>SGLang's own shape: the body gives <span class="mono">text</span> or <span class="mono">input_ids</span> plus <span class="mono">sampling_params</span>,
+  and the response is native SGLang JSON. <strong>No chat template</strong>, fields closest to the core — the native HTTP entry from Lesson 13, ideal for custom clients and the front-end RuntimeEndpoint.</p></div>
+  <div class="col"><h4><span class="mono">/v1/chat/completions</span></h4><p>OpenAI shape: the body is a <span class="mono">messages</span> role list that <span class="mono">OpenAIServingChat</span> <strong>runs through the chat template</strong> and translates into
+  <span class="mono">GenerateReqInput</span>; the response is mapped to a <span class="mono">chat.completion</span> object or a <span class="mono">chat.completion.chunk</span> SSE stream (Lesson 17). Any OpenAI client works out of the box.</p></div>
+</div>
+
+<h2>Two "OpenAI directions": don't conflate A and B</h2>
+<p>Here we must nail down a <strong>very easy to confuse</strong> point that directly bears on understanding both Lesson 12 and this one.
+"OpenAI" appears <strong>twice</strong> in SGLang, but they are <strong>two completely independent, opposite-facing</strong> things:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Two independent OpenAI directions, opposite-facing — never conflate them</b></div>
+  <div class="cells"><span class="lab">Direction A (Lesson 12)</span><span class="cell">SGLang <strong>frontend program</strong></span><span class="sep">→</span><span class="cell hl">calls OUT to OpenAI as backend</span><span class="q">your program is the client</span></div>
+  <div class="cells"><span class="lab">Direction B (this lesson)</span><span class="cell">OpenAI <strong>client</strong></span><span class="sep">→</span><span class="cell hl">calls IN to the SGLang server</span><span class="q">your deployment is the OpenAI endpoint</span></div>
+</div>
+
+<p>Spell them out. <strong>Direction A</strong> (Lesson 12): a frontend program you wrote in the SGLang DSL calls OpenAI as a
+<strong>backend</strong> — here <strong>your program is the client</strong> and OpenAI produces tokens remotely. <strong>Direction B</strong>
+(this lesson): an OpenAI <strong>client</strong> (someone's <span class="mono">openai</span> SDK, LangChain) calls <strong>your SGLang server</strong>
+in turn — here <strong>your SGLang deployment masquerades as an OpenAI endpoint</strong>, and they plug in by just changing
+<span class="mono">base_url</span>. One is "SGLang calling OpenAI," the other "OpenAI calling SGLang" — opposite directions. This lesson is
+<strong>always Direction B</strong>: put an OpenAI mask on your deployment so the whole ecosystem of tools plugs in. Keep these two
+straight and you'll never get lost over "who is the client and who is the server."</p>
+
+<p>Below is the compat layer's real skeleton — the <span class="mono">OpenAIServingChat</span> class, and how it translates an
+OpenAI-shaped <span class="mono">ChatCompletionRequest</span> into a native <span class="mono">GenerateReqInput</span> and hands it to
+<span class="mono">tokenizer_manager.generate_request</span>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/openai/serving_chat.py ::OpenAIServingChat</span><span class="ln">OpenAI shape → native GenerateReqInput → front door</span></div>
+  <pre><span class="kw">class</span> OpenAIServingChat(OpenAIServingBase):
+    <span class="cm"># Handler for /v1/chat/completions requests</span>
+
+    <span class="kw">def</span> _convert_to_internal_request(self, request, raw_request=None):
+        <span class="cm"># Apply the chat template, assembling messages into a single prompt</span>
+        processed_messages = self._process_messages(request, is_multimodal)
+        sampling_params = request.to_sampling_params(...)  <span class="cm"># OpenAI params → sampling params</span>
+        <span class="cm"># Build the only "house language" the runtime knows: native GenerateReqInput (Lesson 16)</span>
+        adapted_request = GenerateReqInput(
+            <span class="kw">**</span>prompt_kwargs, sampling_params=sampling_params,
+            stream=request.stream, rid=request.rid, ...)
+        <span class="kw">return</span> adapted_request, request
+
+    <span class="kw">async def</span> _generate(self, adapted_request, request, raw_request):
+        <span class="cm"># Hand to the TokenizerManager (Lesson 14) — the SAME fast path as the native entry</span>
+        <span class="kw">async for</span> content <span class="kw">in</span> self.tokenizer_manager.generate_request(
+                adapted_request, raw_request):
+            <span class="kw">yield</span> content        <span class="cm"># then map outputs back to chat.completion.chunk (Lesson 17)</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Compat layer = translators</strong>: the SGLang server speaks several <strong>protocols</strong> so existing clients work <strong>unchanged</strong>; it only does schema translation + chat templating, <strong>not a new engine</strong>.</li>
+    <li><strong>Request path</strong>: client SDK → protocol adapter → native <span class="mono">GenerateReqInput</span> (Lesson 16) → <strong>the same runtime</strong> (TokenizerManager, Lesson 14) → adapter formats the response (SSE, Lesson 17).</li>
+    <li><strong>Route map</strong>: <span class="mono">/v1/chat/completions</span>→<span class="mono">OpenAIServingChat</span>, <span class="mono">/v1/completions</span>→<span class="mono">OpenAIServingCompletion</span>, <span class="mono">/v1/messages</span>→Anthropic, <span class="mono">/api/generate</span>→Ollama — all ending at <span class="mono">GenerateReqInput</span>.</li>
+    <li><strong>Two OpenAI directions</strong>: A (Lesson 12) is an SGLang program calling <strong>OUT</strong> to OpenAI as backend; B (this lesson) is an OpenAI client calling <strong>IN</strong> to the SGLang server. Opposite — don't conflate.</li>
+    <li><strong>Why thin adapters</strong>: the runtime is protocol-agnostic, adding a protocol is cheap, and the hottest inference fast path is always shared and optimized once.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does the compat layer (OpenAI/Anthropic/Ollama) actually do so existing clients work against SGLang unchanged?</div>
+  <ol class="opts">
+    <li>It forwards SGLang requests to the real OpenAI servers to compute</li>
+    <li>It runs a separate inference engine and KV cache per protocol</li>
+    <li>It requires clients to switch to a SGLang-only SDK</li>
+    <li>A set of <strong>serving classes</strong> that only do <strong>schema translation + chat templating</strong>: shape the dialect request into a native <code>GenerateReqInput</code> (Lesson 16) for the TokenizerManager (Lesson 14), then map outputs back to that protocol's response/SSE — <strong>not a reimplemented engine</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The runtime is <strong>protocol-agnostic</strong> and only knows <code>GenerateReqInput</code>. The adapter does two narrow things at the outermost layer: map OpenAI/Anthropic/Ollama fields to native fields (schema translation) and assemble messages into a prompt per the model's template (chat templating). Because the job is narrow, adding a protocol is just one more adapter, and the hottest fast path stays shared and optimized once.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. "OpenAI" has two directions in SGLang. Which one does this lesson (Direction B) cover?</div>
+  <ol class="opts">
+    <li>An OpenAI <strong>client</strong> (someone's openai SDK / LangChain) calls <strong>IN</strong> to your SGLang server — your deployment <strong>masquerades as an OpenAI endpoint</strong>, and they plug in by just changing <code>base_url</code></li>
+    <li>Your SGLang frontend program calls OUT to OpenAI as a backend (that is Direction A, Lesson 12)</li>
+    <li>The two directions are the same thing and need not be distinguished</li>
+    <li>SGLang proxies both request and response to the real OpenAI</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Direction A (Lesson 12): the SGLang program is the <strong>client</strong>, calling OpenAI as a backend. Direction B (this lesson): the OpenAI client is the caller and your SGLang server is the callee, wearing an OpenAI mask so the whole ecosystem plugs in. One is 'SGLang calling OpenAI,' the other 'OpenAI calling SGLang' — opposite, never conflate.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does any OpenAI client work against the SGLang server out of the box?</div>
+  <ol class="opts">
+    <li>Because SGLang implements OpenAI's HTTP protocol: <code>/v1/chat/completions</code> is handled by <code>OpenAIServingChat</code>, which translates the OpenAI-shaped request into a native one, runs the same runtime, and maps results back to <code>chat.completion</code> objects/SSE chunks — so the client only points <code>base_url</code> at SGLang</li>
+    <li>Because the two protocols' fields are identical, needing no translation</li>
+    <li>Because SGLang secretly calls the real OpenAI API under the hood</li>
+    <li>Because OpenAI clients auto-detect and switch to SGLang's native protocol</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. An OpenAI client only sends requests and parses responses per OpenAI's HTTP contract. SGLang's compat layer under <code>entrypoints/openai/</code> implements that contract: each route binds a serving class that translates, the request becomes a native <code>GenerateReqInput</code> on the shared fast path, and the response is formatted back into OpenAI objects or stream chunks. The client never notices SGLang underneath — just change <code>base_url</code>.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'row of multilingual translators at the door' analogy, explain the compat layer to a colleague. Make clear: guests speak the OpenAI/Anthropic/Ollama dialects, the translators convert each into the one house language the kitchen understands (native GenerateReqInput), there is only one kitchen with a shared cooking path, and the dish is translated back into each dialect. Explain why this is 'thin adapters + shared core' rather than a separate engine per protocol.</li>
+    <li>Distinguish and compare the two 'OpenAI directions': in Direction A (Lesson 12) the SGLang frontend program calls OUT to OpenAI as a backend — who is the client? In Direction B (this lesson) an OpenAI client calls IN to the SGLang server — who is the server? Then describe how, in Direction B, a <code>/v1/chat/completions</code> request flows through <code>OpenAIServingChat</code> to apply the chat template, build a <code>GenerateReqInput</code>, hand it to the TokenizerManager, and finally map back to SSE.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>IO structs & IPC</h1>
+
+<p class="lead">
+Lesson 14 showed the <strong>front door</strong> (TokenizerManager) and Lesson 15 the <strong>multi-protocol translators</strong>, but one thing kept
+slipping by: these three processes <strong>do not share memory</strong> — so what exactly <strong>travels between them</strong>? That is today's star: the
+group of message structs in <strong>io_struct.py</strong>. Processes cannot read each other's variables; they can only <strong>pass messages</strong>. And
+<span class="mono">io_struct.py</span> pins down the <strong>shape</strong> of those messages as Python <strong>dataclasses</strong>, serialized over <strong>ZMQ</strong>.
+</p>
+
+<p>Why a whole lesson for it? Because this set of structs is effectively the runtime's <strong>"type system" and wire protocol</strong>. Every later
+component — the scheduler (Lesson 18), the worker, the detokenizer (Lesson 17) — talks to the others <strong>in these structs</strong>. Grab the single
+thread of "how a request changes shape across processes," and those seemingly complex components string together like beads. Skip it, and the scheduler
+source will drown you in <span class="mono">TokenizedGenerateReqInput</span> and <span class="mono">BatchTokenIDOutput</span> — they are not details, they are the <strong>skeleton</strong>.</p>
+
+<p>There is a deeper angle too: making communication <strong>explicit as data structures</strong> is itself an engineering discipline. Once the process
+boundary is pinned by dataclasses, "who sends which field, who fills it, who reads it" becomes <strong>black and white</strong> — printable, breakpoint-able,
+unit-testable. Compared with implicit shared state, this "everything is a message" design costs a few extra classes but buys <strong>debuggability and
+evolvability</strong> — a lesson distributed systems keep re-teaching.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of these structs as <strong>standardized forms and envelopes moving between departments</strong>. For one case, each department turns it into a
+  <strong>new official form</strong>: the front desk takes an <strong>intake form</strong> (raw ask: text, sampling prefs, stream flag); tokenization turns it into a
+  <strong>work order</strong> (token ids + params, sent to the floor); the floor produces a <strong>results sheet</strong> (a batch of token ids); finally it is typed up as a
+  <strong>printed letter</strong> (decoded text) and mailed back. Every form is stamped with the <strong>same case number</strong> (<span class="mono">rid</span>) in the corner, so even with
+  dozens of cases interleaving on the conveyor belt, nothing is misrouted. Departments <strong>never share a drawer</strong> (no shared memory) — they cooperate purely by
+  <strong>handing forms across</strong> (passing messages).
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  <span class="mono">io_struct.py</span> lives under <span class="mono">python/sglang/srt/managers/</span> and is a pure <strong>message-definition file</strong>: almost no
+  algorithms, just <span class="mono">@dataclass</span> after <span class="mono">@dataclass</span>. They line up along the request's lifecycle —
+  <span class="mono">GenerateReqInput</span> (the user-facing request the front door receives) → <span class="mono">TokenizedGenerateReqInput</span> (post-tokenization, the one that
+  <strong>actually crosses ZMQ to the scheduler</strong>) → <span class="mono">BatchTokenIDOutput</span> (batched token ids from scheduler/worker) →
+  <span class="mono">BatchStrOutput</span> (text decoded by the detokenizer). Each struct marks <strong>who produces and who consumes</strong> it. They travel over ZMQ IPC
+  sockets (a port per process), and the <span class="mono">rid</span> routes interleaved batched outputs back to the right request. There are also standalone
+  <strong>control messages</strong>: abort, flush_cache, health.
+</div>
+
+<h2>Why message passing, not shared memory</h2>
+<p>Recall the <strong>three-process model</strong> (Lesson 2): the main process (TokenizerManager), the scheduler subprocess, the detokenizer subprocess. They are
+<strong>three separate OS processes</strong>, each with its own memory — an object in the main process is <strong>invisible and untouchable</strong> to the scheduler. This is
+deliberate: splitting processes sidesteps Python's GIL and lets CPU and GPU truly overlap (Lesson 21). The price: they can no longer cooperate by "reading the same
+variable" — only by <strong>handing messages back and forth</strong>.</p>
+
+<p>So the question becomes: what do messages look like, and how do they cross the wire? SGLang's answer is plain and effective — define <strong>shape with
+dataclasses</strong>, do <strong>transport with ZMQ</strong>. Dataclasses make every field obvious and printable; ZMQ provides lightweight inter-process sockets that
+<strong>serialize</strong> an object to bytes, send it, and <strong>deserialize</strong> it on the other side. Together they yield communication that is <strong>cheap, explicit, and
+debuggable</strong> — you can literally print a message and see its tokens and sampling params.</p>
+
+<div class="cols">
+  <div class="col"><h4>Shared memory? <strong>No</strong></h4><p>The three processes each own <strong>separate memory</strong>; one process's objects are unreadable to another. That is the boundary cost of splitting processes to dodge the GIL and overlap CPU/GPU (Lesson 21).</p></div>
+  <div class="col"><h4>Message passing? <strong>Yes</strong></h4><p>Cooperation is purely by <strong>passing messages</strong>: shape with <span class="mono">dataclass</span>, cross the wire via <strong>ZMQ</strong> serialization. Cheap, explicit, printable and breakpoint-able — the classic distributed choice.</p></div>
+</div>
+
+<h2>A request's lifecycle: a relay of message shapes</h2>
+<p>What brings this design alive is <strong>following one request</strong> and watching it <strong>swap structs</strong> at each process boundary. It is a tight relay: each
+leg's "output message" is exactly the next leg's "input message," and the baton carried throughout is the <span class="mono">rid</span>.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">GenerateReqInput</div><div class="nd">user request at the door: text+params+stream</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">TokenizedGenerateReqInput</div><div class="nd">post-tokenize, <strong>sent via ZMQ to scheduler</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">BatchTokenIDOutput</div><div class="nd">batched token ids from scheduler/worker</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">BatchStrOutput</div><div class="nd">text decoded by the detokenizer</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">route by rid to client</div><div class="nd">hand back to the awaiting request</div></div>
+</div>
+
+<p>Leg by leg. <strong>Leg one</strong>: the TokenizerManager (Lesson 14) receives a <span class="mono">GenerateReqInput</span> — the <strong>user-facing</strong> request:
+<strong>raw text</strong>, sampling params, a <span class="mono">stream</span> flag, maybe images/audio. Note: <strong>this object does not cross processes</strong>; it lives only in the main
+process. <strong>Leg two</strong>: tokenization turns text into token ids and packs a <span class="mono">TokenizedGenerateReqInput</span> — <strong>this</strong> is the message actually
+serialized by ZMQ and <strong>sent across the boundary to the scheduler</strong>. In other words, <strong>what crosses ZMQ to the scheduler is tokenized ids, not raw text</strong>.
+That is the one line to memorize this lesson.</p>
+
+<p><strong>Leg three</strong>: the scheduler (Lesson 18) groups requests into a <span class="mono">ScheduleBatch</span> (Lesson 19), runs the forward pass, and emits a
+<span class="mono">BatchTokenIDOutput</span> — note it is <strong>batched</strong>: one message holds the new token ids for <strong>many requests at once</strong>, with a
+<span class="mono">rids</span> list marking which segment belongs to whom. <strong>Leg four</strong>: the detokenizer (Lesson 17) decodes ids back to text as a
+<span class="mono">BatchStrOutput</span> (with <span class="mono">output_strs</span>). <strong>Final leg</strong>: results flow back to the TokenizerManager, which uses the
+<span class="mono">rid</span> to route each piece to the right <span class="mono">await</span>ing coroutine and hands it to the client.</p>
+
+<table class="t">
+  <tr><th>Message struct</th><th>Key fields</th><th>Producer → Consumer</th></tr>
+  <tr><td class="mono">GenerateReqInput</td><td>text / input_ids, sampling_params, stream, rid</td><td>client/compat → TokenizerManager (<strong>no IPC</strong>)</td></tr>
+  <tr><td class="mono">TokenizedGenerateReqInput</td><td>rid, input_ids, sampling_params, stream</td><td>TokenizerManager →(<strong>ZMQ</strong>)→ Scheduler</td></tr>
+  <tr><td class="mono">BatchTokenIDOutput</td><td>rids, decode_ids/output_ids, finished_reasons</td><td>Scheduler/worker →(ZMQ)→ Detokenizer</td></tr>
+  <tr><td class="mono">BatchStrOutput</td><td>rids, output_strs, output_ids, finish info</td><td>Detokenizer →(ZMQ)→ TokenizerManager → client</td></tr>
+</table>
+
+<p>Read the table top-to-bottom and a neat pattern appears: <strong>each row's consumer is the next row's producer</strong>; the four structs link end-to-end into the
+<strong>full loop</strong> from "human text" to "tokens" and back to "human text." Note the switch from <strong>singular to plural</strong>: inbound is <strong>single</strong>
+(<span class="mono">GenerateReqInput</span>/<span class="mono">TokenizedGenerateReqInput</span>, carrying <span class="mono">rid</span>), outbound is <strong>batched</strong>
+(<span class="mono">Batch*Output</span>, carrying <span class="mono">rids</span>) — because the scheduler <strong>batches many requests</strong> together, so outputs are naturally batched.
+That is continuous batching (Lesson 18) showing through.</p>
+
+<h2>rid: the case number threaded throughout</h2>
+<p>What keeps these messages <strong>from getting scrambled</strong> across three processes is one humble field: <span class="mono">rid</span> (request id). It is created at the
+<span class="mono">GenerateReqInput</span>, copied into <span class="mono">TokenizedGenerateReqInput</span> all the way to the scheduler, and flows back in the
+<span class="mono">rids</span> lists of <span class="mono">BatchTokenIDOutput</span>/<span class="mono">BatchStrOutput</span>. Because the scheduler <strong>batches many requests</strong> together, the
+returning output is <strong>interleaved and batched</strong> — one message holds tokens for request 7, request 3, request 9. Without <span class="mono">rid</span>, the
+TokenizerManager could not <strong>split and route</strong> that interleaved batch back to the right awaiting coroutines.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>How rid routes interleaved batched outputs</b></div>
+  <div class="cells"><span class="lab">out</span><span class="cell">rid=7: tok</span><span class="cell">rid=3: tok</span><span class="cell hl">rid=9: tok</span><span class="sep">→</span><span class="cell">one BatchTokenIDOutput</span><span class="q">batched, interleaved</span></div>
+  <div class="cells"><span class="lab">split</span><span class="cell hl">by rid</span><span class="sep">→</span><span class="cell">7→coro A</span><span class="cell">3→coro B</span><span class="cell">9→coro C</span><span class="q">each to its own</span></div>
+</div>
+
+<p>So <span class="mono">rid</span> is not optional metadata — it is the root that lets this "everything is a message" system run <strong>concurrent yet unscrambled</strong>. It is
+like the <strong>tracking number</strong> on a parcel: packages get broken apart, co-mingled, and redistributed at the sorting center, yet are tracked precisely and delivered to
+the right person — all by that number. Understand the round-trip of <span class="mono">rid</span> and you understand the <strong>foundation</strong> shared by SGLang's async routing
+(Lesson 14) and streaming (Lesson 17). Here is the real skeleton of the core message that actually crosses ZMQ:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/io_struct.py ::TokenizedGenerateReqInput</span><span class="ln">the message that actually crosses ZMQ to the scheduler</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> TokenizedGenerateReqInput(BaseReq):   <span class="cm"># BaseReq supplies rid (the cross-process id)</span>
+    input_text: str                       <span class="cm"># raw text (kept for debug/logging)</span>
+    input_ids: Optional[array[int]]        <span class="cm"># tokenized ids — what actually feeds the model</span>
+    mm_inputs: object                      <span class="cm"># multimodal inputs (image/audio)</span>
+    sampling_params: SamplingParams        <span class="cm"># temperature/top_p/max_new_tokens, ...</span>
+    return_logprob: bool
+    stream: bool                           <span class="cm"># whether to stream back (Lesson 17)</span>
+    <span class="cm"># ...then serialized by ZMQ and sent to the scheduler (Lesson 18)</span></pre>
+</div>
+
+<p>Notice this struct has <strong>no</strong> user-level <span class="mono">text</span>-list shape; instead it carries the already-tokenized <span class="mono">input_ids</span> — confirming the key
+line: <strong>past the ZMQ wire, downstream only knows tokens, never human text</strong>. <span class="mono">input_text</span> is retained, but only for debugging and logs; what drives the
+model is <span class="mono">input_ids</span>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>No shared memory, only messages</strong>: the three processes (Lesson 2) own separate memory and cooperate via <span class="mono">@dataclass</span> messages in <span class="mono">io_struct.py</span> + <strong>ZMQ</strong> serialization.</li>
+    <li><strong>Lifecycle = a relay of messages</strong>: <span class="mono">GenerateReqInput</span> → <span class="mono">TokenizedGenerateReqInput</span> → <span class="mono">BatchTokenIDOutput</span> → <span class="mono">BatchStrOutput</span>, swapping struct at each process.</li>
+    <li><strong>What crosses ZMQ is tokens, not text</strong>: the scheduler (Lesson 18) actually receives the tokenized <span class="mono">TokenizedGenerateReqInput</span> (with <span class="mono">input_ids</span>); <span class="mono">GenerateReqInput</span> lives only in the main process.</li>
+    <li><strong>rid threads throughout</strong>: the request id routes interleaved <strong>batched</strong> outputs (the <span class="mono">rids</span> list) back to the right awaiting coroutine (async routing Lesson 14, streaming Lesson 17).</li>
+    <li><strong>It is the runtime's "type system"</strong>: scheduler, worker, and detokenizer all speak these structs; abort/flush_cache/health are standalone control messages.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why do SGLang's three processes communicate via <code>io_struct.py</code> dataclasses + ZMQ instead of sharing objects directly?</div>
+  <ol class="opts">
+    <li>Because Python has no way to share memory between processes at all</li>
+    <li>Because the three processes (Lesson 2) own <strong>separate memory</strong>, so one process's objects are unreadable to another — splitting processes is the necessary cost of dodging the GIL and overlapping CPU/GPU (Lesson 21), so messages must be <strong>shaped by dataclasses and serialized over ZMQ</strong>, buying cheap, explicit, printable/breakpoint-able cooperation</li>
+    <li>Because only this lets you call CUDA kernels on the GPU</li>
+    <li>Because dataclasses run faster than shared memory, purely a performance optimization</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The point isn't 'speed' but 'boundaries': the three are separate OS processes with mutually invisible memory. Splitting them dodges the GIL and overlaps CPU/GPU; the cost is no shared variables, only passing messages. <code>io_struct.py</code> pins message shapes with dataclasses and ZMQ handles serialized transport, giving an explicit, debuggable cross-process protocol.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. When a request actually crosses ZMQ to the scheduler (Lesson 18), which struct travels, and what does it carry?</div>
+  <ol class="opts">
+    <li>It's <code>GenerateReqInput</code>, carrying the user's raw text string</li>
+    <li>It's <code>TokenizedGenerateReqInput</code>, carrying <strong>already-tokenized ids</strong> (<code>input_ids</code>) + sampling params + <code>rid</code> — the raw text was tokenized in the main process, and <strong>past the wire downstream only knows tokens, not human text</strong></li>
+    <li>It's <code>BatchStrOutput</code>, carrying decoded text</li>
+    <li>The tokenizer object itself is shared directly with the scheduler process</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <code>GenerateReqInput</code> is the user-facing request that lives only in the main process and <strong>does not cross processes</strong>. Only after tokenization is it packed into <code>TokenizedGenerateReqInput</code>, which holds <code>input_ids</code> rather than raw text and is the message ZMQ serializes to the scheduler. So what crosses is tokens, not text — reflecting that tokenization stays in the main process, keeping the linguistic burden at the outermost layer (Lesson 14).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. The scheduler batches many requests together, so the returning <code>BatchTokenIDOutput</code> is interleaved and batched. What does <code>rid</code> do here?</div>
+  <ol class="opts">
+    <li><code>rid</code> is the <strong>request id</strong> threaded through every message: each token segment in the batched output carries its own <code>rid</code>, so the TokenizerManager <strong>splits and routes</strong> the interleaved output back to the right awaiting coroutine; without it, hundreds of concurrent replies would be misdelivered</li>
+    <li><code>rid</code> is part of the sampling params, controlling temperature and top_p</li>
+    <li><code>rid</code> is just an optional logging field; removing it doesn't affect routing</li>
+    <li><code>rid</code> decides which GPU computes each request</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Because outputs are batched and interleaved (one message mixes tokens for requests 7, 3, 9), a stable identifier is needed to place each segment. <code>rid</code> is created at <code>GenerateReqInput</code>, copied into the tokenized struct, and flows back in the <code>rids</code> lists of the <code>Batch*Output</code> — the foundation shared by async routing (Lesson 14) and streaming (Lesson 17).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'standardized forms moving between departments' analogy, describe a request's lifecycle across the three processes: how it goes from <code>GenerateReqInput</code> (intake form) to <code>TokenizedGenerateReqInput</code> (work order, crossing ZMQ to the scheduler), to <code>BatchTokenIDOutput</code> (results sheet), and finally <code>BatchStrOutput</code> (printed letter). Explain in particular why 'in' is singular while 'out' is batched, and what the <code>rid</code> stamped on each form does.</li>
+    <li>Someone argues: 'Just let the three processes share one block of memory and read/write each other's request objects directly — wouldn't skipping serialization be faster?' Rebut this: from the angles of the GIL, CPU/GPU overlap (Lesson 21), fault isolation, and debuggability, explain why SGLang prefers the 'everything is a message' design with dataclasses + ZMQ even at the cost of serialization.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Detokenizer & streaming</h1>
+
+<p class="lead">
+Lesson 14 covered the runtime's <strong>entrance</strong> — the TokenizerManager turns human text into token ids and sends them to the GPU.
+This lesson covers the <strong>exit</strong>: how the token ids the GPU emits one at a time become readable text again, then stream back to the
+client <strong>piece by piece</strong>, like a typewriter. The component responsible is its own subprocess — the
+<strong>DetokenizerManager</strong>. It is the <strong>last component in the chain that speaks human language</strong>, and it closes Part 4.
+</p>
+
+<p>Why give it its own process and its own lesson? Because stitching token ids back into text is far more than a table lookup. It solves two
+genuinely tricky problems: first, <strong>incrementality</strong> — each step must emit only the <strong>small new slice</strong>, not re-decode
+and re-send the whole generated text every time; second, <strong>multi-byte boundaries</strong> — a token may decode to only half a Chinese
+character or half an emoji, so it must <strong>wait for a complete character</strong> before emitting, never feeding a half-character to the
+screen. Grasp these two and you'll see why streaming looks so smooth while quietly relying on careful <strong>offset bookkeeping</strong>.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of the detokenizer as a <strong>simultaneous interpreter</strong>. The speaker (GPU) keeps spilling out words; every few seconds the
+  interpreter opens their mouth — but speaks <strong>only the words that appeared since they last spoke</strong>, never replaying the whole
+  speech (that's <span class="mono">sent_offset</span> remembering "how far I've spoken"). Better still: when a syllable is only half out, the
+  interpreter <strong>holds back</strong> and waits for the full word before voicing it — never a half-syllable (that's the "hold incomplete
+  tokens" handling). So the audience always hears <strong>coherent, complete, never-repeated</strong> sentences. That's exactly the
+  detokenizer's job: <strong>emit only the new, wait until whole, deliver by id</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Recall Lesson 2's <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
+  <strong>detokenize in the detokenizer subprocess</strong>. After each step, the scheduler packs the batch's <strong>newly generated token
+  ids</strong> into a <span class="mono">BatchTokenIDOutput</span> (Lesson 16) and sends it to the detokenizer; the detokenizer decodes ids into
+  text, packs a <span class="mono">BatchStrOutput</span>, and sends it back to the <strong>TokenizerManager</strong> (Lesson 14), which routes it
+  by <span class="mono">rid</span> to the <span class="mono">await</span>ing coroutine, finally streaming it to the HTTP client via
+  <strong>SSE</strong>. Detokenize gets its own process because it is <strong>pure CPU string work</strong> that can <strong>overlap</strong> with
+  the GPU forward loop without either waiting on the other (the zero-overhead idea, Lesson 21).
+</div>
+
+<h2>Where it lives: the runtime's last door</h2>
+<p>The detokenizer is the pipeline's <strong>exit gate</strong>. It <strong>only speaks token ids and never touches the GPU</strong>: input is
+the batches of new tokens from the scheduler, output is slices of readable text. It mirrors the tokenizer exactly — one splits text into numbers
+(in), the other stitches numbers back into text (out). Note it sends results back to the <strong>TokenizerManager</strong>, not the client:
+only the TokenizerManager's <span class="mono">rid_to_state</span> map knows "which awaiting coroutine this rid belongs to and how to
+<span class="mono">yield</span> it to the upstream SSE".</p>
+
+<p>Trace the exit path: the <strong>scheduler</strong> (subproc) finishes its forward and emits this step's new token ids; the
+<strong>DetokenizerManager</strong> (subproc) decodes ids into text and does the incremental slice; the slice returns to the main process's
+<strong>TokenizerManager</strong>, routed by <span class="mono">rid</span> to the awaiting coroutine; and finally it streams piece by piece via
+<strong>SSE</strong> to the <strong>HTTP client</strong>, surfacing as a "typewriter". Four stages, three process boundaries, all stitched into a
+loop by the <span class="mono">rid</span>.</p>
+
+<h2>Incremental detokenize: the magic of sent_offset</h2>
+<p>This is the lesson's <strong>most central</strong> — and most overlooked — piece. The naive approach: every step, decode <strong>all tokens
+so far</strong> into the full text and send the whole thing. It looks simple but has two fatal flaws: first, resending the whole string each step
+makes traffic grow <strong>quadratically</strong> (O(n²)) with length; second, the client repeatedly receives <strong>duplicate</strong> prefixes
+and must itself figure out "which part is new".</p>
+
+<p>The right approach is <strong>incremental</strong>: each request keeps an offset <span class="mono">sent_offset</span> recording "which
+character I've sent up to". After decoding the current full text <span class="mono">output_str</span> each step, emit <strong>only the new
+slice</strong> <span class="mono">output_str[sent_offset:]</span>, then advance <span class="mono">sent_offset</span> to
+<span class="mono">len(output_str)</span>. Next step, again emit only the new tail. Every character <strong>crosses the wire exactly once</strong>;
+traffic is linear.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>receive new token ids</h4><p>The scheduler delivers this step's newly generated token ids (in a <span class="mono">BatchTokenIDOutput</span>, Lesson 16), appended to the request's existing id sequence.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>decode the full text</h4><p>Decode the current id sequence into the full-text-so-far <span class="mono">output_str</span> (with multi-byte boundary handling).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>slice only the new part</h4><p>Take <span class="mono">incremental = output_str[sent_offset:]</span> — only the small slice that <strong>appeared since</strong> the last send.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>advance the offset</h4><p><span class="mono">sent_offset = len(output_str)</span>, recording "sent up to here" so the next step never re-sends already-sent characters.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>pack as an SSE chunk</h4><p>The new slice rides a <span class="mono">BatchStrOutput</span> back to the TokenizerManager, then streams to the client as one SSE chunk — the "typewriter" effect.</p></div></div>
+</div>
+
+<p>To make the difference between "resend everything" and "send only the new" obvious, compare them side by side:</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ Re-decode all each step</h4><p>Decode all tokens and send the whole text every step. The client keeps receiving duplicate prefixes, traffic grows <strong>quadratically (O(n²))</strong> with length — especially wasteful for long outputs — and the burden of "finding the new part" is dumped on the client.</p></div>
+  <div class="col"><h4>✅ Incremental slice (sent_offset)</h4><p>Each step sends only the small new slice <span class="mono">output_str[sent_offset:]</span> and advances the offset. Every character <strong>crosses the wire once</strong>, traffic is linear, the client just concatenates, and it maps naturally onto an SSE stream.</p></div>
+</div>
+
+<h2>Multi-byte boundaries: why hold back</h2>
+<p>Incremental slicing hides another difficulty: <strong>one token is not one character</strong>. A Chinese character or an emoji often takes
+several bytes — sometimes spanning several tokens — to complete. If a step decodes a tail that is an <strong>incomplete UTF-8 sequence</strong>
+(half a character, a broken emoji) and sends it as-is, the client flashes a garbled box <span class="mono">�</span>. So the detokenizer must
+<strong>hold back bytes that don't yet form a complete character</strong> and wait until more tokens arrive to complete it. The table below shows
+how <span class="mono">sent_offset</span> advances per step and <strong>stays put</strong> when only half a character is available:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>sent_offset advancing per step: the highlight is the slice <strong>newly emitted</strong> this step</b></div>
+  <div class="cells"><span class="lab">Step 1</span><span class="cell">output_str=<span class="mono">"你好"</span></span><span class="sep">→</span><span class="cell hl">emit "你好"</span><span class="q">sent_offset: 0 → 2</span></div>
+  <div class="cells"><span class="lab">Step 2</span><span class="cell">tail is half a char</span><span class="sep">→</span><span class="cell">hold, emit nothing</span><span class="q">sent_offset stays: 2</span></div>
+  <div class="cells"><span class="lab">Step 3</span><span class="cell">output_str=<span class="mono">"你好世界"</span></span><span class="sep">→</span><span class="cell hl">emit "世界"</span><span class="q">sent_offset: 2 → 4</span></div>
+  <div class="cells"><span class="lab">Step 4</span><span class="cell">output_str=<span class="mono">"你好世界！"</span></span><span class="sep">→</span><span class="cell hl">emit "！"</span><span class="q">sent_offset: 4 → 5</span></div>
+</div>
+
+<h2>Stop conditions and SSE: when generation ends</h2>
+<p>Streaming always needs an end. A request's generation halts under one of three conditions, and the detokenizer/scheduler trims the output at
+the <strong>stop boundary</strong> accordingly (sampling and stop details in Lesson 28):</p>
+
+<table class="t">
+  <tr><th>Stop condition</th><th>Meaning</th><th>Effect on output</th></tr>
+  <tr><td class="mono">EOS token</td><td>the model generated the end-of-sequence token</td><td>natural finish, this request ends streaming</td></tr>
+  <tr><td class="mono">stop string</td><td>a user-specified stop string is matched (e.g. "\n\n")</td><td><strong>trim off</strong> the stop string and everything after it</td></tr>
+  <tr><td class="mono">max_new_tokens</td><td>reached this request's max allowed new tokens</td><td>force-truncate, emit the final slice and end</td></tr>
+</table>
+
+<p>When generation ends, the detokenizer <strong>materializes</strong> the request's full text, calls <span class="mono">trim_matched_stop</span>
+to cut off the stop string, emits that last tail (again only <span class="mono">output_str[sent_offset:]</span>), and then deletes the request's
+decode state. Turning each new slice <strong>into an SSE stream</strong> is the TokenizerManager's job: it uses
+<span class="mono">StreamingResponse</span> with <span class="mono">media_type="text/event-stream"</span>, pushing each chunk as one
+<strong>Server-Sent Event</strong> to the browser — that's the typewriter experience of text "popping out one bit at a time". Below is the real
+skeleton of the detokenizer's incremental logic:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/detokenizer_manager.py ::DetokenizerManager</span><span class="ln">incremental slice: output_str[sent_offset:] + advance offset</span></div>
+  <pre><span class="cm"># each request's decode state carries a sent_offset</span>
+<span class="kw">class</span> DecodeStatus:
+    decoded_text: str
+    sent_offset: int = <span class="st">0</span>   <span class="cm"># character position already sent</span>
+
+<span class="cm"># finished: materialize full text, trim the stop, emit the tail</span>
+output_str = self.trim_matched_stop(
+    s.get_decoded_text() + new_text,
+    recv_obj.finished_reasons[i],
+    recv_obj.no_stop_trim[i],
+)
+incremental_output = output_str[s.sent_offset :]  <span class="cm"># slice only the new part</span>
+s.sent_offset = len(output_str)                   <span class="cm"># advance the offset</span>
+output_strs.append(incremental_output)</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Exit / own subprocess</strong>: the DetokenizerManager is the runtime's exit, running in <strong>its own subprocess</strong> (Lesson 2's three-process model); it only speaks token ids and never touches the GPU.</li>
+    <li><strong>Message round-trip</strong>: the scheduler sends <span class="mono">BatchTokenIDOutput</span> (new token ids); the detokenizer decodes and returns <span class="mono">BatchStrOutput</span> (Lesson 16) to the TokenizerManager (Lesson 14), routed back by <span class="mono">rid</span>.</li>
+    <li><strong>Incremental is key</strong>: each request keeps a <span class="mono">sent_offset</span>; each step emits only <span class="mono">output_str[sent_offset:]</span> then advances the offset — avoiding the O(n²) and duplicate prefixes of full resends.</li>
+    <li><strong>Multi-byte boundaries</strong>: incomplete UTF-8 (half a Chinese character / broken emoji) must be <strong>held back</strong> until a full character forms — never stream half a character.</li>
+    <li><strong>Stop and SSE</strong>: generation ends on EOS / stop string / max_new_tokens (Lesson 28); the TokenizerManager wraps each slice into an SSE "typewriter" via <span class="mono">StreamingResponse</span>. A separate process so it can overlap the GPU (zero-overhead, Lesson 21).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Each step, the detokenizer decodes <strong>all tokens so far</strong> into the full text and sends the whole thing to the client. What's the fundamental problem, and what's the right approach?</div>
+  <ol class="opts">
+    <li>No problem at all — full resends are simplest and fastest, no optimization needed</li>
+    <li>The problem is too few token ids; you should wait until all are generated and send once</li>
+    <li>Resending everything makes traffic grow <strong>quadratically (O(n²))</strong> with length, and the client keeps receiving duplicate prefixes; the right approach is <strong>incremental</strong>: each request keeps a <code>sent_offset</code> and each step emits only the new slice <code>output_str[sent_offset:]</code> then advances the offset, so every character <strong>crosses the wire once</strong></li>
+    <li>The problem is decoding is too slow; detokenize should be moved to the GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Naive full resends have two fatal flaws: O(n²) traffic and duplicate prefixes that dump the 'find the new part' burden on the client. Incremental slicing uses <code>sent_offset</code> to track 'how far sent', emitting only <code>output_str[sent_offset:]</code> each step then advancing — linear traffic, the client just concatenates, and it fits SSE naturally.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. After a step, the tail of the text is exactly <strong>half a Chinese character</strong> (an incomplete UTF-8 sequence). What should the detokenizer do, and why?</div>
+  <ol class="opts">
+    <li>Discard the half-character and keep decoding later tokens</li>
+    <li><strong>Hold the half-character back, emit nothing</strong>, and don't advance <code>sent_offset</code> yet — wait for more tokens next step to complete the character before emitting; otherwise the client flashes a garbled box <code>�</code>, streaming half a character</li>
+    <li>Immediately terminate this request's generation and raise a UTF-8 error</li>
+    <li>Just send the half-character; the client will auto-repair the garbling</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. One token ≠ one character: Chinese characters and emojis often span multiple bytes or even tokens. Sending incomplete UTF-8 as-is shows a <code>�</code>. So the detokenizer must <strong>hold back</strong> bytes that don't yet form a complete character and emit only once whole — exactly why streaming looks smooth and never spits half a character.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does SGLang put detokenize in its <strong>own subprocess</strong> rather than doing it inside the scheduler or main process?</div>
+  <ol class="opts">
+    <li>Because detokenize needs direct GPU VRAM access, requiring a separate process</li>
+    <li>Because detokenize is <strong>pure CPU string work</strong>; isolating it in its own process lets it <strong>overlap</strong> the GPU forward loop without either waiting (the zero-overhead idea, Lesson 21) — echoing Lesson 2's three-process model: tokenize / schedule+forward / detokenize each in one process</li>
+    <li>Because subprocesses get higher CPU priority than the main process</li>
+    <li>Purely a historical accident with no real significance</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Stitching token ids back into text is CPU-bound string work, unrelated to GPU matmuls. Inside the GPU process, the GPU would idle while the CPU builds strings. As a separate subprocess, detokenize <strong>truly overlaps</strong> the GPU forward — the foundation of Lesson 21's zero-overhead scheduling and consistent with Lesson 2's three-process boundaries.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (Lesson 16) round-trip, why the detokenizer sends results back to the TokenizerManager (Lesson 14) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.</li>
+    <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the TokenizerManager turns each slice into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>).</li>
   </ul>
 </div>
 </div>

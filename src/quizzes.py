@@ -872,6 +872,376 @@ QUIZZES = {
             },
         ],
     },
+    "13-engine-and-http-server.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "关于离线 <code>Engine</code> 和在线 server，下面哪种说法最准确？",
+                    "en": "Which statement about the offline <code>Engine</code> and the online server is most accurate?",
+                },
+                "opts": [
+                    {
+                        "zh": "在线 server 用 <code>launch_server</code> 起一个 FastAPI 应用，<strong>包住一个 Engine</strong> 并暴露 HTTP 路由；离线 Engine 是纯进程内 Python API，跳过 HTTP 直接调 <code>generate</code>。两者<strong>共享同一套运行时</strong>，server 没有重新实现任何运行时逻辑",
+                        "en": "The online server uses <code>launch_server</code> to start a FastAPI app that <strong>wraps an Engine</strong> and exposes HTTP routes; the offline Engine is a pure in-process Python API calling <code>generate</code> without HTTP. Both <strong>share one runtime</strong>; the server reimplements no runtime logic",
+                    },
+                    {"zh": "在线 server 重新实现了一套独立的调度与前向逻辑，和 Engine 互不相干", "en": "The online server reimplements its own scheduling and forward logic, unrelated to the Engine"},
+                    {"zh": "离线 Engine 也走 HTTP，只是端口不对外暴露", "en": "The offline Engine also uses HTTP, just on a non-exposed port"},
+                    {"zh": "两者底层运行时不同，所以要分别学两遍", "en": "Their underlying runtimes differ, so you must learn each separately"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "server = Engine + 一层 HTTP 外壳。<code>launch_server</code> 内部构造一个 Engine，再用 FastAPI/uvicorn 包起来，暴露原生 <code>POST /generate</code> 与 OpenAI 兼容路由；离线 Engine 直接走链路后半段、跳过 HTTP。底层运行时（TokenizerManager、Scheduler、Detokenizer）完全相同，所以从第 14 课起的内容两者共用，只需学一遍。",
+                    "en": "server = Engine + an HTTP shell. <code>launch_server</code> builds an Engine internally, then wraps it with FastAPI/uvicorn exposing native <code>POST /generate</code> and OpenAI-compatible routes; the offline Engine takes the back half of the chain, skipping HTTP. The underlying runtime (TokenizerManager, Scheduler, Detokenizer) is identical, so everything from Lesson 14 on is shared — learn it once.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你要在强化学习训练里做 rollout（让训练器频繁生成样本）。为什么通常优先选离线 <code>Engine</code> 而不是起一个 HTTP server？",
+                    "en": "You need rollout in RL training (the trainer generates samples frequently). Why usually prefer the offline <code>Engine</code> over standing up an HTTP server?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为离线 Engine 是<strong>进程内直接调用</strong>，没有 HTTP 解析、序列化和网络往返的开销，延迟最低；训练器可以在同一个进程里直接 <code>generate</code>，最适合高频 rollout",
+                        "en": "Because the offline Engine is an <strong>in-process direct call</strong> with no HTTP parsing, serialization, or network round-trip — lowest latency; the trainer can <code>generate</code> in the same process, ideal for high-frequency rollout",
+                    },
+                    {"zh": "因为 HTTP server 无法加载大模型", "en": "Because an HTTP server cannot load large models"},
+                    {"zh": "因为离线 Engine 生成质量更高、精度不同", "en": "Because the offline Engine produces higher-quality, different-precision outputs"},
+                    {"zh": "因为只有 Engine 支持采样参数", "en": "Because only the Engine supports sampling params"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "RL rollout 调用极其频繁，每多一层 HTTP+序列化+网络往返都会被放大成可观的开销。离线 Engine 在同一进程内直接返回 Python 结果，省掉这几层，延迟最低；训练器可直接持有 Engine 对象做 rollout（第 51 课）。生成质量与采样能力两者一致——差别只在“要不要那层 HTTP”。",
+                    "en": "RL rollout calls are extremely frequent, so every extra HTTP+serialization+network round-trip is magnified into real overhead. The offline Engine returns Python results in the same process, dropping those layers for lowest latency; the trainer can hold the Engine object directly for rollout (Lesson 51). Output quality and sampling are identical — the only difference is whether you want that HTTP layer.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "构造 <code>sgl.Engine(model_path=...)</code> 时，<code>Engine.__init__</code> 主要做了什么？",
+                    "en": "When you construct <code>sgl.Engine(model_path=...)</code>, what does <code>Engine.__init__</code> mainly do?",
+                },
+                "opts": [
+                    {
+                        "zh": "解析 <code>ServerArgs</code>，然后调用 <code>_launch_subprocesses</code> 拉起三进程：主进程内的 TokenizerManager，加上 Scheduler 与 DetokenizerManager 两个子进程，并建好 ZMQ 通道（即第 2 课的三进程模型）",
+                        "en": "Parse <code>ServerArgs</code>, then call <code>_launch_subprocesses</code> to spin up three processes: TokenizerManager in the main process plus Scheduler and DetokenizerManager subprocesses, and wire up ZMQ (Lesson 2's three-process model)",
+                    },
+                    {"zh": "仅仅把模型权重加载到 CPU 内存，不创建任何进程", "en": "Merely load model weights into CPU memory, creating no processes"},
+                    {"zh": "启动一个 FastAPI 服务器并监听端口", "en": "Start a FastAPI server and listen on a port"},
+                    {"zh": "什么都不做，等到第一次 generate 才初始化", "en": "Do nothing, initializing only on the first generate"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "构造 Engine 就是给整套运行时“点火”：先把 kwargs 收成 <code>ServerArgs</code>，再 <code>_launch_subprocesses</code> 在主进程建 TokenizerManager、各起一个子进程跑 Scheduler 与 Detokenizer，并连好 ZMQ 通道。注意它<strong>不</strong>启动 FastAPI——HTTP 那层是 server 的事。在线 server 也先构造 Engine，所以同样经过这一步（第 2 课）。",
+                    "en": "Constructing the Engine ignites the whole runtime: gather kwargs into <code>ServerArgs</code>, then <code>_launch_subprocesses</code> builds TokenizerManager in the main process, starts one subprocess each for Scheduler and Detokenizer, and wires ZMQ. Note it does <strong>not</strong> start FastAPI — the HTTP layer is the server's job. The online server also builds an Engine first, so it goes through this too (Lesson 2).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“同一个后厨、两种点单方式”的类比，向同事解释离线 Engine 与在线 server 的关系。请明确说出：server 是否重新实现了运行时？从第 14 课起学的 TokenizerManager、Scheduler、Detokenizer 对两者是不是同一套？以及为什么这意味着你“只需学一遍底层”。",
+                "en": "Using the 'one kitchen, two ways to order' analogy, explain to a colleague the relationship between the offline Engine and the online server. State clearly: does the server reimplement the runtime? Are the TokenizerManager, Scheduler, and Detokenizer (from Lesson 14 on) the same for both? And why does that mean you 'learn the internals only once'?",
+            },
+            {
+                "zh": "给定两个场景：(a) 给一万条 prompt 批量打分做离线评测；(b) 给一个面向公网、多语言客户端的聊天产品提供服务。分别该选离线 Engine 还是在线 server？请从开销、并发、跨语言/跨机访问、OpenAI 兼容生态几个角度论证你的取舍。",
+                "en": "Two scenarios: (a) batch-score ten thousand prompts for offline eval; (b) serve a public-facing, multi-language chat product. For each, pick the offline Engine or the online server, and justify your choice from overhead, concurrency, cross-language/cross-machine access, and the OpenAI-compatible ecosystem.",
+            },
+        ],
+    },
+    "14-tokenizer-manager.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "TokenizerManager 运行在哪个进程？为什么这样安排？",
+                    "en": "Which process does the TokenizerManager run in, and why?",
+                },
+                "opts": [
+                    {
+                        "zh": "跑在<strong>主进程</strong>（和 HTTP server / Engine 同进程），<strong>不</strong>在 GPU 子进程里——因为分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，第 21 课）",
+                        "en": "In the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> the GPU subprocess — because tokenize/detokenize are CPU-bound string work, and keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21)",
+                    },
+                    {"zh": "跑在 GPU 子进程里，和 Scheduler 一起做前向计算", "en": "In the GPU subprocess, doing forward passes alongside the Scheduler"},
+                    {"zh": "每条请求各起一个独立进程，用完即销毁", "en": "A fresh process per request, destroyed after use"},
+                    {"zh": "它没有自己的进程，只是 Scheduler 里的一个函数", "en": "It has no process of its own — just a function inside the Scheduler"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "TokenizerManager 是运行时的前门，坐在主进程做 CPU 侧预处理，绝不碰 GPU。把 GPU 循环单独关进子进程后，CPU 在给下一批分词的同时，GPU 正在为上一批做前向，两者真正并行——这正是第 21 课“零开销调度”的根基，而它与调度器之间那一跳是 ZMQ/IPC 接缝。",
+                    "en": "The TokenizerManager is the runtime's front door, doing CPU-side preprocessing in the main process and never touching the GPU. With the GPU loop locked in its own subprocess, the CPU tokenizes the next batch while the GPU forwards the previous one — true overlap, the foundation of Lesson 21's zero-overhead scheduling. The hop to the scheduler is the ZMQ/IPC seam.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "几百条请求并发涌入，<code>rid</code>（请求号）最关键的作用是什么？",
+                    "en": "With hundreds of concurrent requests, what is the most critical role of the <code>rid</code> (request id)?",
+                },
+                "opts": [
+                    {
+                        "zh": "作为跨进程的“身份证”：后台输出<strong>乱序交错</strong>地流回来时，TokenizerManager 凭 <code>rid</code> 在 <code>rid_to_state</code> 里找到正在 <code>await</code> 的那个协程，把每段输出<strong>准确投回</strong>原调用方",
+                        "en": "A cross-process 'ID card': when outputs flow back <strong>interleaved and out of order</strong>, the TokenizerManager uses the <code>rid</code> in <code>rid_to_state</code> to find the awaiting coroutine and <strong>route each chunk back</strong> to the right caller",
+                    },
+                    {"zh": "决定请求的采样温度和 top_p", "en": "It sets the request's sampling temperature and top_p"},
+                    {"zh": "它是 token id 的别名，分词后才生成", "en": "It is an alias for token ids, generated after tokenization"},
+                    {"zh": "用来给请求排优先级，数字越小越先算", "en": "It prioritizes requests — smaller numbers compute first"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "请求发出后主进程不阻塞，而是把 <code>rid → 协程状态</code> 记进 <code>rid_to_state</code>。回包乱序交错地流回时，唯有靠唯一的 <code>rid</code> 才能对号入座，把输出交还给正确的等待协程（第 17 课流式回传）。没有 rid，几百条并发请求的回包就会张冠李戴。",
+                    "en": "After sending, the main process does not block — it records <code>rid → coroutine state</code> in <code>rid_to_state</code>. As replies stream back interleaved, only the unique <code>rid</code> can match each chunk to the correct awaiting coroutine (streaming, Lesson 17). Without it, hundreds of concurrent replies would go to the wrong callers.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 <code>generate_request</code> 里，TokenizerManager 究竟把<strong>什么</strong>通过 ZMQ 发给调度器子进程？",
+                    "en": "Inside <code>generate_request</code>, what exactly does the TokenizerManager send over ZMQ to the scheduler subprocess?",
+                },
+                "opts": [
+                    {
+                        "zh": "一个已分词、带唯一 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（含 token id 与采样参数，第 16 课）——调度器只认 token，从不直接接触原始文本",
+                        "en": "A tokenized <code>TokenizedGenerateReqInput</code> with a unique <code>rid</code> (token ids + sampling params, Lesson 16) — the scheduler only speaks tokens and never sees raw text",
+                    },
+                    {"zh": "原始 prompt 文本字符串，让调度器自己去分词", "en": "The raw prompt text string, leaving the scheduler to tokenize"},
+                    {"zh": "模型权重和 KV 缓存指针", "en": "Model weights and KV-cache pointers"},
+                    {"zh": "一个 HTTP 请求对象，交给调度器解析", "en": "An HTTP request object for the scheduler to parse"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "TokenizerManager 先 <code>_tokenize_one_request</code> 得到 token id、构造并校验 <code>SamplingParams</code>，再打包成带 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（第 16 课的 io_struct 消息），用 <code>_send_one_request</code> 经 ZMQ socket 投给调度器。文本→token 的翻译在主进程就做完了，GPU 子进程因此只需面对 token，专心计算。",
+                    "en": "The TokenizerManager first runs <code>_tokenize_one_request</code> to get token ids, builds and verifies <code>SamplingParams</code>, then packs a <code>TokenizedGenerateReqInput</code> with a <code>rid</code> (Lesson 16's io_struct message) and dispatches it via <code>_send_one_request</code> over a ZMQ socket. The text→token translation is done in the main process, so the GPU subprocess only faces tokens and just computes.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“酒店前台接待员”的类比，向同事解释 TokenizerManager 的职责。请讲清楚：它把口语需求翻译成什么（token id + 参数 + 预订号 rid），为什么自己从不“进后厨”（不碰 GPU），以及它如何同时招呼几十位客人还不把回包交错。",
+                "en": "Using the 'hotel front-desk receptionist' analogy, explain the TokenizerManager's job to a colleague. Make clear: what it translates spoken needs into (token ids + params + a booking number rid), why it never 'enters the kitchen' (never touches the GPU), and how it juggles dozens of guests without mixing up replies.",
+            },
+            {
+                "zh": "假设有人提议把分词直接搬进 GPU 子进程、省掉 TokenizerManager 与调度器之间的 ZMQ 一跳。请从 CPU/GPU 重叠（第 21 课）、GIL、以及主进程 vs 子进程职责分离的角度，论证这样做会损失什么。",
+                "en": "Suppose someone proposes moving tokenization into the GPU subprocess to drop the ZMQ hop between the TokenizerManager and the scheduler. Argue what would be lost, from the angles of CPU/GPU overlap (Lesson 21), the GIL, and the main-process vs subprocess separation of duties.",
+            },
+        ],
+    },
+    "15-openai-anthropic-ollama-compat.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "兼容层（OpenAI/Anthropic/Ollama）究竟做了什么，才能让现成客户端不改代码就接入 SGLang？",
+                    "en": "What does the compat layer (OpenAI/Anthropic/Ollama) actually do so existing clients work against SGLang unchanged?",
+                },
+                "opts": [
+                    {
+                        "zh": "它是一组 <strong>serving 类</strong>，只做 <strong>schema 翻译 + 聊天模板套用</strong>：把方言请求拼成原生 <code>GenerateReqInput</code>（第 16 课）交给 TokenizerManager（第 14 课），再把输出映射回该协议的响应/SSE——<strong>不重新实现引擎</strong>",
+                        "en": "A set of <strong>serving classes</strong> that only do <strong>schema translation + chat templating</strong>: shape the dialect request into a native <code>GenerateReqInput</code> (Lesson 16) for the TokenizerManager (Lesson 14), then map outputs back to that protocol's response/SSE — <strong>not a reimplemented engine</strong>",
+                    },
+                    {"zh": "它为每种协议各跑一套独立的推理引擎和 KV 缓存", "en": "It runs a separate inference engine and KV cache per protocol"},
+                    {"zh": "它把 SGLang 的请求转发到真正的 OpenAI 服务器去计算", "en": "It forwards SGLang requests to the real OpenAI servers to compute"},
+                    {"zh": "它要求客户端改用 SGLang 专属 SDK 才能工作", "en": "It requires clients to switch to a SGLang-only SDK"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "运行时本身是<strong>协议无关</strong>的，只认 <code>GenerateReqInput</code>。适配器仅在最外层做两件窄事：把 OpenAI/Anthropic/Ollama 字段映射成原生字段（schema 翻译），以及把 messages 按模型模板拼成 prompt（聊天模板）。因为职责窄，新增协议只需加一个适配器，而最热的推理快路径始终共享、只优化一遍。",
+                    "en": "The runtime is <strong>protocol-agnostic</strong> and only knows <code>GenerateReqInput</code>. The adapter does two narrow things at the outermost layer: map OpenAI/Anthropic/Ollama fields to native fields (schema translation) and assemble messages into a prompt per the model's template (chat templating). Because the job is narrow, adding a protocol is just one more adapter, and the hottest fast path stays shared and optimized once.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "“OpenAI” 在 SGLang 里有两个方向。本课（方向 B）讲的是哪一个？",
+                    "en": "\"OpenAI\" has two directions in SGLang. Which one does this lesson (Direction B) cover?",
+                },
+                "opts": [
+                    {
+                        "zh": "一个 OpenAI <strong>客户端</strong>（别人的 openai SDK / LangChain）<strong>向内</strong>调用你的 SGLang 服务器——你的部署<strong>伪装成 OpenAI 端点</strong>，对方只改 <code>base_url</code> 就接入",
+                        "en": "An OpenAI <strong>client</strong> (someone's openai SDK / LangChain) calls <strong>IN</strong> to your SGLang server — your deployment <strong>masquerades as an OpenAI endpoint</strong>, and they plug in by just changing <code>base_url</code>",
+                    },
+                    {"zh": "你的 SGLang 前端程序向外调用 OpenAI 当后端（那是第 12 课的方向 A）", "en": "Your SGLang frontend program calls OUT to OpenAI as a backend (that is Direction A, Lesson 12)"},
+                    {"zh": "SGLang 把请求和响应都代理给真正的 OpenAI", "en": "SGLang proxies both request and response to the real OpenAI"},
+                    {"zh": "两个方向其实是同一回事，不必区分", "en": "The two directions are the same thing and need not be distinguished"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "方向 A（第 12 课）：SGLang 程序是<strong>客户端</strong>，把 OpenAI 当后端调用。方向 B（本课）：OpenAI 客户端是调用方，你的 SGLang 服务器是被调用的<strong>服务器</strong>，戴上 OpenAI 的面具让整个生态插进来。一个是“SGLang 打 OpenAI”，一个是“OpenAI 打 SGLang”，方向相反，切勿混淆。",
+                    "en": "Direction A (Lesson 12): the SGLang program is the <strong>client</strong>, calling OpenAI as a backend. Direction B (this lesson): the OpenAI client is the caller and your SGLang server is the callee, wearing an OpenAI mask so the whole ecosystem plugs in. One is 'SGLang calling OpenAI,' the other 'OpenAI calling SGLang' — opposite, never conflate.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么任意一个 OpenAI 客户端都能直接打到 SGLang 服务器上？",
+                    "en": "Why does any OpenAI client work against the SGLang server out of the box?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为 SGLang 实现了 OpenAI 的 HTTP 协议：<code>/v1/chat/completions</code> 由 <code>OpenAIServingChat</code> 接管，把 OpenAI 形状的请求翻成原生请求、走同一套运行时，再把结果映射回 <code>chat.completion</code> 对象/SSE 块，所以客户端只需把 <code>base_url</code> 指向 SGLang",
+                        "en": "Because SGLang implements OpenAI's HTTP protocol: <code>/v1/chat/completions</code> is handled by <code>OpenAIServingChat</code>, which translates the OpenAI-shaped request into a native one, runs the same runtime, and maps results back to <code>chat.completion</code> objects/SSE chunks — so the client only points <code>base_url</code> at SGLang",
+                    },
+                    {"zh": "因为 SGLang 内部偷偷调用了真正的 OpenAI API", "en": "Because SGLang secretly calls the real OpenAI API under the hood"},
+                    {"zh": "因为 OpenAI 客户端会自动检测并切换到 SGLang 原生协议", "en": "Because OpenAI clients auto-detect and switch to SGLang's native protocol"},
+                    {"zh": "因为两套协议字段完全相同，无需任何翻译", "en": "Because the two protocols' fields are identical, needing no translation"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "OpenAI 客户端只会按 OpenAI 的 HTTP 约定发请求、解析响应。SGLang 的兼容层在 <code>entrypoints/openai/</code> 里实现了这套约定：每条路由绑一个 serving 类负责翻译，请求被拼成原生 <code>GenerateReqInput</code> 走共享快路径，响应再被格式化回 OpenAI 的对象或流式块。客户端感知不到背后是 SGLang，只需改 <code>base_url</code>。",
+                    "en": "An OpenAI client only sends requests and parses responses per OpenAI's HTTP contract. SGLang's compat layer under <code>entrypoints/openai/</code> implements that contract: each route binds a serving class that translates, the request becomes a native <code>GenerateReqInput</code> on the shared fast path, and the response is formatted back into OpenAI objects or stream chunks. The client never notices SGLang underneath — just change <code>base_url</code>.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“门口一排多语翻译官”的类比，向同事解释兼容层。请讲清楚：客人各说 OpenAI/Anthropic/Ollama 方言，翻译官把它们都翻成厨房唯一听得懂的“本店语言”（原生 GenerateReqInput），厨房只有一个、做菜路径共享，菜做好再翻回各自方言端上。并说明为什么这是“薄适配器 + 共享内核”而不是给每种协议各写一个引擎。",
+                "en": "Using the 'row of multilingual translators at the door' analogy, explain the compat layer to a colleague. Make clear: guests speak the OpenAI/Anthropic/Ollama dialects, the translators convert each into the one house language the kitchen understands (native GenerateReqInput), there is only one kitchen with a shared cooking path, and the dish is translated back into each dialect. Explain why this is 'thin adapters + shared core' rather than a separate engine per protocol.",
+            },
+            {
+                "zh": "请把两个“OpenAI 方向”讲清楚并对比：方向 A（第 12 课）SGLang 前端程序向外调用 OpenAI 当后端，谁是客户端？方向 B（本课）OpenAI 客户端向内调用 SGLang 服务器，谁是服务器？再说明在方向 B 里，一个 <code>/v1/chat/completions</code> 请求如何经 <code>OpenAIServingChat</code> 套聊天模板、拼成 <code>GenerateReqInput</code>、交给 TokenizerManager，最后映射回 SSE。",
+                "en": "Distinguish and compare the two 'OpenAI directions': in Direction A (Lesson 12) the SGLang frontend program calls OUT to OpenAI as a backend — who is the client? In Direction B (this lesson) an OpenAI client calls IN to the SGLang server — who is the server? Then describe how, in Direction B, a <code>/v1/chat/completions</code> request flows through <code>OpenAIServingChat</code> to apply the chat template, build a <code>GenerateReqInput</code>, hand it to the TokenizerManager, and finally map back to SSE.",
+            },
+        ],
+    },
+    "16-io-structs-and-ipc.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "SGLang 的三个进程之间为什么要靠 <code>io_struct.py</code> 的 dataclass + ZMQ 传消息，而不是直接共享对象？",
+                    "en": "Why do SGLang's three processes communicate via <code>io_struct.py</code> dataclasses + ZMQ instead of sharing objects directly?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为三进程（第 2 课）<strong>各有独立内存空间</strong>，一个进程的对象另一个根本读不到——拆进程是为绕开 GIL、让 CPU/GPU 重叠（第 21 课）的必然代价，于是只能把消息<strong>用 dataclass 定形状、经 ZMQ 序列化</strong>过线，换来便宜、显式、可打印可断点的协作",
+                        "en": "Because the three processes (Lesson 2) own <strong>separate memory</strong>, so one process's objects are unreadable to another — splitting processes is the necessary cost of dodging the GIL and overlapping CPU/GPU (Lesson 21), so messages must be <strong>shaped by dataclasses and serialized over ZMQ</strong>, buying cheap, explicit, printable/breakpoint-able cooperation",
+                    },
+                    {"zh": "因为 dataclass 比共享内存运行得更快，纯粹是性能优化", "en": "Because dataclasses run faster than shared memory, purely a performance optimization"},
+                    {"zh": "因为 Python 根本不支持进程间共享内存", "en": "Because Python has no way to share memory between processes at all"},
+                    {"zh": "因为只有这样才能调用 GPU 上的 CUDA kernel", "en": "Because only this lets you call CUDA kernels on the GPU"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键不是“快”，而是“边界”：三进程是独立 OS 进程，内存彼此不可见。拆进程是为了绕开 GIL、让 CPU 与 GPU 真正重叠，代价就是不能再共享变量，只能传消息。<code>io_struct.py</code> 用 dataclass 把消息形状钉死、ZMQ 负责序列化传输，得到一套显式、可调试的跨进程协议。",
+                    "en": "The point isn't 'speed' but 'boundaries': the three are separate OS processes with mutually invisible memory. Splitting them dodges the GIL and overlaps CPU/GPU; the cost is no shared variables, only passing messages. <code>io_struct.py</code> pins message shapes with dataclasses and ZMQ handles serialized transport, giving an explicit, debuggable cross-process protocol.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "当请求跨过 ZMQ 真正送达调度器（第 18 课）时，传过去的是哪个结构、装的是什么？",
+                    "en": "When a request actually crosses ZMQ to the scheduler (Lesson 18), which struct travels, and what does it carry?",
+                },
+                "opts": [
+                    {
+                        "zh": "是 <code>TokenizedGenerateReqInput</code>，装的是<strong>已分词的 token id</strong>（<code>input_ids</code>）+ 采样参数 + <code>rid</code>——原始文本已在主进程被分词，<strong>过线后下游只认 token，不再碰人类文本</strong>",
+                        "en": "It's <code>TokenizedGenerateReqInput</code>, carrying <strong>already-tokenized ids</strong> (<code>input_ids</code>) + sampling params + <code>rid</code> — the raw text was tokenized in the main process, and <strong>past the wire downstream only knows tokens, not human text</strong>",
+                    },
+                    {"zh": "是 <code>GenerateReqInput</code>，装的是用户的原始文本字符串", "en": "It's <code>GenerateReqInput</code>, carrying the user's raw text string"},
+                    {"zh": "是 <code>BatchStrOutput</code>，装的是解码后的文本", "en": "It's <code>BatchStrOutput</code>, carrying decoded text"},
+                    {"zh": "直接把 tokenizer 对象本身共享给调度器进程", "en": "The tokenizer object itself is shared directly with the scheduler process"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<code>GenerateReqInput</code> 是用户视角的请求，只活在主进程、<strong>不跨进程</strong>。分词后才打包成 <code>TokenizedGenerateReqInput</code>，里面是 <code>input_ids</code> 而非原始文本，这个才是被 ZMQ 序列化送往调度器的消息。所以跨线的是 token，不是文本——这正是分词留在主进程、把语言学负担挡在最外层的体现（第 14 课）。",
+                    "en": "<code>GenerateReqInput</code> is the user-facing request that lives only in the main process and <strong>does not cross processes</strong>. Only after tokenization is it packed into <code>TokenizedGenerateReqInput</code>, which holds <code>input_ids</code> rather than raw text and is the message ZMQ serializes to the scheduler. So what crosses is tokens, not text — reflecting that tokenization stays in the main process, keeping the linguistic burden at the outermost layer (Lesson 14).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "调度器把多条请求攒成一批一起算，回来的 <code>BatchTokenIDOutput</code> 是交错的批量输出。<code>rid</code> 在这里起什么作用？",
+                    "en": "The scheduler batches many requests together, so the returning <code>BatchTokenIDOutput</code> is interleaved and batched. What does <code>rid</code> do here?",
+                },
+                "opts": [
+                    {
+                        "zh": "<code>rid</code> 是贯穿每条消息的<strong>请求号</strong>：批量输出里每段 token 都带着自己的 <code>rid</code>，TokenizerManager 据此把交错的输出<strong>拆开、投回正确的等待协程</strong>，没有它几百条并发回包就会张冠李戴",
+                        "en": "<code>rid</code> is the <strong>request id</strong> threaded through every message: each token segment in the batched output carries its own <code>rid</code>, so the TokenizerManager <strong>splits and routes</strong> the interleaved output back to the right awaiting coroutine; without it, hundreds of concurrent replies would be misdelivered",
+                    },
+                    {"zh": "<code>rid</code> 只是日志用的可选字段，去掉也不影响路由", "en": "<code>rid</code> is just an optional logging field; removing it doesn't affect routing"},
+                    {"zh": "<code>rid</code> 决定每条请求用哪块 GPU 计算", "en": "<code>rid</code> decides which GPU computes each request"},
+                    {"zh": "<code>rid</code> 是采样参数的一部分，控制温度与 top_p", "en": "<code>rid</code> is part of the sampling params, controlling temperature and top_p"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "因为输出是批量、交错的（一条消息里混着第 7、3、9 号的 token），必须有一个稳定标识把每段对号入座。<code>rid</code> 从 <code>GenerateReqInput</code> 处生成，一路复制到 Tokenized 结构、再随 <code>Batch*Output</code> 的 <code>rids</code> 列表流回，是异步路由（第 14 课）与流式回传（第 17 课）共同依赖的地基。",
+                    "en": "Because outputs are batched and interleaved (one message mixes tokens for requests 7, 3, 9), a stable identifier is needed to place each segment. <code>rid</code> is created at <code>GenerateReqInput</code>, copied into the tokenized struct, and flows back in the <code>rids</code> lists of the <code>Batch*Output</code> — the foundation shared by async routing (Lesson 14) and streaming (Lesson 17).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“部门之间流转的标准化表单”的类比，描述一条请求在三进程间的生命周期：它如何从 <code>GenerateReqInput</code>（受理单）变成 <code>TokenizedGenerateReqInput</code>（工单，跨 ZMQ 送往调度器）、再到 <code>BatchTokenIDOutput</code>（结果清单）、最后 <code>BatchStrOutput</code>（打印好的信）。请特别说明：为什么“进”是单条而“出”是批量，以及每张表单右上角的 <code>rid</code> 起什么作用。",
+                "en": "Using the 'standardized forms moving between departments' analogy, describe a request's lifecycle across the three processes: how it goes from <code>GenerateReqInput</code> (intake form) to <code>TokenizedGenerateReqInput</code> (work order, crossing ZMQ to the scheduler), to <code>BatchTokenIDOutput</code> (results sheet), and finally <code>BatchStrOutput</code> (printed letter). Explain in particular why 'in' is singular while 'out' is batched, and what the <code>rid</code> stamped on each form does.",
+            },
+            {
+                "zh": "有人主张“让三个进程共享同一块内存、直接读写对方的请求对象，省掉序列化开销不是更快吗？”请你反驳：从 GIL、CPU/GPU 重叠（第 21 课）、容错隔离、可调试性几个角度，说明 SGLang 为什么宁可付出序列化成本也要用 dataclass + ZMQ 的“一切皆消息”设计。",
+                "en": "Someone argues: 'Just let the three processes share one block of memory and read/write each other's request objects directly — wouldn't skipping serialization be faster?' Rebut this: from the angles of the GIL, CPU/GPU overlap (Lesson 21), fault isolation, and debuggability, explain why SGLang prefers the 'everything is a message' design with dataclasses + ZMQ even at the cost of serialization.",
+            },
+        ],
+    },
+    "17-detokenizer-and-streaming.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "反分词器每跑一步都把<strong>到目前为止的全部 token</strong> 解码成整段文本、整段发给客户端——这种做法的根本问题是什么？正确做法又是什么？",
+                    "en": "Each step, the detokenizer decodes <strong>all tokens so far</strong> into the full text and sends the whole thing to the client. What's the fundamental problem, and what's the right approach?",
+                },
+                "opts": [
+                    {
+                        "zh": "全量重发让传输量随长度<strong>平方膨胀（O(n²)）</strong>，且客户端反复收到重复前缀；正确做法是<strong>增量</strong>：每条请求记一个 <code>sent_offset</code>，每步只发新增片段 <code>output_str[sent_offset:]</code> 再推进偏移量，每个字符<strong>只过线一次</strong>",
+                        "en": "Resending everything makes traffic grow <strong>quadratically (O(n²))</strong> with length, and the client keeps receiving duplicate prefixes; the right approach is <strong>incremental</strong>: each request keeps a <code>sent_offset</code> and each step emits only the new slice <code>output_str[sent_offset:]</code> then advances the offset, so every character <strong>crosses the wire once</strong>",
+                    },
+                    {"zh": "没有问题，全量重发最简单也最快，无需优化", "en": "No problem at all — full resends are simplest and fastest, no optimization needed"},
+                    {"zh": "问题在于解码太慢，应该改用 GPU 来做反分词", "en": "The problem is decoding is too slow; detokenize should be moved to the GPU"},
+                    {"zh": "问题在于 token id 不够多，应该等全部生成完再一次性发", "en": "The problem is too few token ids; you should wait until all are generated and send once"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "朴素的“每步整段重发”有两个致命缺陷：传输量 O(n²) 平方膨胀，且重复前缀把“算新增”的负担甩给客户端。增量切片用 <code>sent_offset</code> 记“已发到哪”，每步只截 <code>output_str[sent_offset:]</code> 这一小段再推进偏移量，传输量线性、客户端直接拼接，天然适配 SSE 流。",
+                    "en": "Naive full resends have two fatal flaws: O(n²) traffic and duplicate prefixes that dump the 'find the new part' burden on the client. Incremental slicing uses <code>sent_offset</code> to track 'how far sent', emitting only <code>output_str[sent_offset:]</code> each step then advancing — linear traffic, the client just concatenates, and it fits SSE naturally.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "某一步解码后，文本尾部正好是<strong>半个汉字</strong>（不完整的 UTF-8 序列）。反分词器应该怎么做？为什么？",
+                    "en": "After a step, the tail of the text is exactly <strong>half a Chinese character</strong> (an incomplete UTF-8 sequence). What should the detokenizer do, and why?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>先把这半个字符扣住、不发</strong>，<code>sent_offset</code> 暂不推进，等下一步更多 token 到来拼成完整字符再吐——否则客户端屏幕会闪出乱码方块 <code>�</code>，流出半个字符",
+                        "en": "<strong>Hold the half-character back, emit nothing</strong>, and don't advance <code>sent_offset</code> yet — wait for more tokens next step to complete the character before emitting; otherwise the client flashes a garbled box <code>�</code>, streaming half a character",
+                    },
+                    {"zh": "直接把半个字符发出去，客户端会自动修复乱码", "en": "Just send the half-character; the client will auto-repair the garbling"},
+                    {"zh": "丢弃这半个字符，继续解码后面的 token", "en": "Discard the half-character and keep decoding later tokens"},
+                    {"zh": "立刻终止这条请求的生成，报 UTF-8 错误", "en": "Immediately terminate this request's generation and raise a UTF-8 error"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "一个 token ≠ 一个字符：汉字、emoji 常跨多个字节甚至多个 token。若把不完整 UTF-8 直接发出，屏幕会出现 <code>�</code>。所以反分词器必须把还不构成完整字符的字节<strong>先攒着</strong>，等拼成完整字符再发——这正是流式输出看起来顺滑、绝不蹦半个字的原因。",
+                    "en": "One token ≠ one character: Chinese characters and emojis often span multiple bytes or even tokens. Sending incomplete UTF-8 as-is shows a <code>�</code>. So the detokenizer must <strong>hold back</strong> bytes that don't yet form a complete character and emit only once whole — exactly why streaming looks smooth and never spits half a character.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 SGLang 要把反分词单独放进一个<strong>子进程</strong>，而不是在调度器或主进程里顺手做掉？",
+                    "en": "Why does SGLang put detokenize in its <strong>own subprocess</strong> rather than doing it inside the scheduler or main process?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为反分词是<strong>纯 CPU 的字符串活</strong>，放进独立进程才能和 GPU 的前向循环<strong>重叠</strong>、互不等待（零开销思想，第 21 课）；这也呼应第 2 课的三进程模型——分词/调度+前向/反分词各占一进程",
+                        "en": "Because detokenize is <strong>pure CPU string work</strong>; isolating it in its own process lets it <strong>overlap</strong> the GPU forward loop without either waiting (the zero-overhead idea, Lesson 21) — echoing Lesson 2's three-process model: tokenize / schedule+forward / detokenize each in one process",
+                    },
+                    {"zh": "因为反分词需要直接访问 GPU 显存，必须独立进程", "en": "Because detokenize needs direct GPU VRAM access, requiring a separate process"},
+                    {"zh": "因为子进程比主进程拥有更高的 CPU 优先级", "en": "Because subprocesses get higher CPU priority than the main process"},
+                    {"zh": "纯粹是历史遗留，没有实际意义", "en": "Purely a historical accident with no real significance"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "反分词把 token id 拼回文本是 CPU 密集的字符串工作，和 GPU 矩阵乘毫无关系。若塞进 GPU 进程，CPU 在拼字符串时 GPU 只能干等。拆成独立子进程后，反分词能和 GPU 前向<strong>真正并行重叠</strong>——这正是第 21 课零开销调度的根基，也和第 2 课的三进程边界一脉相承。",
+                    "en": "Stitching token ids back into text is CPU-bound string work, unrelated to GPU matmuls. Inside the GPU process, the GPU would idle while the CPU builds strings. As a separate subprocess, detokenize <strong>truly overlaps</strong> the GPU forward — the foundation of Lesson 21's zero-overhead scheduling and consistent with Lesson 2's three-process boundaries.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“同声传译只说新增的词、并等完整词再出声”的类比，完整描述一条流式请求从 GPU 吐出 token id 到客户端看到“打字机”文字的全过程。请点明：<code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code>（第 16 课）的消息往返、反分词器为什么把结果发回 TokenizerManager（第 14 课）而不是直接给客户端、<code>sent_offset</code> 如何保证“只增不重”，以及不完整 UTF-8 为什么要先攒着。",
+                "en": "Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (Lesson 16) round-trip, why the detokenizer sends results back to the TokenizerManager (Lesson 14) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.",
+            },
+            {
+                "zh": "生成什么时候算结束？请列出三种停止条件（EOS token / 停止串 / max_new_tokens，详见第 28 课），分别说明它们对最终输出的影响，并解释反分词器在结束时为什么要调用 <code>trim_matched_stop</code> 把停止串裁掉、再发出最后一段 <code>output_str[sent_offset:]</code>。最后说明 TokenizerManager 是如何用 <code>StreamingResponse</code>（<code>text/event-stream</code>）把每段变成 SSE “打字机”的。",
+                "en": "When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the TokenizerManager turns each slice into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>).",
+            },
+        ],
+    },
 }
 
 

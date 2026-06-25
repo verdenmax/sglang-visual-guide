@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>14 · TokenizerManager / TokenizerManager - SGLang 图解教程</title>
+<meta name="description" content="第四部分 · 服务入口与编排｜TokenizerManager - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="14 · TokenizerManager / TokenizerManager - SGLang 图解教程">
+<meta property="og:description" content="第四部分 · 服务入口与编排｜TokenizerManager - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="14 · TokenizerManager / TokenizerManager - SGLang 图解教程">
+<meta name="twitter:description" content="第四部分 · 服务入口与编排｜TokenizerManager - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></span>
+    <span class="pill">14 / 17</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:82%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></div>
+    <h1><span class="lang-zh">TokenizerManager</span><span class="lang-en">TokenizerManager</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课我们说，无论走离线 <span class="inline">Engine</span> 还是在线 server，请求最终都落到<strong>同一套运行时</strong>上。
+那么请求进入运行时之后，<strong>第一个</strong>接住它的组件是谁？答案就是本课的主角——<strong>TokenizerManager</strong>。
+它是整个运行时的<strong>前门（front door）</strong>：跑在<strong>主进程</strong>里（和 HTTP server / Engine 同进程），
+而<strong>不</strong>在那个吃显存的 GPU 子进程里。每一条请求都要先经过它分词、打包、登记，再被送往后面的调度器。
+</p>
+
+<p>为什么要先单独讲它？因为 TokenizerManager 是<strong>外部文本世界</strong>与<strong>内部 token 世界</strong>的翻译官，
+也是<strong>异步并发的总枢纽</strong>。你发来的是一串字符串，引擎内部认的却是一串 token id；几百条请求同时涌入，
+谁的回包该交还给谁——这些都由它统筹。看懂这扇前门怎么运转，后面第 16 课的 io_struct 消息、第 17 课的反分词与流式回传、
+第 18 课的调度器才能串成一条完整的链路。</p>
+
+<p>把这层关系想透很重要：它意味着<strong>整个运行时只有一个“说人话”的地方</strong>。再往后，所有组件——调度器、各种注意力后端、KV 缓存管理器——
+都只跟 token id 打交道，谁也不需要懂 UTF-8、不需要懂哪个子词该怎么拼。TokenizerManager 把这层“语言学负担”一次性挡在最外层，
+让内部组件保持<strong>纯数值、纯张量</strong>的干净世界。这也是为什么我们要在 Part 4 一开始、紧跟入口之后就讲它：
+它是整条链路上<strong>唯一面向人类文本</strong>的关口，越早理解，后面学起来就越省力、越不容易迷路。</p>
+
+<p>还有一个角度值得点明：TokenizerManager 不只是“分词器的薄包装”。<strong>分词器（tokenizer）</strong>本身只是个把字符串变成数字的工具，
+而 <strong>TokenizerManager</strong> 是围绕它建起来的<strong>异步管理层</strong>——它持有 tokenizer、持有 ZMQ socket、持有那张 <span class="mono">rid_to_state</span> 表，
+还跑着一个后台的接收循环不断从子进程取回包。换句话说，名字里的 “Manager”（管理器）才是重点：它<strong>管理</strong>的是“一条请求从文本进、到结果出”的<strong>完整生命周期与并发状态</strong>，
+分词只是它开场要做的第一件事而已。带着这个区分去读源码，你就不会把它和普通的 HuggingFace tokenizer 混为一谈。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 TokenizerManager 想成酒店的<strong>前台接待员</strong>。客人（请求）走到前台，用<strong>口语</strong>说出需求（一串文本）；
+  接待员把它<strong>翻译成一张标准工单</strong>——填上房型与要求（采样参数）、贴上一个<strong>预订号</strong>（rid），
+  然后把工单<strong>送进后台办公室</strong>（调度器子进程）去真正安排。客人不必走进后厨，只在前台<strong>等叫号</strong>；
+  接待员则<strong>同时招呼几十位客人</strong>，谁的结果出来了就准确无误地交还给谁。前台从不亲自做菜（不碰 GPU），
+  它只负责<strong>翻译、登记、转单、等回话、交付</strong>——这正是 TokenizerManager 在干的事。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  TokenizerManager 活在<strong>主进程</strong>，是 CPU 侧的异步协调中心。它的核心方法 <span class="mono">generate_request</span>
+  是一个 <span class="mono">async</span> 协程：拿到请求后，先把文本<strong>分词</strong>成 token id（纯 CPU 的字符串工作），
+  构造好<strong>采样参数</strong>，打包成一个带唯一 <span class="mono">rid</span> 的 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课），
+  通过 <strong>ZMQ</strong> 发给调度器子进程；随后<strong>登记一份按 rid 索引的异步状态</strong>，并 <span class="mono">await</span>
+  从反分词器（第 17 课）流回来的输出，逐段 <span class="mono">yield</span> 给调用方（HTTP 的 SSE 或 Engine）。
+  之所以把分词/反分词与 GPU 循环<strong>隔在不同进程</strong>，是为了让 CPU 与 GPU <strong>重叠</strong>起来（零开销思想，第 21 课）。
+</div>
+
+<h2>它在哪个进程？为什么是 CPU 的活</h2>
+<p>回忆第 2 课的<strong>三进程模型</strong>：分词在主进程，调度+前向在调度器子进程，反分词在反分词器子进程。
+TokenizerManager 就坐在<strong>主进程</strong>这一格——和 HTTP server / Engine 同进程，<strong>不</strong>在 GPU 子进程里。
+这不是随手的安排，而是刻意的<strong>进程边界</strong>设计。</p>
+
+<p>关键在于：<strong>分词与反分词本质是 CPU 密集的 Python 字符串处理</strong>——查词表、拼 BPE、处理特殊 token，
+全是 CPU 在忙，和 GPU 的矩阵乘法毫无关系。如果把这些活塞进 GPU 子进程，CPU 在分词时 GPU 只能干等，
+反之亦然，两边互相拖累、串行排队。把 GPU 循环单独关进一个进程、让 TokenizerManager 在主进程做 CPU 侧的预处理，
+两者就能<strong>真正并行重叠</strong>：GPU 正在为上一批做前向时，CPU 已经在给下一批分词了。
+这正是 SGLang “零开销调度”（第 21 课）的根基，而 TokenizerManager ↔ 调度器之间那一跳，就是 <strong>ZMQ/IPC 的接缝</strong>。</p>
+
+<p>这条进程边界还带来一个常被忽视的好处：<strong>容错与隔离</strong>。GPU 子进程一旦因为显存溢出（OOM）或 CUDA 错误而崩溃，
+主进程里的 TokenizerManager 仍然活着，能感知到子进程异常并对外报错、清理挂起的请求状态，而不是整个服务一起静默死掉。
+反过来，主进程里某条请求的分词出了问题，也不会污染正在 GPU 上跑的其他请求。<strong>把“易错的、重的 GPU 工作”和“轻的、面向人类文本的协调工作”分到两个进程</strong>，
+让系统在工程上更稳健、更好观测——这是三进程模型除了性能之外的另一层深意。</p>
+
+<div class="cols">
+  <div class="col"><h4>主进程 · TokenizerManager</h4><p>CPU 侧前门：<strong>分词</strong>、建采样参数、打包 <span class="mono">TokenizedGenerateReqInput</span>、按 <span class="mono">rid</span> 登记异步状态、<span class="mono">await</span> 回包。<strong>不碰 GPU</strong>，纯 Python 字符串与协程调度。</p></div>
+  <div class="col"><h4>子进程 · Scheduler + GPU</h4><p>收到已分词的请求后做<strong>连续批处理</strong>与前向（第 18 课），吃显存、跑 kernel。它<strong>只认 token id</strong>，从不直接接触原始文本，专心喂饱 GPU。</p></div>
+</div>
+
+<p>这里还藏着一个常被忽略的细节：拆进程不仅是为了重叠算力，也是为了绕开 Python 的<strong>全局解释器锁（GIL）</strong>。
+如果分词、调度、反分词都挤在同一进程的不同线程里，它们会因为抢同一把 GIL 而<strong>事实上串行</strong>，多核优势荡然无存。
+拆成独立进程后，每个进程有自己的解释器与 GIL，三者才能在多核 CPU 上<strong>真正并行</strong>，再用 ZMQ 把消息异步串成流水线。
+所以 TokenizerManager 待在主进程、调度器待在子进程，既是<strong>职责分离</strong>，也是<strong>性能必需</strong>——这一点在第 2 课与第 21 课会反复出现。</p>
+
+<h2>generate_request：一条请求的旅程</h2>
+<p>当一条请求到来，<span class="mono">generate_request</span> 这个 <span class="mono">async</span> 协程把它一步步推下去：
+先<strong>规范化</strong>参数，再<strong>分词</strong>得到 token id，<strong>构造采样参数</strong>，打包成带 <span class="mono">rid</span> 的
+<span class="mono">TokenizedGenerateReqInput</span>，经 <strong>ZMQ</strong> 发往调度器，最后 <span class="mono">await</span> 回流的输出并逐段交还。
+为什么要先<strong>规范化</strong>？因为外部进来的请求形态各异：可能是单条文本、可能是一批文本、可能直接给了 token id、还可能带着图片或音频。
+TokenizerManager 先把这些情况统一成内部规范的形状，再分支处理“单条”还是“成批”。下面把这条主干拆成五步：</p>
+
+<p>这五步里，<strong>第 1 步和第 5 步</strong>是理解整个设计的关键。第 1 步把“人类文本”收口成“token 序列”，从此往里一切都是数值；
+第 5 步则把主进程从“同步等待”里解放出来——<span class="mono">async for</span> 加 <span class="mono">yield</span> 意味着这条协程在等回包时会<strong>主动让出</strong>，
+让事件循环去推进别的请求。于是同一个主进程能用<strong>单线程的协程并发</strong>同时照看成百上千条请求，而不需要为每条请求开一个线程。
+这正是 <span class="mono">generate_request</span> 写成 <span class="mono">async</span> 的根本原因：它要做的不是“算”，而是“高效地等与转”。</p>
+
+<p>顺带厘清第 2 步里的<strong>采样参数</strong>为什么也在前门构造：温度、top_p、最大新生成 token 数这些是<strong>请求级</strong>的旋钮，
+每条请求都可能不同。TokenizerManager 在打包时就把它们收成一个 <span class="mono">SamplingParams</span> 并做 <span class="mono">normalize / verify</span> 校验，
+于是<strong>非法参数能在最前面被拦下</strong>（比如越界的 top_p），不必等跑到 GPU 上才报错，省掉一次昂贵的无效前向。
+把“参数校验”放在前门，和“分词”放在前门是同一个工程直觉：<strong>越早把脏活、轻活做完，越能让后面的重活保持纯净高效</strong>。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>分词 tokenize</h4><p><span class="mono">_tokenize_one_request</span> 把文本喂给 tokenizer，得到 <span class="mono">input_ids</span>（纯 CPU 工作，刻意留在 GPU 进程之外）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>建采样参数</h4><p>把 <span class="mono">temperature / top_p / max_new_tokens</span> 等收成一个 <span class="mono">SamplingParams</span>，并 <span class="mono">normalize / verify</span> 校验。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>打包 + 贴 rid</h4><p>构造 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课），带上唯一请求号 <span class="mono">rid</span>，作为跨进程的“身份证”。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>ZMQ 发送</h4><p><span class="mono">_send_one_request</span> 把这个对象经 <strong>ZMQ socket</strong> 投递给调度器子进程，主进程不再阻塞等待。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>登记并 await</h4><p>在 <span class="mono">rid_to_state</span> 里登记一份异步状态，<span class="mono">await</span> 反分词器流回的输出，逐段 <span class="mono">yield</span> 给调用方。</p></div></div>
+</div>
+
+<h2>rid 的往返：异步枢纽如何对号入座</h2>
+<p>TokenizerManager 最精妙的地方是它的<strong>异步路由</strong>。几百条请求并发涌入，每条都被分配一个唯一的 <span class="mono">rid</span>；
+请求发出后，主进程<strong>不阻塞</strong>，而是把 <span class="mono">rid → 协程状态</span> 记进一张表（<span class="mono">rid_to_state</span>）。
+后台的输出<strong>乱序交错</strong>地流回来——某一刻可能先到第 7 号的一个 token，下一刻又到第 3 号的——
+TokenizerManager 凭 <span class="mono">rid</span> 把每段输出<strong>准确投递</strong>回正在 <span class="mono">await</span> 的那个协程。
+没有 <span class="mono">rid</span>，几百条并发请求的回包就会张冠李戴。它还负责 <strong>abort</strong>（中止某条请求）和多模态的<strong>图像/音频预处理</strong>。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">TokenizerManager</div><div class="nd">分词 + 贴 rid，主进程</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Scheduler</div><div class="nd">组批 + 前向（子进程）</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Detokenizer</div><div class="nd">反分词 token→文本</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">回到 TokenizerManager</div><div class="nd">按 rid 投回原协程</div></div>
+</div>
+
+<p>注意这条回路的<strong>闭环</strong>形状：请求从 TokenizerManager 出发，绕过调度器与反分词器，最后<strong>又回到</strong> TokenizerManager。
+也就是说，TokenizerManager 既是<strong>入口</strong>也是<strong>出口</strong>——它把请求送出去，也负责把结果收回来交还给调用方。
+反分词器（第 17 课）之所以把结果发回 TokenizerManager 而不是直接回给客户端，正是因为只有 TokenizerManager 那张 <span class="mono">rid_to_state</span>
+表知道“这个 rid 对应的是哪个正在 <span class="mono">await</span> 的协程、该怎么 <span class="mono">yield</span> 给上层的 HTTP SSE 或 Engine 调用者”。
+这把“谁在等结果”的状态<strong>集中在前门一处</strong>，是这套异步架构能简洁运转的关键。</p>
+
+<table class="t">
+  <tr><th>TokenizerManager 负责什么</th><th>具体含义</th></tr>
+  <tr><td class="mono">tokenize</td><td>把文本分词成 token id（CPU 工作，挡在 GPU 进程之外）</td></tr>
+  <tr><td class="mono">sampling params</td><td>构造并校验 <span class="mono">SamplingParams</span>（温度、top_p、max_new_tokens 等）</td></tr>
+  <tr><td class="mono">rid</td><td>给每条请求贴唯一请求号，作为跨进程身份与回包路由依据</td></tr>
+  <tr><td class="mono">async routing</td><td>维护 <span class="mono">rid_to_state</span>，把乱序回包投回正确的等待协程</td></tr>
+  <tr><td class="mono">abort</td><td>处理请求中止，清理对应的挂起状态</td></tr>
+  <tr><td class="mono">mm preprocess</td><td>多模态请求的图像/音频预处理</td></tr>
+</table>
+
+<p>把这张表连起来看：TokenizerManager 是一个<strong>只做 CPU 侧协调、绝不碰 GPU</strong> 的异步枢纽。它把“文本→token、
+贴号、转单、等回、交付”这一整套前门工作全包了，从而让 GPU 子进程能心无旁骛地<strong>只认 token、只管算</strong>。
+顺带一提，表里的<strong>多模态预处理</strong>也安排在这里很自然：把一张图片解码、缩放、切成图像 patch，同样是<strong>CPU 密集</strong>的预处理，
+和文本分词是同一类活，理应在主进程一并做完，再把处理好的多模态张量随 token 一起打包送往 GPU 子进程。
+所以无论输入是纯文本还是图文混合，TokenizerManager 都是那道<strong>统一的、CPU 侧的预处理关口</strong>。
+下面这段就是 <span class="mono">generate_request</span> 的真实骨架：分词、登记、ZMQ 发送、再 <span class="mono">await</span> 回包。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/tokenizer_manager.py ::TokenizerManager.generate_request</span><span class="ln">前门：分词 → ZMQ 发送 → await 回包</span></div>
+  <pre><span class="kw">async def</span> generate_request(self, obj, request=None):
+    self.auto_create_handle_loop()
+    obj.normalize_batch_and_arguments()
+    self._init_req_state(obj, request)        <span class="cm"># 按 rid 登记异步状态</span>
+
+    <span class="kw">if</span> obj.is_single:
+        <span class="cm"># 分词（CPU 工作，留在 GPU 进程之外）</span>
+        tokenized_obj = <span class="kw">await</span> self._tokenize_one_request(obj)
+        state = self.rid_to_state[obj.rid]    <span class="cm"># 用 rid 找到这条请求的状态</span>
+        self._send_one_request(tokenized_obj) <span class="cm"># 经 ZMQ 发给调度器子进程</span>
+        <span class="kw">async for</span> response <span class="kw">in</span> self._wait_one_response(obj, request):
+            <span class="kw">yield</span> response                    <span class="cm"># await 回流输出，逐段交还调用方</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>前门 / 主进程</strong>：TokenizerManager 是运行时的前门，跑在<strong>主进程</strong>（与 HTTP server / Engine 同进程），<strong>不</strong>在 GPU 子进程里。</li>
+    <li><strong>五步主干</strong>：<span class="mono">generate_request</span> 协程——分词 → 建采样参数 → 打包带 <span class="mono">rid</span> 的 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课）→ 经 <strong>ZMQ</strong> 发给调度器 → <span class="mono">await</span> 回包并逐段 <span class="mono">yield</span>。</li>
+    <li><strong>rid 的作用</strong>：唯一请求号是跨进程身份证；几百条并发请求乱序回包，靠 <span class="mono">rid_to_state</span> 投回正确的等待协程（第 17 课流式回传）。</li>
+    <li><strong>为什么 CPU 上分词</strong>：分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，第 21 课）。</li>
+    <li><strong>还负责</strong>：请求 <span class="mono">abort</span> 与多模态图像/音频预处理；它是异步并发的总枢纽，自身从不接触 GPU。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. TokenizerManager 运行在哪个进程？为什么这样安排？</div>
+  <ol class="opts">
+    <li>跑在<strong>主进程</strong>（和 HTTP server / Engine 同进程），<strong>不</strong>在 GPU 子进程里——因为分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，第 21 课）</li>
+    <li>跑在 GPU 子进程里，和 Scheduler 一起做前向计算</li>
+    <li>它没有自己的进程，只是 Scheduler 里的一个函数</li>
+    <li>每条请求各起一个独立进程，用完即销毁</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。TokenizerManager 是运行时的前门，坐在主进程做 CPU 侧预处理，绝不碰 GPU。把 GPU 循环单独关进子进程后，CPU 在给下一批分词的同时，GPU 正在为上一批做前向，两者真正并行——这正是第 21 课“零开销调度”的根基，而它与调度器之间那一跳是 ZMQ/IPC 接缝。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 几百条请求并发涌入，<code>rid</code>（请求号）最关键的作用是什么？</div>
+  <ol class="opts">
+    <li>作为跨进程的“身份证”：后台输出<strong>乱序交错</strong>地流回来时，TokenizerManager 凭 <code>rid</code> 在 <code>rid_to_state</code> 里找到正在 <code>await</code> 的那个协程，把每段输出<strong>准确投回</strong>原调用方</li>
+    <li>决定请求的采样温度和 top_p</li>
+    <li>用来给请求排优先级，数字越小越先算</li>
+    <li>它是 token id 的别名，分词后才生成</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。请求发出后主进程不阻塞，而是把 <code>rid → 协程状态</code> 记进 <code>rid_to_state</code>。回包乱序交错地流回时，唯有靠唯一的 <code>rid</code> 才能对号入座，把输出交还给正确的等待协程（第 17 课流式回传）。没有 rid，几百条并发请求的回包就会张冠李戴。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在 <code>generate_request</code> 里，TokenizerManager 究竟把<strong>什么</strong>通过 ZMQ 发给调度器子进程？</div>
+  <ol class="opts">
+    <li>一个 HTTP 请求对象，交给调度器解析</li>
+    <li>模型权重和 KV 缓存指针</li>
+    <li>一个已分词、带唯一 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（含 token id 与采样参数，第 16 课）——调度器只认 token，从不直接接触原始文本</li>
+    <li>原始 prompt 文本字符串，让调度器自己去分词</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。TokenizerManager 先 <code>_tokenize_one_request</code> 得到 token id、构造并校验 <code>SamplingParams</code>，再打包成带 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（第 16 课的 io_struct 消息），用 <code>_send_one_request</code> 经 ZMQ socket 投给调度器。文本→token 的翻译在主进程就做完了，GPU 子进程因此只需面对 token，专心计算。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“酒店前台接待员”的类比，向同事解释 TokenizerManager 的职责。请讲清楚：它把口语需求翻译成什么（token id + 参数 + 预订号 rid），为什么自己从不“进后厨”（不碰 GPU），以及它如何同时招呼几十位客人还不把回包交错。</li>
+    <li>假设有人提议把分词直接搬进 GPU 子进程、省掉 TokenizerManager 与调度器之间的 ZMQ 一跳。请从 CPU/GPU 重叠（第 21 课）、GIL、以及主进程 vs 子进程职责分离的角度，论证这样做会损失什么。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson said: whether you enter through the offline <span class="inline">Engine</span> or the online server, requests land on
+<strong>one shared runtime</strong>. So once a request is inside, which component catches it <strong>first</strong>? That is today's star —
+the <strong>TokenizerManager</strong>. It is the runtime's <strong>front door</strong>: it runs in the <strong>main process</strong>
+(alongside the HTTP server / Engine), <strong>not</strong> in the GPU-hungry subprocess. Every request is first tokenized, packed and
+registered here before being sent on to the scheduler.
+</p>
+
+<p>Why give it its own lesson? Because the TokenizerManager is the translator between the outside <strong>text world</strong> and the inner
+<strong>token world</strong>, and the <strong>async concurrency hub</strong>. You send a string; the engine speaks token ids. Hundreds of
+requests pour in at once — whose reply goes back to whom is its job to coordinate. Understanding this front door is what lets Lesson 16's
+io_struct messages, Lesson 17's detokenize/streaming, and Lesson 18's scheduler chain into one coherent flow.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of the TokenizerManager as a hotel <strong>front-desk receptionist</strong>. A guest (request) walks up and states their need in
+  <strong>spoken words</strong> (raw text). The receptionist <strong>translates it into a standardized ticket</strong> — fills in the room
+  type and requests (sampling params), staples on a <strong>booking number</strong> (rid), and <strong>sends the ticket to the back office</strong>
+  (the scheduler subprocess) to actually arrange things. The guest never enters the kitchen; they just <strong>wait to be called</strong>.
+  Meanwhile the receptionist <strong>juggles dozens of guests at once</strong>, handing each reply back to exactly the right person. The desk
+  never cooks (never touches the GPU): it only <strong>translates, registers, forwards, awaits, and delivers</strong> — exactly the TokenizerManager's job.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The TokenizerManager lives in the <strong>main process</strong> as the CPU-side async coordinator. Its core method
+  <span class="mono">generate_request</span> is an <span class="mono">async</span> coroutine: it <strong>tokenizes</strong> the text into token ids
+  (pure CPU string work), builds the <strong>sampling params</strong>, packs everything into a <span class="mono">TokenizedGenerateReqInput</span>
+  (Lesson 16) carrying a unique <span class="mono">rid</span>, and sends it over <strong>ZMQ</strong> to the scheduler subprocess. It then
+  <strong>registers a per-request async state keyed by rid</strong> and <span class="mono">await</span>s the outputs streaming back from the
+  detokenizer (Lesson 17), <span class="mono">yield</span>ing them to the caller (HTTP SSE or the Engine). Isolating tokenize/detokenize from the
+  GPU loop in separate processes is what lets CPU and GPU <strong>overlap</strong> (the zero-overhead idea, Lesson 21).
+</div>
+
+<h2>Which process? Why is it CPU work</h2>
+<p>Recall Lesson 2's <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
+detokenize in the detokenizer subprocess. The TokenizerManager sits in the <strong>main process</strong> slot — same process as the HTTP
+server / Engine, <strong>not</strong> in the GPU subprocess. This is a deliberate <strong>process-boundary</strong> design, not an accident.</p>
+
+<p>The key: <strong>tokenize and detokenize are CPU-bound Python string work</strong> — table lookups, BPE merges, special-token handling,
+all CPU, nothing to do with GPU matmuls. If you crammed them into the GPU subprocess, the GPU would idle while the CPU tokenizes and vice
+versa — the two would serialize and drag each other down. By locking the GPU loop in its own process and letting the TokenizerManager do the
+CPU-side preprocessing in the main process, the two can <strong>truly overlap</strong>: while the GPU forwards the previous batch, the CPU is
+already tokenizing the next. This is the foundation of SGLang's zero-overhead scheduling (Lesson 21), and the TokenizerManager ↔ scheduler
+hop is exactly the <strong>ZMQ/IPC seam</strong>.</p>
+
+<div class="cols">
+  <div class="col"><h4>Main process · TokenizerManager</h4><p>CPU-side front door: <strong>tokenize</strong>, build sampling params, pack a <span class="mono">TokenizedGenerateReqInput</span>, register async state by <span class="mono">rid</span>, <span class="mono">await</span> replies. <strong>Never touches the GPU</strong> — pure Python strings and coroutine scheduling.</p></div>
+  <div class="col"><h4>Subprocess · Scheduler + GPU</h4><p>Given already-tokenized requests, it does <strong>continuous batching</strong> and forward passes (Lesson 18), burning VRAM and kernels. It <strong>only speaks token ids</strong>, never sees raw text, focused on keeping the GPU fed.</p></div>
+</div>
+
+<h2>generate_request: a request's journey</h2>
+<p>When a request arrives, the <span class="mono">async</span> coroutine <span class="mono">generate_request</span> pushes it down step by step:
+<strong>normalize</strong> the args, <strong>tokenize</strong> into token ids, <strong>build sampling params</strong>, pack a
+<span class="mono">TokenizedGenerateReqInput</span> with a <span class="mono">rid</span>, send over <strong>ZMQ</strong> to the scheduler, then
+<span class="mono">await</span> the streamed outputs and hand them back piece by piece. Here is the trunk in five steps:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>tokenize</h4><p><span class="mono">_tokenize_one_request</span> feeds text to the tokenizer, yielding <span class="mono">input_ids</span> (pure CPU work, deliberately kept off the GPU process).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>build sampling params</h4><p>Collect <span class="mono">temperature / top_p / max_new_tokens</span> into a <span class="mono">SamplingParams</span>, then <span class="mono">normalize / verify</span> it.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>pack + stamp rid</h4><p>Build a <span class="mono">TokenizedGenerateReqInput</span> (Lesson 16) carrying a unique <span class="mono">rid</span> — the cross-process "ID card".</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>ZMQ send</h4><p><span class="mono">_send_one_request</span> dispatches the object over a <strong>ZMQ socket</strong> to the scheduler subprocess; the main process does not block.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>register and await</h4><p>Register an async state in <span class="mono">rid_to_state</span>, <span class="mono">await</span> the outputs streaming back from the detokenizer, and <span class="mono">yield</span> them to the caller.</p></div></div>
+</div>
+
+<h2>The rid round-trip: how the hub routes replies</h2>
+<p>The TokenizerManager's cleverest part is its <strong>async routing</strong>. Hundreds of requests arrive concurrently, each assigned a unique
+<span class="mono">rid</span>; after sending, the main process <strong>does not block</strong> — it records <span class="mono">rid → coroutine state</span>
+in a map (<span class="mono">rid_to_state</span>). Outputs flow back <strong>interleaved and out of order</strong> — a token for #7 now, one for #3
+next — and the TokenizerManager uses the <span class="mono">rid</span> to <strong>route each chunk back</strong> to the exact coroutine that is
+<span class="mono">await</span>ing it. Without the <span class="mono">rid</span>, hundreds of concurrent replies would go to the wrong callers. It also
+handles <strong>abort</strong> and, for multimodal, <strong>image/audio preprocessing</strong>.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">TokenizerManager</div><div class="nd">tokenize + stamp rid, main proc</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Scheduler</div><div class="nd">batch + forward (subproc)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Detokenizer</div><div class="nd">tokens → text</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">back to TokenizerManager</div><div class="nd">route by rid to the coroutine</div></div>
+</div>
+
+<table class="t">
+  <tr><th>What the TokenizerManager owns</th><th>Meaning</th></tr>
+  <tr><td class="mono">tokenize</td><td>turn text into token ids (CPU work, kept off the GPU process)</td></tr>
+  <tr><td class="mono">sampling params</td><td>build and verify <span class="mono">SamplingParams</span> (temperature, top_p, max_new_tokens, ...)</td></tr>
+  <tr><td class="mono">rid</td><td>stamp each request with a unique id — cross-process identity and reply routing</td></tr>
+  <tr><td class="mono">async routing</td><td>maintain <span class="mono">rid_to_state</span>, route out-of-order replies to the right awaiting coroutine</td></tr>
+  <tr><td class="mono">abort</td><td>handle request cancellation, clean up the pending state</td></tr>
+  <tr><td class="mono">mm preprocess</td><td>image/audio preprocessing for multimodal requests</td></tr>
+</table>
+
+<p>Read the table as a whole: the TokenizerManager is an async hub that does <strong>only CPU-side coordination and never touches the GPU</strong>.
+It owns the whole front-door job — text→tokens, stamp, forward, await, deliver — so the GPU subprocess can <strong>speak only tokens and just
+compute</strong>. Below is the real skeleton of <span class="mono">generate_request</span>: tokenize, register, ZMQ send, then
+<span class="mono">await</span> the replies.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/tokenizer_manager.py ::TokenizerManager.generate_request</span><span class="ln">front door: tokenize → ZMQ send → await replies</span></div>
+  <pre><span class="kw">async def</span> generate_request(self, obj, request=None):
+    self.auto_create_handle_loop()
+    obj.normalize_batch_and_arguments()
+    self._init_req_state(obj, request)        <span class="cm"># register async state by rid</span>
+
+    <span class="kw">if</span> obj.is_single:
+        <span class="cm"># tokenize (CPU work, kept off the GPU process)</span>
+        tokenized_obj = <span class="kw">await</span> self._tokenize_one_request(obj)
+        state = self.rid_to_state[obj.rid]    <span class="cm"># find this request's state by rid</span>
+        self._send_one_request(tokenized_obj) <span class="cm"># send over ZMQ to the scheduler subproc</span>
+        <span class="kw">async for</span> response <span class="kw">in</span> self._wait_one_response(obj, request):
+            <span class="kw">yield</span> response                    <span class="cm"># await streamed outputs, hand back to caller</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Front door / main process</strong>: the TokenizerManager is the runtime's front door, running in the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> in the GPU subprocess.</li>
+    <li><strong>Five-step trunk</strong>: the <span class="mono">generate_request</span> coroutine — tokenize → build sampling params → pack a <span class="mono">TokenizedGenerateReqInput</span> with a <span class="mono">rid</span> (Lesson 16) → send over <strong>ZMQ</strong> to the scheduler → <span class="mono">await</span> replies and <span class="mono">yield</span> them.</li>
+    <li><strong>What the rid is for</strong>: the unique request id is the cross-process ID card; with hundreds of concurrent, out-of-order replies, <span class="mono">rid_to_state</span> routes each back to the right awaiting coroutine (streaming, Lesson 17).</li>
+    <li><strong>Why tokenize on CPU</strong>: tokenize/detokenize are CPU-bound string work; keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21).</li>
+    <li><strong>Also owns</strong>: request <span class="mono">abort</span> and multimodal image/audio preprocessing; it is the async concurrency hub and itself never touches the GPU.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which process does the TokenizerManager run in, and why?</div>
+  <ol class="opts">
+    <li>In the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> the GPU subprocess — because tokenize/detokenize are CPU-bound string work, and keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21)</li>
+    <li>In the GPU subprocess, doing forward passes alongside the Scheduler</li>
+    <li>It has no process of its own — just a function inside the Scheduler</li>
+    <li>A fresh process per request, destroyed after use</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The TokenizerManager is the runtime's front door, doing CPU-side preprocessing in the main process and never touching the GPU. With the GPU loop locked in its own subprocess, the CPU tokenizes the next batch while the GPU forwards the previous one — true overlap, the foundation of Lesson 21's zero-overhead scheduling. The hop to the scheduler is the ZMQ/IPC seam.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. With hundreds of concurrent requests, what is the most critical role of the <code>rid</code> (request id)?</div>
+  <ol class="opts">
+    <li>A cross-process 'ID card': when outputs flow back <strong>interleaved and out of order</strong>, the TokenizerManager uses the <code>rid</code> in <code>rid_to_state</code> to find the awaiting coroutine and <strong>route each chunk back</strong> to the right caller</li>
+    <li>It sets the request's sampling temperature and top_p</li>
+    <li>It prioritizes requests — smaller numbers compute first</li>
+    <li>It is an alias for token ids, generated after tokenization</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. After sending, the main process does not block — it records <code>rid → coroutine state</code> in <code>rid_to_state</code>. As replies stream back interleaved, only the unique <code>rid</code> can match each chunk to the correct awaiting coroutine (streaming, Lesson 17). Without it, hundreds of concurrent replies would go to the wrong callers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Inside <code>generate_request</code>, what exactly does the TokenizerManager send over ZMQ to the scheduler subprocess?</div>
+  <ol class="opts">
+    <li>An HTTP request object for the scheduler to parse</li>
+    <li>Model weights and KV-cache pointers</li>
+    <li>A tokenized <code>TokenizedGenerateReqInput</code> with a unique <code>rid</code> (token ids + sampling params, Lesson 16) — the scheduler only speaks tokens and never sees raw text</li>
+    <li>The raw prompt text string, leaving the scheduler to tokenize</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The TokenizerManager first runs <code>_tokenize_one_request</code> to get token ids, builds and verifies <code>SamplingParams</code>, then packs a <code>TokenizedGenerateReqInput</code> with a <code>rid</code> (Lesson 16's io_struct message) and dispatches it via <code>_send_one_request</code> over a ZMQ socket. The text→token translation is done in the main process, so the GPU subprocess only faces tokens and just computes.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'hotel front-desk receptionist' analogy, explain the TokenizerManager's job to a colleague. Make clear: what it translates spoken needs into (token ids + params + a booking number rid), why it never 'enters the kitchen' (never touches the GPU), and how it juggles dozens of guests without mixing up replies.</li>
+    <li>Suppose someone proposes moving tokenization into the GPU subprocess to drop the ZMQ hop between the TokenizerManager and the scheduler. Argue what would be lost, from the angles of CPU/GPU overlap (Lesson 21), the GIL, and the main-process vs subprocess separation of duties.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="13-engine-and-http-server.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">Engine 与 HTTP Server</span><span class="lang-en">Engine &amp; HTTP server</span></div></a><a class="next" href="15-openai-anthropic-ollama-compat.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">OpenAI/Anthropic/Ollama 兼容层</span><span class="lang-en">OpenAI/Anthropic/Ollama compat</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

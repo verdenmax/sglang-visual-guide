@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>16 · IO 结构与进程间通信 / IO structs &amp; IPC - SGLang 图解教程</title>
+<meta name="description" content="第四部分 · 服务入口与编排｜IO 结构与进程间通信 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="16 · IO 结构与进程间通信 / IO structs &amp; IPC - SGLang 图解教程">
+<meta property="og:description" content="第四部分 · 服务入口与编排｜IO 结构与进程间通信 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="16 · IO 结构与进程间通信 / IO structs &amp; IPC - SGLang 图解教程">
+<meta name="twitter:description" content="第四部分 · 服务入口与编排｜IO 结构与进程间通信 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></span>
+    <span class="pill">16 / 17</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:94%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · 服务入口与编排</span><span class="lang-en">Part 4 · Entrypoints &amp; orchestration</span></div>
+    <h1><span class="lang-zh">IO 结构与进程间通信</span><span class="lang-en">IO structs &amp; IPC</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+第 14 课我们看清了<strong>前门</strong>（TokenizerManager）、第 15 课看清了<strong>多协议翻译官</strong>，但有一件事一直被我们一带而过：
+这三个进程<strong>不共享内存</strong>，它们之间到底<strong>传的是什么</strong>？答案就是本课的主角——<strong>io_struct.py</strong> 里那一组消息结构。
+进程之间无法直接读对方的变量，只能<strong>互相投递消息</strong>；而 <span class="mono">io_struct.py</span> 正是用一批 Python <strong>dataclass</strong>
+把这些消息<strong>定死了形状</strong>，再经 <strong>ZMQ</strong> 序列化后在进程间穿梭。
+</p>
+
+<p>为什么要专门为它开一课？因为这组结构其实是整个运行时的<strong>“类型系统”与线缆协议（wire protocol）</strong>。
+后面每一个组件——调度器（第 18 课）、worker、反分词器（第 17 课）——彼此说话，<strong>说的都是这些 struct</strong>。
+你只要把“一条请求在进程间如何变换形态”这条线索抓住，后面那些看似复杂的组件就会像串珠子一样被这根线穿起来。
+反过来，如果不先认清这套消息，你读调度器源码时会被各种 <span class="mono">TokenizedGenerateReqInput</span>、<span class="mono">BatchTokenIDOutput</span>
+绕晕——它们不是细节，而是<strong>骨架</strong>。</p>
+
+<p>还有一个更深的角度：把通信<strong>显式化成数据结构</strong>，本身就是一种工程纪律。进程边界一旦用 dataclass 钉死，
+“谁该传什么字段、谁负责填、谁负责读”就变成<strong>白纸黑字</strong>，可打印、可断点、可单测。相比起隐式的共享状态，
+这种“一切皆消息”的设计虽然多写了几个类，却换来了<strong>可调试性与可演化性</strong>——这正是分布式系统里反复被验证的智慧。</p>
+
+<p>不妨先把这套设计的三个关键词记在心里：<strong>形状、传输、身份</strong>。形状由 dataclass 负责——它规定每条消息有哪些字段、各是什么类型；
+传输由 ZMQ 负责——它把对象序列化成字节、经 socket 送到另一进程、再反序列化还原；身份由 <span class="mono">rid</span> 负责——它给每条请求一个唯一编号，
+让交错的批量回包能各归其位。这三件事一旦拆清楚，<span class="mono">io_struct.py</span> 这份文件读起来就不再是一堆零散的类，而是一套<strong>层次分明的协议</strong>。
+本课接下来的每一节，都是围绕这三个关键词展开的。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把这套消息结构想成<strong>在各部门之间流转的标准化表单与信封</strong>。同一桩业务，每经过一个部门就被<strong>换成一种新的正式表单</strong>：
+  前台收的是<strong>受理单</strong>（原始诉求：文本、采样要求、是否流式）；分词后变成一张<strong>工单</strong>（token id + 参数，送进车间）；
+  车间产出<strong>结果清单</strong>（一批 token id）；最后誊清成一封<strong>打印好的信</strong>（解码后的文本）寄回。每一张表单的右上角都盖着<strong>同一个案件编号</strong>
+  （<span class="mono">rid</span>），于是哪怕几十桩业务的表单在传送带上交错前进，也绝不会张冠李戴、寄错人。部门之间<strong>从不共用一个抽屉</strong>（不共享内存），
+  全靠<strong>把表单递过去</strong>（传消息）来协作。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  <span class="mono">io_struct.py</span> 住在 <span class="mono">python/sglang/srt/managers/</span> 下，是一份纯粹的<strong>消息定义文件</strong>：里面几乎没有算法，
+  只有一个个 <span class="mono">@dataclass</span>。它们沿着请求的生命周期排开——<span class="mono">GenerateReqInput</span>（前门收到的用户级请求）→
+  <span class="mono">TokenizedGenerateReqInput</span>（分词后、<strong>真正跨 ZMQ 送往调度器</strong>的那个）→ <span class="mono">BatchTokenIDOutput</span>
+  （调度器/worker 产出的批量 token id）→ <span class="mono">BatchStrOutput</span>（反分词器解码出的文本）。每个 struct 都明确标注了
+  <strong>谁生产、谁消费</strong>。它们经 ZMQ 的 IPC socket（每个进程一个端口）序列化传输，靠 <span class="mono">rid</span> 把交错的批量输出<strong>对号入座</strong>回各自的请求。
+  此外还有 abort（中止）、flush_cache（清缓存）、health（健康检查）等独立的<strong>控制消息</strong>。
+</div>
+
+<h2>为什么是“传消息”而不是“共享内存”</h2>
+<p>回忆第 2 课的<strong>三进程模型</strong>：主进程（TokenizerManager）、调度器子进程、反分词器子进程。它们是<strong>三个独立的操作系统进程</strong>，
+各有各的内存空间——主进程里的一个 Python 对象，调度器进程<strong>看不见、也碰不到</strong>。这不是缺陷，而是刻意为之：拆进程能绕开
+Python 的 GIL、让 CPU 与 GPU 真正重叠（第 21 课）。但代价是：它们不能再靠“读同一个变量”来协作，<strong>只能靠互相投递消息</strong>。</p>
+
+<p>于是问题变成：消息长什么样、怎么过线？SGLang 的答案朴素而有效——用 <strong>dataclass 定义形状</strong>，用 <strong>ZMQ 做传输</strong>。
+dataclass 让每条消息的字段一目了然、可读可打印；ZMQ 提供轻量的进程间 socket，把对象<strong>序列化</strong>成字节流送过去、再<strong>反序列化</strong>还原。
+两者搭配，得到的是一套<strong>便宜、显式、好调试</strong>的跨进程通信。你甚至可以把某条消息打印出来，一眼看清它带了哪些 token、什么采样参数。</p>
+
+<p>这里值得多想一层：序列化确实有开销——把对象拍扁成字节、再还原，并不是零成本。但 SGLang 之所以甘愿付这笔钱，是因为换回来的东西更值钱：
+其一，三进程能在多核 CPU 上<strong>真正并行</strong>，绕开 GIL 的串行枷锁；其二，GPU 子进程在跑前向时，主进程能同时给下一批分词，<strong>CPU 与 GPU 重叠</strong>（第 21 课）；
+其三，万一 GPU 子进程因显存溢出（OOM）崩溃，主进程仍然活着，能感知异常、清理挂起状态，而不是整个服务一起静默死掉。把通信显式化成消息，
+正是把这些<strong>并行、重叠、容错</strong>的好处一并拿下的代价——而这笔代价，相对它换回的吞吐与稳健，是非常划算的。</p>
+
+<div class="cols">
+  <div class="col"><h4>共享内存？<strong>不</strong></h4><p>三个进程<strong>各有独立内存空间</strong>，一个进程的对象另一个进程读不到。这是拆进程绕开 GIL、让 CPU/GPU 重叠（第 21 课）必然付出的边界。</p></div>
+  <div class="col"><h4>传消息？<strong>是</strong></h4><p>协作只能靠<strong>投递消息</strong>：用 <span class="mono">dataclass</span> 定形状、用 <strong>ZMQ</strong> 序列化过线。便宜、显式、可打印断点，是分布式协作的经典选择。</p></div>
+</div>
+
+<h2>一条请求的生命周期：消息形态的接力</h2>
+<p>真正把这套设计讲活的，是<strong>跟着一条请求走一遍</strong>，看它每过一个进程边界就<strong>换一种 struct</strong>。这是一场严丝合缝的接力：
+前一棒的“输出消息”恰好是后一棒的“输入消息”，而贯穿全程的接力棒，就是那个 <span class="mono">rid</span>。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">GenerateReqInput</div><div class="nd">前门收到的用户请求：文本+参数+stream</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">TokenizedGenerateReqInput</div><div class="nd">分词后，<strong>经 ZMQ 送往调度器</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">BatchTokenIDOutput</div><div class="nd">调度器/worker 产出的批量 token id</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">BatchStrOutput</div><div class="nd">反分词器解码出的文本</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">按 rid 投回客户端</div><div class="nd">交还正在 await 的那条请求</div></div>
+</div>
+
+<p>把这条链路逐棒说清楚。<strong>第一棒</strong>，TokenizerManager（第 14 课）收到 <span class="mono">GenerateReqInput</span>——这是<strong>用户视角</strong>的请求：
+里面是<strong>原始文本</strong>、采样参数、是否流式（<span class="mono">stream</span>），还可能带图片/音频。注意：<strong>这个对象不跨进程</strong>，它只活在主进程里。
+<strong>第二棒</strong>，分词把文本变成 token id，打包成 <span class="mono">TokenizedGenerateReqInput</span>——<strong>这个</strong>才是真正被 ZMQ 序列化、
+<strong>穿过进程边界送给调度器</strong>的消息。换句话说，<strong>跨过 ZMQ 到调度器的不是原始文本，而是已分词的 token id</strong>。这是本课最该记牢的一句话。</p>
+
+<p>为什么要在“进”的那一刻就完成从文本到 token 的转换？因为这道转换是<strong>纯 CPU 的字符串活</strong>，理应留在主进程、挡在 GPU 进程之外（第 14 课）。
+一旦过了 ZMQ 这道线，下游所有组件——调度器、各种注意力后端、KV 缓存——就<strong>只跟 token id 打交道</strong>，谁也不需要懂 UTF-8、不需要懂子词怎么拼。
+这层“语言学负担”被一次性收口在最外层，内部世界因此保持<strong>纯数值、纯张量</strong>的干净。也正因如此，<span class="mono">TokenizedGenerateReqInput</span>
+里虽然还留着一份 <span class="mono">input_text</span>，但那只是给人看的调试线索，真正驱动模型前向的，<strong>始终是 <span class="mono">input_ids</span></strong>。</p>
+
+<p><strong>第三棒</strong>，调度器（第 18 课）把多条请求组成 <span class="mono">ScheduleBatch</span>（第 19 课）跑前向，产出 <span class="mono">BatchTokenIDOutput</span>——
+注意它是<strong>批量</strong>的：一条消息里装着这一批<strong>多条请求</strong>各自的新 token id，靠 <span class="mono">rids</span> 列表标明每段属于谁。
+<strong>第四棒</strong>，反分词器（第 17 课）把 token id 解码回文本，封成 <span class="mono">BatchStrOutput</span>（带 <span class="mono">output_strs</span>）。
+<strong>最后一棒</strong>，结果流回 TokenizerManager，凭 <span class="mono">rid</span> 投递回那条正在 <span class="mono">await</span> 的协程，逐段交还客户端。</p>
+
+<table class="t">
+  <tr><th>消息 struct</th><th>关键字段</th><th>谁生产 → 谁消费</th></tr>
+  <tr><td class="mono">GenerateReqInput</td><td>text / input_ids、sampling_params、stream、rid</td><td>客户端/兼容层 → TokenizerManager（<strong>不跨进程</strong>）</td></tr>
+  <tr><td class="mono">TokenizedGenerateReqInput</td><td>rid、input_ids、sampling_params、stream</td><td>TokenizerManager →（<strong>ZMQ</strong>）→ Scheduler</td></tr>
+  <tr><td class="mono">BatchTokenIDOutput</td><td>rids、decode_ids/output_ids、finished_reasons</td><td>Scheduler/worker →（ZMQ）→ Detokenizer</td></tr>
+  <tr><td class="mono">BatchStrOutput</td><td>rids、output_strs、output_ids、finish 信息</td><td>Detokenizer →（ZMQ）→ TokenizerManager → 客户端</td></tr>
+</table>
+
+<p>把这张表竖着读，你会发现一个优雅的规律：<strong>上一行的“消费者”往往就是下一行的“生产者”</strong>，四个 struct 首尾相接，
+正好拼成请求从“人类文本”到“token”再回到“人类文本”的<strong>完整闭环</strong>。还要留意<strong>单数与复数</strong>的切换：进的方向是<strong>单条</strong>
+（<span class="mono">GenerateReqInput</span>/<span class="mono">TokenizedGenerateReqInput</span>，带 <span class="mono">rid</span>），出的方向是<strong>批量</strong>
+（<span class="mono">Batch*Output</span>，带 <span class="mono">rids</span>）——因为调度器是把多条请求<strong>攒成一批</strong>一起算的，输出自然是批量的，这正是连续批处理（第 18 课）的体现。</p>
+
+<h2>rid：贯穿始终的“案件编号”</h2>
+<p>这套消息能在三进程间<strong>不乱套</strong>，全靠一个朴素的字段：<span class="mono">rid</span>（request id，请求号）。它在 <span class="mono">GenerateReqInput</span>
+处生成，被复制进 <span class="mono">TokenizedGenerateReqInput</span> 一路带去调度器，再随 <span class="mono">BatchTokenIDOutput</span>/<span class="mono">BatchStrOutput</span>
+的 <span class="mono">rids</span> 列表流回来。因为调度器把多条请求<strong>攒成一批</strong>一起算，回来的输出是<strong>交错、批量</strong>的——某条消息里同时装着第 7 号、第 3 号、第 9 号的 token。
+没有 <span class="mono">rid</span>，TokenizerManager 根本无法把这批交错输出<strong>拆开投回</strong>正确的等待协程。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>rid 如何让交错的批量输出对号入座</b></div>
+  <div class="cells"><span class="lab">出</span><span class="cell">rid=7：tok</span><span class="cell">rid=3：tok</span><span class="cell hl">rid=9：tok</span><span class="sep">→</span><span class="cell">一条 BatchTokenIDOutput</span><span class="q">批量、交错</span></div>
+  <div class="cells"><span class="lab">分</span><span class="cell hl">按 rid 拆</span><span class="sep">→</span><span class="cell">7→协程A</span><span class="cell">3→协程B</span><span class="cell">9→协程C</span><span class="q">各回各家</span></div>
+</div>
+
+<p>所以 <span class="mono">rid</span> 不是可有可无的元数据，而是这套“一切皆消息”体系能<strong>并发而不混乱</strong>的根。它像快递面单上的<strong>运单号</strong>：
+包裹在分拣中心被打散、混装、又重新分发，全程能精准追踪、最终送到正确的人手里，靠的就是那串号。理解了 <span class="mono">rid</span> 的往返，
+你就理解了 SGLang 异步路由（第 14 课）与流式回传（第 17 课）共同依赖的<strong>地基</strong>。下面这段就是那个真正跨 ZMQ 的核心消息的真实骨架：</p>
+
+<p>最后把视角拉高一层。这组 struct 之所以重要，是因为它定义了运行时各组件之间<strong>唯一合法的对话方式</strong>：调度器（第 18 课）只会收到
+<span class="mono">TokenizedGenerateReqInput</span>、只会吐出 <span class="mono">BatchTokenIDOutput</span>；反分词器（第 17 课）只认 <span class="mono">BatchTokenIDOutput</span>、
+只产出 <span class="mono">BatchStrOutput</span>。换句话说，每个组件的<strong>输入输出契约</strong>都写在 <span class="mono">io_struct.py</span> 里，清清楚楚。
+正因如此，当你后面去读 <span class="mono">ScheduleBatch</span>（第 19 课）、连续批处理（第 18 课）那些更复杂的代码时，只要先问一句“它收什么 struct、发什么 struct”，
+就能迅速定位它在整条流水线里的位置。这份消息定义文件，因此是你<strong>读懂整个运行时的一把总钥匙</strong>，也是后续每一课都会反复回看的地图起点。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/io_struct.py ::TokenizedGenerateReqInput</span><span class="ln">真正跨 ZMQ 送往调度器的消息</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> TokenizedGenerateReqInput(BaseReq):   <span class="cm"># BaseReq 提供 rid 字段（跨进程身份证）</span>
+    input_text: str                       <span class="cm"># 原始文本（便于调试/日志）</span>
+    input_ids: Optional[array[int]]        <span class="cm"># 分词后的 token id —— 真正喂给模型的</span>
+    mm_inputs: object                      <span class="cm"># 多模态输入（图像/音频）</span>
+    sampling_params: SamplingParams        <span class="cm"># 温度/top_p/max_new_tokens 等</span>
+    return_logprob: bool
+    stream: bool                           <span class="cm"># 是否流式回传（第 17 课）</span>
+    <span class="cm"># …随后经 ZMQ 序列化，跨进程送达调度器（第 18 课）</span></pre>
+</div>
+
+<p>注意这个结构里<strong>没有</strong>原始的 <span class="mono">text</span> 列表那种用户级形态，取而代之的是已经分好的 <span class="mono">input_ids</span>——
+这正印证了那句关键话：<strong>过了 ZMQ 这道线，下游只认 token，不再碰人类文本</strong>。<span class="mono">input_text</span> 仍被保留，但只为调试与日志之便，真正驱动模型的是 <span class="mono">input_ids</span>。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>不共享内存，只传消息</strong>：三进程（第 2 课）各有独立内存，靠 <span class="mono">io_struct.py</span> 里的 <span class="mono">@dataclass</span> 消息 + <strong>ZMQ</strong> 序列化协作。</li>
+    <li><strong>生命周期 = 消息接力</strong>：<span class="mono">GenerateReqInput</span> → <span class="mono">TokenizedGenerateReqInput</span> → <span class="mono">BatchTokenIDOutput</span> → <span class="mono">BatchStrOutput</span>，每过一个进程换一种 struct。</li>
+    <li><strong>跨 ZMQ 的是 token，不是文本</strong>：真正送往调度器（第 18 课）的是已分词的 <span class="mono">TokenizedGenerateReqInput</span>（带 <span class="mono">input_ids</span>），<span class="mono">GenerateReqInput</span> 只活在主进程。</li>
+    <li><strong>rid 贯穿始终</strong>：请求号让交错的<strong>批量</strong>输出（<span class="mono">rids</span> 列表）对号入座，投回正确的等待协程（第 14 课异步路由、第 17 课流式）。</li>
+    <li><strong>它是运行时的“类型系统”</strong>：调度器、worker、反分词器都说这套 struct；abort/flush_cache/health 是独立的控制消息，同样是显式的跨进程信号。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. SGLang 的三个进程之间为什么要靠 <code>io_struct.py</code> 的 dataclass + ZMQ 传消息，而不是直接共享对象？</div>
+  <ol class="opts">
+    <li>因为 Python 根本不支持进程间共享内存</li>
+    <li>因为三进程（第 2 课）<strong>各有独立内存空间</strong>，一个进程的对象另一个根本读不到——拆进程是为绕开 GIL、让 CPU/GPU 重叠（第 21 课）的必然代价，于是只能把消息<strong>用 dataclass 定形状、经 ZMQ 序列化</strong>过线，换来便宜、显式、可打印可断点的协作</li>
+    <li>因为只有这样才能调用 GPU 上的 CUDA kernel</li>
+    <li>因为 dataclass 比共享内存运行得更快，纯粹是性能优化</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。关键不是“快”，而是“边界”：三进程是独立 OS 进程，内存彼此不可见。拆进程是为了绕开 GIL、让 CPU 与 GPU 真正重叠，代价就是不能再共享变量，只能传消息。<code>io_struct.py</code> 用 dataclass 把消息形状钉死、ZMQ 负责序列化传输，得到一套显式、可调试的跨进程协议。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 当请求跨过 ZMQ 真正送达调度器（第 18 课）时，传过去的是哪个结构、装的是什么？</div>
+  <ol class="opts">
+    <li>是 <code>GenerateReqInput</code>，装的是用户的原始文本字符串</li>
+    <li>是 <code>TokenizedGenerateReqInput</code>，装的是<strong>已分词的 token id</strong>（<code>input_ids</code>）+ 采样参数 + <code>rid</code>——原始文本已在主进程被分词，<strong>过线后下游只认 token，不再碰人类文本</strong></li>
+    <li>是 <code>BatchStrOutput</code>，装的是解码后的文本</li>
+    <li>直接把 tokenizer 对象本身共享给调度器进程</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。<code>GenerateReqInput</code> 是用户视角的请求，只活在主进程、<strong>不跨进程</strong>。分词后才打包成 <code>TokenizedGenerateReqInput</code>，里面是 <code>input_ids</code> 而非原始文本，这个才是被 ZMQ 序列化送往调度器的消息。所以跨线的是 token，不是文本——这正是分词留在主进程、把语言学负担挡在最外层的体现（第 14 课）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 调度器把多条请求攒成一批一起算，回来的 <code>BatchTokenIDOutput</code> 是交错的批量输出。<code>rid</code> 在这里起什么作用？</div>
+  <ol class="opts">
+    <li><code>rid</code> 是贯穿每条消息的<strong>请求号</strong>：批量输出里每段 token 都带着自己的 <code>rid</code>，TokenizerManager 据此把交错的输出<strong>拆开、投回正确的等待协程</strong>，没有它几百条并发回包就会张冠李戴</li>
+    <li><code>rid</code> 是采样参数的一部分，控制温度与 top_p</li>
+    <li><code>rid</code> 只是日志用的可选字段，去掉也不影响路由</li>
+    <li><code>rid</code> 决定每条请求用哪块 GPU 计算</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。因为输出是批量、交错的（一条消息里混着第 7、3、9 号的 token），必须有一个稳定标识把每段对号入座。<code>rid</code> 从 <code>GenerateReqInput</code> 处生成，一路复制到 Tokenized 结构、再随 <code>Batch*Output</code> 的 <code>rids</code> 列表流回，是异步路由（第 14 课）与流式回传（第 17 课）共同依赖的地基。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“部门之间流转的标准化表单”的类比，描述一条请求在三进程间的生命周期：它如何从 <code>GenerateReqInput</code>（受理单）变成 <code>TokenizedGenerateReqInput</code>（工单，跨 ZMQ 送往调度器）、再到 <code>BatchTokenIDOutput</code>（结果清单）、最后 <code>BatchStrOutput</code>（打印好的信）。请特别说明：为什么“进”是单条而“出”是批量，以及每张表单右上角的 <code>rid</code> 起什么作用。</li>
+    <li>有人主张“让三个进程共享同一块内存、直接读写对方的请求对象，省掉序列化开销不是更快吗？”请你反驳：从 GIL、CPU/GPU 重叠（第 21 课）、容错隔离、可调试性几个角度，说明 SGLang 为什么宁可付出序列化成本也要用 dataclass + ZMQ 的“一切皆消息”设计。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Lesson 14 showed the <strong>front door</strong> (TokenizerManager) and Lesson 15 the <strong>multi-protocol translators</strong>, but one thing kept
+slipping by: these three processes <strong>do not share memory</strong> — so what exactly <strong>travels between them</strong>? That is today's star: the
+group of message structs in <strong>io_struct.py</strong>. Processes cannot read each other's variables; they can only <strong>pass messages</strong>. And
+<span class="mono">io_struct.py</span> pins down the <strong>shape</strong> of those messages as Python <strong>dataclasses</strong>, serialized over <strong>ZMQ</strong>.
+</p>
+
+<p>Why a whole lesson for it? Because this set of structs is effectively the runtime's <strong>"type system" and wire protocol</strong>. Every later
+component — the scheduler (Lesson 18), the worker, the detokenizer (Lesson 17) — talks to the others <strong>in these structs</strong>. Grab the single
+thread of "how a request changes shape across processes," and those seemingly complex components string together like beads. Skip it, and the scheduler
+source will drown you in <span class="mono">TokenizedGenerateReqInput</span> and <span class="mono">BatchTokenIDOutput</span> — they are not details, they are the <strong>skeleton</strong>.</p>
+
+<p>There is a deeper angle too: making communication <strong>explicit as data structures</strong> is itself an engineering discipline. Once the process
+boundary is pinned by dataclasses, "who sends which field, who fills it, who reads it" becomes <strong>black and white</strong> — printable, breakpoint-able,
+unit-testable. Compared with implicit shared state, this "everything is a message" design costs a few extra classes but buys <strong>debuggability and
+evolvability</strong> — a lesson distributed systems keep re-teaching.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of these structs as <strong>standardized forms and envelopes moving between departments</strong>. For one case, each department turns it into a
+  <strong>new official form</strong>: the front desk takes an <strong>intake form</strong> (raw ask: text, sampling prefs, stream flag); tokenization turns it into a
+  <strong>work order</strong> (token ids + params, sent to the floor); the floor produces a <strong>results sheet</strong> (a batch of token ids); finally it is typed up as a
+  <strong>printed letter</strong> (decoded text) and mailed back. Every form is stamped with the <strong>same case number</strong> (<span class="mono">rid</span>) in the corner, so even with
+  dozens of cases interleaving on the conveyor belt, nothing is misrouted. Departments <strong>never share a drawer</strong> (no shared memory) — they cooperate purely by
+  <strong>handing forms across</strong> (passing messages).
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  <span class="mono">io_struct.py</span> lives under <span class="mono">python/sglang/srt/managers/</span> and is a pure <strong>message-definition file</strong>: almost no
+  algorithms, just <span class="mono">@dataclass</span> after <span class="mono">@dataclass</span>. They line up along the request's lifecycle —
+  <span class="mono">GenerateReqInput</span> (the user-facing request the front door receives) → <span class="mono">TokenizedGenerateReqInput</span> (post-tokenization, the one that
+  <strong>actually crosses ZMQ to the scheduler</strong>) → <span class="mono">BatchTokenIDOutput</span> (batched token ids from scheduler/worker) →
+  <span class="mono">BatchStrOutput</span> (text decoded by the detokenizer). Each struct marks <strong>who produces and who consumes</strong> it. They travel over ZMQ IPC
+  sockets (a port per process), and the <span class="mono">rid</span> routes interleaved batched outputs back to the right request. There are also standalone
+  <strong>control messages</strong>: abort, flush_cache, health.
+</div>
+
+<h2>Why message passing, not shared memory</h2>
+<p>Recall the <strong>three-process model</strong> (Lesson 2): the main process (TokenizerManager), the scheduler subprocess, the detokenizer subprocess. They are
+<strong>three separate OS processes</strong>, each with its own memory — an object in the main process is <strong>invisible and untouchable</strong> to the scheduler. This is
+deliberate: splitting processes sidesteps Python's GIL and lets CPU and GPU truly overlap (Lesson 21). The price: they can no longer cooperate by "reading the same
+variable" — only by <strong>handing messages back and forth</strong>.</p>
+
+<p>So the question becomes: what do messages look like, and how do they cross the wire? SGLang's answer is plain and effective — define <strong>shape with
+dataclasses</strong>, do <strong>transport with ZMQ</strong>. Dataclasses make every field obvious and printable; ZMQ provides lightweight inter-process sockets that
+<strong>serialize</strong> an object to bytes, send it, and <strong>deserialize</strong> it on the other side. Together they yield communication that is <strong>cheap, explicit, and
+debuggable</strong> — you can literally print a message and see its tokens and sampling params.</p>
+
+<div class="cols">
+  <div class="col"><h4>Shared memory? <strong>No</strong></h4><p>The three processes each own <strong>separate memory</strong>; one process's objects are unreadable to another. That is the boundary cost of splitting processes to dodge the GIL and overlap CPU/GPU (Lesson 21).</p></div>
+  <div class="col"><h4>Message passing? <strong>Yes</strong></h4><p>Cooperation is purely by <strong>passing messages</strong>: shape with <span class="mono">dataclass</span>, cross the wire via <strong>ZMQ</strong> serialization. Cheap, explicit, printable and breakpoint-able — the classic distributed choice.</p></div>
+</div>
+
+<h2>A request's lifecycle: a relay of message shapes</h2>
+<p>What brings this design alive is <strong>following one request</strong> and watching it <strong>swap structs</strong> at each process boundary. It is a tight relay: each
+leg's "output message" is exactly the next leg's "input message," and the baton carried throughout is the <span class="mono">rid</span>.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">GenerateReqInput</div><div class="nd">user request at the door: text+params+stream</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">TokenizedGenerateReqInput</div><div class="nd">post-tokenize, <strong>sent via ZMQ to scheduler</strong></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">BatchTokenIDOutput</div><div class="nd">batched token ids from scheduler/worker</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">BatchStrOutput</div><div class="nd">text decoded by the detokenizer</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">route by rid to client</div><div class="nd">hand back to the awaiting request</div></div>
+</div>
+
+<p>Leg by leg. <strong>Leg one</strong>: the TokenizerManager (Lesson 14) receives a <span class="mono">GenerateReqInput</span> — the <strong>user-facing</strong> request:
+<strong>raw text</strong>, sampling params, a <span class="mono">stream</span> flag, maybe images/audio. Note: <strong>this object does not cross processes</strong>; it lives only in the main
+process. <strong>Leg two</strong>: tokenization turns text into token ids and packs a <span class="mono">TokenizedGenerateReqInput</span> — <strong>this</strong> is the message actually
+serialized by ZMQ and <strong>sent across the boundary to the scheduler</strong>. In other words, <strong>what crosses ZMQ to the scheduler is tokenized ids, not raw text</strong>.
+That is the one line to memorize this lesson.</p>
+
+<p><strong>Leg three</strong>: the scheduler (Lesson 18) groups requests into a <span class="mono">ScheduleBatch</span> (Lesson 19), runs the forward pass, and emits a
+<span class="mono">BatchTokenIDOutput</span> — note it is <strong>batched</strong>: one message holds the new token ids for <strong>many requests at once</strong>, with a
+<span class="mono">rids</span> list marking which segment belongs to whom. <strong>Leg four</strong>: the detokenizer (Lesson 17) decodes ids back to text as a
+<span class="mono">BatchStrOutput</span> (with <span class="mono">output_strs</span>). <strong>Final leg</strong>: results flow back to the TokenizerManager, which uses the
+<span class="mono">rid</span> to route each piece to the right <span class="mono">await</span>ing coroutine and hands it to the client.</p>
+
+<table class="t">
+  <tr><th>Message struct</th><th>Key fields</th><th>Producer → Consumer</th></tr>
+  <tr><td class="mono">GenerateReqInput</td><td>text / input_ids, sampling_params, stream, rid</td><td>client/compat → TokenizerManager (<strong>no IPC</strong>)</td></tr>
+  <tr><td class="mono">TokenizedGenerateReqInput</td><td>rid, input_ids, sampling_params, stream</td><td>TokenizerManager →(<strong>ZMQ</strong>)→ Scheduler</td></tr>
+  <tr><td class="mono">BatchTokenIDOutput</td><td>rids, decode_ids/output_ids, finished_reasons</td><td>Scheduler/worker →(ZMQ)→ Detokenizer</td></tr>
+  <tr><td class="mono">BatchStrOutput</td><td>rids, output_strs, output_ids, finish info</td><td>Detokenizer →(ZMQ)→ TokenizerManager → client</td></tr>
+</table>
+
+<p>Read the table top-to-bottom and a neat pattern appears: <strong>each row's consumer is the next row's producer</strong>; the four structs link end-to-end into the
+<strong>full loop</strong> from "human text" to "tokens" and back to "human text." Note the switch from <strong>singular to plural</strong>: inbound is <strong>single</strong>
+(<span class="mono">GenerateReqInput</span>/<span class="mono">TokenizedGenerateReqInput</span>, carrying <span class="mono">rid</span>), outbound is <strong>batched</strong>
+(<span class="mono">Batch*Output</span>, carrying <span class="mono">rids</span>) — because the scheduler <strong>batches many requests</strong> together, so outputs are naturally batched.
+That is continuous batching (Lesson 18) showing through.</p>
+
+<h2>rid: the case number threaded throughout</h2>
+<p>What keeps these messages <strong>from getting scrambled</strong> across three processes is one humble field: <span class="mono">rid</span> (request id). It is created at the
+<span class="mono">GenerateReqInput</span>, copied into <span class="mono">TokenizedGenerateReqInput</span> all the way to the scheduler, and flows back in the
+<span class="mono">rids</span> lists of <span class="mono">BatchTokenIDOutput</span>/<span class="mono">BatchStrOutput</span>. Because the scheduler <strong>batches many requests</strong> together, the
+returning output is <strong>interleaved and batched</strong> — one message holds tokens for request 7, request 3, request 9. Without <span class="mono">rid</span>, the
+TokenizerManager could not <strong>split and route</strong> that interleaved batch back to the right awaiting coroutines.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>How rid routes interleaved batched outputs</b></div>
+  <div class="cells"><span class="lab">out</span><span class="cell">rid=7: tok</span><span class="cell">rid=3: tok</span><span class="cell hl">rid=9: tok</span><span class="sep">→</span><span class="cell">one BatchTokenIDOutput</span><span class="q">batched, interleaved</span></div>
+  <div class="cells"><span class="lab">split</span><span class="cell hl">by rid</span><span class="sep">→</span><span class="cell">7→coro A</span><span class="cell">3→coro B</span><span class="cell">9→coro C</span><span class="q">each to its own</span></div>
+</div>
+
+<p>So <span class="mono">rid</span> is not optional metadata — it is the root that lets this "everything is a message" system run <strong>concurrent yet unscrambled</strong>. It is
+like the <strong>tracking number</strong> on a parcel: packages get broken apart, co-mingled, and redistributed at the sorting center, yet are tracked precisely and delivered to
+the right person — all by that number. Understand the round-trip of <span class="mono">rid</span> and you understand the <strong>foundation</strong> shared by SGLang's async routing
+(Lesson 14) and streaming (Lesson 17). Here is the real skeleton of the core message that actually crosses ZMQ:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/io_struct.py ::TokenizedGenerateReqInput</span><span class="ln">the message that actually crosses ZMQ to the scheduler</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> TokenizedGenerateReqInput(BaseReq):   <span class="cm"># BaseReq supplies rid (the cross-process id)</span>
+    input_text: str                       <span class="cm"># raw text (kept for debug/logging)</span>
+    input_ids: Optional[array[int]]        <span class="cm"># tokenized ids — what actually feeds the model</span>
+    mm_inputs: object                      <span class="cm"># multimodal inputs (image/audio)</span>
+    sampling_params: SamplingParams        <span class="cm"># temperature/top_p/max_new_tokens, ...</span>
+    return_logprob: bool
+    stream: bool                           <span class="cm"># whether to stream back (Lesson 17)</span>
+    <span class="cm"># ...then serialized by ZMQ and sent to the scheduler (Lesson 18)</span></pre>
+</div>
+
+<p>Notice this struct has <strong>no</strong> user-level <span class="mono">text</span>-list shape; instead it carries the already-tokenized <span class="mono">input_ids</span> — confirming the key
+line: <strong>past the ZMQ wire, downstream only knows tokens, never human text</strong>. <span class="mono">input_text</span> is retained, but only for debugging and logs; what drives the
+model is <span class="mono">input_ids</span>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>No shared memory, only messages</strong>: the three processes (Lesson 2) own separate memory and cooperate via <span class="mono">@dataclass</span> messages in <span class="mono">io_struct.py</span> + <strong>ZMQ</strong> serialization.</li>
+    <li><strong>Lifecycle = a relay of messages</strong>: <span class="mono">GenerateReqInput</span> → <span class="mono">TokenizedGenerateReqInput</span> → <span class="mono">BatchTokenIDOutput</span> → <span class="mono">BatchStrOutput</span>, swapping struct at each process.</li>
+    <li><strong>What crosses ZMQ is tokens, not text</strong>: the scheduler (Lesson 18) actually receives the tokenized <span class="mono">TokenizedGenerateReqInput</span> (with <span class="mono">input_ids</span>); <span class="mono">GenerateReqInput</span> lives only in the main process.</li>
+    <li><strong>rid threads throughout</strong>: the request id routes interleaved <strong>batched</strong> outputs (the <span class="mono">rids</span> list) back to the right awaiting coroutine (async routing Lesson 14, streaming Lesson 17).</li>
+    <li><strong>It is the runtime's "type system"</strong>: scheduler, worker, and detokenizer all speak these structs; abort/flush_cache/health are standalone control messages.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why do SGLang's three processes communicate via <code>io_struct.py</code> dataclasses + ZMQ instead of sharing objects directly?</div>
+  <ol class="opts">
+    <li>Because Python has no way to share memory between processes at all</li>
+    <li>Because the three processes (Lesson 2) own <strong>separate memory</strong>, so one process's objects are unreadable to another — splitting processes is the necessary cost of dodging the GIL and overlapping CPU/GPU (Lesson 21), so messages must be <strong>shaped by dataclasses and serialized over ZMQ</strong>, buying cheap, explicit, printable/breakpoint-able cooperation</li>
+    <li>Because only this lets you call CUDA kernels on the GPU</li>
+    <li>Because dataclasses run faster than shared memory, purely a performance optimization</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The point isn't 'speed' but 'boundaries': the three are separate OS processes with mutually invisible memory. Splitting them dodges the GIL and overlaps CPU/GPU; the cost is no shared variables, only passing messages. <code>io_struct.py</code> pins message shapes with dataclasses and ZMQ handles serialized transport, giving an explicit, debuggable cross-process protocol.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. When a request actually crosses ZMQ to the scheduler (Lesson 18), which struct travels, and what does it carry?</div>
+  <ol class="opts">
+    <li>It's <code>GenerateReqInput</code>, carrying the user's raw text string</li>
+    <li>It's <code>TokenizedGenerateReqInput</code>, carrying <strong>already-tokenized ids</strong> (<code>input_ids</code>) + sampling params + <code>rid</code> — the raw text was tokenized in the main process, and <strong>past the wire downstream only knows tokens, not human text</strong></li>
+    <li>It's <code>BatchStrOutput</code>, carrying decoded text</li>
+    <li>The tokenizer object itself is shared directly with the scheduler process</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <code>GenerateReqInput</code> is the user-facing request that lives only in the main process and <strong>does not cross processes</strong>. Only after tokenization is it packed into <code>TokenizedGenerateReqInput</code>, which holds <code>input_ids</code> rather than raw text and is the message ZMQ serializes to the scheduler. So what crosses is tokens, not text — reflecting that tokenization stays in the main process, keeping the linguistic burden at the outermost layer (Lesson 14).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. The scheduler batches many requests together, so the returning <code>BatchTokenIDOutput</code> is interleaved and batched. What does <code>rid</code> do here?</div>
+  <ol class="opts">
+    <li><code>rid</code> is the <strong>request id</strong> threaded through every message: each token segment in the batched output carries its own <code>rid</code>, so the TokenizerManager <strong>splits and routes</strong> the interleaved output back to the right awaiting coroutine; without it, hundreds of concurrent replies would be misdelivered</li>
+    <li><code>rid</code> is part of the sampling params, controlling temperature and top_p</li>
+    <li><code>rid</code> is just an optional logging field; removing it doesn't affect routing</li>
+    <li><code>rid</code> decides which GPU computes each request</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Because outputs are batched and interleaved (one message mixes tokens for requests 7, 3, 9), a stable identifier is needed to place each segment. <code>rid</code> is created at <code>GenerateReqInput</code>, copied into the tokenized struct, and flows back in the <code>rids</code> lists of the <code>Batch*Output</code> — the foundation shared by async routing (Lesson 14) and streaming (Lesson 17).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'standardized forms moving between departments' analogy, describe a request's lifecycle across the three processes: how it goes from <code>GenerateReqInput</code> (intake form) to <code>TokenizedGenerateReqInput</code> (work order, crossing ZMQ to the scheduler), to <code>BatchTokenIDOutput</code> (results sheet), and finally <code>BatchStrOutput</code> (printed letter). Explain in particular why 'in' is singular while 'out' is batched, and what the <code>rid</code> stamped on each form does.</li>
+    <li>Someone argues: 'Just let the three processes share one block of memory and read/write each other's request objects directly — wouldn't skipping serialization be faster?' Rebut this: from the angles of the GIL, CPU/GPU overlap (Lesson 21), fault isolation, and debuggability, explain why SGLang prefers the 'everything is a message' design with dataclasses + ZMQ even at the cost of serialization.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="15-openai-anthropic-ollama-compat.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">OpenAI/Anthropic/Ollama 兼容层</span><span class="lang-en">OpenAI/Anthropic/Ollama compat</span></div></a><a class="next" href="17-detokenizer-and-streaming.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">Detokenizer 与流式输出</span><span class="lang-en">Detokenizer &amp; streaming</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
