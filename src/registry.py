@@ -7,6 +7,7 @@ Grows one Part module per milestone (part1 .. part13).
 """
 import part1
 import part2
+import part3
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -18,4 +19,8 @@ CONTENT = {
     "06-paged-attention-and-paged-kv.html": part2.LESSON_06,
     "07-radixattention-and-prefix-caching.html": part2.LESSON_07,
     "08-throughput-vs-latency.html": part2.LESSON_08,
+    "09-structured-generation-language.html": part3.LESSON_09,
+    "10-interpreter-and-tracer.html": part3.LESSON_10,
+    "11-fork-join-and-prefix-sharing.html": part3.LESSON_11,
+    "12-backends-and-openai-compat.html": part3.LESSON_12,
 }

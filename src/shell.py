@@ -63,6 +63,14 @@ PAGES = [
      "第二部分 · 推理前置基础", "Part 2 · Foundations"),
     ("08-throughput-vs-latency.html", "吞吐 vs 延迟", "Throughput vs latency",
      "第二部分 · 推理前置基础", "Part 2 · Foundations"),
+    ("09-structured-generation-language.html", "结构化生成语言", "The structured-generation language",
+     "第三部分 · 前端语言", "Part 3 · The frontend language"),
+    ("10-interpreter-and-tracer.html", "解释器与 tracer", "Interpreter & tracer",
+     "第三部分 · 前端语言", "Part 3 · The frontend language"),
+    ("11-fork-join-and-prefix-sharing.html", "fork/join 与前缀共享", "fork/join & prefix sharing",
+     "第三部分 · 前端语言", "Part 3 · The frontend language"),
+    ("12-backends-and-openai-compat.html", "后端与 OpenAI 兼容", "Backends & OpenAI compat",
+     "第三部分 · 前端语言", "Part 3 · The frontend language"),
 ]
 
 
@@ -528,6 +536,14 @@ SUBTITLES = {
                                                   "all KV in a radix tree · shared prefixes computed once, reused across requests & turns · match/insert/split + LRU eviction"),
     "08-throughput-vs-latency.html": ("TTFT/ITL/吞吐/有效吞吐 · 批处理拿延迟换吞吐 · 旋钮与调度张力",
                                       "TTFT/ITL/throughput/goodput · batching trades latency for throughput · the knobs & the scheduling tension"),
+    "09-structured-generation-language.html": ("用 gen/select/fork/join 写多调用 LLM 程序 · SGLang 的命名由来",
+                                               "write multi-call LLM programs with gen/select/fork/join · SGLang's namesake"),
+    "10-interpreter-and-tracer.html": ("解释执行 vs 追踪编译 · StreamExecutor 与 ProgramState",
+                                       "interpret vs trace/compile · StreamExecutor & ProgramState"),
+    "11-fork-join-and-prefix-sharing.html": ("fork 并行分支共享前缀 · 与 RadixAttention 是一体两面",
+                                             "fork's parallel branches share the prefix · two halves of RadixAttention"),
+    "12-backends-and-openai-compat.html": ("后端无关 · 本地 runtime vs OpenAI/Anthropic · 通往运行时的接缝",
+                                           "backend-agnostic · local runtime vs OpenAI/Anthropic · the seam to the runtime"),
 }
 
 

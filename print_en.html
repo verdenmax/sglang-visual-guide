@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 8 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 12 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -344,6 +344,10 @@ details[open] > summary { list-style: none; }
   <li>PagedAttention & paged KV</li>
   <li>RadixAttention & prefix caching</li>
   <li>Throughput vs latency</li>
+  <li>The structured-generation language</li>
+  <li>Interpreter & tracer</li>
+  <li>fork/join & prefix sharing</li>
+  <li>Backends & OpenAI compat</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -2171,6 +2175,689 @@ curve, and what does it cost?" — is the lens for everything that follows.</p>
   <ul>
     <li>Define TTFT, ITL/TPOT, throughput, and goodput each in one sentence, and state what mainly dominates each. Then explain: why can a system with very high throughput still have low goodput? Give a concrete scenario where this happens.</li>
     <li>Your service has an SLA of 'TTFT < 300ms', but to chase throughput you set max_running_requests very large, causing some requests to blow past the TTFT bound. Describe how you would re-pick a point on the throughput-latency curve (touching at least two of max_running_requests, mem_fraction_static, chunked_prefill_size), and explain how chunked prefill (Lesson 22) helps hold the SLA when a long prompt triggers a latency spike.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>The structured-generation language</h1>
+
+<p class="lead">
+The previous parts were all about the <strong>runtime</strong> — KV cache, continuous batching, paging, prefix reuse. But the
+project's name, <strong>SGLang = Structured Generation Language</strong>, really lands on the word <strong>Language</strong>:
+first and foremost it is a <strong>front-end language for writing "calling an LLM" as a program</strong>. This lesson returns to
+the project's <strong>namesake origin</strong> and its core shape — an ordinary Python function decorated with
+<span class="inline">@sgl.function</span>, where <strong>gen</strong> leaves "blanks to fill" and <strong>select</strong> leaves
+"multiple-choice blanks," turning a multi-step dialogue into a <strong>readable, controllable, reusable</strong> program.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  An SGLang program is like a <strong>fill-in-the-blank form / mail-merge template</strong>: you write the <strong>fixed text</strong>
+  ahead of time and leave <strong>labeled blanks</strong> wherever the model should answer. A plain blank (<strong>gen</strong>) lets the
+  model <strong>write freely</strong>; a <strong>multiple-choice</strong> blank (<strong>select</strong>) offers only a few
+  <strong>preset options</strong>, so the model can only <strong>pick one</strong>. You design the form's <strong>skeleton and slots</strong>;
+  the model <strong>fills the blanks</strong> — and afterward each blank carries a label, so <span class="inline">s["label"]</span>
+  pulls the answer back out for reuse.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>SGLang lets you write "multi-call LLM" programs using ordinary Python control flow</strong>. The function
+  takes a <strong>state object s</strong>; you <strong>build the prompt</strong> with <span class="inline">s += sgl.user("…")</span> and
+  insert <strong>generation slots</strong> with <span class="inline">gen(...)</span>, with <strong>arbitrary if / for / plain Python</strong>
+  between two gens. This buys three things: ① <strong>structure and control flow</strong> live in Python — clear and debuggable;
+  ② <strong>constrained decoding</strong> (select, regex, json) makes outputs <strong>reliable and parseable</strong>; ③ the runtime
+  <strong>automatically reuses KV across shared prefixes</strong> (Lesson 7, RadixAttention).
+</div>
+
+<h2>What an SGLang program looks like</h2>
+<p>The smallest unit is an <strong>ordinary Python function</strong> decorated with <span class="inline">@sgl.function</span>, whose
+<strong>first argument is always the state s</strong>. You don't "call one API and get a string" — you <strong>build the dialogue step by
+step</strong> in the body: use <strong>role helpers</strong> (<span class="mono">system</span> / <span class="mono">user</span> /
+<span class="mono">assistant</span>) to assemble messages, and <strong>gen</strong> to <strong>dig a named blank</strong> wherever the model
+answers. <strong>However many gens appear, that's how many LLM calls happen</strong> — they chain into a <strong>multi-call</strong> program,
+with arbitrary Python logic between them.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Build the first prompt</h4><p><span class="mono">s += sgl.user("Q: …")</span> — merge fixed text and variables <strong>into state s</strong>, like writing the form's question.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>First gen: let it think</h4><p><span class="mono">s += sgl.assistant(gen("reason", max_tokens=256))</span> — dig a blank named <strong>reason</strong> for the model's reasoning.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Use the result in plain Python</h4><p>Read <span class="mono">s["reason"]</span>, then <strong>write if/for to decide the next prompt</strong> — control flow is just Python.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Second gen: final answer</h4><p><span class="mono">gen("answer", stop="\n")</span> — dig one more blank. Two gens ⇒ <strong>two calls</strong>, sharing one prefix.</p></div></div>
+</div>
+
+<h2>Core primitives: gen and select, plus role helpers</h2>
+<p>SGLang's expressiveness concentrates in <strong>a tiny set of primitives</strong>. The most common are <strong>gen</strong> (free fill-in)
+and <strong>select</strong> (constrained choice): the former lets the model <strong>generate freely</strong>, the latter <strong>restricts decoding to
+the given options</strong> — the entry point to "constrained decoding," making outputs of tasks like classification or routing
+<strong>always valid and directly usable</strong>. With role helpers and the multimodal <span class="mono">image</span>, you can build anything
+from pure text to mixed image-text programs.</p>
+
+<table class="t">
+  <tr><th>Primitive</th><th>What it does</th><th>Read result</th></tr>
+  <tr><td class="mono">gen(name, max_tokens, stop=…)</td><td>Dig a <strong>free fill-in slot</strong>; the model generates any text</td><td class="mono">s["name"]</td></tr>
+  <tr><td class="mono">select(name, choices=[…])</td><td><strong>Constrained choice</strong>: decoding restricted to options, pick one</td><td class="mono">s["name"]</td></tr>
+  <tr><td class="mono">system / user / assistant</td><td><strong>Role helpers</strong>: tag message roles to build multi-turn chat</td><td>—</td></tr>
+  <tr><td class="mono">image(path_or_url)</td><td><strong>Multimodal</strong>: feed an image into the prompt for a vision model</td><td>—</td></tr>
+</table>
+
+<p>One relationship is worth spelling out: <strong>select is essentially a "constrained" gen</strong>. In the source, once
+<span class="mono">gen(...)</span> receives <span class="mono">choices=[…]</span> it returns an <span class="mono">SglSelect</span> rather than an
+<span class="mono">SglGen</span> — meaning <strong>constraints (choices / regex / json_schema)</strong> are built into gen, tightening "free fill-in"
+into "fill by rule" when needed. This is one of the DSL's key advantages over a raw API.</p>
+
+<h2>Why a DSL instead of hand-rolling a raw API?</h2>
+<p>For the same "call the model twice, feed the first result into the second," hand-writing raw HTTP / OpenAI API means you must
+<strong>concatenate strings, parse, manage history, and enforce format yourself</strong>; SGLang <strong>sinks all that into the language and
+runtime</strong>, so you write only "<strong>what to do</strong>" and leave "<strong>how to do it efficiently and reliably</strong>" to the framework.</p>
+
+<div class="cols">
+  <div class="col"><h4>SGLang DSL: what you write</h4><p>One <span class="mono">@sgl.function</span> with <strong>plain Python control flow + gen/select slots</strong>.
+  You declare "<strong>fill here</strong>, choose from these there," and read with <span class="mono">s["name"]</span>. <strong>Structure, constraints, multi-step logic</strong> are all in plain sight.</p></div>
+  <div class="col"><h4>Raw API: what the framework auto-does</h4><p>① <strong>KV across shared prefixes is reused automatically</strong> (Lesson 7), no manual caching;
+  ② <strong>constrained decoding</strong> guarantees valid select/json output; ③ scheduling, continuous batching, paging all happen transparently in the <strong>runtime</strong>. With a raw API you'd do <strong>all of it yourself</strong>.</p></div>
+</div>
+
+<p>The third benefit is the subtlest and most valuable: <strong>when you write the program structurally, the framework can see the structure and
+optimize from it</strong>. If multiple requests <strong>share a prefix</strong> (same system prompt, same few-shot examples), the runtime
+<strong>computes the prefix once and reuses its KV</strong>; when one function <span class="mono">fork</span>s into branches (Lesson 11), the branches
+<strong>share the parent's prefix cache</strong>. In other words, <strong>writing a structured program is itself feeding optimization hints to the
+runtime</strong> — something the raw-API style of "fire one, read one, blind to each other" can never obtain.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>A named blank = a readable result</b>: every gen/select carries a label; once filled, read it with <span class="mono">s["name"]</span> to chain a multi-step program</div>
+  <div class="cells"><span class="lab">gen("reason")</span><span class="cell hl">model fills reasoning</span><span class="sep">→</span><span class="cell q">read s["reason"]</span></div>
+  <div class="cells"><span class="lab">select("label")</span><span class="cell">positive</span><span class="cell hl">negative</span><span class="cell">neutral</span><span class="sep">→</span><span class="cell q">s["label"] is one of the three</span></div>
+  <div class="cells"><span class="lab">gen("answer")</span><span class="cell hl">answer from prior steps</span><span class="sep">→</span><span class="cell q">s["answer"] final output</span></div>
+</div>
+
+<h2>A peek at the source: gen is a "deferred node"</h2>
+<p>Interestingly, calling <span class="mono">gen(...)</span> <strong>does not immediately hit the model</strong> — it just <strong>constructs and returns an IR
+node</strong> (<span class="mono">SglGen</span>, or <span class="mono">SglSelect</span> when given choices) describing "<strong>what to generate here, with what
+constraints</strong>." Actual execution is left to the <strong>interpreter</strong> (Lesson 10), which walks these nodes and calls the backend (Lesson 12)
+as needed. Here is the real snippet of <span class="mono">gen</span> from <span class="mono">lang/api.py</span>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/api.py ::gen</span><span class="ln">gen: construct a generation IR node</span></div>
+  <pre><span class="kw">def</span> gen(
+    name: Optional[str] = <span class="kw">None</span>,
+    max_tokens: Optional[int] = <span class="kw">None</span>,
+    stop: Optional[Union[str, List[str]]] = <span class="kw">None</span>,
+    <span class="cm"># …temperature / top_p / regex / json_schema / choices and more sampling+constraint args…</span>
+    choices: Optional[List[str]] = <span class="kw">None</span>,
+    regex: Optional[str] = <span class="kw">None</span>,
+):
+    <span class="cm"># With choices, gen degrades to a "constrained choice" — i.e. select</span>
+    <span class="kw">if</span> choices:
+        <span class="kw">return</span> SglSelect(name, choices, ...)
+    <span class="cm"># Otherwise return a free-generation node for the interpreter to run on demand</span>
+    <span class="kw">return</span> SglGen(name, max_tokens, ..., stop, ..., regex, ...)</pre>
+</div>
+
+<p>Grasp this and you have the soul of the SGLang front end: <strong>the program you write is not "code that runs immediately" but a "tree of intent
+to be executed."</strong> Precisely because it is a declarative tree, the framework can <strong>see the whole structure before execution</strong> — which
+prefixes are shared, which branches can run in parallel, which outputs need constraints — and hand it to the interpreter (Lesson 10), fork/join
+(Lesson 11), and backends (Lesson 12) to realize layer by layer. Carry "<strong>function is a program, gen is a blank, structure is an optimization
+hint</strong>" forward, and the next three lessons will show how this intent tree <strong>runs, parallelizes, and lands on the engine</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>SGLang is the project's namesake origin</strong>: Structured Generation Language — a front-end DSL for writing "calling an LLM" as an <strong>ordinary Python program</strong>.</li>
+    <li><strong>Program shape</strong>: decorated with <span class="mono">@sgl.function</span>, first arg is state <span class="mono">s</span>; build prompts with <span class="mono">s += sgl.user(…)</span>, dig generation slots with <span class="mono">gen(name,…)</span>, read with <span class="mono">s["name"]</span>. <strong>Multiple gens = a multi-call LLM program</strong> with arbitrary if/for in between.</li>
+    <li><strong>Core primitives</strong>: <span class="mono">gen</span> (free fill-in), <span class="mono">select</span> (constrained choice / decoding), <span class="mono">system/user/assistant</span> (roles), <span class="mono">image</span> (multimodal). In the source a gen with <span class="mono">choices</span> returns <span class="mono">SglSelect</span>.</li>
+    <li><strong>Why a DSL</strong>: ① control flow and structure live in Python; ② constrained decoding guarantees reliable output; ③ the runtime <strong>auto-reuses shared-prefix KV</strong> (Lesson 7, RadixAttention) — a structured program naturally feeds optimization hints to the framework.</li>
+    <li><strong>Essence</strong>: gen doesn't execute immediately; it builds an IR node, and the nodes form a <strong>tree of intent</strong> realized by the interpreter (Lesson 10), fork/join (Lesson 11), and backends (Lesson 12).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In an SGLang program, what is the essential difference between <code>gen(name, …)</code> and <code>select(name, choices=[…])</code>?</div>
+  <ol class="opts">
+    <li>gen works only in system messages, select only in user messages</li>
+    <li>They are fully equivalent; select is just an alias for gen</li>
+    <li>gen runs synchronously and blocks, select is always async and never returns a result</li>
+    <li>gen is a 'free fill-in' where the model writes any text into a named slot; select is a 'constrained choice' whose decoding is restricted to the given options (pick one) — essentially a constrained gen</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. gen lets the model generate freely into a named slot (read via s["name"]); select restricts decoding to the choices, guaranteeing the output is one of the valid options. In the source, a gen that receives choices returns an SglSelect, so select is essentially a 'constrained gen' — the entry point to constrained decoding. The other options misstate the mechanism.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is writing multi-step LLM programs in a DSL like SGLang usually better than hand-rolling raw HTTP/OpenAI API calls?</div>
+  <ol class="opts">
+    <li>Because control flow and structure live in plain Python (clear, debuggable), constrained decoding makes outputs reliable, and the runtime auto-reuses KV across shared prefixes — all of which you'd have to hand-build with a raw API</li>
+    <li>Because raw APIs cannot generate text; only a DSL can call the model</li>
+    <li>Because the DSL gives each request its own dedicated GPU, making it faster</li>
+    <li>Because the DSL automatically halves the model weights, saving HBM</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The DSL buys three things: ① structure and control flow in Python (readable, debuggable); ② constrained decoding (select/regex/json) for valid, parseable output; ③ once the framework sees the structure, it auto-reuses shared-prefix KV (Lesson 7, RadixAttention) and shares parent prefixes across fork/join (Lesson 11). With a raw API you do all the string-building, parsing, history management, and caching yourself. The others are false.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does 'writing the program as a structured SGLang function' give the runtime its opportunity for automatic prefix reuse?</div>
+  <ol class="opts">
+    <li>Because a structured program automatically lowers the sampling temperature to hit the cache</li>
+    <li>Because prefix reuse only concerns disk caching and is unrelated to how the program is written</li>
+    <li>Because SGLang concatenates all requests' outputs into one giant sequence and computes them together</li>
+    <li>Because a structured program lets the framework see the whole structure before execution — which requests/branches share the same prefix prompt — so the runtime computes the prefix once and reuses its KV; the raw-API 'fire one, read one, blind to each other' style can't expose such hints</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. gen doesn't execute immediately; it builds an IR node, and the nodes form a declarative 'tree of intent.' Because it's a tree, the framework sees the global structure before execution: which requests share a system prompt or few-shot prefix, which fork branches share the parent prefix. So the runtime computes a shared prefix once and reuses its KV (Lesson 7). That is the structured style's unique edge over a raw API. The others misstate the mechanism.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Write a two-step SGLang program decorated with <code>@sgl.function</code> whose first arg is <code>s</code>: step one uses <code>gen</code> to let the model write its reasoning, step two reads it back with <code>s["…"]</code> and then uses <code>select</code> to emit a final classification from fixed labels. Explain what kind of model call each gen/select corresponds to, and why the two steps can share the same prefix's KV.</li>
+    <li>Your team currently hand-writes a two-stage 'extract key points, then summarize from them' flow with the raw OpenAI API, struggling with unstable formats, error-prone history concatenation, and the same system prompt being recomputed repeatedly. Argue how migrating to the SGLang DSL improves things along three axes (control flow / constrained decoding / automatic prefix reuse), with one concrete example each.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Interpreter & tracer</h1>
+
+<p class="lead">
+Last lesson we saw what an SGLang program <strong>looks like</strong> — an ordinary Python function decorated with <span class="inline">@sgl.function</span>, leaving blanks via
+<strong>gen / select</strong>, essentially a <strong>"tree of intent to be executed."</strong> This lesson answers: <strong>how does that tree actually run?</strong> SGLang has
+<strong>two ways to realize a program</strong> — <strong>interpret</strong>, where <span class="inline">StreamExecutor</span> really <strong>drives the backend step by step and generates text</strong>;
+and <strong>trace</strong>, where <span class="inline">trace_program</span> walks the function <strong>symbolically WITHOUT calling the model</strong>, just to <strong>see the structure and extract the static prefix</strong>.
+Grasp these two modes and you hold the main axis of the SGLang front end — <strong>from "written" to "run."</strong>
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of an SGLang program as a <strong>recipe</strong>. You can use it two ways. First, <strong>cook it step by step right now (interpret)</strong> — chop, sear, stir, and each step
+  <strong>really produces food</strong>; how far you've gotten and what's in the pan are <strong>concrete results</strong>. Second, <strong>read it through first (trace)</strong> — you
+  <strong>don't turn on the stove</strong>; you just follow the <strong>fixed leading steps</strong> to see what's needed, so you can <strong>prepare a shopping list and mise en place</strong> ahead of time.
+  You stop at the first step like "<strong>taste it, then decide how much salt</strong>" that <strong>depends on a live result</strong> — that one you can only know by actually cooking.
+  <strong>Interpret = do it now; trace = understand the shape first and pre-stage what you can.</strong>
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <strong>the same tree of intent can be "executed" or "analyzed."</strong> <strong>Interpret</strong> is the normal path — <span class="inline">StreamExecutor</span> takes the function and
+  drives it <strong>expression by expression</strong>: fixed text is appended to the state; a <strong>gen / select</strong> <strong>calls the backend</strong> (Lesson 12), streaming the model's output onto the text and into a named variable;
+  the <strong>if / for between two gens is plain Python</strong> that runs normally. <strong>Trace</strong> is the compile/analysis path — <span class="inline">trace_program</span> walks the function <strong>symbolically with a dummy backend</strong>,
+  <strong>never touching the model</strong>, just to learn the program's <strong>structure</strong> and <strong>extract the constant leading prompt</strong> (the static prefix), which the runtime can <strong>precompute, cache, and share</strong> (echoing Lesson 7, RadixAttention).
+  <strong>One answers "what to produce now," the other answers "what shape is this program"</strong> — that is the division of labor between interpreter and tracer.
+</div>
+
+<h2>The interpret path: how StreamExecutor drives a program</h2>
+<p>When you <strong>call</strong> an <span class="inline">@sgl.function</span>, SGLang builds a <strong>StreamExecutor</strong> and a <strong>ProgramState (the s in your function)</strong>.
+The executor runs a worker in a <strong>background thread</strong>: every <span class="mono">s += …</span> in your body essentially drops an <strong>expression (expr)</strong> into its queue, and the worker <strong>_executes them one by one</strong>.
+Fixed text is <strong>appended to text_</strong>; a <strong>gen</strong> calls <span class="mono">backend.generate(...)</span> and <strong>appends the result to text_ and stores it in variables[name]</strong>; a <strong>select</strong> asks the backend to <strong>pick one of the choices</strong>.
+The key idea: <strong>interpreting is "produce as you go"</strong> — text and variables <strong>really grow step by step</strong>.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Program</span><span class="name">@sgl.function</span></div><div class="ld">Your tree of intent: role messages + <span class="mono">gen/select</span> slots + plain Python control flow. On call, handed to the executor.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Driver</span><span class="name">StreamExecutor</span></div><div class="ld">A background thread <span class="mono">_execute</span>s each expression: fixed text is appended, <span class="mono">gen/select</span> calls the backend.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">Execute</span><span class="name">Backend (Lesson 12)</span></div><div class="ld">Where tokens are actually produced: local runtime or OpenAI-compatible API; <span class="mono">gen</span> can return <strong>streaming</strong>.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">State</span><span class="name">ProgramState s</span></div><div class="ld">Accumulates <span class="mono">text_</span> (full text/prefix), <span class="mono">messages_</span> (role messages), <span class="mono">variables</span> (named results, read via <span class="mono">s["name"]</span>).</div></div>
+</div>
+
+<h2>The trace path: see the shape without calling the model</h2>
+<p>Trace is the other road. <span class="inline">trace_program</span> / <span class="inline">extract_prefix_by_tracing</span> builds a <strong>TracerProgramState</strong> and a <strong>dummy backend (BaseBackend)</strong>,
+then walks your function <strong>symbolically</strong> — <strong>it never calls the model</strong>. It wants not "answers" but the program's <strong>skeleton</strong>: which fixed texts, gens, selects, and forks appear in order.
+The most useful product is the <strong>static prefix</strong>: from the start <strong>up to the first place that depends on a model output</strong>, that whole stretch of <strong>constant leading prompt</strong>. In the source it concatenates the leading run of <span class="mono">SglConstantText</span> and
+<strong>stops at the first gen-like node that "only a real run could know."</strong> Extract that prefix and the runtime can <strong>compute it once and reuse its KV</strong> (Lesson 7), or <strong>compile/optimize</strong> the whole program from it.</p>
+
+<div class="cols">
+  <div class="col"><h4>Interpret · the normal path</h4><p><strong>Execute now.</strong> Driven step by step by <span class="mono">StreamExecutor</span>, it <strong>really calls the backend</strong> for each gen and can <strong>stream</strong>; it <strong>mutates state</strong> — text_ and variables grow. With no data dependency it can even <strong>run several gens concurrently</strong> (paving the way for Lesson 11 fork/join). <strong>Goal: produce results.</strong></p></div>
+  <div class="col"><h4>Trace · the compile/analysis path</h4><p><strong>Understand the shape first.</strong> Driven by <span class="mono">trace_program</span> with a dummy backend, it walks <strong>symbolically</strong>, <strong>never touching the model</strong> and producing no real tokens; it only <strong>discovers structure and extracts the static prefix</strong>, <strong>stopping</strong> at any node that depends on a model result. <strong>Goal: understand + precompute shared prefixes for caching and optimization.</strong></p></div>
+</div>
+
+<h2>Exactly where the two modes differ</h2>
+<p>Side by side in one table, the difference is obvious: the core question differs ("what to produce" vs "what shape"), <strong>whether the model is called</strong> differs, <strong>side effects</strong> differ, and the <strong>product</strong> differs.
+Remember this table and you'll never conflate "running a program" with "analyzing a program."</p>
+
+<table class="t">
+  <tr><th>Dimension</th><th>Interpret</th><th>Trace</th></tr>
+  <tr><td>Driver</td><td class="mono">StreamExecutor</td><td class="mono">trace_program / TracerProgramState</td></tr>
+  <tr><td>Calls model?</td><td><strong>Yes</strong>, every gen/select hits the backend</td><td><strong>No</strong>, symbolic walk with a dummy backend</td></tr>
+  <tr><td>Streams?</td><td><strong>Can</strong>, gen returns as it generates</td><td><strong>No</strong>, there are no real tokens</td></tr>
+  <tr><td>Side effects?</td><td><strong>Yes</strong>: text_/variables really grow</td><td><strong>Almost none</strong>: only records structure</td></tr>
+  <tr><td>Product</td><td>Final text + named results <span class="mono">s["name"]</span></td><td>Program structure + <strong>static prefix</strong> (cacheable/reusable)</td></tr>
+  <tr><td>When used</td><td>Actually running a program</td><td>Precompute shared prefix, compile/optimize</td></tr>
+</table>
+
+<h2>The state object s: where the interpreter stores results</h2>
+<p>Either way, everything revolves around the <strong>state object s</strong> (ProgramState). In interpret mode, <strong>StreamExecutor is the "ledger" behind s</strong>: it accumulates the <strong>full text text_</strong> (this is precisely the "prefix" for later requests),
+records <strong>role messages</strong> into messages_, and stores each gen/select result <strong>by name into variables</strong>. So when you write <span class="mono">s["reason"]</span> in Python,
+you're reading <span class="mono">variables["reason"]</span>. The diagram below draws "<strong>what gets added to the state when one gen completes</strong>":</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>What ProgramState holds</b>: each step the interpreter runs drops things into s's three baskets — text, messages, named variables</div>
+  <div class="cells"><span class="lab">s += sgl.user("Q…")</span><span class="cell">append to text_</span><span class="sep">→</span><span class="cell">messages_ logs a user turn</span></div>
+  <div class="cells"><span class="lab">gen("reason")</span><span class="cell hl">backend generates text</span><span class="sep">→</span><span class="cell">append to text_</span><span class="sep">+</span><span class="cell q">variables["reason"]</span></div>
+  <div class="cells"><span class="lab">read s["reason"]</span><span class="cell q">= variables["reason"]</span><span class="sep">→</span><span class="cell">used in plain Python</span></div>
+</div>
+
+<h2>A peek at the source: StreamExecutor</h2>
+<p>The heart of the interpreter is <span class="mono">StreamExecutor</span>. In a <strong>background thread</strong> it holds the backend, the variables table, the full text text_, and more; <span class="mono">submit</span> drops an expression into the queue,
+the worker pops it and <span class="mono">_execute</span>s, and <span class="mono">_execute_gen</span> is where the model is <strong>actually called</strong> and the result is <strong>written back into text_ and variables</strong>. Here is its real skeleton:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::StreamExecutor</span><span class="ln">interpreter: execute per-expression, write gen results back to state</span></div>
+  <pre><span class="kw">class</span> StreamExecutor:
+    <span class="st">&quot;&quot;&quot;A stream executor that executes SGL expressions in a background thread.&quot;&quot;&quot;</span>
+
+    <span class="kw">def</span> __init__(self, backend, arguments, ...):
+        self.backend = backend          <span class="cm"># the chosen backend (Lesson 12)</span>
+        self.variables = {}             <span class="cm"># named results: s["name"] reads from here</span>
+        self.text_ = <span class="st">""</span>             <span class="cm"># the ever-growing full text = the prefix</span>
+        self.messages_ = []             <span class="cm"># role messages in OpenAI format</span>
+        <span class="cm"># …a background worker thread consumes expressions from the queue…</span>
+
+    <span class="kw">def</span> submit(self, expr):             <span class="cm"># drop a gen/select node into the queue</span>
+        self._init_var_event(expr)
+        self.queue.put(expr)
+
+    <span class="kw">def</span> _execute_gen(self, expr):       <span class="cm"># where the model is actually called</span>
+        comp, meta_info = self.backend.generate(self, ...)
+        self.text_ += comp              <span class="cm"># append the generated result to the text</span>
+        self.variables[expr.name] = comp  <span class="cm"># store into a named variable for s["name"]</span></pre>
+</div>
+
+<p>Read this and you grasp the interpreter's soul: <strong>it is a loop that "consumes expressions one by one and keeps accumulating results into state."</strong> Fixed text is appended; gen/select hits the backend and writes back into text_ and variables —
+that's how state <strong>grows step by step</strong>. The tracer walks the same tree but <strong>swaps "hit the backend" for a symbolic placeholder</strong>, so it can see the structure and extract the prefix <strong>without spending a single FLOP</strong>.
+Carry "<strong>interpret = execute and accumulate state; trace = symbolically read the shape and extract the prefix</strong>" forward: Lesson 11 shows how the interpreter runs branches <strong>fork/join concurrently</strong> when there's no data dependency
+and lets them <strong>share the parent prefix's KV</strong> (Lesson 7); Lesson 12 unveils where gen actually lands — the <strong>backend interface and OpenAI compatibility.</strong></p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>One tree, two ways to run</strong>: the same <span class="mono">@sgl.function</span> tree can be <strong>interpreted</strong> (executed) or <strong>traced</strong> (analyzed).</li>
+    <li><strong>Interpret = StreamExecutor</strong>: a background thread <strong>_executes per expression</strong>; fixed text is appended to text_, <span class="mono">gen/select</span> <strong>calls the backend</strong> (Lesson 12), results <strong>stream</strong> onto text_ and into <span class="mono">variables[name]</span>; between two gens is plain Python.</li>
+    <li><strong>Trace = trace_program</strong>: a <strong>symbolic walk with a dummy backend</strong>, <strong>never calling the model</strong>, discovering structure and <strong>extracting the static prefix</strong> (the constant leading run, stopping at the first gen), for the runtime to <strong>precompute/cache/share</strong>.</li>
+    <li><strong>Why two modes</strong>: interpret answers "<strong>what to produce now</strong>"; trace answers "<strong>what shape is this program</strong>" — extracting the shared prefix lets the runtime <strong>compute it once and reuse the KV</strong> (Lesson 7, RadixAttention) and enables compilation/optimization.</li>
+    <li><strong>What ProgramState s holds</strong>: <span class="mono">text_</span> (full text/prefix), <span class="mono">messages_</span> (role messages), <span class="mono">variables</span> (named results, read via <span class="mono">s["name"]</span>).</li>
+    <li><strong>Where it fits</strong>: DSL primitives (Lesson 9) → interpret/trace (this lesson) → fork/join concurrency (Lesson 11) → backend landing (Lesson 12).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In SGLang, what is the most essential difference between <code>interpret</code> and <code>trace</code>?</div>
+  <ol class="opts">
+    <li>Interpret really drives the backend step by step via StreamExecutor, generates tokens, and mutates state; trace walks symbolically with a dummy backend, never calls the model, and only discovers structure and extracts the static prefix</li>
+    <li>Both call the model; trace is merely faster</li>
+    <li>Interpret is for training, trace is for evaluation</li>
+    <li>Interpret only runs on GPU, trace only runs on CPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Interpret is the normal execution path: StreamExecutor _executes per expression, gen/select really hits the backend, appends to text_ and stores into variables, growing state step by step. Trace is the compile/analysis path: trace_program walks symbolically with a dummy backend, never touching the model, only discovering structure and extracting the constant leading static prefix. The others misstate the mechanism.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does trace walk the program 'without calling the model'? What is its most valuable product?</div>
+  <ol class="opts">
+    <li>To see the program's structure without spending compute, and to extract the 'static prefix' (the constant leading prompt up to the first place that depends on a model output), so the runtime can compute it once and reuse its KV</li>
+    <li>To compress model weights and save HBM</li>
+    <li>To pre-cache every gen's answer to disk</li>
+    <li>To lower sampling temperature for more deterministic output</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Trace aims to 'understand the shape first': a symbolic walk with a dummy backend that stops at any node depending on a model result, so it discovers structure and extracts the constant leading static prefix at zero compute. The runtime then computes attention for that shared prefix once and reuses its KV (Lesson 7, RadixAttention), and can compile/optimize from it. It has nothing to do with compressing weights, caching answers, or temperature.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. In interpret mode, what does the state object <code>s</code> (ProgramState) actually hold, and what does <code>s["name"]</code> read?</div>
+  <ol class="opts">
+    <li>It stores pointers to the model weights</li>
+    <li>It only stores a boolean flag for whether the program finished</li>
+    <li>It accumulates the full text text_ (the prefix), role messages messages_, and named results stored in variables; s["name"] reads variables["name"] — the output of some gen/select</li>
+    <li>It encodes everything into a single integer token id</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. StreamExecutor is the 'ledger' behind s: text_ is the ever-growing full text (also the prefix for later requests), messages_ logs role messages, and variables stores each gen/select result by name. So s["reason"] in Python reads variables["reason"]. The others don't match the source fields.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, describe what StreamExecutor does — from being called to producing the final text — when you invoke an <code>@sgl.function</code> with two <code>gen</code>s. Point out how each gen hits the backend, how results are written back into <code>text_</code> and <code>variables</code>, and where <code>s["name"]</code> reads from.</li>
+    <li>Suppose your service has ten thousand requests all starting with the same long system prompt + few-shot template. Argue why running a 'trace' once to extract the static prefix helps the runtime's throughput. How does it connect to Lesson 7's RadixAttention prefix reuse? Where does tracing stop, and why?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>fork/join & prefix sharing</h1>
+
+<p class="lead">
+Last lesson (Lesson 10) showed how the interpreter <strong>runs a tree of intent step by step</strong>. But what really sets SGLang apart is that a program can
+<strong>fork multiple parallel branches off the current state</strong> — that is <span class="inline">s.fork(n)</span>. The one line to remember today:
+<strong>the front-end's fork and the runtime's RadixAttention (Lesson 7) are two halves of one idea</strong>. fork lets you <strong>declare "branch here" in the program</strong>;
+RadixAttention <strong>computes that branch's shared prefix once in the engine and reuses it for every branch</strong>. One <strong>states the structure</strong>, the other <strong>cashes it in as saved compute</strong>.
+Grasp this correspondence and you finally understand the weight of the word <strong>Structured</strong> in SGLang's name.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  fork/join is like a <strong>choose-your-own-adventure book</strong>: every reader first reads <strong>the same opening chapters</strong> (the shared prefix); at a fork in the road the
+  book says "<strong>to save the princess turn to page 50, to slay the dragon turn to page 80</strong>" — so one story <strong>branches into several different endings</strong>.
+  The key: <strong>the shared opening is printed only once</strong>, never <strong>re-copied for each branch</strong>; each reader only reads their own <strong>short second half</strong>.
+  Finally you <strong>lay the endings side by side</strong> and pick the best — that is <strong>join</strong> (gathering each branch's result back). fork = branch at the shared opening, join = aggregate the separately-obtained answers.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <span class="inline">s.fork(n)</span> clones <strong>n parallel continuation branches</strong> from the <strong>current state</strong>, each <strong>inheriting the same prompt prefix built so far</strong>,
+  then each generates independently (e.g. n different samples, or n different sub-questions); <strong>join / gather</strong> then <strong>collects each branch's newly-captured variables back into the parent state</strong> for you to compare, vote, or aggregate.
+  Its power is <strong>not convenience but saved compute</strong>: since the n branches share an identical prefix, RadixAttention <strong>computes that prefix's KV once and shares it across all branches</strong> (Lesson 7).
+  So forking 8 branches off a long prefix costs roughly "<strong>1 prefix + 8 very short suffixes</strong>," not "<strong>8 full prompts</strong>." fork is therefore not just a convenience — <strong>it is what "prefix sharing" looks like in the programming model</strong>.
+</div>
+
+<h2>What fork does: N branches grown from one state</h2>
+<p>Think of state <span class="mono">s</span> as an <strong>ever-growing dialogue record</strong> (Lessons 9, 10). At some moment you have built up a long prompt into <span class="mono">s</span> — system setup, few-shot examples, the user question.
+Calling <span class="mono">s.fork(n)</span> now <strong>clones n identical copies at the current tail</strong> of that record, each carrying <strong>the entire prefix so far</strong>.
+The n branches then <strong>go their separate ways</strong>: branch 0 may sample at one temperature, branch 1 at another; or you <strong>append a different sub-question</strong> to each. They are independent and do not interfere.
+Once all branches finish, you call <span class="mono">join</span> (default <span class="mono">gather_variable</span> mode), and the framework <strong>copies each branch's newly-written named variables back into the parent state s</strong> —
+e.g. a variable in the parent becomes a <strong>list</strong> holding all n branches' answers, ready to compare, vote, or pick the best.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Build the shared prefix</h4><p>First assemble system + few-shot + question into <span class="mono">s</span> — this segment is <strong>shared by all branches</strong> and is the root of fork's savings.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>s.fork(n): branch in place</h4><p>Clone <strong>n parallel sub-states</strong> from the current state, each inheriting <strong>the same prefix</strong>; returns a <span class="mono">ProgramStateGroup</span>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Each branch generates independently</h4><p>Each branch <span class="mono">forks[i] += gen("answer")</span> writes its own; branches with no data dependency can <strong>run concurrently</strong> (interpreter, Lesson 10).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>join: gather answers back</h4><p><span class="mono">forks.join()</span> aggregates each branch's <strong>new variables</strong> back into <span class="mono">s</span>, so <span class="mono">s["answer"]</span> becomes a list of n results to compare / vote / aggregate.</p></div></div>
+</div>
+
+<h2>The core: fork and RadixAttention are two halves of one idea</h2>
+<p>This is the part to <strong>highlight hardest</strong>. Lesson 7 explained: RadixAttention organizes all requests' prefixes into a <strong>radix tree</strong>, where a <strong>common prefix stores one copy of KV shared by many requests</strong>.
+What fork does is exactly <strong>deliberately create a "one common prefix + many different suffixes" shape in the program</strong>. In other words: <strong>fork is the "declaration side," RadixAttention is the "redemption side."</strong>
+Writing <span class="mono">s.fork(8)</span> in the DSL tells the runtime plainly: "<strong>these 8 branches have an identical opening.</strong>" The runtime takes that signal and computes the shared prefix's attention <strong>only once</strong>;
+the 8 branches <strong>share one prefix KV</strong>, each adding compute only for its own short suffix. Without fork's declaration, RadixAttention could still <strong>discover after the fact</strong> that prefixes match; with fork, the sharing is <strong>structurally explicit, zero-guess</strong>.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Shared prefix computed once, each branch adds a short suffix</b>: highlighted cells are the <strong>same prefix KV shared by all forked branches</strong> (Lesson 7 RadixAttention reuse); white cells are what each branch computes anew</div>
+  <div class="cells"><span class="lab">Branch 0</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer A</span></div>
+  <div class="cells"><span class="lab">Branch 1</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer B</span></div>
+  <div class="cells"><span class="lab">Branch 2</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer C</span></div>
+  <div class="cells"><span class="lab">reuse</span><span class="cell q">the three highlighted runs = one prefix KV stored once in the radix tree, shared by all three branches</span></div>
+</div>
+
+<h2>Serial loop vs fork: where the cost differs</h2>
+<p>For "best-of-n," the naïve way is a <strong>for loop running n times</strong>: each iteration resends the <strong>full prompt</strong>. The problem: those n requests share <strong>an identical long prefix</strong>,
+yet it gets <strong>recomputed n times end to end</strong> — burning (n−1) prefixes of compute, and the iterations run serially, blind to one another. With <span class="mono">s.fork(n)</span>, you <strong>declare the "shared prefix + n suffixes" structure once</strong>,
+the runtime computes <strong>one prefix</strong> plus n short suffixes, and independent branches can run concurrently. The longer the prefix and the larger n, the more you save.</p>
+
+<div class="cols">
+  <div class="col"><h4>Serial for loop: N × full prompt</h4><p>Run n gens in a loop, each <strong>recomputing the whole long prefix</strong>. Cost ≈ <strong>n × (prefix + suffix)</strong>, prefix recomputed n times; iterations serial, runtime <strong>can't tell their openings match</strong>.</p></div>
+  <div class="col"><h4>s.fork(n): 1 × prefix + N × suffix</h4><p>Declare the fork once; the runtime computes the <strong>shared prefix KV only once</strong> (Lesson 7), n branches each add only a <strong>short suffix</strong>. Cost ≈ <strong>prefix + n × suffix</strong>; independent branches also run concurrently (Lesson 10).</p></div>
+</div>
+
+<h2>Common uses: what fork is good for</h2>
+<p>Whenever a task can be phrased as "<strong>share an opening, then do several things separately</strong>," fork applies. The four patterns below are the most common — all share the trait of <strong>branching off the same parent prefix</strong>, so all automatically enjoy prefix reuse.</p>
+
+<table class="t">
+  <tr><th>Pattern</th><th>How it forks</th><th>What join does next</th></tr>
+  <tr><td class="mono">best-of-n sampling</td><td>fork n branches off one prompt, each generating <strong>n candidates</strong> with different randomness</td><td>gather n answers, <strong>score / vote</strong> for the best</td></tr>
+  <tr><td class="mono">branch-and-evaluate</td><td>generate several <strong>distinct options</strong>, one branch per option</td><td><strong>evaluate each option</strong> independently, then aggregate to compare</td></tr>
+  <tr><td class="mono">map over a list</td><td>open <strong>one branch per element</strong>, sharing the same instruction prefix</td><td>collect <strong>each element's result</strong> into a list</td></tr>
+  <tr><td class="mono">tree-of-thought</td><td>at each thinking node <strong>fork several reasoning paths</strong>, forking again layer by layer</td><td><strong>explore / prune</strong> down the tree, recover the best path</td></tr>
+</table>
+
+<p>One more word on concurrency: when forked branches <strong>have no data dependency</strong>, the interpreter (Lesson 10) can <strong>advance them concurrently</strong> rather than waiting for one to finish before the next.
+So fork brings <strong>two benefits at once</strong>: compute-wise, RadixAttention <strong>saves the duplicated prefix</strong>; time-wise, concurrency <strong>overlaps the branches</strong>. Now the real fork in the source.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState.fork</span><span class="ln">fork: branch N sub-states off the current state</span></div>
+  <pre><span class="kw">def</span> fork(
+    self,
+    size: int = 1,
+    position_ids_offset: Optional[List[int]] = <span class="kw">None</span>,
+):
+    <span class="cm"># Have the executor clone `size` branches from the current state — they share the built prefix</span>
+    stream_executors = self.stream_executor.fork(size, position_ids_offset)
+    states = [ProgramState(x) <span class="kw">for</span> x <span class="kw">in</span> stream_executors]
+    <span class="cm"># Pack into a group; later group.join() copies each branch's variables back to the parent</span>
+    state_group = ProgramStateGroup(states, self)
+    <span class="kw">return</span> state_group</pre>
+</div>
+
+<p>A few lines, but they tie the two halves together: <span class="mono">stream_executor.fork(size, …)</span> does the real "<strong>clone size branches from the current prefix</strong>" at the <strong>runtime layer</strong> —
+exactly the moment RadixAttention's prefix tree <strong>grows size children off a shared parent node</strong>; the returned <span class="mono">ProgramStateGroup</span> gives you <span class="mono">join</span>,
+which in <span class="mono">gather_variable</span> mode <strong>copies each branch's new variables back into the parent state</strong>. With one <span class="mono">s.fork(n)</span>, front-end declaration and runtime reuse become <strong>one and the same</strong>.
+Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/join onto concrete engines — completing Part 3's chain of "language → interpret → fork → land."</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>What fork does</strong>: <span class="mono">s.fork(n)</span> branches n parallel continuations off the <strong>current state</strong>, each <strong>inheriting the same already-built prefix</strong>, then generating independently; <span class="mono">join</span> (gather) copies each branch's <strong>new named variables back into the parent</strong> for compare / vote / aggregate.</li>
+    <li><strong>The core correspondence</strong>: fork is the "<strong>declaration side</strong>," RadixAttention (Lesson 7) the "<strong>redemption side</strong>" — two halves of one idea. fork states "<strong>these branches share an opening</strong>"; the runtime computes the shared prefix's KV <strong>once and reuses it for every branch</strong>.</li>
+    <li><strong>Cost</strong>: forking 8 branches off a long prefix ≈ <strong>1 prefix + 8 short suffixes</strong>, not 8 full prompts; a serial for loop <strong>recomputes the prefix n times</strong>. The longer the prefix and larger n, the more you save.</li>
+    <li><strong>Common uses</strong>: best-of-n sampling, branch-and-evaluate, map over a list, tree-of-thought — all share "<strong>share an opening, then do things separately</strong>."</li>
+    <li><strong>Concurrency</strong>: branches with no data dependency can be <strong>advanced concurrently</strong> by the interpreter (Lesson 10). So fork saves compute (prefix reuse) and time (concurrency) at once. Source: <span class="mono">interpreter.py ::ProgramState.fork</span>; Lesson 12 lands it on concrete backends.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. When you call <code>s.fork(n)</code> on a state, what exactly do the n branches <strong>share</strong>?</div>
+  <ol class="opts">
+    <li>They share one random seed, so they would necessarily produce identical text</li>
+    <li>They all inherit the <strong>same prompt prefix built up to the fork point</strong> (system + few-shot + question, etc.), then generate independently afterward</li>
+    <li>They share a dedicated GPU that no other request may use</li>
+    <li>They share nothing; fork is equivalent to firing n brand-new requests from scratch</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. fork clones n sub-states from the current state, each carrying <strong>the same prefix built so far</strong>, after which they generate independently. Precisely because the prefix is identical, RadixAttention (Lesson 7) computes it once and reuses it across branches. Branches with different randomness yield different results (not necessarily identical); no dedicated GPU is involved; and it is not from scratch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. This lesson repeatedly stresses that 'fork and RadixAttention are two halves of one idea.' What does that most precisely mean?</div>
+  <ol class="opts">
+    <li>fork is the 'declaration side' — it states in the program that 'these branches share an opening'; RadixAttention is the 'redemption side' — it computes that shared prefix's KV once and reuses it across branches. The front-end declares structure, the runtime cashes it in as saved compute</li>
+    <li>fork only affects front-end readability and has no effect on runtime compute</li>
+    <li>fork turns RadixAttention off and switches to disk caching</li>
+    <li>They are mutually exclusive optimizations; enabling fork disables prefix reuse</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. fork explicitly states in the DSL that 'these n branches share one prefix,' telling the runtime the structure with zero guessing; RadixAttention takes that signal and computes the shared prefix's attention once, with all branches sharing one KV. One states the structure, the other cashes it in. They cooperate rather than exclude, and neither disables the other nor degrades to disk caching.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Forking 8 branches off a <strong>long shared prefix</strong>, versus a for loop running 8 full prompts serially — roughly how does the cost differ?</div>
+  <ol class="opts">
+    <li>The serial loop is cheaper because it never runs concurrently</li>
+    <li>The costs are identical; fork is merely shorter to write</li>
+    <li>fork is more expensive because it must store 8 copies of the prefix KV</li>
+    <li>fork ≈ '1 prefix + 8 short suffixes' (prefix computed once); the serial loop ≈ '8 × full prompt' (prefix recomputed 8 times). The longer the prefix, the more fork saves, and independent branches can also run concurrently</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. In the serial loop, the same long prefix opens all 8 requests yet is recomputed 8 times, wasting 7 prefixes of compute; fork declares 'shared prefix + 8 suffixes' once, so the runtime computes one prefix KV shared by all 8 branches, each adding only a short suffix, with concurrency when independent. fork does not store 8 prefixes (it stores exactly one), and the costs are far from identical.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Write best-of-n pseudocode in SGLang: build a longish system prompt + question into <code>s</code>, then <code>forks = s.fork(8)</code> so 8 branches each do <code>gen("answer")</code>, finally <code>forks.join()</code> to gather 8 answers. Explain which segment the 8 branches share, which segment each computes independently, and what the runtime (RadixAttention, Lesson 7) thereby computes only once.</li>
+    <li>Someone claims 'fork is just convenient syntactic sugar; drop it and a for loop does the same.' Rebut this using the 'fork is the declaration side, RadixAttention the redemption side' relationship: why does <strong>explicitly declaring</strong> the branch structure benefit both prefix reuse and concurrency at the runtime? And what role does <code>join</code> play in all this?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Backends & OpenAI compat</h1>
+
+<p class="lead">
+From Lesson 9 through Lesson 11 we have been <strong>writing programs</strong>: describing intent in the DSL (Lesson 9), letting the interpreter run the tree of intent (Lesson 10), forking parallel branches with fork/join (Lesson 11).
+But one question has been quietly dodged all along — <strong>who actually executes all these <span class="inline">gen</span>, <span class="inline">select</span>, <span class="inline">fork</span> calls?</strong>
+The answer is today's star: the <strong>Backend</strong>. The heart of SGLang's design is that <strong>the same front-end program runs unchanged on different backends</strong> —
+the local SGLang runtime, OpenAI, Anthropic, VertexAI… and the program itself <strong>has no idea</strong> which backend it runs on. This lesson closes Part 3 (the front-end)
+and, through the <span class="mono">RuntimeEndpoint</span> local-runtime backend, <strong>snaps seamlessly onto the runtime world of Part 4+</strong>: your fork/gen become HTTP calls to the scheduler we study next.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A backend interface is like a <strong>universal remote</strong>: one set of buttons (power, channel, volume) drives <strong>any TV</strong> — the living-room one, the bedroom one, a friend's.
+  When you press "channel," you needn't care what brand sits in front of you. But there is a key difference: <strong>only your own TV (the local runtime)</strong> exposes the <strong>advanced features</strong> —
+  picture enhancement, recording, scheduling (i.e. <strong>prefix cache, constrained decoding, branch sharing</strong>); a generic stranger's TV (a hosted API) only knows the <strong>basic buttons</strong>.
+  "<strong>One button set drives all TVs</strong>" maps to the <span class="mono">BaseBackend</span> abstract interface; "<strong>only your own TV has the advanced keys</strong>" maps to: only the local runtime gives you RadixAttention and constrained decoding,
+  while hosted models are black boxes — whether they cache, whether they strictly constrain, is <strong>not up to you</strong>. Remember this remote and you remember the whole lesson: <strong>one interface, layered capabilities</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <span class="inline">BaseBackend</span> is an <strong>abstract interface</strong> that prescribes what a backend must be able to do — <span class="mono">generate</span>, <span class="mono">select</span> (pick among candidates), streaming, role handling, and so on.
+  Your DSL program calls only these <strong>abstract methods</strong> and <strong>never touches a concrete engine directly</strong>. So switching backends is one line, <span class="mono">set_default_backend(...)</span>:
+  pass <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> to run on the <strong>local SGLang runtime</strong> (the <span class="mono">/generate</span> HTTP server we build in Lessons 13–17),
+  pass <span class="mono">OpenAI(...)</span> and the <strong>same program</strong> targets OpenAI's hosted models instead. But there is no free lunch: the <strong>local runtime</strong> gives you RadixAttention prefix caching (Lesson 7), constrained decoding, fast batching;
+  a <strong>hosted backend</strong> buys you <strong>portability</strong> at the cost of <strong>losing prefix-cache and fork-sharing</strong> benefits — those models are black boxes, caching is the provider's call, and constrained decoding is limited.
+</div>
+
+<h2>1. BaseBackend: the seam that decouples program from engine</h2>
+<p>Recall Lesson 10: the interpreter (StreamExecutor) executes the expressions of the intent tree one by one — fixed text is appended, and a <span class="mono">gen</span> / <span class="mono">select</span> <strong>issues a call to the backend</strong>.
+That "backend" is any class inheriting from <span class="mono">BaseBackend</span>. <span class="mono">BaseBackend</span> abstracts "<strong>an engine that can execute an SGLang program</strong>" into a set of methods: how to generate tokens, how to <span class="mono">select</span> among candidates,
+how to stream, how to handle system/user/assistant roles. <strong>The program always faces this interface, never a specific engine</strong>. This is the classic "<strong>program to an interface</strong>":
+the upper layer depends on a contract, not on the lower layer's implementation. So the same intent tree can run on local GPUs today and a cloud API tomorrow, <strong>with not one character changed</strong>.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Program</span><span class="name">@sgl.function intent tree</span></div><div class="ld">Your DSL <span class="mono">gen/select/fork</span> (Lessons 9–11). It <strong>calls only abstract methods</strong> and has no idea which backend it runs on.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Interface</span><span class="name">BaseBackend (abstract)</span></div><div class="ld">Prescribes what a backend must do: <span class="mono">generate / select</span>, streaming, role handling. This seam <strong>decouples program from engine</strong>.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">Local</span><span class="name">RuntimeEndpoint (preferred)</span></div><div class="ld">Targets the local <span class="mono">/generate</span> HTTP server (Lessons 13–17). <strong>Exclusively</strong> gives RadixAttention prefix cache, constrained decoding, fast batching.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Hosted</span><span class="name">OpenAI / Anthropic / VertexAI …</span></div><div class="ld">Points the same program at <strong>hosted models</strong>: portable, but the model is a black box, <strong>losing</strong> prefix-cache and fork-sharing benefits.</div></div>
+</div>
+
+<h2>2. RuntimeEndpoint: the seam where the front-end lands on the runtime</h2>
+<p>Among all backends, <span class="mono">RuntimeEndpoint</span> matters most — <strong>it is the seam where Part 3 (front-end) snaps precisely onto Part 4+ (runtime)</strong>.
+It points at a locally launched SGLang server (default <span class="mono">http://localhost:30000</span>) and translates every <span class="mono">gen</span> / <span class="mono">fork</span> in the program into <strong>a POST /generate HTTP request</strong>,
+sent to the server we dissect layer by layer in Lessons 13–17 — the TokenizerManager at the door, the Scheduler as the brain, the ModelRunner doing the forward. <strong>Precisely because the request lands on our own runtime</strong>,
+the RadixAttention prefix cache (Lesson 7), fork's branch sharing (Lesson 11), and constrained decoding <strong>actually take effect</strong>: the 8 branches you fork share one prefix and the runtime computes it once — something only the <span class="mono">RuntimeEndpoint</span> backend can deliver.
+One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>, welds the front-end's full expressiveness onto the very engine we are about to open up.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">Program</div><div class="nd">s += gen("answer")</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">RuntimeEndpoint</div><div class="nd">local-runtime backend</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">POST /generate</div><div class="nd">HTTP request · Lessons 13–17</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Scheduler</div><div class="nd">schedule + RadixAttention (Lesson 7)</div></div>
+</div>
+
+<h2>3. Local runtime vs hosted API: what are you trading?</h2>
+<p>Switching backends is not free. <span class="mono">RuntimeEndpoint</span> and <span class="mono">OpenAI</span> look identical in the program, but the <strong>capabilities you get differ vastly</strong>.
+The crux: <strong>the local runtime is a white box you can see through and control</strong>, so the prefix cache (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding (guaranteeing valid JSON / regex output) are all available;
+while a <strong>hosted model is a black box</strong> — the provider may cache internally, but you <strong>cannot declare or rely on it</strong>, and constrained decoding usually degrades to "begging for it in the prompt." Here is the trade laid out.</p>
+
+<div class="cols">
+  <div class="col"><h4>Local runtime (RuntimeEndpoint)</h4><p><strong>White box, controllable</strong>: full RadixAttention prefix cache (Lesson 7), fork branch sharing (Lesson 11), strict constrained decoding, fast batching. The cost: you must <strong>deploy and manage GPUs yourself</strong> (Lessons 13–17 teach you). <strong>For performance and control, use this.</strong></p></div>
+  <div class="col"><h4>Hosted API (OpenAI / Anthropic …)</h4><p><strong>Black box, portable</strong>: one line switches to a top closed model, no GPUs needed. The cost: you <strong>lose the deterministic prefix-cache and fork-sharing</strong> benefits, constrained decoding is limited, and you <strong>pay per token</strong>. <strong>For convenience and portability, use this.</strong></p></div>
+</div>
+
+<h2>4. Don't mix the two directions: who calls whose OpenAI API</h2>
+<p>"OpenAI-compatible" is the most confusing phrase because it involves <strong>two opposite directions</strong> — keep them straight:</p>
+
+<table class="t">
+  <tr><th>Direction</th><th>Who is client / who is server</th><th>Meaning</th></tr>
+  <tr><td class="mono">SGLang program → OpenAI backend</td><td>your program is the client, OpenAI is the server</td><td>Use the <span class="mono">OpenAI(...)</span> backend so <strong>your SGLang program calls OpenAI's hosted models</strong></td></tr>
+  <tr><td class="mono">OpenAI client → SGLang server</td><td>someone's program is the client, your SGLang is the server</td><td>The SGLang server <strong>is itself OpenAI-API-compatible</strong>; any OpenAI client can point straight at it</td></tr>
+</table>
+
+<p>In other words: <strong>SGLang can be a client calling OpenAI (direction one), and a server called by OpenAI clients (direction two)</strong>.
+The second direction is especially handy — the SGLang server you stand up in Lessons 13–17 exposes a standard OpenAI interface, so <strong>any existing OpenAI SDK, LangChain, or third-party tool plugs into your private deployment by just changing base_url</strong>,
+without rewriting a single line of client code for SGLang. One "compatibility," two directions: a bridge both to <strong>consume others' models</strong> and to <strong>plug your own service into the whole ecosystem</strong>.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/backend/runtime_endpoint.py ::RuntimeEndpoint</span><span class="ln">local-runtime backend: every generate POSTs /generate</span></div>
+  <pre><span class="kw">class</span> RuntimeEndpoint(BaseBackend):
+    <span class="kw">def</span> __init__(self, base_url, api_key=<span class="kw">None</span>, ...):
+        super().__init__()
+        self.base_url = base_url
+        <span class="cm"># Startup handshake: ask the local runtime which model is loaded</span>
+        res = http_request(self.base_url + <span class="st">"/get_model_info"</span>, ...)
+        self.model_info = res.json()
+
+    <span class="kw">def</span> cache_prefix(self, prefix_str):
+        <span class="cm"># Send the shared prefix with max_new_tokens=0 to pre-warm RadixAttention (Lesson 7)</span>
+        http_request(self.base_url + <span class="st">"/generate"</span>,
+            json={<span class="st">"text"</span>: prefix_str, <span class="st">"sampling_params"</span>: {<span class="st">"max_new_tokens"</span>: 0}})
+
+    <span class="kw">def</span> generate(self, s, sampling_params):
+        <span class="cm"># A gen in the program becomes one POST /generate HTTP call here</span>
+        data = {<span class="st">"text"</span>: s.text_, <span class="st">"sampling_params"</span>: {...}}
+        res = http_request(self.base_url + <span class="st">"/generate"</span>, json=data)
+        <span class="kw">return</span> res.json()</pre>
+</div>
+
+<p>These few lines are <strong>the door from front-end to runtime</strong>: the constructor handshakes via <span class="mono">/get_model_info</span> to confirm the model; <span class="mono">cache_prefix</span> uses <span class="mono">max_new_tokens=0</span> to <strong>pre-warm the shared prefix into the cache</strong>,
+the very mechanism behind fork's compute savings (Lesson 11); and <span class="mono">generate</span> faithfully translates each <span class="mono">gen</span> in the program into <strong>one POST /generate</strong>.
+Understand this and you understand the seam between Part 3 and Part 4 — <strong>from the next lesson on, we step into the server behind that <span class="mono">/generate</span></strong>, watching TokenizerManager, Scheduler, and ModelRunner turn this one HTTP request into real tokens on the GPU.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>One interface</strong>: <span class="mono">BaseBackend</span> is the abstract layer prescribing the contract — <span class="mono">generate/select</span>, streaming, role handling. The DSL program (Lessons 9–11) calls only abstract methods and <strong>neither knows nor cares</strong> which backend runs it — switching is one line, <span class="mono">set_default_backend(...)</span>.</li>
+    <li><strong>Local runtime</strong>: <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> translates <span class="mono">gen/fork</span> into <strong>POST /generate</strong> to the server built in Lessons 13–17. <strong>Only it</strong> gives you RadixAttention prefix cache (Lesson 7), fork branch sharing (Lesson 11), constrained decoding, and fast batching.</li>
+    <li><strong>Hosted backends</strong>: <span class="mono">OpenAI / Anthropic / VertexAI</span> point the same program at closed models — portable, no self-hosted GPU, but you <strong>lose prefix-cache and fork-sharing</strong> (black-box model), constrained decoding is limited, and you pay per token.</li>
+    <li><strong>Two directions, don't mix</strong>: ① <strong>SGLang program → OpenAI backend</strong> (your program calls OpenAI); ② <strong>OpenAI client → SGLang server</strong> (the SGLang server is itself OpenAI-compatible; any OpenAI client plugs into your private deployment by changing base_url).</li>
+    <li><strong>Bridge forward</strong>: <span class="mono">RuntimeEndpoint</span> is the seam welding Part 3 (front-end) onto Part 4+ (runtime). Source in <span class="mono">lang/backend/runtime_endpoint.py</span>; from the next lesson we step into the server behind <span class="mono">/generate</span>.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Run the same SGLang front-end program on two backends: <code>RuntimeEndpoint</code> (local runtime) and <code>OpenAI</code> (hosted). Which backend actually gives you RadixAttention prefix caching and fork branch sharing (Lessons 7, 11), and why?</div>
+  <ol class="opts">
+    <li>Both backends are identical; prefix caching has nothing to do with the backend</li>
+    <li>The OpenAI backend, because closed models always cache better than local ones</li>
+    <li>Neither; prefix caching can only be done manually in the prompt</li>
+    <li><strong>RuntimeEndpoint</strong>: it sends requests to your own local SGLang server (a white box), so the runtime sees the prefix structure and computes a shared prefix once; a hosted model is a black box where caching is the provider's call, which you can neither declare nor rely on</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. RadixAttention and fork sharing are <strong>runtime capabilities</strong>, effective only when the request actually lands on a local SGLang runtime you control (RuntimeEndpoint posting to /generate). A hosted API hides the model behind a black box, so you cannot declare the prefix structure or guarantee cache hits, losing that deterministic benefit. The two backends look identical in code but differ vastly in capability.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 'OpenAI-compatible' involves two opposite directions. Which option correctly distinguishes them?</div>
+  <ol class="opts">
+    <li>Direction ① 'SGLang program → OpenAI backend': your program is the client calling OpenAI's hosted models; direction ② 'OpenAI client → SGLang server': the SGLang server is itself OpenAI-compatible, so someone else's OpenAI client plugs into your private deployment by just changing base_url</li>
+    <li>The two directions are the same thing — both mean SGLang calling OpenAI</li>
+    <li>'Compatible' refers only to identical data formats, independent of who calls whom</li>
+    <li>Only OpenAI can be the server; SGLang is always the client</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The directions are exactly opposite: in ① SGLang is the client and OpenAI the server (using the OpenAI backend to consume hosted models); in ② SGLang is the server and an OpenAI client is the client (the SGLang server exposes a standard OpenAI interface, so any OpenAI SDK/LangChain plugs in by changing base_url). One consumes others' models; the other plugs your own service into the ecosystem.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. You decide to switch your production service from the local <code>RuntimeEndpoint</code> to the hosted <code>OpenAI</code> backend. Beyond a one-line <code>set_default_backend</code>, what do you mainly <strong>trade away</strong>?</div>
+  <ol class="opts">
+    <li>You sacrifice nothing; the hosted backend is strictly better on every dimension</li>
+    <li>You gain portability and skip self-hosting GPUs, but sacrifice the deterministic prefix-cache and fork-sharing benefits and strict constrained decoding, and switch to per-token billing — because the hosted model is a black box whose internal optimizations you cannot control</li>
+    <li>You sacrifice program readability and must rewrite the entire intent tree</li>
+    <li>You only sacrifice startup speed; runtime capabilities are identical</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The local runtime is a white box delivering full RadixAttention prefix caching (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding; a hosted API is a black box where those deterministic benefits cannot be declared or relied upon, constrained decoding is limited, and you pay per token. The upside is portability and no GPU ops. The program itself is unchanged (the whole point of the BaseBackend abstraction), so what you trade is runtime capability and cost structure, not readability.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In a sentence or two, explain to a colleague why switching backends for the same SGLang program takes only one line, <code>set_default_backend</code>. Point out the role of the <code>BaseBackend</code> abstract interface and why the program 'neither knows nor cares' which backend runs it.</li>
+    <li><code>RuntimeEndpoint</code> is called 'the seam joining Part 3 (front-end) to Part 4+ (runtime).' Using the fact that it translates <code>gen/fork</code> into <code>POST /generate</code>, explain why only this backend can deliver RadixAttention prefix caching (Lesson 7) and fork branch sharing (Lesson 11), and which components from Lessons 13–17 will handle that HTTP request next.</li>
   </ul>
 </div>
 </div>

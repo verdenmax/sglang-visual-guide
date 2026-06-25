@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>11 · fork/join 与前缀共享 / fork/join &amp; prefix sharing - SGLang 图解教程</title>
+<meta name="description" content="第三部分 · 前端语言｜fork/join 与前缀共享 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="11 · fork/join 与前缀共享 / fork/join &amp; prefix sharing - SGLang 图解教程">
+<meta property="og:description" content="第三部分 · 前端语言｜fork/join 与前缀共享 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="11 · fork/join 与前缀共享 / fork/join &amp; prefix sharing - SGLang 图解教程">
+<meta name="twitter:description" content="第三部分 · 前端语言｜fork/join 与前缀共享 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第三部分 · 前端语言</span><span class="lang-en">Part 3 · The frontend language</span></span>
+    <span class="pill">11 / 12</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:91%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第三部分 · 前端语言</span><span class="lang-en">Part 3 · The frontend language</span></div>
+    <h1><span class="lang-zh">fork/join 与前缀共享</span><span class="lang-en">fork/join &amp; prefix sharing</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课（第 10 课）我们看清了解释器<strong>如何把一棵意图树一步步跑起来</strong>。但真正让 SGLang 与众不同的，是它能让一个程序
+<strong>从当前状态分叉出多个并行分支</strong>——这就是 <span class="inline">s.fork(n)</span>。而本课最该记住的一句话是：
+<strong>前端的 fork 和运行时的 RadixAttention（第 7 课）其实是同一个想法的两半</strong>。fork 让你在<strong>程序里声明"这里要分叉"</strong>，
+RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次、给所有分支复用</strong>。一个负责<strong>说出结构</strong>，一个负责<strong>把结构变现成省下来的算力</strong>。
+理解了这层对应，你才算真正读懂了 SGLang 这个名字里"<strong>结构化（Structured）</strong>"三个字的分量：所谓结构化，不只是为了好读，更是为了让运行时<strong>看得见结构、据此省下算力</strong>。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  fork/join 就像一本<strong>"你来决定结局"的冒险书（choose-your-own-adventure）</strong>：所有读者都先读<strong>同样的前几章</strong>（共享前缀），
+  读到某个岔路口，书会说"<strong>想救公主翻到第 50 页，想屠龙翻到第 80 页</strong>"——于是同一个故事<strong>分叉出好几条不同的结局</strong>。
+  关键在于：<strong>共享的前几章只印一次</strong>，不会为每条支线<strong>把开头重抄一遍</strong>；每个读者只需各自读自己那条<strong>短短的后半段</strong>。
+  最后你把几条结局<strong>放在一起比一比</strong>，挑出最满意的——这就是 <strong>join</strong>（把各分支的结果收回来）。fork = 在共享开头处分叉，join = 把分头得到的答案聚合回来，一分一合，干净利落。
+  你可以顺着这个比喻记住全课：<strong>共享的章节只印一次</strong>对应 RadixAttention 的前缀只算一次；<strong>多条支线各读各的</strong>对应各分支独立生成；<strong>把结局摆一起比较</strong>对应 join 收集变量。整本书的"骨架共享、结局分叉、最后汇总"，就是 fork/join 的全部精神。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<span class="inline">s.fork(n)</span> 从<strong>当前状态</strong>克隆出 <strong>n 个并行续写分支</strong>，每个分支都<strong>继承到目前为止建好的同一段提示前缀</strong>，
+  然后各自独立往下生成（比如采样 n 个不同答案，或并行回答 n 个子问题）；<strong>join / gather</strong> 再把每个分支<strong>新产生的命名变量收集回父状态</strong>，供你比较、投票或汇总。
+  它之所以强大，<strong>不是因为"省事"，而是因为省算力</strong>：既然 n 个分支共享完全相同的前缀，RadixAttention 就<strong>把这段前缀的 KV 只算一次、让所有分支共用</strong>（第 7 课）。
+  于是从一段长前缀 fork 出 8 个分支，代价约等于"<strong>1 段前缀 + 8 段很短的后缀</strong>"，而不是"<strong>8 段完整提示</strong>"。fork 因此不只是个便利函数，<strong>它就是"前缀共享"在编程模型里的样子</strong>：你用一行代码声明意图，框架替你把"少算 7 份前缀"这笔账<strong>悄悄结清</strong>。
+</div>
+
+<h2>fork 到底做了什么：从一个状态长出 N 个分支</h2>
+<p>把状态 <span class="mono">s</span> 想成一条<strong>不断生长的对话录</strong>（第 9、10 课）。在某个时刻，你已经往 <span class="mono">s</span> 里拼好了一长段提示——比如系统设定、少样本示例、用户问题。
+此刻调用 <span class="mono">s.fork(n)</span>，就相当于在<strong>这条对话录的当前末端</strong>，<strong>原地复制出 n 个一模一样的副本</strong>，每个副本都带着<strong>到此为止的全部前缀</strong>。
+接下来，这 n 个分支<strong>各走各路</strong>：分支 0 可以用一种采样温度生成、分支 1 用另一种；或者你给每个分支<strong>追加一个不同的子问题</strong>。它们彼此独立，互不干扰。
+等所有分支都生成完，你调用 <span class="mono">join</span>（默认 <span class="mono">gather_variable</span> 模式），框架就<strong>把每个分支新写下的命名变量，回填进父状态 s</strong>——
+比如父状态里的某个变量会变成一个<strong>列表</strong>，装着 n 个分支各自的答案，让你一眼就能比较、投票、择优。这也解释了 <span class="mono">join</span> 默认叫 <span class="mono">gather_variable</span> 的原因——它做的正是"<strong>把散落在各分支的命名结果，按名字归拢回父状态</strong>"这件事。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>建好共享前缀</h4><p>先往 <span class="mono">s</span> 里拼好 system + few-shot + 问题——这段<strong>所有分支都将共享</strong>，是 fork 之所以省算力的根。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>s.fork(n)：原地分叉</h4><p>从当前状态克隆出 <strong>n 个并行子状态</strong>，每个都继承<strong>同一段前缀</strong>；返回一个 <span class="mono">ProgramStateGroup</span>。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>各分支独立生成</h4><p>每个分支 <span class="mono">forks[i] += gen("answer")</span> 各写各的；无数据依赖的分支可<strong>并发执行</strong>（解释器，第 10 课）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>join：把答案收回父状态</h4><p><span class="mono">forks.join()</span> 把各分支<strong>新产生的变量</strong>聚合回 <span class="mono">s</span>，于是 <span class="mono">s["answer"]</span> 成为 n 个结果的列表，可比较 / 投票 / 汇总。</p></div></div>
+</div>
+
+<h2>核心：fork 与 RadixAttention 是一个想法的两半</h2>
+<p>这是全课<strong>最该划重点</strong>的地方。第 7 课讲过：RadixAttention 把所有请求的前缀<strong>组织成一棵基数树（radix tree）</strong>，<strong>公共前缀只存一份 KV、被多个请求共享</strong>。
+而 fork 做的事，恰好就是<strong>在程序里主动制造出"一段公共前缀 + 多条不同后缀"的形状</strong>。换句话说：<strong>fork 是"声明端"，RadixAttention 是"兑现端"</strong>。
+你在 DSL 里写下 <span class="mono">s.fork(8)</span>，等于明明白白告诉运行时："<strong>这 8 个分支的开头是完全一样的</strong>"；运行时收到这个信号，就把那段共享前缀的注意力<strong>只算一次</strong>，
+8 个分支<strong>共用同一份前缀 KV</strong>，各自只为自己那段短后缀新增计算。没有 fork 的声明，运行时也能靠 RadixAttention 去<strong>事后发现</strong>前缀相同；但有了 fork，这种共享是<strong>结构上明示、零猜测</strong>的。</p>
+
+<p>不妨把这层关系再说透一点。第 9 课讲过 SGLang 是"<strong>把调模型写成程序</strong>"，第 10 课讲过这程序其实是一棵<strong>意图树</strong>。fork 在这棵树上做的，是<strong>从某个节点长出 n 条平行的枝</strong>——而这恰好<strong>同构</strong>于 RadixAttention 维护的那棵前缀基数树：父节点是共享前缀，子节点是各分支的不同后缀。
+所以你在前端写下的<strong>程序结构</strong>，几乎可以<strong>一一对应</strong>到运行时缓存里那棵树的形状。<strong>程序怎么分叉，KV 缓存就怎么共享</strong>——这就是"结构化"能换来效率的根本原因：你越是把"哪里共享、哪里发散"<strong>显式写清楚</strong>，框架能复用的就越多、要重算的就越少。这也是为什么 fork 不该被当成普通的"开几个线程"，它<strong>携带的是语义信息</strong>，告诉运行时"这几条枝同根"。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>共享前缀只算一次，分支各加短后缀</b>：高亮格子是 fork 出的所有分支<strong>共用的同一段前缀 KV</strong>（第 7 课 RadixAttention 复用），白格子才是各分支自己新算的部分</div>
+  <div class="cells"><span class="lab">分支 0</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 A</span></div>
+  <div class="cells"><span class="lab">分支 1</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 B</span></div>
+  <div class="cells"><span class="lab">分支 2</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 C</span></div>
+  <div class="cells"><span class="lab">复用</span><span class="cell q">高亮三段 = 整棵基数树里只存一份、三分支共享的前缀 KV</span></div>
+</div>
+
+<h2>串行循环 vs fork：代价差在哪</h2>
+<p>"best-of-n"这类需求，最朴素的写法是<strong>写个 for 循环跑 n 次</strong>：每次都把<strong>完整的提示</strong>重新发一遍。问题在于，这 n 次请求<strong>开头那段长前缀是一模一样的</strong>，
+却被<strong>从头到尾重算了 n 遍</strong>——白白烧掉 (n−1) 份前缀算力，而且各次串行、互相看不见。换成 <span class="mono">s.fork(n)</span>，你把"<strong>共享前缀 + n 条后缀</strong>"的结构<strong>一次性声明清楚</strong>，
+运行时只算<strong>一份前缀</strong>、再加 n 段短后缀，且无依赖的分支还能并发。前缀越长、n 越大，省得越多。换个角度看，串行循环和 fork 在<strong>最终结果上完全等价</strong>（都得到 n 个候选），区别<strong>纯粹在于代价</strong>：前者把"共享"这件事<strong>藏在了你看不见的地方</strong>，运行时只能把每次请求当成<strong>互不相干的孤岛</strong>，于是被迫重算前缀；后者把"共享"<strong>摆到明面上</strong>，运行时一眼看穿、只算一次。这正呼应了第 9 课那句话：<strong>写得越结构化，框架能省的就越多</strong>。fork 就是这条原则在"并行"维度上的具体兑现。</p>
+
+<div class="cols">
+  <div class="col"><h4>串行 for 循环：N × 完整提示</h4><p>循环里跑 n 次 gen，每次都把<strong>整段长前缀重新计算一遍</strong>。代价 ≈ <strong>n × (前缀 + 后缀)</strong>，前缀被重算 n 次；各次串行，运行时<strong>看不出它们开头相同</strong>。</p></div>
+  <div class="col"><h4>s.fork(n)：1 × 前缀 + N × 后缀</h4><p>一次声明分叉，运行时把<strong>共享前缀的 KV 只算一次</strong>（第 7 课），n 个分支各自只补<strong>一段短后缀</strong>。代价 ≈ <strong>前缀 + n × 后缀</strong>；无依赖分支还能并发（第 10 课）。</p></div>
+</div>
+
+<h2>典型用法：fork 能干哪些活</h2>
+<p>只要你的任务能写成"<strong>共享一段开头，再分头做几件事</strong>"，fork 就用得上。下面四类是最常见的模式——它们的共同点都是<strong>从同一个父前缀分叉</strong>，因此都自动吃到前缀复用的红利，几乎不用你额外操心。</p>
+
+<table class="t">
+  <tr><th>模式</th><th>怎么分叉</th><th>join 之后做什么</th></tr>
+  <tr><td class="mono">best-of-n 并行采样</td><td>同一提示 fork n 个分支，各用不同随机性<strong>生成 n 个候选</strong></td><td>取回 n 个答案，<strong>打分 / 投票</strong>选最优</td></tr>
+  <tr><td class="mono">branch-and-evaluate</td><td>先生成若干<strong>不同选项</strong>，每个选项一个分支</td><td>对每个选项<strong>独立评估</strong>，再聚合比较</td></tr>
+  <tr><td class="mono">map over a list</td><td>对列表里<strong>每个元素开一个分支</strong>，共享同一段说明前缀</td><td>收齐<strong>每个元素的处理结果</strong>成列表</td></tr>
+  <tr><td class="mono">tree-of-thought</td><td>在每个思考节点<strong>分叉出多条推理路径</strong>，可逐层再 fork</td><td>沿树<strong>探索 / 剪枝</strong>，回收最优路径</td></tr>
+</table>
+
+<p>这里再点一句并发：fork 出来的分支<strong>彼此没有数据依赖</strong>时，解释器（第 10 课）可以<strong>并发地推进它们</strong>，而不必傻等一个跑完再跑下一个。
+所以 fork 同时带来<strong>两种好处</strong>：算力上靠 RadixAttention<strong>省下重复前缀</strong>，时间上靠并发<strong>把多分支叠起来跑</strong>。需要提醒的是：并发能不能真的发生，取决于分支之间<strong>有没有数据依赖</strong>——若分支 1 要用到分支 0 的结果，它就只能<strong>等</strong>；但像 best-of-n 这种各分支<strong>毫不相干</strong>的场景，就能畅快地并发。下面看源码里 fork 的真身。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState.fork</span><span class="ln">fork：从当前状态分叉出 N 个子状态</span></div>
+  <pre><span class="kw">def</span> fork(
+    self,
+    size: int = 1,
+    position_ids_offset: Optional[List[int]] = <span class="kw">None</span>,
+):
+    <span class="cm"># 让底层执行器从当前状态克隆出 size 个分支——它们共享已建好的前缀</span>
+    stream_executors = self.stream_executor.fork(size, position_ids_offset)
+    states = [ProgramState(x) <span class="kw">for</span> x <span class="kw">in</span> stream_executors]
+    <span class="cm"># 打包成一个组；稍后 group.join() 把各分支的变量收回父状态</span>
+    state_group = ProgramStateGroup(states, self)
+    <span class="kw">return</span> state_group</pre>
+</div>
+
+<p>短短几行，却把本课的两半串了起来：<span class="mono">stream_executor.fork(size, …)</span> 在<strong>运行时层</strong>真正完成"<strong>从当前前缀克隆出 size 个分支</strong>"——
+这正是 RadixAttention 前缀树<strong>长出 size 个共享父节点的子节点</strong>的时刻；返回的 <span class="mono">ProgramStateGroup</span> 则给你 <span class="mono">join</span>，
+按 <span class="mono">gather_variable</span> 模式<strong>把各分支新变量回填进父状态</strong>。一句 <span class="mono">s.fork(n)</span>，前端声明与运行时复用就此<strong>合二为一</strong>。
+往后第 12 课会讲<strong>后端接口</strong>，把这套 fork/join 真正落到具体引擎上——至此 Part 3 的"语言 → 解释 → 分叉 → 落地"四步就连成了一条完整链路。读到这里，你应当能把全书前后打通：第 7 课的前缀复用是<strong>引擎的本事</strong>，本课的 fork 是<strong>语言的表达</strong>，二者一里一外、一声明一兑现，共同撑起 SGLang"<strong>又好写又高效</strong>"的承诺。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>fork 做什么</strong>：<span class="mono">s.fork(n)</span> 从<strong>当前状态</strong>分叉出 n 个并行分支，每个<strong>继承同一段已建好的前缀</strong>，再各自独立生成；<span class="mono">join</span>（gather）把各分支<strong>新命名变量收回父状态</strong>供比较 / 投票 / 汇总。</li>
+    <li><strong>核心对应</strong>：fork 是"<strong>声明端</strong>"，RadixAttention（第 7 课）是"<strong>兑现端</strong>"——同一想法的两半。fork 在程序里说出"<strong>这些分支开头相同</strong>"，运行时就把共享前缀的 KV<strong>只算一次、所有分支复用</strong>。</li>
+    <li><strong>代价</strong>：从长前缀 fork 出 8 个分支 ≈ <strong>1 段前缀 + 8 段短后缀</strong>，而非 8 段完整提示；串行 for 循环则会把前缀<strong>重算 n 遍</strong>。前缀越长、n 越大，省得越多。</li>
+    <li><strong>典型用法</strong>：best-of-n 并行采样、branch-and-evaluate、map over a list、tree-of-thought——共同点都是<strong>共享一段开头、再分头做事</strong>。</li>
+    <li><strong>并发</strong>：无数据依赖的分支可由解释器（第 10 课）<strong>并发推进</strong>。于是 fork 同时省算力（前缀复用）又省时间（并发）。源码见 <span class="mono">interpreter.py ::ProgramState.fork</span>，第 12 课接到具体后端。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 当你对状态调用 <code>s.fork(n)</code> 时，这 n 个分支之间<strong>共享</strong>的到底是什么？</div>
+  <ol class="opts">
+    <li>它们共享同一个随机种子，因此必然生成完全相同的文本</li>
+    <li>它们都继承到 fork 那一刻为止<strong>已建好的同一段提示前缀</strong>（system + 少样本 + 问题等），之后各自独立生成</li>
+    <li>它们共享一块独占的 GPU，其他请求不能用</li>
+    <li>它们什么都不共享，fork 等价于从零开始发 n 个全新请求</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。fork 从当前状态克隆出 n 个子状态，每个都带着<strong>到此为止建好的同一段前缀</strong>，然后各走各路独立生成。正因为前缀相同，RadixAttention（第 7 课）才能只算一次、给所有分支复用。分支用不同随机性可得不同结果，并非必然相同；也不涉及独占 GPU；更不是从零开始。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 本课反复强调“fork 和 RadixAttention 是一个想法的两半”。这句话最准确的含义是？</div>
+  <ol class="opts">
+    <li>fork 是“声明端”——在程序里说出“这些分支开头相同”；RadixAttention 是“兑现端”——把那段共享前缀的 KV 只算一次、让所有分支复用。前端声明结构，运行时把结构变现成省下的算力</li>
+    <li>fork 只影响前端可读性，对运行时算力毫无影响</li>
+    <li>fork 会把 RadixAttention 关掉，改用磁盘缓存</li>
+    <li>两者是互斥的优化，开了 fork 就不能用前缀复用</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。fork 在 DSL 里明示“这 n 个分支共享同一段前缀”，等于零猜测地把结构告诉运行时；RadixAttention 收到这个结构信号，就把共享前缀的注意力只算一次、所有分支共用同一份 KV。一个负责说出结构，一个负责把结构变现。二者协同而非互斥，也不会关掉对方或退化成磁盘缓存。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 从一段<strong>很长的共享前缀</strong> fork 出 8 个分支，相比用 for 循环串行跑 8 次完整提示，代价差别大致是？</div>
+  <ol class="opts">
+    <li>串行循环更省，因为它从不并发</li>
+    <li>两者代价完全相同，fork 只是写法更短</li>
+    <li>fork 更贵，因为要额外存 8 份前缀 KV</li>
+    <li>fork ≈ “1 段前缀 + 8 段短后缀”（前缀只算一次）；串行循环 ≈ “8 × 完整提示”（前缀被重算 8 遍）。前缀越长，fork 省得越多，且无依赖分支还能并发</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。串行循环里 8 次请求开头那段长前缀一模一样，却被从头重算 8 遍，白烧 7 份前缀算力；fork 把“共享前缀 + 8 条后缀”一次声明清楚，运行时只算一份前缀 KV、8 个分支共用，各自只补一段短后缀，无依赖时还能并发。fork 并不会存 8 份前缀（恰恰只存一份），代价也绝不相同。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用 SGLang 写一段 best-of-n 的伪代码：先往 <code>s</code> 拼好一段较长的系统提示 + 问题，再 <code>forks = s.fork(8)</code> 让 8 个分支各自 <code>gen("answer")</code>，最后 <code>forks.join()</code> 收回 8 个答案。请说明：这 8 个分支共享的是哪一段、各自独立算的是哪一段，以及运行时（RadixAttention，第 7 课）据此把什么只算了一次。</li>
+    <li>有人说“fork 只是个写起来方便的语法糖，去掉它用 for 循环效果一样”。请结合“fork 是声明端、RadixAttention 是兑现端”这层关系反驳：为什么把分叉结构<strong>显式声明</strong>出来，对运行时的前缀复用和并发都更有利？<code>join</code> 在其中又承担了什么角色？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson (Lesson 10) showed how the interpreter <strong>runs a tree of intent step by step</strong>. But what really sets SGLang apart is that a program can
+<strong>fork multiple parallel branches off the current state</strong> — that is <span class="inline">s.fork(n)</span>. The one line to remember today:
+<strong>the front-end's fork and the runtime's RadixAttention (Lesson 7) are two halves of one idea</strong>. fork lets you <strong>declare "branch here" in the program</strong>;
+RadixAttention <strong>computes that branch's shared prefix once in the engine and reuses it for every branch</strong>. One <strong>states the structure</strong>, the other <strong>cashes it in as saved compute</strong>.
+Grasp this correspondence and you finally understand the weight of the word <strong>Structured</strong> in SGLang's name.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  fork/join is like a <strong>choose-your-own-adventure book</strong>: every reader first reads <strong>the same opening chapters</strong> (the shared prefix); at a fork in the road the
+  book says "<strong>to save the princess turn to page 50, to slay the dragon turn to page 80</strong>" — so one story <strong>branches into several different endings</strong>.
+  The key: <strong>the shared opening is printed only once</strong>, never <strong>re-copied for each branch</strong>; each reader only reads their own <strong>short second half</strong>.
+  Finally you <strong>lay the endings side by side</strong> and pick the best — that is <strong>join</strong> (gathering each branch's result back). fork = branch at the shared opening, join = aggregate the separately-obtained answers.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <span class="inline">s.fork(n)</span> clones <strong>n parallel continuation branches</strong> from the <strong>current state</strong>, each <strong>inheriting the same prompt prefix built so far</strong>,
+  then each generates independently (e.g. n different samples, or n different sub-questions); <strong>join / gather</strong> then <strong>collects each branch's newly-captured variables back into the parent state</strong> for you to compare, vote, or aggregate.
+  Its power is <strong>not convenience but saved compute</strong>: since the n branches share an identical prefix, RadixAttention <strong>computes that prefix's KV once and shares it across all branches</strong> (Lesson 7).
+  So forking 8 branches off a long prefix costs roughly "<strong>1 prefix + 8 very short suffixes</strong>," not "<strong>8 full prompts</strong>." fork is therefore not just a convenience — <strong>it is what "prefix sharing" looks like in the programming model</strong>.
+</div>
+
+<h2>What fork does: N branches grown from one state</h2>
+<p>Think of state <span class="mono">s</span> as an <strong>ever-growing dialogue record</strong> (Lessons 9, 10). At some moment you have built up a long prompt into <span class="mono">s</span> — system setup, few-shot examples, the user question.
+Calling <span class="mono">s.fork(n)</span> now <strong>clones n identical copies at the current tail</strong> of that record, each carrying <strong>the entire prefix so far</strong>.
+The n branches then <strong>go their separate ways</strong>: branch 0 may sample at one temperature, branch 1 at another; or you <strong>append a different sub-question</strong> to each. They are independent and do not interfere.
+Once all branches finish, you call <span class="mono">join</span> (default <span class="mono">gather_variable</span> mode), and the framework <strong>copies each branch's newly-written named variables back into the parent state s</strong> —
+e.g. a variable in the parent becomes a <strong>list</strong> holding all n branches' answers, ready to compare, vote, or pick the best.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Build the shared prefix</h4><p>First assemble system + few-shot + question into <span class="mono">s</span> — this segment is <strong>shared by all branches</strong> and is the root of fork's savings.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>s.fork(n): branch in place</h4><p>Clone <strong>n parallel sub-states</strong> from the current state, each inheriting <strong>the same prefix</strong>; returns a <span class="mono">ProgramStateGroup</span>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Each branch generates independently</h4><p>Each branch <span class="mono">forks[i] += gen("answer")</span> writes its own; branches with no data dependency can <strong>run concurrently</strong> (interpreter, Lesson 10).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>join: gather answers back</h4><p><span class="mono">forks.join()</span> aggregates each branch's <strong>new variables</strong> back into <span class="mono">s</span>, so <span class="mono">s["answer"]</span> becomes a list of n results to compare / vote / aggregate.</p></div></div>
+</div>
+
+<h2>The core: fork and RadixAttention are two halves of one idea</h2>
+<p>This is the part to <strong>highlight hardest</strong>. Lesson 7 explained: RadixAttention organizes all requests' prefixes into a <strong>radix tree</strong>, where a <strong>common prefix stores one copy of KV shared by many requests</strong>.
+What fork does is exactly <strong>deliberately create a "one common prefix + many different suffixes" shape in the program</strong>. In other words: <strong>fork is the "declaration side," RadixAttention is the "redemption side."</strong>
+Writing <span class="mono">s.fork(8)</span> in the DSL tells the runtime plainly: "<strong>these 8 branches have an identical opening.</strong>" The runtime takes that signal and computes the shared prefix's attention <strong>only once</strong>;
+the 8 branches <strong>share one prefix KV</strong>, each adding compute only for its own short suffix. Without fork's declaration, RadixAttention could still <strong>discover after the fact</strong> that prefixes match; with fork, the sharing is <strong>structurally explicit, zero-guess</strong>.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Shared prefix computed once, each branch adds a short suffix</b>: highlighted cells are the <strong>same prefix KV shared by all forked branches</strong> (Lesson 7 RadixAttention reuse); white cells are what each branch computes anew</div>
+  <div class="cells"><span class="lab">Branch 0</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer A</span></div>
+  <div class="cells"><span class="lab">Branch 1</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer B</span></div>
+  <div class="cells"><span class="lab">Branch 2</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer C</span></div>
+  <div class="cells"><span class="lab">reuse</span><span class="cell q">the three highlighted runs = one prefix KV stored once in the radix tree, shared by all three branches</span></div>
+</div>
+
+<h2>Serial loop vs fork: where the cost differs</h2>
+<p>For "best-of-n," the naïve way is a <strong>for loop running n times</strong>: each iteration resends the <strong>full prompt</strong>. The problem: those n requests share <strong>an identical long prefix</strong>,
+yet it gets <strong>recomputed n times end to end</strong> — burning (n−1) prefixes of compute, and the iterations run serially, blind to one another. With <span class="mono">s.fork(n)</span>, you <strong>declare the "shared prefix + n suffixes" structure once</strong>,
+the runtime computes <strong>one prefix</strong> plus n short suffixes, and independent branches can run concurrently. The longer the prefix and the larger n, the more you save.</p>
+
+<div class="cols">
+  <div class="col"><h4>Serial for loop: N × full prompt</h4><p>Run n gens in a loop, each <strong>recomputing the whole long prefix</strong>. Cost ≈ <strong>n × (prefix + suffix)</strong>, prefix recomputed n times; iterations serial, runtime <strong>can't tell their openings match</strong>.</p></div>
+  <div class="col"><h4>s.fork(n): 1 × prefix + N × suffix</h4><p>Declare the fork once; the runtime computes the <strong>shared prefix KV only once</strong> (Lesson 7), n branches each add only a <strong>short suffix</strong>. Cost ≈ <strong>prefix + n × suffix</strong>; independent branches also run concurrently (Lesson 10).</p></div>
+</div>
+
+<h2>Common uses: what fork is good for</h2>
+<p>Whenever a task can be phrased as "<strong>share an opening, then do several things separately</strong>," fork applies. The four patterns below are the most common — all share the trait of <strong>branching off the same parent prefix</strong>, so all automatically enjoy prefix reuse.</p>
+
+<table class="t">
+  <tr><th>Pattern</th><th>How it forks</th><th>What join does next</th></tr>
+  <tr><td class="mono">best-of-n sampling</td><td>fork n branches off one prompt, each generating <strong>n candidates</strong> with different randomness</td><td>gather n answers, <strong>score / vote</strong> for the best</td></tr>
+  <tr><td class="mono">branch-and-evaluate</td><td>generate several <strong>distinct options</strong>, one branch per option</td><td><strong>evaluate each option</strong> independently, then aggregate to compare</td></tr>
+  <tr><td class="mono">map over a list</td><td>open <strong>one branch per element</strong>, sharing the same instruction prefix</td><td>collect <strong>each element's result</strong> into a list</td></tr>
+  <tr><td class="mono">tree-of-thought</td><td>at each thinking node <strong>fork several reasoning paths</strong>, forking again layer by layer</td><td><strong>explore / prune</strong> down the tree, recover the best path</td></tr>
+</table>
+
+<p>One more word on concurrency: when forked branches <strong>have no data dependency</strong>, the interpreter (Lesson 10) can <strong>advance them concurrently</strong> rather than waiting for one to finish before the next.
+So fork brings <strong>two benefits at once</strong>: compute-wise, RadixAttention <strong>saves the duplicated prefix</strong>; time-wise, concurrency <strong>overlaps the branches</strong>. Now the real fork in the source.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState.fork</span><span class="ln">fork: branch N sub-states off the current state</span></div>
+  <pre><span class="kw">def</span> fork(
+    self,
+    size: int = 1,
+    position_ids_offset: Optional[List[int]] = <span class="kw">None</span>,
+):
+    <span class="cm"># Have the executor clone `size` branches from the current state — they share the built prefix</span>
+    stream_executors = self.stream_executor.fork(size, position_ids_offset)
+    states = [ProgramState(x) <span class="kw">for</span> x <span class="kw">in</span> stream_executors]
+    <span class="cm"># Pack into a group; later group.join() copies each branch's variables back to the parent</span>
+    state_group = ProgramStateGroup(states, self)
+    <span class="kw">return</span> state_group</pre>
+</div>
+
+<p>A few lines, but they tie the two halves together: <span class="mono">stream_executor.fork(size, …)</span> does the real "<strong>clone size branches from the current prefix</strong>" at the <strong>runtime layer</strong> —
+exactly the moment RadixAttention's prefix tree <strong>grows size children off a shared parent node</strong>; the returned <span class="mono">ProgramStateGroup</span> gives you <span class="mono">join</span>,
+which in <span class="mono">gather_variable</span> mode <strong>copies each branch's new variables back into the parent state</strong>. With one <span class="mono">s.fork(n)</span>, front-end declaration and runtime reuse become <strong>one and the same</strong>.
+Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/join onto concrete engines — completing Part 3's chain of "language → interpret → fork → land."</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>What fork does</strong>: <span class="mono">s.fork(n)</span> branches n parallel continuations off the <strong>current state</strong>, each <strong>inheriting the same already-built prefix</strong>, then generating independently; <span class="mono">join</span> (gather) copies each branch's <strong>new named variables back into the parent</strong> for compare / vote / aggregate.</li>
+    <li><strong>The core correspondence</strong>: fork is the "<strong>declaration side</strong>," RadixAttention (Lesson 7) the "<strong>redemption side</strong>" — two halves of one idea. fork states "<strong>these branches share an opening</strong>"; the runtime computes the shared prefix's KV <strong>once and reuses it for every branch</strong>.</li>
+    <li><strong>Cost</strong>: forking 8 branches off a long prefix ≈ <strong>1 prefix + 8 short suffixes</strong>, not 8 full prompts; a serial for loop <strong>recomputes the prefix n times</strong>. The longer the prefix and larger n, the more you save.</li>
+    <li><strong>Common uses</strong>: best-of-n sampling, branch-and-evaluate, map over a list, tree-of-thought — all share "<strong>share an opening, then do things separately</strong>."</li>
+    <li><strong>Concurrency</strong>: branches with no data dependency can be <strong>advanced concurrently</strong> by the interpreter (Lesson 10). So fork saves compute (prefix reuse) and time (concurrency) at once. Source: <span class="mono">interpreter.py ::ProgramState.fork</span>; Lesson 12 lands it on concrete backends.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. When you call <code>s.fork(n)</code> on a state, what exactly do the n branches <strong>share</strong>?</div>
+  <ol class="opts">
+    <li>They share one random seed, so they would necessarily produce identical text</li>
+    <li>They all inherit the <strong>same prompt prefix built up to the fork point</strong> (system + few-shot + question, etc.), then generate independently afterward</li>
+    <li>They share a dedicated GPU that no other request may use</li>
+    <li>They share nothing; fork is equivalent to firing n brand-new requests from scratch</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. fork clones n sub-states from the current state, each carrying <strong>the same prefix built so far</strong>, after which they generate independently. Precisely because the prefix is identical, RadixAttention (Lesson 7) computes it once and reuses it across branches. Branches with different randomness yield different results (not necessarily identical); no dedicated GPU is involved; and it is not from scratch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. This lesson repeatedly stresses that 'fork and RadixAttention are two halves of one idea.' What does that most precisely mean?</div>
+  <ol class="opts">
+    <li>fork is the 'declaration side' — it states in the program that 'these branches share an opening'; RadixAttention is the 'redemption side' — it computes that shared prefix's KV once and reuses it across branches. The front-end declares structure, the runtime cashes it in as saved compute</li>
+    <li>fork only affects front-end readability and has no effect on runtime compute</li>
+    <li>fork turns RadixAttention off and switches to disk caching</li>
+    <li>They are mutually exclusive optimizations; enabling fork disables prefix reuse</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. fork explicitly states in the DSL that 'these n branches share one prefix,' telling the runtime the structure with zero guessing; RadixAttention takes that signal and computes the shared prefix's attention once, with all branches sharing one KV. One states the structure, the other cashes it in. They cooperate rather than exclude, and neither disables the other nor degrades to disk caching.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Forking 8 branches off a <strong>long shared prefix</strong>, versus a for loop running 8 full prompts serially — roughly how does the cost differ?</div>
+  <ol class="opts">
+    <li>The serial loop is cheaper because it never runs concurrently</li>
+    <li>The costs are identical; fork is merely shorter to write</li>
+    <li>fork is more expensive because it must store 8 copies of the prefix KV</li>
+    <li>fork ≈ '1 prefix + 8 short suffixes' (prefix computed once); the serial loop ≈ '8 × full prompt' (prefix recomputed 8 times). The longer the prefix, the more fork saves, and independent branches can also run concurrently</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. In the serial loop, the same long prefix opens all 8 requests yet is recomputed 8 times, wasting 7 prefixes of compute; fork declares 'shared prefix + 8 suffixes' once, so the runtime computes one prefix KV shared by all 8 branches, each adding only a short suffix, with concurrency when independent. fork does not store 8 prefixes (it stores exactly one), and the costs are far from identical.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Write best-of-n pseudocode in SGLang: build a longish system prompt + question into <code>s</code>, then <code>forks = s.fork(8)</code> so 8 branches each do <code>gen("answer")</code>, finally <code>forks.join()</code> to gather 8 answers. Explain which segment the 8 branches share, which segment each computes independently, and what the runtime (RadixAttention, Lesson 7) thereby computes only once.</li>
+    <li>Someone claims 'fork is just convenient syntactic sugar; drop it and a for loop does the same.' Rebut this using the 'fork is the declaration side, RadixAttention the redemption side' relationship: why does <strong>explicitly declaring</strong> the branch structure benefit both prefix reuse and concurrency at the runtime? And what role does <code>join</code> play in all this?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="10-interpreter-and-tracer.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">解释器与 tracer</span><span class="lang-en">Interpreter &amp; tracer</span></div></a><a class="next" href="12-backends-and-openai-compat.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">后端与 OpenAI 兼容</span><span class="lang-en">Backends &amp; OpenAI compat</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

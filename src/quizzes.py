@@ -612,6 +612,266 @@ QUIZZES = {
             },
         ],
     },
+    "09-structured-generation-language.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 SGLang 程序里，<code>gen(name, …)</code> 和 <code>select(name, choices=[…])</code> 的本质区别是什么？",
+                    "en": "In an SGLang program, what is the essential difference between <code>gen(name, …)</code> and <code>select(name, choices=[…])</code>?",
+                },
+                "opts": [
+                    {"zh": "gen 是“自由填空”，模型生成任意文本填入命名槽；select 是“受限多选”，解码被限制在给定选项内、只能挑一个——本质是带约束的 gen", "en": "gen is a 'free fill-in' where the model writes any text into a named slot; select is a 'constrained choice' whose decoding is restricted to the given options (pick one) — essentially a constrained gen"},
+                    {"zh": "gen 只能用于 system 消息，select 只能用于 user 消息", "en": "gen works only in system messages, select only in user messages"},
+                    {"zh": "gen 同步执行并阻塞，select 永远异步且不返回结果", "en": "gen runs synchronously and blocks, select is always async and never returns a result"},
+                    {"zh": "两者完全等价，select 只是 gen 的别名", "en": "They are fully equivalent; select is just an alias for gen"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "gen 让模型自由生成填入命名槽（用 s[\"name\"] 取出）；select 把解码限制在 choices 内，保证输出一定是合法选项之一。源码里 gen 一旦收到 choices 就直接返回 SglSelect，说明 select 本质上就是“带约束的 gen”——这正是约束解码的入口。其余选项都与机制不符。",
+                    "en": "gen lets the model generate freely into a named slot (read via s[\"name\"]); select restricts decoding to the choices, guaranteeing the output is one of the valid options. In the source, a gen that receives choices returns an SglSelect, so select is essentially a 'constrained gen' — the entry point to constrained decoding. The other options misstate the mechanism.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么用 SGLang 这样的 DSL 写多步 LLM 程序，通常优于手搓裸 HTTP/OpenAI API 调用？",
+                    "en": "Why is writing multi-step LLM programs in a DSL like SGLang usually better than hand-rolling raw HTTP/OpenAI API calls?",
+                },
+                "opts": [
+                    {"zh": "因为控制流与结构都写在普通 Python 里（清晰可调试）、约束解码保证输出可靠、且运行时能自动复用共享前缀的 KV——这些在裸 API 里都得自己手工实现", "en": "Because control flow and structure live in plain Python (clear, debuggable), constrained decoding makes outputs reliable, and the runtime auto-reuses KV across shared prefixes — all of which you'd have to hand-build with a raw API"},
+                    {"zh": "因为 DSL 会自动把模型权重压缩一半，从而更省显存", "en": "Because the DSL automatically halves the model weights, saving HBM"},
+                    {"zh": "因为 DSL 让每条请求独占一张 GPU，从而更快", "en": "Because the DSL gives each request its own dedicated GPU, making it faster"},
+                    {"zh": "因为裸 API 无法生成文本，只能用 DSL 调用模型", "en": "Because raw APIs cannot generate text; only a DSL can call the model"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "DSL 的三重红利：① 结构与控制流都在 Python，可读可调试；② select/regex/json 等约束解码让输出合法可解析；③ 框架看见结构后，能自动复用共享前缀的 KV（第 7 课 RadixAttention）、fork/join 共享父前缀（第 11 课）。这些在裸 API 里全靠自己拼字符串、解析、管历史、手动缓存。其余选项与事实不符。",
+                    "en": "The DSL buys three things: ① structure and control flow in Python (readable, debuggable); ② constrained decoding (select/regex/json) for valid, parseable output; ③ once the framework sees the structure, it auto-reuses shared-prefix KV (Lesson 7, RadixAttention) and shares parent prefixes across fork/join (Lesson 11). With a raw API you do all the string-building, parsing, history management, and caching yourself. The others are false.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "“把程序写成结构化的 SGLang 函数”是如何让运行时获得自动前缀复用机会的？",
+                    "en": "How does 'writing the program as a structured SGLang function' give the runtime its opportunity for automatic prefix reuse?",
+                },
+                "opts": [
+                    {"zh": "因为结构化程序让框架在执行前就看清整体结构——哪些请求/分支共享同一段前缀提示——于是运行时只算一次前缀、复用其 KV；裸 API 那种“一发一收、互相看不见”的调用拿不到这种线索", "en": "Because a structured program lets the framework see the whole structure before execution — which requests/branches share the same prefix prompt — so the runtime computes the prefix once and reuses its KV; the raw-API 'fire one, read one, blind to each other' style can't expose such hints"},
+                    {"zh": "因为 SGLang 会把所有请求的输出拼接成一条超长序列再一起算", "en": "Because SGLang concatenates all requests' outputs into one giant sequence and computes them together"},
+                    {"zh": "因为结构化程序会自动降低采样温度，从而命中缓存", "en": "Because a structured program automatically lowers the sampling temperature to hit the cache"},
+                    {"zh": "因为前缀复用只和磁盘缓存有关，与程序怎么写无关", "en": "Because prefix reuse only concerns disk caching and is unrelated to how the program is written"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "gen 不立即执行，而是构造 IR 节点，组成一棵“待执行意图树”。正因是声明式的树，框架在执行前就能看见全局结构：哪些请求共享同一 system 提示或少样本前缀、哪些 fork 分支共享父节点前缀。于是运行时只对共享前缀算一次、复用其 KV（第 7 课）。这正是结构化写法相对裸 API 的独有红利。其余选项都与机制不符。",
+                    "en": "gen doesn't execute immediately; it builds an IR node, and the nodes form a declarative 'tree of intent.' Because it's a tree, the framework sees the global structure before execution: which requests share a system prompt or few-shot prefix, which fork branches share the parent prefix. So the runtime computes a shared prefix once and reuses its KV (Lesson 7). That is the structured style's unique edge over a raw API. The others misstate the mechanism.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用 SGLang 写一个被 <code>@sgl.function</code> 装饰、首参为 <code>s</code> 的两步程序：第一步用 <code>gen</code> 让模型先写推理，第二步先用 <code>s[\"…\"]</code> 取出推理、再用 <code>select</code> 在固定标签里给出最终分类。说明每个 gen/select 各对应一次什么样的模型调用，以及为什么这两步能共享同一段前缀的 KV。",
+                "en": "Write a two-step SGLang program decorated with <code>@sgl.function</code> whose first arg is <code>s</code>: step one uses <code>gen</code> to let the model write its reasoning, step two reads it back with <code>s[\"…\"]</code> and then uses <code>select</code> to emit a final classification from fixed labels. Explain what kind of model call each gen/select corresponds to, and why the two steps can share the same prefix's KV.",
+            },
+            {
+                "zh": "你的团队现在用裸 OpenAI API 手写一个“先抽取要点、再据要点生成摘要”的两段式流程，受困于格式不稳、历史拼接易错、相同 system 提示被反复重算。请论证迁移到 SGLang DSL 能在哪三个方面带来改善（控制流/约束解码/自动前缀复用），并各举一个具体例子。",
+                "en": "Your team currently hand-writes a two-stage 'extract key points, then summarize from them' flow with the raw OpenAI API, struggling with unstable formats, error-prone history concatenation, and the same system prompt being recomputed repeatedly. Argue how migrating to the SGLang DSL improves things along three axes (control flow / constrained decoding / automatic prefix reuse), with one concrete example each.",
+            },
+        ],
+    },
+    "10-interpreter-and-tracer.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 SGLang 里，<code>解释（interpret）</code>和<code>追踪（trace）</code>这两种模式最本质的区别是什么？",
+                    "en": "In SGLang, what is the most essential difference between <code>interpret</code> and <code>trace</code>?",
+                },
+                "opts": [
+                    {"zh": "解释由 StreamExecutor 真正逐步调用后端、生成 token 并改变状态；追踪用假后端符号化走一遍、不调用模型，只为看清结构并抽出静态前缀", "en": "Interpret really drives the backend step by step via StreamExecutor, generates tokens, and mutates state; trace walks symbolically with a dummy backend, never calls the model, and only discovers structure and extracts the static prefix"},
+                    {"zh": "解释只能跑在 GPU 上，追踪只能跑在 CPU 上", "en": "Interpret only runs on GPU, trace only runs on CPU"},
+                    {"zh": "两者都会调用模型，区别只是追踪更快", "en": "Both call the model; trace is merely faster"},
+                    {"zh": "解释用于训练，追踪用于评测", "en": "Interpret is for training, trace is for evaluation"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "解释是常规执行路径：StreamExecutor 逐表达式 _execute，gen/select 真的打后端，把结果接到 text_、存进 variables，状态一步步生长。追踪是编译/分析路径：trace_program 用假后端符号化走一遍，完全不碰模型，只发现结构并抽出开头那段恒定的静态前缀。其余选项都与机制不符。",
+                    "en": "Interpret is the normal execution path: StreamExecutor _executes per expression, gen/select really hits the backend, appends to text_ and stores into variables, growing state step by step. Trace is the compile/analysis path: trace_program walks symbolically with a dummy backend, never touching the model, only discovering structure and extracting the constant leading static prefix. The others misstate the mechanism.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "追踪为什么要“不调用模型”地走一遍程序？它最有价值的产物是什么？",
+                    "en": "Why does trace walk the program 'without calling the model'? What is its most valuable product?",
+                },
+                "opts": [
+                    {"zh": "为了在不花算力的前提下看清程序结构，并抽出“静态前缀”（开头恒定、直到第一个依赖模型输出处为止的那段提示），供运行时只算一次、复用其 KV", "en": "To see the program's structure without spending compute, and to extract the 'static prefix' (the constant leading prompt up to the first place that depends on a model output), so the runtime can compute it once and reuse its KV"},
+                    {"zh": "为了把模型权重压缩，从而省显存", "en": "To compress model weights and save HBM"},
+                    {"zh": "为了提前把所有 gen 的答案缓存到磁盘", "en": "To pre-cache every gen's answer to disk"},
+                    {"zh": "为了降低采样温度让输出更确定", "en": "To lower sampling temperature for more deterministic output"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "追踪的目的是“先看懂形状”：用假后端符号化走一遍，遇到依赖模型结果的节点就停，于是能在零算力下发现结构、抽出开头那段恒定的静态前缀。运行时据此只对共享前缀算一次注意力、复用其 KV（第 7 课 RadixAttention），还能据此编译/优化。这与压权重、缓存答案、调温度都无关。",
+                    "en": "Trace aims to 'understand the shape first': a symbolic walk with a dummy backend that stops at any node depending on a model result, so it discovers structure and extracts the constant leading static prefix at zero compute. The runtime then computes attention for that shared prefix once and reuses its KV (Lesson 7, RadixAttention), and can compile/optimize from it. It has nothing to do with compressing weights, caching answers, or temperature.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "解释模式下，状态对象 <code>s</code>（ProgramState）里到底存了哪些东西？<code>s[\"name\"]</code> 取的是什么？",
+                    "en": "In interpret mode, what does the state object <code>s</code> (ProgramState) actually hold, and what does <code>s[\"name\"]</code> read?",
+                },
+                "opts": [
+                    {"zh": "它累积完整文本 text_（即前缀）、role 消息 messages_、以及按名字存放的命名结果 variables；s[\"name\"] 取的就是 variables[\"name\"]——某个 gen/select 的输出", "en": "It accumulates the full text text_ (the prefix), role messages messages_, and named results stored in variables; s[\"name\"] reads variables[\"name\"] — the output of some gen/select"},
+                    {"zh": "它只存一个布尔标志，表示程序是否结束", "en": "It only stores a boolean flag for whether the program finished"},
+                    {"zh": "它存的是模型权重的指针", "en": "It stores pointers to the model weights"},
+                    {"zh": "它把所有内容编码成单个整数 token id", "en": "It encodes everything into a single integer token id"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "StreamExecutor 就是 s 背后的“账本”：text_ 是不断生长的完整文本（也正是后续请求的前缀），messages_ 记 role 消息，variables 按名字存每个 gen/select 的结果。所以你在 Python 里写 s[\"reason\"]，取的就是 variables[\"reason\"]。其余选项都与源码字段不符。",
+                    "en": "StreamExecutor is the 'ledger' behind s: text_ is the ever-growing full text (also the prefix for later requests), messages_ logs role messages, and variables stores each gen/select result by name. So s[\"reason\"] in Python reads variables[\"reason\"]. The others don't match the source fields.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用自己的话描述：当你调用一个含两个 <code>gen</code> 的 <code>@sgl.function</code> 时，StreamExecutor 从被调用到产出最终文本，依次发生了什么？请点明每个 gen 如何打后端、结果如何写回 <code>text_</code> 与 <code>variables</code>，以及 <code>s[\"name\"]</code> 是从哪里取值的。",
+                "en": "In your own words, describe what StreamExecutor does — from being called to producing the final text — when you invoke an <code>@sgl.function</code> with two <code>gen</code>s. Point out how each gen hits the backend, how results are written back into <code>text_</code> and <code>variables</code>, and where <code>s[\"name\"]</code> reads from.",
+            },
+            {
+                "zh": "假设你的服务里有一万条请求都以同一段很长的系统提示 + few-shot 模板开头。请论证：为什么先对程序做一次“追踪”抽出静态前缀，会对运行时的吞吐有帮助？它和第 7 课的 RadixAttention 前缀复用是怎么衔接的？追踪到哪里会停下、为什么？",
+                "en": "Suppose your service has ten thousand requests all starting with the same long system prompt + few-shot template. Argue why running a 'trace' once to extract the static prefix helps the runtime's throughput. How does it connect to Lesson 7's RadixAttention prefix reuse? Where does tracing stop, and why?",
+            },
+        ],
+    },
+    "11-fork-join-and-prefix-sharing.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "当你对状态调用 <code>s.fork(n)</code> 时，这 n 个分支之间<strong>共享</strong>的到底是什么？",
+                    "en": "When you call <code>s.fork(n)</code> on a state, what exactly do the n branches <strong>share</strong>?",
+                },
+                "opts": [
+                    {"zh": "它们都继承到 fork 那一刻为止<strong>已建好的同一段提示前缀</strong>（system + 少样本 + 问题等），之后各自独立生成", "en": "They all inherit the <strong>same prompt prefix built up to the fork point</strong> (system + few-shot + question, etc.), then generate independently afterward"},
+                    {"zh": "它们共享同一个随机种子，因此必然生成完全相同的文本", "en": "They share one random seed, so they would necessarily produce identical text"},
+                    {"zh": "它们共享一块独占的 GPU，其他请求不能用", "en": "They share a dedicated GPU that no other request may use"},
+                    {"zh": "它们什么都不共享，fork 等价于从零开始发 n 个全新请求", "en": "They share nothing; fork is equivalent to firing n brand-new requests from scratch"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "fork 从当前状态克隆出 n 个子状态，每个都带着<strong>到此为止建好的同一段前缀</strong>，然后各走各路独立生成。正因为前缀相同，RadixAttention（第 7 课）才能只算一次、给所有分支复用。分支用不同随机性可得不同结果，并非必然相同；也不涉及独占 GPU；更不是从零开始。",
+                    "en": "fork clones n sub-states from the current state, each carrying <strong>the same prefix built so far</strong>, after which they generate independently. Precisely because the prefix is identical, RadixAttention (Lesson 7) computes it once and reuses it across branches. Branches with different randomness yield different results (not necessarily identical); no dedicated GPU is involved; and it is not from scratch.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "本课反复强调“fork 和 RadixAttention 是一个想法的两半”。这句话最准确的含义是？",
+                    "en": "This lesson repeatedly stresses that 'fork and RadixAttention are two halves of one idea.' What does that most precisely mean?",
+                },
+                "opts": [
+                    {"zh": "fork 是“声明端”——在程序里说出“这些分支开头相同”；RadixAttention 是“兑现端”——把那段共享前缀的 KV 只算一次、让所有分支复用。前端声明结构，运行时把结构变现成省下的算力", "en": "fork is the 'declaration side' — it states in the program that 'these branches share an opening'; RadixAttention is the 'redemption side' — it computes that shared prefix's KV once and reuses it across branches. The front-end declares structure, the runtime cashes it in as saved compute"},
+                    {"zh": "fork 会把 RadixAttention 关掉，改用磁盘缓存", "en": "fork turns RadixAttention off and switches to disk caching"},
+                    {"zh": "两者是互斥的优化，开了 fork 就不能用前缀复用", "en": "They are mutually exclusive optimizations; enabling fork disables prefix reuse"},
+                    {"zh": "fork 只影响前端可读性，对运行时算力毫无影响", "en": "fork only affects front-end readability and has no effect on runtime compute"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "fork 在 DSL 里明示“这 n 个分支共享同一段前缀”，等于零猜测地把结构告诉运行时；RadixAttention 收到这个结构信号，就把共享前缀的注意力只算一次、所有分支共用同一份 KV。一个负责说出结构，一个负责把结构变现。二者协同而非互斥，也不会关掉对方或退化成磁盘缓存。",
+                    "en": "fork explicitly states in the DSL that 'these n branches share one prefix,' telling the runtime the structure with zero guessing; RadixAttention takes that signal and computes the shared prefix's attention once, with all branches sharing one KV. One states the structure, the other cashes it in. They cooperate rather than exclude, and neither disables the other nor degrades to disk caching.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "从一段<strong>很长的共享前缀</strong> fork 出 8 个分支，相比用 for 循环串行跑 8 次完整提示，代价差别大致是？",
+                    "en": "Forking 8 branches off a <strong>long shared prefix</strong>, versus a for loop running 8 full prompts serially — roughly how does the cost differ?",
+                },
+                "opts": [
+                    {"zh": "fork ≈ “1 段前缀 + 8 段短后缀”（前缀只算一次）；串行循环 ≈ “8 × 完整提示”（前缀被重算 8 遍）。前缀越长，fork 省得越多，且无依赖分支还能并发", "en": "fork ≈ '1 prefix + 8 short suffixes' (prefix computed once); the serial loop ≈ '8 × full prompt' (prefix recomputed 8 times). The longer the prefix, the more fork saves, and independent branches can also run concurrently"},
+                    {"zh": "两者代价完全相同，fork 只是写法更短", "en": "The costs are identical; fork is merely shorter to write"},
+                    {"zh": "fork 更贵，因为要额外存 8 份前缀 KV", "en": "fork is more expensive because it must store 8 copies of the prefix KV"},
+                    {"zh": "串行循环更省，因为它从不并发", "en": "The serial loop is cheaper because it never runs concurrently"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "串行循环里 8 次请求开头那段长前缀一模一样，却被从头重算 8 遍，白烧 7 份前缀算力；fork 把“共享前缀 + 8 条后缀”一次声明清楚，运行时只算一份前缀 KV、8 个分支共用，各自只补一段短后缀，无依赖时还能并发。fork 并不会存 8 份前缀（恰恰只存一份），代价也绝不相同。",
+                    "en": "In the serial loop, the same long prefix opens all 8 requests yet is recomputed 8 times, wasting 7 prefixes of compute; fork declares 'shared prefix + 8 suffixes' once, so the runtime computes one prefix KV shared by all 8 branches, each adding only a short suffix, with concurrency when independent. fork does not store 8 prefixes (it stores exactly one), and the costs are far from identical.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用 SGLang 写一段 best-of-n 的伪代码：先往 <code>s</code> 拼好一段较长的系统提示 + 问题，再 <code>forks = s.fork(8)</code> 让 8 个分支各自 <code>gen(\"answer\")</code>，最后 <code>forks.join()</code> 收回 8 个答案。请说明：这 8 个分支共享的是哪一段、各自独立算的是哪一段，以及运行时（RadixAttention，第 7 课）据此把什么只算了一次。",
+                "en": "Write best-of-n pseudocode in SGLang: build a longish system prompt + question into <code>s</code>, then <code>forks = s.fork(8)</code> so 8 branches each do <code>gen(\"answer\")</code>, finally <code>forks.join()</code> to gather 8 answers. Explain which segment the 8 branches share, which segment each computes independently, and what the runtime (RadixAttention, Lesson 7) thereby computes only once.",
+            },
+            {
+                "zh": "有人说“fork 只是个写起来方便的语法糖，去掉它用 for 循环效果一样”。请结合“fork 是声明端、RadixAttention 是兑现端”这层关系反驳：为什么把分叉结构<strong>显式声明</strong>出来，对运行时的前缀复用和并发都更有利？<code>join</code> 在其中又承担了什么角色？",
+                "en": "Someone claims 'fork is just convenient syntactic sugar; drop it and a for loop does the same.' Rebut this using the 'fork is the declaration side, RadixAttention the redemption side' relationship: why does <strong>explicitly declaring</strong> the branch structure benefit both prefix reuse and concurrency at the runtime? And what role does <code>join</code> play in all this?",
+            },
+        ],
+    },
+    "12-backends-and-openai-compat.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "同一个 SGLang 前端程序，分别用 <code>RuntimeEndpoint</code>（本地运行时）和 <code>OpenAI</code>（托管）两个后端跑。哪个后端能真正给你 RadixAttention 前缀缓存与 fork 分支共享（第 7、11 课）？为什么？",
+                    "en": "Run the same SGLang front-end program on two backends: <code>RuntimeEndpoint</code> (local runtime) and <code>OpenAI</code> (hosted). Which backend actually gives you RadixAttention prefix caching and fork branch sharing (Lessons 7, 11), and why?",
+                },
+                "opts": [
+                    {"zh": "<strong>RuntimeEndpoint</strong>：它把请求打向你自己的本地 SGLang 服务器（白盒），运行时能看见前缀结构、把共享前缀只算一次；托管模型是黑盒，缓存与否由服务商决定，你无从声明也无法依赖", "en": "<strong>RuntimeEndpoint</strong>: it sends requests to your own local SGLang server (a white box), so the runtime sees the prefix structure and computes a shared prefix once; a hosted model is a black box where caching is the provider's call, which you can neither declare nor rely on"},
+                    {"zh": "OpenAI 后端，因为闭源模型一定比本地模型更会缓存", "en": "The OpenAI backend, because closed models always cache better than local ones"},
+                    {"zh": "两个后端完全一样，前缀缓存与后端无关", "en": "Both backends are identical; prefix caching has nothing to do with the backend"},
+                    {"zh": "都不行，前缀缓存只能手动在提示里实现", "en": "Neither; prefix caching can only be done manually in the prompt"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "RadixAttention 与 fork 共享是<strong>运行时的本事</strong>，只有当请求真正落到你能掌控的本地 SGLang 运行时（RuntimeEndpoint 打向 /generate）时才生效。托管 API 把模型藏在黑盒后，你无法声明前缀结构、无法保证缓存命中，因此失去这份确定性红利。两个后端在程序里写法相同，但能力天差地别。",
+                    "en": "RadixAttention and fork sharing are <strong>runtime capabilities</strong>, effective only when the request actually lands on a local SGLang runtime you control (RuntimeEndpoint posting to /generate). A hosted API hides the model behind a black box, so you cannot declare the prefix structure or guarantee cache hits, losing that deterministic benefit. The two backends look identical in code but differ vastly in capability.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "“OpenAI 兼容”涉及两个相反方向。下面哪一项正确区分了它们？",
+                    "en": "'OpenAI-compatible' involves two opposite directions. Which option correctly distinguishes them?",
+                },
+                "opts": [
+                    {"zh": "方向①“SGLang 程序 → OpenAI 后端”：你的程序当客户端去调 OpenAI 托管模型；方向②“OpenAI 客户端 → SGLang 服务器”：SGLang 服务器本身兼容 OpenAI API，别人的 OpenAI 客户端改个 base_url 就能接入你的私有部署", "en": "Direction ① 'SGLang program → OpenAI backend': your program is the client calling OpenAI's hosted models; direction ② 'OpenAI client → SGLang server': the SGLang server is itself OpenAI-compatible, so someone else's OpenAI client plugs into your private deployment by just changing base_url"},
+                    {"zh": "两个方向是一回事，都是指 SGLang 调用 OpenAI", "en": "The two directions are the same thing — both mean SGLang calling OpenAI"},
+                    {"zh": "只有 OpenAI 能当服务端，SGLang 永远是客户端", "en": "Only OpenAI can be the server; SGLang is always the client"},
+                    {"zh": "“兼容”仅指数据格式相同，与谁调用谁无关", "en": "'Compatible' refers only to identical data formats, independent of who calls whom"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "两个方向恰好相反：方向①里 SGLang 是客户端、OpenAI 是服务端（用 OpenAI 后端消费托管模型）；方向②里 SGLang 是服务端、OpenAI 客户端是客户端（SGLang 服务器对外暴露标准 OpenAI 接口，任何 OpenAI SDK/LangChain 改 base_url 即可接入）。一个是消费别人的模型，一个是把自己的服务接入生态。",
+                    "en": "The directions are exactly opposite: in ① SGLang is the client and OpenAI the server (using the OpenAI backend to consume hosted models); in ② SGLang is the server and an OpenAI client is the client (the SGLang server exposes a standard OpenAI interface, so any OpenAI SDK/LangChain plugs in by changing base_url). One consumes others' models; the other plugs your own service into the ecosystem.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你决定把生产服务从本地 <code>RuntimeEndpoint</code> 换成托管 <code>OpenAI</code> 后端。除了一行 <code>set_default_backend</code>，你主要<strong>交易（牺牲）</strong>了什么？",
+                    "en": "You decide to switch your production service from the local <code>RuntimeEndpoint</code> to the hosted <code>OpenAI</code> backend. Beyond a one-line <code>set_default_backend</code>, what do you mainly <strong>trade away</strong>?",
+                },
+                "opts": [
+                    {"zh": "换来可移植性与免自建 GPU，但牺牲了前缀缓存与 fork 共享的确定性红利、严格的约束解码能力，并改为按量计费——因为托管模型是黑盒，你无法掌控其内部优化", "en": "You gain portability and skip self-hosting GPUs, but sacrifice the deterministic prefix-cache and fork-sharing benefits and strict constrained decoding, and switch to per-token billing — because the hosted model is a black box whose internal optimizations you cannot control"},
+                    {"zh": "什么都不牺牲，托管后端在所有维度都严格更优", "en": "You sacrifice nothing; the hosted backend is strictly better on every dimension"},
+                    {"zh": "只牺牲启动速度，运行时能力完全一致", "en": "You only sacrifice startup speed; runtime capabilities are identical"},
+                    {"zh": "牺牲了程序的可读性，必须重写整棵意图树", "en": "You sacrifice program readability and must rewrite the entire intent tree"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "本地运行时是白盒，吃满 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）与严格约束解码；托管 API 是黑盒，这些确定性红利无从声明、无法依赖，约束解码受限，且按 token 计费。好处是可移植、免运维 GPU。程序本身一字不改（这正是 BaseBackend 抽象的价值），所以牺牲的不是可读性，而是运行时能力与成本结构。",
+                    "en": "The local runtime is a white box delivering full RadixAttention prefix caching (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding; a hosted API is a black box where those deterministic benefits cannot be declared or relied upon, constrained decoding is limited, and you pay per token. The upside is portability and no GPU ops. The program itself is unchanged (the whole point of the BaseBackend abstraction), so what you trade is runtime capability and cost structure, not readability.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用一两句话向同事解释“为什么同一个 SGLang 程序换后端只需改一行 <code>set_default_backend</code>”。请点出 <code>BaseBackend</code> 这层抽象接口的作用，以及程序为什么“不知道也不在乎”自己跑在哪个后端上。",
+                "en": "In a sentence or two, explain to a colleague why switching backends for the same SGLang program takes only one line, <code>set_default_backend</code>. Point out the role of the <code>BaseBackend</code> abstract interface and why the program 'neither knows nor cares' which backend runs it.",
+            },
+            {
+                "zh": "<code>RuntimeEndpoint</code> 被称为“Part 3（前端）与 Part 4+（运行时）对接的接缝”。请结合它把 <code>gen/fork</code> 翻成 <code>POST /generate</code> 的事实，说明：为什么只有这个后端能兑现 RadixAttention 前缀缓存（第 7 课）与 fork 分支共享（第 11 课），以及这次 HTTP 请求接下来会交给第 13–17 课的哪些组件处理？",
+                "en": "<code>RuntimeEndpoint</code> is called 'the seam joining Part 3 (front-end) to Part 4+ (runtime).' Using the fact that it translates <code>gen/fork</code> into <code>POST /generate</code>, explain why only this backend can deliver RadixAttention prefix caching (Lesson 7) and fork branch sharing (Lesson 11), and which components from Lessons 13–17 will handle that HTTP request next.",
+            },
+        ],
+    },
 }
 
 

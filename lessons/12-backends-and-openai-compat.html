@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>12 · 后端与 OpenAI 兼容 / Backends &amp; OpenAI compat - SGLang 图解教程</title>
+<meta name="description" content="第三部分 · 前端语言｜后端与 OpenAI 兼容 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="12 · 后端与 OpenAI 兼容 / Backends &amp; OpenAI compat - SGLang 图解教程">
+<meta property="og:description" content="第三部分 · 前端语言｜后端与 OpenAI 兼容 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="12 · 后端与 OpenAI 兼容 / Backends &amp; OpenAI compat - SGLang 图解教程">
+<meta name="twitter:description" content="第三部分 · 前端语言｜后端与 OpenAI 兼容 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第三部分 · 前端语言</span><span class="lang-en">Part 3 · The frontend language</span></span>
+    <span class="pill">12 / 12</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第三部分 · 前端语言</span><span class="lang-en">Part 3 · The frontend language</span></div>
+    <h1><span class="lang-zh">后端与 OpenAI 兼容</span><span class="lang-en">Backends &amp; OpenAI compat</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+从第 9 课到第 11 课，我们一直在<strong>写程序</strong>：用 DSL 描述意图（第 9 课）、让解释器把意图树跑起来（第 10 课）、用 fork/join 分叉并行（第 11 课）。
+但有一个问题一直被悄悄绕开——<strong>这些 <span class="inline">gen</span>、<span class="inline">select</span>、<span class="inline">fork</span> 最终到底是谁在执行？</strong>
+答案就是本课的主角：<strong>后端（Backend）</strong>。SGLang 的设计精髓在于：<strong>同一个前端程序，可以原封不动地跑在不同的后端上</strong>——
+本地的 SGLang 运行时、OpenAI、Anthropic、VertexAI……程序本身<strong>完全不知道</strong>自己跑在哪个后端。这一课收束 Part 3（前端），
+并在 <span class="mono">RuntimeEndpoint</span> 这个本地运行时后端上，<strong>无缝接到 Part 4 之后的运行时世界</strong>：你写的 fork/gen，从这里开始变成一次次发往调度器的 HTTP 调用。
+理解这一层，你就理解了 SGLang 架构里最优雅的一笔：<strong>前端负责"怎么写"，后端负责"在哪跑"，两者通过一道抽象接口彻底分开</strong>，谁也不必迁就谁。
+正因如此，你今天用本地 GPU 调试出来的程序，明天想搬到云端托管模型上做演示，几乎是零成本的——这正是"一次编写、随处运行"在大模型时代的具体体现。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  后端接口就像一只<strong>万能遥控器</strong>：同一排按钮（开机、换台、调音量）能驱动<strong>任意一台电视</strong>——客厅的、卧室的、朋友家的。
+  你按"换台"时，根本不用关心面前是哪个牌子。但有个关键差别：<strong>只有你自己那台电视（本地运行时）</strong>才暴露<strong>高级功能</strong>——
+  画质增强、录制、定时（对应<strong>前缀缓存、约束解码、分支共享</strong>）；而通用的别人家电视（托管 API）只认得<strong>最基础的几个键</strong>。
+  遥控器的"<strong>一套按钮驱动所有电视</strong>"对应 <span class="mono">BaseBackend</span> 抽象接口；"<strong>只有自家电视有高级键</strong>"对应：本地运行时才能给你 RadixAttention 与约束解码，
+  托管模型是黑盒，能不能缓存、能不能严格约束，<strong>你说了不算</strong>。记住这只遥控器，你就记住了整课：<strong>接口统一，能力分层</strong>，这正是后端设计的灵魂所在，也是本课最值得带走的一句话。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一句话：<span class="inline">BaseBackend</span> 是一层<strong>抽象接口</strong>，规定了"一个后端必须会做哪些事"——<span class="mono">generate</span>（生成）、<span class="mono">select</span>（在候选里选）、流式返回、role 消息处理等等。
+  你的 DSL 程序只调用这些<strong>抽象方法</strong>，<strong>从不直接碰具体引擎</strong>。于是换后端只需一行 <span class="mono">set_default_backend(...)</span>：
+  传入 <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> 就跑在<strong>本地 SGLang 运行时</strong>（第 13–17 课要搭的那个 <span class="mono">/generate</span> HTTP 服务），
+  传入 <span class="mono">OpenAI(...)</span> 就让<strong>同一个程序</strong>改打 OpenAI 的托管模型。但天下没有免费的午餐：<strong>本地运行时</strong>给你 RadixAttention 前缀缓存（第 7 课）、约束解码、快速批处理；
+  <strong>托管后端</strong>换来的是<strong>可移植性</strong>，代价是<strong>丢掉前缀缓存与 fork 共享</strong>那些红利——那些模型是黑盒，缓存与否由服务商决定，约束解码也受限。
+</div>
+
+<h2>一、BaseBackend：让程序与引擎解耦的那道缝</h2>
+<p>回想第 10 课：解释器（StreamExecutor）逐个执行意图树上的表达式，遇到固定文字就直接拼接，遇到 <span class="mono">gen</span> / <span class="mono">select</span> 就<strong>向后端发起一次调用</strong>。
+这里的"后端"，正是任何继承自 <span class="mono">BaseBackend</span> 的类。<span class="mono">BaseBackend</span> 把"<strong>一个能执行 SGLang 程序的引擎</strong>"抽象成一组方法：怎么生成 token、怎么在候选项里做 <span class="mono">select</span>、
+怎么流式吐字、怎么处理 system/user/assistant 这些 role。<strong>程序面对的永远是这层接口，而不是某个具体引擎</strong>。打个比方，这就像电源插座的国家标准：电器只管长一个标准插头，至于墙后接的是水电、火电还是核电，电器一概不问。这正是软件工程里最经典的"<strong>面向接口编程</strong>"：
+上层不依赖下层的实现细节，只依赖一份契约。于是同一棵意图树，今天可以跑在本地 GPU 上、明天可以跑在云端 API 上，<strong>程序一个字都不用改</strong>。
+这种解耦带来的好处远不止"换后端方便"：它让前端的设计者可以<strong>专心打磨表达力</strong>（怎么把复杂的多轮、分叉、约束写得优雅），让后端的工程师可以<strong>专心打磨性能</strong>（怎么把 token 算得更快），
+两拨人沿着同一条接口各自演进，互不掣肘。每当 SGLang 新增一种后端（比如接入某个新厂商的托管模型），存量的程序<strong>自动获得</strong>这份能力，无需逐个改写；
+反过来，每当某个程序写好，它也<strong>自动具备</strong>了在所有现有后端上运行的资格。这就是抽象接口的复利：<strong>N 个程序 × M 个后端，只需各写一次，就能两两组合</strong>。</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">程序</span><span class="name">@sgl.function 意图树</span></div><div class="ld">你用 DSL 写的 <span class="mono">gen/select/fork</span>（第 9–11 课）。它<strong>只调用抽象方法</strong>，不知道自己跑在哪个后端上。</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">接口</span><span class="name">BaseBackend（抽象层）</span></div><div class="ld">规定"一个后端必须会做什么"：<span class="mono">generate / select</span>、流式、role 处理。这道缝<strong>把程序和引擎解耦</strong>。</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">本地</span><span class="name">RuntimeEndpoint（首选）</span></div><div class="ld">打向本地 <span class="mono">/generate</span> HTTP 服务（第 13–17 课）。<strong>独享</strong> RadixAttention 前缀缓存、约束解码、快速批处理。</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">托管</span><span class="name">OpenAI / Anthropic / VertexAI …</span></div><div class="ld">让同一程序改打<strong>托管模型</strong>：可移植，但模型是黑盒，<strong>失去</strong>前缀缓存与 fork 共享红利。</div></div>
+</div>
+
+<h2>二、RuntimeEndpoint：前端落到运行时的那个接缝</h2>
+<p>在所有后端里，<span class="mono">RuntimeEndpoint</span> 最关键——<strong>它就是 Part 3（前端）与 Part 4+（运行时）严丝合缝对接的那个接缝</strong>。
+它指向一个本地启动的 SGLang 服务（默认 <span class="mono">http://localhost:30000</span>），把程序里每一次 <span class="mono">gen</span> / <span class="mono">fork</span> 翻译成<strong>一次 POST /generate 的 HTTP 请求</strong>，
+发给我们将在第 13–17 课逐层拆解的那台服务器——入口的 TokenizerManager、大脑 Scheduler、执行的 ModelRunner。<strong>正因为请求落到了我们自己的运行时</strong>，
+第 7 课的 RadixAttention 前缀缓存、第 11 课 fork 的分支共享、以及约束解码，<strong>才真正生效</strong>：你 fork 出的 8 个分支共享同一段前缀，运行时只算一次——这件事只有在 <span class="mono">RuntimeEndpoint</span> 后端上才兑现得了。
+一句 <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>，就把前端的全部表达力，焊接到了我们即将深入的那台引擎上。
+这也解释了一个常见困惑：为什么很多 SGLang 教程开头都要你先<strong>起一个本地服务器</strong>，再跑程序？因为只有先有了那台监听 <span class="mono">/generate</span> 的运行时，<span class="mono">RuntimeEndpoint</span> 才有地方把请求打过去。
+程序和服务器是<strong>两个进程</strong>：程序是客户端，运行时是服务端，中间隔着一条 HTTP 连接。把这条连接想象成一根管子——前端把意图塞进管子这头，运行时在另一头把 token 算出来再顺着管子流回。
+后面第 13–17 课，我们就沿着这根管子一路走到底，看清管子另一头那台引擎的五脏六腑。</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">程序</div><div class="nd">s += gen("answer")</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">RuntimeEndpoint</div><div class="nd">本地运行时后端</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">POST /generate</div><div class="nd">HTTP 请求 · 第 13–17 课</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Scheduler</div><div class="nd">调度 + RadixAttention（第 7 课）</div></div>
+</div>
+
+<h2>三、本地运行时 vs 托管 API：你在交易什么</h2>
+<p>换后端不是免费的。<span class="mono">RuntimeEndpoint</span> 和 <span class="mono">OpenAI</span> 在程序里长得一模一样，但拿到手的<strong>能力天差地别</strong>。
+核心在于：<strong>本地运行时是你能看穿、能掌控的白盒</strong>，所以第 7 课的前缀缓存、第 11 课的 fork 共享、严格的约束解码（保证输出合法 JSON / 正则）统统可用；
+而<strong>托管模型是黑盒</strong>——服务商或许内部也做缓存，但你<strong>无从声明、无法依赖</strong>，约束解码通常只能退化成"在提示里求它"。下面把这笔交易摆开。
+顺带提醒一个常被忽视的隐性成本：托管 API 是<strong>按 token 计费</strong>的，你 fork 出的每一个分支、每一次重试，都在真金白银地花钱；而本地运行时一旦 GPU 就绪，跑多少分支几乎是<strong>边际成本趋零</strong>的。
+所以"用 fork 做 best-of-32"这种在本地稀松平常的玩法，搬到托管后端上可能就<strong>贵得离谱</strong>。选后端从来不是单看"哪个模型聪明"，而要把<strong>性能、可控性、成本、运维负担</strong>放在一起权衡。</p>
+
+<div class="cols">
+  <div class="col"><h4>本地运行时（RuntimeEndpoint）</h4><p><strong>白盒、可掌控</strong>：吃满 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）、严格约束解码、快速批处理。代价是你得<strong>自己部署、自己管 GPU</strong>（第 13–17 课教你搭）。<strong>追求性能与可控，就用它。</strong></p></div>
+  <div class="col"><h4>托管 API（OpenAI / Anthropic …）</h4><p><strong>黑盒、可移植</strong>：一行换后端就能用上顶级闭源模型，无需自备 GPU。代价是<strong>丢掉前缀缓存与 fork 共享</strong>的确定性红利，约束解码受限，且<strong>按量计费</strong>。<strong>追求省心与可移植，就用它。</strong></p></div>
+</div>
+
+<h2>四、两个方向别搞混：谁在调用谁的 OpenAI 接口</h2>
+<p>"OpenAI 兼容"这个词最容易让人犯晕，因为它牵涉<strong>两个相反的方向</strong>，务必分清：</p>
+
+<table class="t">
+  <tr><th>方向</th><th>谁是客户端 / 谁是服务端</th><th>含义</th></tr>
+  <tr><td class="mono">SGLang 程序 → OpenAI 后端</td><td>你的程序是客户端，OpenAI 是服务端</td><td>用 <span class="mono">OpenAI(...)</span> 后端，让<strong>你的 SGLang 程序去调用 OpenAI 的托管模型</strong></td></tr>
+  <tr><td class="mono">OpenAI 客户端 → SGLang 服务器</td><td>别人的程序是客户端，你的 SGLang 是服务端</td><td>SGLang 服务器<strong>本身就兼容 OpenAI API</strong>，任何 OpenAI 客户端都能直接指过来</td></tr>
+</table>
+
+<p>换句话说：<strong>SGLang 既能当客户端去打 OpenAI（第一个方向），又能当服务端被 OpenAI 客户端打（第二个方向）</strong>。
+第二个方向尤其实用——你用第 13–17 课搭好的 SGLang 服务器，对外暴露的就是标准 OpenAI 接口，于是<strong>任何现成的 OpenAI SDK、LangChain、第三方工具，改一下 base_url 就能无缝接入你的私有部署</strong>，
+完全不必为 SGLang 重写一行客户端代码。一个"兼容"，两个方向，既是<strong>消费别人的模型</strong>的桥，也是<strong>把自己的服务接入整个生态</strong>的桥。
+为什么这件事如此重要？因为 OpenAI 的接口格式早已成为<strong>事实标准</strong>：海量工具、框架、SDK 都围绕它构建。SGLang 服务器主动兼容这套接口，等于<strong>免费搭上了整个生态的便车</strong>——
+你不需要说服任何下游工具去适配 SGLang，只要它们能调 OpenAI，就能调你。这是一种聪明的"<strong>站在巨人肩膀上</strong>"：用最小的工程代价，换来最大的互操作性。
+所以当有人问"SGLang 和 OpenAI 是什么关系"，正确的回答是：<strong>它们既不是非此即彼，也不是简单替代——SGLang 可以调 OpenAI，也可以假装成 OpenAI，端看你站在桥的哪一头。</strong></p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/backend/runtime_endpoint.py ::RuntimeEndpoint</span><span class="ln">本地运行时后端：每次生成都 POST /generate</span></div>
+  <pre><span class="kw">class</span> RuntimeEndpoint(BaseBackend):
+    <span class="kw">def</span> __init__(self, base_url, api_key=<span class="kw">None</span>, ...):
+        super().__init__()
+        self.base_url = base_url
+        <span class="cm"># 启动握手：先向本地运行时问清楚加载了哪个模型</span>
+        res = http_request(self.base_url + <span class="st">"/get_model_info"</span>, ...)
+        self.model_info = res.json()
+
+    <span class="kw">def</span> cache_prefix(self, prefix_str):
+        <span class="cm"># 把共享前缀以 max_new_tokens=0 打过去，提前喂进 RadixAttention 缓存（第 7 课）</span>
+        http_request(self.base_url + <span class="st">"/generate"</span>,
+            json={<span class="st">"text"</span>: prefix_str, <span class="st">"sampling_params"</span>: {<span class="st">"max_new_tokens"</span>: 0}})
+
+    <span class="kw">def</span> generate(self, s, sampling_params):
+        <span class="cm"># 程序里的一次 gen，在这里变成一次 POST /generate 的 HTTP 调用</span>
+        data = {<span class="st">"text"</span>: s.text_, <span class="st">"sampling_params"</span>: {...}}
+        res = http_request(self.base_url + <span class="st">"/generate"</span>, json=data)
+        <span class="kw">return</span> res.json()</pre>
+</div>
+
+<p>这几行就是<strong>前端通往运行时的那扇门</strong>：构造时先 <span class="mono">/get_model_info</span> 握手确认模型；<span class="mono">cache_prefix</span> 用 <span class="mono">max_new_tokens=0</span> 把共享前缀<strong>预热进缓存</strong>，
+正是 fork（第 11 课）省算力的底层机关；而 <span class="mono">generate</span> 则把程序里的每个 <span class="mono">gen</span> 老老实实翻成<strong>一次 POST /generate</strong>。
+读懂它，你就读懂了 Part 3 与 Part 4 的接缝——<strong>下一课起，我们就走进这个 <span class="mono">/generate</span> 背后的服务器</strong>，看 TokenizerManager、Scheduler、ModelRunner 如何把这一次 HTTP 请求，变成 GPU 上真正的 token。
+至此，前端三部曲——<strong>第 9 课怎么写、第 10 课怎么跑、第 11 课怎么分叉</strong>——就在这道后端接缝上画下句点；而它同时也是下一段旅程的起点：穿过 <span class="mono">RuntimeEndpoint</span> 这扇门，我们正式从"语言"走向"引擎"。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>统一接口</strong>：<span class="mono">BaseBackend</span> 是抽象层，规定 <span class="mono">generate/select</span>、流式、role 处理等契约。DSL 程序（第 9–11 课）只调抽象方法，<strong>不知道也不在乎</strong>自己跑在哪个后端——换后端只需一行 <span class="mono">set_default_backend(...)</span>。</li>
+    <li><strong>本地运行时</strong>：<span class="mono">RuntimeEndpoint("http://localhost:30000")</span> 把 <span class="mono">gen/fork</span> 翻成 <strong>POST /generate</strong>，打向第 13–17 课要搭的服务器。<strong>只有它</strong>能给你 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）、约束解码与快速批处理。</li>
+    <li><strong>托管后端</strong>：<span class="mono">OpenAI / Anthropic / VertexAI</span> 让同一程序改打闭源模型——可移植、免自建 GPU，但<strong>丢掉前缀缓存与 fork 共享</strong>（模型是黑盒），约束解码受限，且按量计费。</li>
+    <li><strong>两个方向别混</strong>：① <strong>SGLang 程序 → OpenAI 后端</strong>（你的程序调 OpenAI）；② <strong>OpenAI 客户端 → SGLang 服务器</strong>（SGLang 服务器本身兼容 OpenAI API，任何 OpenAI 客户端改 base_url 即可接入你的私有部署）。</li>
+    <li><strong>承上启下</strong>：<span class="mono">RuntimeEndpoint</span> 是 Part 3（前端）焊接 Part 4+（运行时）的接缝。源码见 <span class="mono">lang/backend/runtime_endpoint.py</span>，下一课起走进 <span class="mono">/generate</span> 背后的服务器。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 同一个 SGLang 前端程序，分别用 <code>RuntimeEndpoint</code>（本地运行时）和 <code>OpenAI</code>（托管）两个后端跑。哪个后端能真正给你 RadixAttention 前缀缓存与 fork 分支共享（第 7、11 课）？为什么？</div>
+  <ol class="opts">
+    <li>两个后端完全一样，前缀缓存与后端无关</li>
+    <li>OpenAI 后端，因为闭源模型一定比本地模型更会缓存</li>
+    <li>都不行，前缀缓存只能手动在提示里实现</li>
+    <li><strong>RuntimeEndpoint</strong>：它把请求打向你自己的本地 SGLang 服务器（白盒），运行时能看见前缀结构、把共享前缀只算一次；托管模型是黑盒，缓存与否由服务商决定，你无从声明也无法依赖</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。RadixAttention 与 fork 共享是<strong>运行时的本事</strong>，只有当请求真正落到你能掌控的本地 SGLang 运行时（RuntimeEndpoint 打向 /generate）时才生效。托管 API 把模型藏在黑盒后，你无法声明前缀结构、无法保证缓存命中，因此失去这份确定性红利。两个后端在程序里写法相同，但能力天差地别。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. “OpenAI 兼容”涉及两个相反方向。下面哪一项正确区分了它们？</div>
+  <ol class="opts">
+    <li>方向①“SGLang 程序 → OpenAI 后端”：你的程序当客户端去调 OpenAI 托管模型；方向②“OpenAI 客户端 → SGLang 服务器”：SGLang 服务器本身兼容 OpenAI API，别人的 OpenAI 客户端改个 base_url 就能接入你的私有部署</li>
+    <li>两个方向是一回事，都是指 SGLang 调用 OpenAI</li>
+    <li>“兼容”仅指数据格式相同，与谁调用谁无关</li>
+    <li>只有 OpenAI 能当服务端，SGLang 永远是客户端</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。两个方向恰好相反：方向①里 SGLang 是客户端、OpenAI 是服务端（用 OpenAI 后端消费托管模型）；方向②里 SGLang 是服务端、OpenAI 客户端是客户端（SGLang 服务器对外暴露标准 OpenAI 接口，任何 OpenAI SDK/LangChain 改 base_url 即可接入）。一个是消费别人的模型，一个是把自己的服务接入生态。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 你决定把生产服务从本地 <code>RuntimeEndpoint</code> 换成托管 <code>OpenAI</code> 后端。除了一行 <code>set_default_backend</code>，你主要<strong>交易（牺牲）</strong>了什么？</div>
+  <ol class="opts">
+    <li>什么都不牺牲，托管后端在所有维度都严格更优</li>
+    <li>换来可移植性与免自建 GPU，但牺牲了前缀缓存与 fork 共享的确定性红利、严格的约束解码能力，并改为按量计费——因为托管模型是黑盒，你无法掌控其内部优化</li>
+    <li>牺牲了程序的可读性，必须重写整棵意图树</li>
+    <li>只牺牲启动速度，运行时能力完全一致</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。本地运行时是白盒，吃满 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）与严格约束解码；托管 API 是黑盒，这些确定性红利无从声明、无法依赖，约束解码受限，且按 token 计费。好处是可移植、免运维 GPU。程序本身一字不改（这正是 BaseBackend 抽象的价值），所以牺牲的不是可读性，而是运行时能力与成本结构。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用一两句话向同事解释“为什么同一个 SGLang 程序换后端只需改一行 <code>set_default_backend</code>”。请点出 <code>BaseBackend</code> 这层抽象接口的作用，以及程序为什么“不知道也不在乎”自己跑在哪个后端上。</li>
+    <li><code>RuntimeEndpoint</code> 被称为“Part 3（前端）与 Part 4+（运行时）对接的接缝”。请结合它把 <code>gen/fork</code> 翻成 <code>POST /generate</code> 的事实，说明：为什么只有这个后端能兑现 RadixAttention 前缀缓存（第 7 课）与 fork 分支共享（第 11 课），以及这次 HTTP 请求接下来会交给第 13–17 课的哪些组件处理？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+From Lesson 9 through Lesson 11 we have been <strong>writing programs</strong>: describing intent in the DSL (Lesson 9), letting the interpreter run the tree of intent (Lesson 10), forking parallel branches with fork/join (Lesson 11).
+But one question has been quietly dodged all along — <strong>who actually executes all these <span class="inline">gen</span>, <span class="inline">select</span>, <span class="inline">fork</span> calls?</strong>
+The answer is today's star: the <strong>Backend</strong>. The heart of SGLang's design is that <strong>the same front-end program runs unchanged on different backends</strong> —
+the local SGLang runtime, OpenAI, Anthropic, VertexAI… and the program itself <strong>has no idea</strong> which backend it runs on. This lesson closes Part 3 (the front-end)
+and, through the <span class="mono">RuntimeEndpoint</span> local-runtime backend, <strong>snaps seamlessly onto the runtime world of Part 4+</strong>: your fork/gen become HTTP calls to the scheduler we study next.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A backend interface is like a <strong>universal remote</strong>: one set of buttons (power, channel, volume) drives <strong>any TV</strong> — the living-room one, the bedroom one, a friend's.
+  When you press "channel," you needn't care what brand sits in front of you. But there is a key difference: <strong>only your own TV (the local runtime)</strong> exposes the <strong>advanced features</strong> —
+  picture enhancement, recording, scheduling (i.e. <strong>prefix cache, constrained decoding, branch sharing</strong>); a generic stranger's TV (a hosted API) only knows the <strong>basic buttons</strong>.
+  "<strong>One button set drives all TVs</strong>" maps to the <span class="mono">BaseBackend</span> abstract interface; "<strong>only your own TV has the advanced keys</strong>" maps to: only the local runtime gives you RadixAttention and constrained decoding,
+  while hosted models are black boxes — whether they cache, whether they strictly constrain, is <strong>not up to you</strong>. Remember this remote and you remember the whole lesson: <strong>one interface, layered capabilities</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  In one line: <span class="inline">BaseBackend</span> is an <strong>abstract interface</strong> that prescribes what a backend must be able to do — <span class="mono">generate</span>, <span class="mono">select</span> (pick among candidates), streaming, role handling, and so on.
+  Your DSL program calls only these <strong>abstract methods</strong> and <strong>never touches a concrete engine directly</strong>. So switching backends is one line, <span class="mono">set_default_backend(...)</span>:
+  pass <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> to run on the <strong>local SGLang runtime</strong> (the <span class="mono">/generate</span> HTTP server we build in Lessons 13–17),
+  pass <span class="mono">OpenAI(...)</span> and the <strong>same program</strong> targets OpenAI's hosted models instead. But there is no free lunch: the <strong>local runtime</strong> gives you RadixAttention prefix caching (Lesson 7), constrained decoding, fast batching;
+  a <strong>hosted backend</strong> buys you <strong>portability</strong> at the cost of <strong>losing prefix-cache and fork-sharing</strong> benefits — those models are black boxes, caching is the provider's call, and constrained decoding is limited.
+</div>
+
+<h2>1. BaseBackend: the seam that decouples program from engine</h2>
+<p>Recall Lesson 10: the interpreter (StreamExecutor) executes the expressions of the intent tree one by one — fixed text is appended, and a <span class="mono">gen</span> / <span class="mono">select</span> <strong>issues a call to the backend</strong>.
+That "backend" is any class inheriting from <span class="mono">BaseBackend</span>. <span class="mono">BaseBackend</span> abstracts "<strong>an engine that can execute an SGLang program</strong>" into a set of methods: how to generate tokens, how to <span class="mono">select</span> among candidates,
+how to stream, how to handle system/user/assistant roles. <strong>The program always faces this interface, never a specific engine</strong>. This is the classic "<strong>program to an interface</strong>":
+the upper layer depends on a contract, not on the lower layer's implementation. So the same intent tree can run on local GPUs today and a cloud API tomorrow, <strong>with not one character changed</strong>.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Program</span><span class="name">@sgl.function intent tree</span></div><div class="ld">Your DSL <span class="mono">gen/select/fork</span> (Lessons 9–11). It <strong>calls only abstract methods</strong> and has no idea which backend it runs on.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Interface</span><span class="name">BaseBackend (abstract)</span></div><div class="ld">Prescribes what a backend must do: <span class="mono">generate / select</span>, streaming, role handling. This seam <strong>decouples program from engine</strong>.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">Local</span><span class="name">RuntimeEndpoint (preferred)</span></div><div class="ld">Targets the local <span class="mono">/generate</span> HTTP server (Lessons 13–17). <strong>Exclusively</strong> gives RadixAttention prefix cache, constrained decoding, fast batching.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Hosted</span><span class="name">OpenAI / Anthropic / VertexAI …</span></div><div class="ld">Points the same program at <strong>hosted models</strong>: portable, but the model is a black box, <strong>losing</strong> prefix-cache and fork-sharing benefits.</div></div>
+</div>
+
+<h2>2. RuntimeEndpoint: the seam where the front-end lands on the runtime</h2>
+<p>Among all backends, <span class="mono">RuntimeEndpoint</span> matters most — <strong>it is the seam where Part 3 (front-end) snaps precisely onto Part 4+ (runtime)</strong>.
+It points at a locally launched SGLang server (default <span class="mono">http://localhost:30000</span>) and translates every <span class="mono">gen</span> / <span class="mono">fork</span> in the program into <strong>a POST /generate HTTP request</strong>,
+sent to the server we dissect layer by layer in Lessons 13–17 — the TokenizerManager at the door, the Scheduler as the brain, the ModelRunner doing the forward. <strong>Precisely because the request lands on our own runtime</strong>,
+the RadixAttention prefix cache (Lesson 7), fork's branch sharing (Lesson 11), and constrained decoding <strong>actually take effect</strong>: the 8 branches you fork share one prefix and the runtime computes it once — something only the <span class="mono">RuntimeEndpoint</span> backend can deliver.
+One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>, welds the front-end's full expressiveness onto the very engine we are about to open up.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">Program</div><div class="nd">s += gen("answer")</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">RuntimeEndpoint</div><div class="nd">local-runtime backend</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">POST /generate</div><div class="nd">HTTP request · Lessons 13–17</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Scheduler</div><div class="nd">schedule + RadixAttention (Lesson 7)</div></div>
+</div>
+
+<h2>3. Local runtime vs hosted API: what are you trading?</h2>
+<p>Switching backends is not free. <span class="mono">RuntimeEndpoint</span> and <span class="mono">OpenAI</span> look identical in the program, but the <strong>capabilities you get differ vastly</strong>.
+The crux: <strong>the local runtime is a white box you can see through and control</strong>, so the prefix cache (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding (guaranteeing valid JSON / regex output) are all available;
+while a <strong>hosted model is a black box</strong> — the provider may cache internally, but you <strong>cannot declare or rely on it</strong>, and constrained decoding usually degrades to "begging for it in the prompt." Here is the trade laid out.</p>
+
+<div class="cols">
+  <div class="col"><h4>Local runtime (RuntimeEndpoint)</h4><p><strong>White box, controllable</strong>: full RadixAttention prefix cache (Lesson 7), fork branch sharing (Lesson 11), strict constrained decoding, fast batching. The cost: you must <strong>deploy and manage GPUs yourself</strong> (Lessons 13–17 teach you). <strong>For performance and control, use this.</strong></p></div>
+  <div class="col"><h4>Hosted API (OpenAI / Anthropic …)</h4><p><strong>Black box, portable</strong>: one line switches to a top closed model, no GPUs needed. The cost: you <strong>lose the deterministic prefix-cache and fork-sharing</strong> benefits, constrained decoding is limited, and you <strong>pay per token</strong>. <strong>For convenience and portability, use this.</strong></p></div>
+</div>
+
+<h2>4. Don't mix the two directions: who calls whose OpenAI API</h2>
+<p>"OpenAI-compatible" is the most confusing phrase because it involves <strong>two opposite directions</strong> — keep them straight:</p>
+
+<table class="t">
+  <tr><th>Direction</th><th>Who is client / who is server</th><th>Meaning</th></tr>
+  <tr><td class="mono">SGLang program → OpenAI backend</td><td>your program is the client, OpenAI is the server</td><td>Use the <span class="mono">OpenAI(...)</span> backend so <strong>your SGLang program calls OpenAI's hosted models</strong></td></tr>
+  <tr><td class="mono">OpenAI client → SGLang server</td><td>someone's program is the client, your SGLang is the server</td><td>The SGLang server <strong>is itself OpenAI-API-compatible</strong>; any OpenAI client can point straight at it</td></tr>
+</table>
+
+<p>In other words: <strong>SGLang can be a client calling OpenAI (direction one), and a server called by OpenAI clients (direction two)</strong>.
+The second direction is especially handy — the SGLang server you stand up in Lessons 13–17 exposes a standard OpenAI interface, so <strong>any existing OpenAI SDK, LangChain, or third-party tool plugs into your private deployment by just changing base_url</strong>,
+without rewriting a single line of client code for SGLang. One "compatibility," two directions: a bridge both to <strong>consume others' models</strong> and to <strong>plug your own service into the whole ecosystem</strong>.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/backend/runtime_endpoint.py ::RuntimeEndpoint</span><span class="ln">local-runtime backend: every generate POSTs /generate</span></div>
+  <pre><span class="kw">class</span> RuntimeEndpoint(BaseBackend):
+    <span class="kw">def</span> __init__(self, base_url, api_key=<span class="kw">None</span>, ...):
+        super().__init__()
+        self.base_url = base_url
+        <span class="cm"># Startup handshake: ask the local runtime which model is loaded</span>
+        res = http_request(self.base_url + <span class="st">"/get_model_info"</span>, ...)
+        self.model_info = res.json()
+
+    <span class="kw">def</span> cache_prefix(self, prefix_str):
+        <span class="cm"># Send the shared prefix with max_new_tokens=0 to pre-warm RadixAttention (Lesson 7)</span>
+        http_request(self.base_url + <span class="st">"/generate"</span>,
+            json={<span class="st">"text"</span>: prefix_str, <span class="st">"sampling_params"</span>: {<span class="st">"max_new_tokens"</span>: 0}})
+
+    <span class="kw">def</span> generate(self, s, sampling_params):
+        <span class="cm"># A gen in the program becomes one POST /generate HTTP call here</span>
+        data = {<span class="st">"text"</span>: s.text_, <span class="st">"sampling_params"</span>: {...}}
+        res = http_request(self.base_url + <span class="st">"/generate"</span>, json=data)
+        <span class="kw">return</span> res.json()</pre>
+</div>
+
+<p>These few lines are <strong>the door from front-end to runtime</strong>: the constructor handshakes via <span class="mono">/get_model_info</span> to confirm the model; <span class="mono">cache_prefix</span> uses <span class="mono">max_new_tokens=0</span> to <strong>pre-warm the shared prefix into the cache</strong>,
+the very mechanism behind fork's compute savings (Lesson 11); and <span class="mono">generate</span> faithfully translates each <span class="mono">gen</span> in the program into <strong>one POST /generate</strong>.
+Understand this and you understand the seam between Part 3 and Part 4 — <strong>from the next lesson on, we step into the server behind that <span class="mono">/generate</span></strong>, watching TokenizerManager, Scheduler, and ModelRunner turn this one HTTP request into real tokens on the GPU.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>One interface</strong>: <span class="mono">BaseBackend</span> is the abstract layer prescribing the contract — <span class="mono">generate/select</span>, streaming, role handling. The DSL program (Lessons 9–11) calls only abstract methods and <strong>neither knows nor cares</strong> which backend runs it — switching is one line, <span class="mono">set_default_backend(...)</span>.</li>
+    <li><strong>Local runtime</strong>: <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> translates <span class="mono">gen/fork</span> into <strong>POST /generate</strong> to the server built in Lessons 13–17. <strong>Only it</strong> gives you RadixAttention prefix cache (Lesson 7), fork branch sharing (Lesson 11), constrained decoding, and fast batching.</li>
+    <li><strong>Hosted backends</strong>: <span class="mono">OpenAI / Anthropic / VertexAI</span> point the same program at closed models — portable, no self-hosted GPU, but you <strong>lose prefix-cache and fork-sharing</strong> (black-box model), constrained decoding is limited, and you pay per token.</li>
+    <li><strong>Two directions, don't mix</strong>: ① <strong>SGLang program → OpenAI backend</strong> (your program calls OpenAI); ② <strong>OpenAI client → SGLang server</strong> (the SGLang server is itself OpenAI-compatible; any OpenAI client plugs into your private deployment by changing base_url).</li>
+    <li><strong>Bridge forward</strong>: <span class="mono">RuntimeEndpoint</span> is the seam welding Part 3 (front-end) onto Part 4+ (runtime). Source in <span class="mono">lang/backend/runtime_endpoint.py</span>; from the next lesson we step into the server behind <span class="mono">/generate</span>.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Run the same SGLang front-end program on two backends: <code>RuntimeEndpoint</code> (local runtime) and <code>OpenAI</code> (hosted). Which backend actually gives you RadixAttention prefix caching and fork branch sharing (Lessons 7, 11), and why?</div>
+  <ol class="opts">
+    <li>Both backends are identical; prefix caching has nothing to do with the backend</li>
+    <li>The OpenAI backend, because closed models always cache better than local ones</li>
+    <li>Neither; prefix caching can only be done manually in the prompt</li>
+    <li><strong>RuntimeEndpoint</strong>: it sends requests to your own local SGLang server (a white box), so the runtime sees the prefix structure and computes a shared prefix once; a hosted model is a black box where caching is the provider's call, which you can neither declare nor rely on</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. RadixAttention and fork sharing are <strong>runtime capabilities</strong>, effective only when the request actually lands on a local SGLang runtime you control (RuntimeEndpoint posting to /generate). A hosted API hides the model behind a black box, so you cannot declare the prefix structure or guarantee cache hits, losing that deterministic benefit. The two backends look identical in code but differ vastly in capability.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 'OpenAI-compatible' involves two opposite directions. Which option correctly distinguishes them?</div>
+  <ol class="opts">
+    <li>Direction ① 'SGLang program → OpenAI backend': your program is the client calling OpenAI's hosted models; direction ② 'OpenAI client → SGLang server': the SGLang server is itself OpenAI-compatible, so someone else's OpenAI client plugs into your private deployment by just changing base_url</li>
+    <li>The two directions are the same thing — both mean SGLang calling OpenAI</li>
+    <li>'Compatible' refers only to identical data formats, independent of who calls whom</li>
+    <li>Only OpenAI can be the server; SGLang is always the client</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The directions are exactly opposite: in ① SGLang is the client and OpenAI the server (using the OpenAI backend to consume hosted models); in ② SGLang is the server and an OpenAI client is the client (the SGLang server exposes a standard OpenAI interface, so any OpenAI SDK/LangChain plugs in by changing base_url). One consumes others' models; the other plugs your own service into the ecosystem.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. You decide to switch your production service from the local <code>RuntimeEndpoint</code> to the hosted <code>OpenAI</code> backend. Beyond a one-line <code>set_default_backend</code>, what do you mainly <strong>trade away</strong>?</div>
+  <ol class="opts">
+    <li>You sacrifice nothing; the hosted backend is strictly better on every dimension</li>
+    <li>You gain portability and skip self-hosting GPUs, but sacrifice the deterministic prefix-cache and fork-sharing benefits and strict constrained decoding, and switch to per-token billing — because the hosted model is a black box whose internal optimizations you cannot control</li>
+    <li>You sacrifice program readability and must rewrite the entire intent tree</li>
+    <li>You only sacrifice startup speed; runtime capabilities are identical</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The local runtime is a white box delivering full RadixAttention prefix caching (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding; a hosted API is a black box where those deterministic benefits cannot be declared or relied upon, constrained decoding is limited, and you pay per token. The upside is portability and no GPU ops. The program itself is unchanged (the whole point of the BaseBackend abstraction), so what you trade is runtime capability and cost structure, not readability.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In a sentence or two, explain to a colleague why switching backends for the same SGLang program takes only one line, <code>set_default_backend</code>. Point out the role of the <code>BaseBackend</code> abstract interface and why the program 'neither knows nor cares' which backend runs it.</li>
+    <li><code>RuntimeEndpoint</code> is called 'the seam joining Part 3 (front-end) to Part 4+ (runtime).' Using the fact that it translates <code>gen/fork</code> into <code>POST /generate</code>, explain why only this backend can deliver RadixAttention prefix caching (Lesson 7) and fork branch sharing (Lesson 11), and which components from Lessons 13–17 will handle that HTTP request next.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="11-fork-join-and-prefix-sharing.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">fork/join 与前缀共享</span><span class="lang-en">fork/join &amp; prefix sharing</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
