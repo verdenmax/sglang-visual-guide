@@ -1165,6 +1165,14 @@ autoregressive generation, you'll see the KV cache isn't a nice-to-have — it's
   letter means redoing all the previous ones — too slow to be usable.
 </div>
 
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  An LLM is <strong>autoregressive</strong>: each new token must look back at <strong>all history</strong>. Recomputing the whole
+  sequence every step is prohibitively expensive; the <strong>KV cache</strong> stores each token's read-only Key/Value once and
+  reuses it, squeezing each step from "recompute everything" to "just the new word's attention over history". The price is
+  <strong>HBM</strong> — the cache grows linearly with context, the very thing <strong>paging, prefix reuse and quantization</strong> later fight.
+</div>
+
 <h2>Autoregressive generation: one token at a time</h2>
 <p>An LLM is <strong>autoregressive</strong>: it predicts only the <strong>next</strong> token, <strong>appends it to the
 input</strong>, predicts the next, and repeats until it emits an end token or hits a length limit. So the model doesn't
@@ -1671,7 +1679,7 @@ minimum unit</strong>. Paired with the KV pool from Lesson 4, a <span class="inl
 in-code incarnation of that "page table." Below is the allocator's skeleton: <strong>alloc takes pages, free returns pages</strong>, all at <span class="mono">page_size</span> granularity:</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/allocator/paged.py ::PagedTokenToKVPoolAllocator</span><span class="ln">allocator/paged.py ::PagedTokenToKVPoolAllocator</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/allocator/paged.py ::PagedTokenToKVPoolAllocator</span><span class="ln">paged allocator: hands out KV slots by page</span></div>
   <pre><span class="kw">class</span> <span class="st">PagedTokenToKVPoolAllocator</span>(BaseTokenToKVPoolAllocator):
     <span class="cm"># An allocator managing the indices to kv cache data; output is page-aligned</span>
     <span class="kw">def</span> __init__(self, size, page_size, dtype, device, kvcache, need_sort):
@@ -2063,7 +2071,7 @@ and a new request waits behind <strong>more work</strong> before its turn (<stro
 <div class="cellgroup">
   <div class="cg-cap"><b>SGLang's main latency/throughput knobs</b>: each pushes the operating point toward "throughput" or "latency"</div>
   <div class="cells"><span class="lab mono">max_running_requests</span><span class="cell hl">concurrency cap</span><span class="sep">→</span><span class="cell q">Larger ⇒ bigger batch, tput↑, latency↑; smaller flips it (caps the batch directly)</span></div>
-  <div class="cells"><span class="lab mono">mem_fraction_static</span><span class="cell hl">HBM share for KV pool</span><span class="sep">→</span><span class="cell q">More ⇒ KV pool holds more tokens ⇒ higher concurrency fits ⇒ tput↑ (less HBM left for activations/graphs)</span></div>
+  <div class="cells"><span class="lab mono">mem_fraction_static</span><span class="cell hl">static HBM share (weights + KV pool)</span><span class="sep">→</span><span class="cell q">More ⇒ KV pool holds more tokens ⇒ higher concurrency fits ⇒ tput↑ (less HBM left for activations/graphs)</span></div>
   <div class="cells"><span class="lab mono">chunked_prefill_size</span><span class="cell hl">prefill chunk size</span><span class="sep">→</span><span class="cell q">Smaller ⇒ long prompts stall decode less ⇒ latency spikes↓ (tput slightly lower)</span></div>
   <div class="cells"><span class="lab">schedule policy (Lesson 20)</span><span class="cell">queue order</span><span class="sep">→</span><span class="cell q">Decides who in the waiting queue goes first, balancing <strong>fairness / latency / cache hit</strong></span></div>
 </div>
@@ -2098,6 +2106,13 @@ it only decides <strong>who sits at the front of the waiting queue</strong>, whi
 cache hits, and overall goodput. Put it alongside the knobs above and you hold the full toolkit for <strong>picking a point on the
 throughput-latency curve</strong>: the knobs set how big the batch and concurrency can be, the policy sets <strong>who gets loaded
 first</strong>. This is exactly why Part 5's scheduler exists — <strong>it is built to make that optimal choice on the curve for you</strong>.</p>
+
+<p>To close, put Lesson 8 back on the whole map. The Part 2 lessons are facets of one story: Lesson 4 told you why decode is
+memory-bound and why KV is managed by slots; Lessons 5–7 are three ways to lift the throughput end (batch more, pack tighter,
+reuse prefixes); and this lesson hands you the <strong>scale</strong> they all sit on. Read on with it and you'll see Part 5's
+scheduler, <strong>Part 7's memory design</strong>, and even chunked prefill and PD disaggregation are all just trying to win you a
+better operating point on the <strong>throughput-latency curve</strong>. That single ruler — "what does this design buy on the
+curve, and what does it cost?" — is the lens for everything that follows.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>

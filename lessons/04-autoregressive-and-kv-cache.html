@@ -358,6 +358,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   前面所有字重算一遍——慢到没法用。
 </div>
 
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  大模型是<strong>自回归</strong>的：每生成一个 token 都要回看<strong>全部历史</strong>。朴素做法每步重算整段、代价高到不可用；
+  <strong>KV 缓存</strong>把历史 token 只读不变的 Key/Value 存下来反复用，把每步从"重算整段"压成"只算新词对历史"。
+  代价是<strong>显存</strong>——缓存随上下文线性膨胀，正是后面<strong>分页、前缀复用、量化</strong>要对付的"大头"。
+</div>
+
 <h2>自回归生成：一次只蹦一个 token</h2>
 <p>大语言模型是<strong>自回归（autoregressive）</strong>的：它一次只预测<strong>下一个</strong> token，然后把这个新 token
 <strong>接回输入末尾</strong>，再预测下一个，如此反复，直到蹦出一个"结束符"或达到长度上限。换句话说，模型生成一句话不是
@@ -563,6 +570,14 @@ autoregressive generation, you'll see the KV cache isn't a nice-to-have — it's
   model's scratch paper: it <strong>stores the intermediate results</strong> (each word's Key/Value) so every new word
   <strong>reuses history and never recomputes it</strong>. Throw the scratch paper away (no cache) and writing each new
   letter means redoing all the previous ones — too slow to be usable.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  An LLM is <strong>autoregressive</strong>: each new token must look back at <strong>all history</strong>. Recomputing the whole
+  sequence every step is prohibitively expensive; the <strong>KV cache</strong> stores each token's read-only Key/Value once and
+  reuses it, squeezing each step from "recompute everything" to "just the new word's attention over history". The price is
+  <strong>HBM</strong> — the cache grows linearly with context, the very thing <strong>paging, prefix reuse and quantization</strong> later fight.
 </div>
 
 <h2>Autoregressive generation: one token at a time</h2>
