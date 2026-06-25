@@ -112,7 +112,7 @@ def check_lesson(fname, html):
             add("ERR", fname, f"unescaped '<' in <pre>: {m.group(0)!r}")
             break
 
-    for m in re.finditer(r"第\s*([0-9、,，~\-－\s]+?)\s*课", html):
+    for m in re.finditer(r"第\s*([0-9、,，~\-－–—\s]+?)\s*课", html):
         nums = [int(x) for x in re.findall(r"[0-9]+", m.group(1))]
         over = [n for n in nums if n == 0 or n > MAX_LESSON]
         if over:
