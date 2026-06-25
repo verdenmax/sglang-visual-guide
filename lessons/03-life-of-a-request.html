@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>03 · 一次请求的一生 / Life of a request - SGLang 图解教程</title>
+<meta name="description" content="第一部分 · 宏观全景｜一次请求的一生 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="03 · 一次请求的一生 / Life of a request - SGLang 图解教程">
+<meta property="og:description" content="第一部分 · 宏观全景｜一次请求的一生 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="03 · 一次请求的一生 / Life of a request - SGLang 图解教程">
+<meta name="twitter:description" content="第一部分 · 宏观全景｜一次请求的一生 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第一部分 · 宏观全景</span><span class="lang-en">Part 1 · The Big Picture</span></span>
+    <span class="pill">03 / 03</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第一部分 · 宏观全景</span><span class="lang-en">Part 1 · The Big Picture</span></div>
+    <h1><span class="lang-zh">一次请求的一生</span><span class="lang-en">Life of a request</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+地图已经画好，这一课我们<strong>让它动起来</strong>：跟着一条真实的 <span class="inline">generate</span> 请求，
+从你按下回车那一刻起，看它怎样<strong>穿过三个进程、被组成一批、在 GPU 上算出一个又一个 token，再流式地变回文字</strong>寄还给你。
+这是一次“一万米高空”的端到端追踪——每一站的内部细节都留给后面的专门课程放大，这里只把<strong>整条链路串成一根线</strong>，
+让你心里有一张能随时回放的“请求一生”动图。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把一条请求想成<strong>在餐厅点的一桌菜</strong>。你在<strong>柜台（TokenizerManager）</strong>报出需求，服务员把它写成标准菜单；
+  单子递进<strong>厨房调度台（Scheduler）</strong>，大厨不会一桌一桌地做，而是把同时进来的单子<strong>并成一批</strong>一起下锅；
+  <strong>灶台（GPU / ModelRunner）</strong>每“开一次火”，就让批里每桌都往前推进<strong>一道工序</strong>；上菜不是一次端齐，而是
+  <strong>一道一道地分批上（流式输出）</strong>——这正是自回归生成“一次蹦一个字”的样子。整桌菜分两段：开头<strong>备料、起锅底</strong>
+  （预填充，一次性把整段提示读进去）最费功夫，之后<strong>一道道出菜</strong>（解码，每次只算最新一个字）则是反复的小步快跑。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一条 <span class="inline">generate</span> 的全程其实就是上一课那张“三进程图”被<strong>真正走了一遍</strong>：
+  <strong>HTTP 入口 → TokenizerManager 分词 →（ZMQ）→ Scheduler 组批 → ModelRunner 前向 → Sampler 采样 →
+  DetokenizerManager 反分词 →（ZMQ）→ 流式 SSE 返回</strong>。其中最关键的认知是：<strong>中间一大段会循环很多次</strong>——
+  一次<strong>预填充</strong>把提示读进去，之后很多次<strong>解码</strong>一个字一个字往外蹦，连续批处理就在每一圈里“插队、让位”，
+  让 GPU 几乎不空转。
+</div>
+
+<h2>端到端：一条 generate 的全程</h2>
+<p>先把整条链路铺开看一眼。下面这张“追踪图”按<strong>进程边界</strong>分成三段：主进程负责<strong>进与出</strong>（分词、最后的流式返回），
+Scheduler 子进程是<strong>真正干活</strong>的中段（组批、前向、采样），Detokenizer 子进程负责把 token <strong>翻回文字</strong>。
+进程之间的每一次跨越，都是一次 <span class="inline">ZMQ</span> 消息传递：</p>
+
+<div class="trace">
+  <div class="tcap">追踪一条 <b>POST /generate</b>：从文本提示到流式文本，跨越 <b>三个进程</b>（→ 表示一次 ZMQ 传递）</div>
+  <div class="stations">
+    <div class="stn"><h5>① 主进程 · 入口</h5><div class="cellrow"><span class="vc hot">HTTP /generate</span></div><div class="cellrow"><span class="vc">TokenizerManager</span><span class="vc blue">分词</span></div><div class="tlab">文本 → token id，建 TokenizedGenerateReqInput</div></div>
+    <div class="op">ZMQ →</div>
+    <div class="stn"><h5>② 子进程 · 大脑+灶台</h5><div class="cellrow"><span class="vc">Scheduler</span><span class="vc blue">组批</span></div><div class="cellrow"><span class="vc hot">ModelRunner 前向</span><span class="vc">Sampler</span></div><div class="tlab">recv → 队列 → get_next_batch → run_batch → 下一个 token</div></div>
+    <div class="op">ZMQ →</div>
+    <div class="stn"><h5>③ 子进程 · 出口</h5><div class="cellrow"><span class="vc">DetokenizerManager</span><span class="vc blue">反分词</span></div><div class="cellrow"><span class="vc hot">SSE 流式</span><span class="vc dim">回主进程</span></div><div class="tlab">token id → 文字增量，经主进程 SSE 推回</div></div>
+  </div>
+</div>
+
+<p>顺着这张图走一遍：你 <span class="mono">POST /generate</span> 的请求先落到 <span class="mono">entrypoints/http_server.py</span> 的处理函数，
+它把负载包成一个 <span class="inline">GenerateReqInput</span>，交给 <span class="inline">TokenizerManager.generate_request</span>。
+TokenizerManager 在<strong>主进程</strong>里把文本分词成 token id、归一化参数，打包成 <span class="inline">TokenizedGenerateReqInput</span>
+（定义在 <span class="mono">managers/io_struct.py</span>），通过 ZMQ 发给 Scheduler 子进程。Scheduler 收下、排队、组批、在 GPU 上前向并采样，
+把新生成的 token 发给 Detokenizer 子进程；后者做<strong>增量反分词</strong>，把“这次新增的几个字”发回主进程，由 HTTP 层以
+<strong>SSE（text/event-stream）</strong>一段段推给你，直到遇到结束符或达到长度上限。</p>
+
+<p>这里有个容易被忽略却很要紧的设计：<strong>反分词必须是“增量”的</strong>。模型每吐一个 token，并不一定对应一个完整的汉字或单词——
+有些字要好几个 token 拼起来才完整。如果每来一个 token 就把<strong>整段</strong>已生成内容从头反分词一遍，既浪费又可能把半个字符错误地切出来。
+所以 DetokenizerManager 会记住“上次已经发到第几个字符”，每次只把<strong>真正新增、且能安全显示</strong>的那一小段文字推出去
+（源码里叫 <span class="inline">sent_offset</span>）。这就是你在前端看到答案“一个词一个词蹦出来”的真实来源：
+不是模型写完再返回，而是引擎<strong>边算边以增量的方式</strong>把文字流给你。流式（streaming）之所以能极大改善体验，
+正是因为用户在<strong>第一个 token 算出来的瞬间</strong>就开始看到回答，而不必干等整段生成结束——这对动辄几百 token 的长回答尤其关键。</p>
+
+<p>把这条全程再压缩成一句口诀，方便记忆：<strong>“主进程分词、子进程算、子进程翻、主进程吐”</strong>。请求进来在主进程被分词、登记，
+跨过一道 ZMQ 到 Scheduler 子进程被组批、前向、采样，新 token 再跨一道 ZMQ 到 Detokenizer 子进程被翻成文字，最后绕回主进程以 SSE 流出。
+注意这四段之间<strong>不是同步阻塞</strong>的——当 Scheduler 正为第 N 个 token 做前向时，Detokenizer 可能还在翻第 N-1 个 token，
+而主进程已经把第 N-2 个 token 推给了用户，三个进程像接力赛一样<strong>同时在跑不同的棒次</strong>。正是这种跨进程的流水线，
+让“一次请求的一生”在宏观上看是一条直线，在微观上却是三方<strong>并行协作</strong>的结果。带着这张端到端的动图，
+我们就准备好钻进任何一个环节去看它的内部了。</p>
+
+<h2>调度器循环：请求如何被组批执行</h2>
+<p>整条链路里，<strong>最值得先看清</strong>的是 Scheduler 这颗大脑——因为它是个<strong>永不停歇的循环</strong>。它不是“来一条算一条”，
+而是反复地做四件事：<strong>收请求 → 组下一批 → 在 GPU 上跑这一批 → 处理结果</strong>。这四步就是引擎的心跳，下面把它拆成竖直的步骤：</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>收请求 recv_requests</h4><p class="mono">Scheduler · 经 ZMQ</p><p>从 TokenizerManager 收下新到的 <span class="inline">TokenizedGenerateReqInput</span>，放进<strong>等待队列</strong>。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>组下一批 get_next_batch_to_run</h4><p class="mono">Scheduler · 决策</p><p>决定这一步该跑<strong>预填充</strong>（吃新请求的提示）还是<strong>解码</strong>（给在跑的请求各推进一个 token），并把它们拼成一个 <span class="inline">ScheduleBatch</span>。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>跑这一批 run_batch</h4><p class="mono">TpWorker · ModelRunner</p><p>在 GPU 上做一次模型前向得到 logits，再由 <span class="inline">Sampler</span> 采出每条请求的下一个 token。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>处理结果 process_batch_result</h4><p class="mono">Scheduler → Detok</p><p>把新 token 发给反分词器；没结束的请求<strong>接回新 token</strong>，下一圈继续；结束的请求<strong>让出位置</strong>。</p></div></div>
+</div>
+
+<p>这套循环在源码里短得惊人——下面就是“正常模式”的事件循环骨架，把上面四步几乎一一对应（还有个 <span class="inline">event_loop_overlap</span>
+重叠版，会在 CPU 准备下一批的同时让 GPU 先算当前批，第 21 课展开）：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::event_loop_normal</span><span class="ln">引擎的心跳</span></div>
+  <pre><span class="kw">def</span> <span class="fn">event_loop_normal</span>(self):
+    <span class="st">&quot;&quot;&quot;A normal scheduler loop.&quot;&quot;&quot;</span>
+    <span class="kw">while</span> True:
+        <span class="cm"># ① 收请求（经 ZMQ 从 TokenizerManager 来），进等待队列</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># ② 组下一批：这一步跑预填充还是解码？</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># ③ 在 GPU 上前向 + 采样</span>
+            result = self.run_batch(batch)
+            <span class="cm"># ④ 处理结果：把新 token 发给反分词器</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>这里藏着 SGLang 高吞吐的<strong>秘密入口</strong>：第 ② 步的 <span class="inline">get_next_batch_to_run</span> 每一圈都<strong>重新组批</strong>，
+所以<strong>连续批处理</strong>就在这里“插队”——新请求随时能挤进当前批，已结束的随时让位（第 5 课）；而<strong>RadixAttention</strong>
+让共享前缀的 KV 缓存只算一次（第 7 课）；组批与排队的具体策略是第 20 课，整个调度循环的源码精读是第 18 课。</p>
+
+<p>再点一个关键细节：第 ③ 步的 <span class="inline">run_batch</span> 才是<strong>唯一真正碰 GPU</strong> 的地方，它把整批请求交给
+<span class="inline">TpWorker</span> 里的 <span class="inline">ModelRunner.forward</span>，在显卡上做一次模型前向，算出每条请求“下一个 token”的
+logits，再交给 <span class="inline">Sampler</span> 按温度 / top-p / top-k 采样。注意整个循环是<strong>单线程</strong>地一圈一圈跑的——
+没有满天飞的回调，没有复杂的多线程同步，就是朴素的 <span class="inline">while True</span>。这种<strong>“一个大循环统管一切”</strong>的设计
+看似简单，却正是它好懂、好调、好优化的原因：你只要盯住这一个循环，就能回答“此刻引擎在干什么、下一步会干什么”。
+而那个重叠版的 <span class="inline">event_loop_overlap</span> 之所以更快，是因为它把第 ③ 步“算这一批”和第 ④ 步“处理上一批结果”
+错开成流水线，让 GPU 在算的同时 CPU 已经在准备——但骨架仍是同一个循环，理解了 normal 版，overlap 版就只是它的“加速变体”。</p>
+
+<h2>解码循环：为什么要转很多圈</h2>
+<p>很多人对“一条请求”最大的误解，是以为模型“一口气把答案写完”。其实<strong>生成是逐 token、自回归</strong>的：算出一个 token、把它接回输入、
+再算下一个，如此反复，直到模型吐出结束符或到达最大长度。所以第 2~4 步会<strong>循环几十上百次</strong>，每一圈只往前挪一个字：</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">收/组批</div><div class="nd">recv + get_next_batch</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">前向</div><div class="nd">ModelRunner · logits</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">采样</div><div class="nd">Sampler · 下一个 token</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">未结束？</div><div class="nd">接回 token，回到组批</div></div>
+</div>
+
+<p>正因为每一圈都要重新组批，连续批处理才有“插队”的机会：<strong>一条新请求不必等当前这批全部跑完</strong>，下一圈就能加入；
+一条已结束的请求也会立刻让出它在批里的位置，省下的算力马上分给别人。这就是为什么 SGLang 的 GPU 利用率能压得这么满——
+循环的<strong>每一步</strong>都是一次重新洗牌的机会，而不是“一批跑到死”。</p>
+
+<p>顺便点破一个新手常踩的坑：这里的“批（batch）”和训练时的“batch”<strong>不是一回事</strong>。训练时一个 batch 里的样本长度往往被对齐、一起进一起出；
+而推理服务里，每条请求<strong>进来的时机不同、要生成的长度也不同</strong>——有的刚发来要做预填充，有的已经吐了几十个 token 正在解码，有的马上就要结束。
+连续批处理（continuous batching，也叫 in-flight batching）的精髓，就是<strong>不强求大家步调一致</strong>：每一步都按当前在场的请求<strong>动态拼一个批</strong>，
+来了就加、走了就撤。也正因如此，调度器的循环必须<strong>足够快</strong>——它每一圈的开销都会乘以“循环很多次”而被放大，这正是“零开销重叠调度器”
+（第 21 课）要把 CPU 组批开销藏进 GPU 计算时间里的原因。把“逐 token 循环”和“每圈重组批”这两件事叠在一起想，你就明白了
+SGLang 吞吐与延迟优化的<strong>所有故事，几乎都发生在这个循环里</strong>。</p>
+
+<h2>预填充 vs 解码：两种不同的活</h2>
+<p>循环里其实混着<strong>两种性质完全不同</strong>的步骤，分清它们是理解后面所有性能课的前提。<strong>预填充（prefill）</strong>是请求刚进来时，
+把<strong>整段提示一次性</strong>读进模型、把它的 KV 缓存填好——一段提示有几百上千个 token，要并行算一大片，是<strong>计算密集（compute-bound）</strong>的，
+但通常<strong>只做一次</strong>。<strong>解码（decode）</strong>是之后每一圈只算<strong>最新的那一个 token</strong>，计算量很小，瓶颈在于反复<strong>搬运庞大的 KV 缓存</strong>，
+是<strong>访存密集（memory-bound）</strong>的，而且要<strong>循环很多次</strong>。下面这张时间线把两者并排对照：</p>
+
+<div class="timeline">
+  <div class="lane"><div class="lane-label">预填充</div><div class="tslot now">读入整段提示</div><div class="tslot span">一次并行算一大片 · 计算密集 · 通常只做一次</div></div>
+  <div class="lane"><div class="lane-label">解码</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot now">… 循环到结束</div></div>
+  <div class="lane"><div class="lane-label">瓶颈</div><div class="tslot span">预填充卡在算力（矩阵乘）</div><div class="tslot span">解码卡在显存带宽（搬 KV）</div></div>
+</div>
+
+<p>两者特性不同，调度策略也不同：把太长的提示一次喂进去会撑爆显存，于是有<strong>分块预填充（chunked prefill，第 22 课）</strong>
+把长提示切片喂；预填充和解码抢同一张卡又会互相拖累，于是 SGLang 甚至能把两者<strong>拆到不同机器</strong>上做
+（<strong>预填充-解码分离</strong>）。但在最朴素的单机情形里，你只要记住这条主线：<strong>一条请求 = 一次预填充 + 很多次解码</strong>，
+而连续批处理让无数条这样的请求在同一张卡上<strong>错峰流水</strong>。这就是“一次请求的一生”的全部骨架——后面的每一课，
+都是在给这根骨架的某一节添上血肉。</p>
+
+<p>为什么一定要分清这两段？因为它们决定了后面几乎所有性能优化的<strong>用力方向</strong>。预填充是计算密集的，优化它要在
+<strong>算力</strong>上做文章：更高效的注意力内核、更好的并行切分；解码是访存密集的，优化它要在<strong>显存</strong>上做文章：
+KV 缓存怎么排布、怎么分页、怎么压缩、怎么复用共享前缀（这正是 KV 缓存第 4、29–32 课，分页注意力第 6 课，RadixAttention 第 7 课的主战场）。
+一个常见的直觉误区是“以为生成的全部成本都在‘想答案’”，其实对长对话来说，<strong>反复搬运越来越长的 KV 缓存</strong>才是解码阶段真正的开销大头。
+所以当你日后看到各种“省显存、提带宽”的花式技巧时，回到这张预填充-解码时间线，你就明白它们到底在<strong>救哪一段的命</strong>。
+把这条主线刻进脑子里：<strong>预填充一次、解码千百次；预填充拼算力、解码拼显存</strong>——它会是你理解整个第二部分的钥匙。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>全程</strong>：HTTP <span class="mono">/generate</span> → TokenizerManager 分词 →（ZMQ）→ Scheduler 组批 → ModelRunner 前向 → Sampler 采样 → DetokenizerManager 反分词 →（ZMQ）→ SSE 流式返回。</li>
+    <li><strong>进程边界</strong>：分词与返回在<strong>主进程</strong>，组批+前向+采样在 <strong>Scheduler 子进程</strong>，反分词在 <strong>Detokenizer 子进程</strong>；每次跨进程都是一次 ZMQ 传递。</li>
+    <li><strong>调度心跳</strong>：<span class="inline">event_loop_normal</span> 反复做 recv_requests → get_next_batch_to_run → run_batch → process_batch_result。</li>
+    <li><strong>循环本质</strong>：自回归逐 token，第 2~4 步循环很多次；连续批处理在每一圈“插队/让位”，GPU 几乎不空转。</li>
+    <li><strong>两段</strong>：预填充（读整段提示，计算密集，通常一次）vs 解码（每次一个 token，访存密集，循环多次）。一条请求 = 一次预填充 + 很多次解码。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在调度器的事件循环里，连续批处理“插队”的能力主要来自哪一步？</div>
+  <ol class="opts">
+    <li>process_batch_result：它把整批一起结束再开下一批</li>
+    <li>recv_requests：它一次性收完所有请求后才开始算</li>
+    <li>on_idle：它在空闲时预先生成 token</li>
+    <li>get_next_batch_to_run：它每一圈都重新组批，所以新请求随时能加入、已结束的随时让位，GPU 几乎不空转</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。事件循环每一圈都调用 get_next_batch_to_run 重新组批，这正是“插队/让位”的发生点：新请求下一圈即可加入，结束的请求立刻让出槽位，所以批次始终接近满载（第 5、20 课）。这是 SGLang 高 GPU 利用率的核心机制。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 关于预填充（prefill）和解码（decode）两个阶段，下面哪种说法最准确？</div>
+  <ol class="opts">
+    <li>预填充和解码完全一样，只是名字不同</li>
+    <li>两个阶段都不碰 KV 缓存</li>
+    <li>解码计算密集、只做一次；预填充访存密集、循环很多次</li>
+    <li>预填充把整段提示一次性读入、计算密集、通常只做一次；解码每次只算最新一个 token、访存密集、循环很多次。一条请求 = 一次预填充 + 很多次解码</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。预填充把几百上千个提示 token 并行算成一大片、把 KV 缓存填好，是计算密集的、通常只做一次；解码每圈只算最新一个 token，瓶颈在反复搬运越来越长的 KV 缓存，是访存密集的、要循环很多次。分清这两段，是理解后续所有显存/带宽优化的钥匙（第 6、22、29–32 课）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么前端看到的回答是“一个词一个词蹦出来”的流式效果？</div>
+  <ol class="opts">
+    <li>因为网络带宽不足，只能一段段传</li>
+    <li>因为模型先把整段答案算完，再人为切成小段慢慢显示</li>
+    <li>因为前端 JavaScript 故意加了打字机动画</li>
+    <li>因为生成是自回归逐 token 的，DetokenizerManager 做增量反分词，只把这次新增、能安全显示的文字推回，经主进程 SSE 流式发出，无需等整段生成完</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。生成本身就是逐 token 的：每算出一个 token，Detokenizer 就把“真正新增、能安全显示”的那一小段（用 sent_offset 记住进度）增量地翻成文字，经主进程以 SSE 推给用户。所以用户在第一个 token 算出的瞬间就开始看到回答，而不是等整段生成结束——这对长回答的体验至关重要。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>把一条 generate 请求的全程画成一张图，标出三个进程的边界和每一次 ZMQ 传递。然后解释：当 Scheduler 正在为第 N 个 token 做前向时，Detokenizer 和主进程可能分别在做什么？这种跨进程流水线如何同时提升吞吐与首 token 延迟体验？</li>
+    <li>一个客服系统里，请求们的提示长度差异很大、到达时机也不同。结合“每圈重新组批”的事件循环与“预填充 vs 解码”的区别，说说为什么调度器循环必须足够快，以及把太长的提示一次喂进去会带来什么问题、SGLang 用什么手段缓解（提示：分块预填充）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+The map is drawn; this lesson <strong>brings it to life</strong>: we follow a real <span class="inline">generate</span> request from
+the moment you hit enter, watching it <strong>cross three processes, get merged into a batch, compute one token after another on the
+GPU, then turn back into text</strong> streamed home to you. This is a "10,000-foot" end-to-end trace — each station's internals are
+left to later dedicated lessons; here we just <strong>string the whole path into one line</strong>, so you carry a replayable mental
+animation of a "request's life".
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of one request as <strong>a table's worth of dishes ordered at a restaurant</strong>. You state your needs at the
+  <strong>counter (TokenizerManager)</strong> and the server writes a standard menu ticket; the ticket goes into the
+  <strong>kitchen dispatch (Scheduler)</strong>, where the chef does not cook table by table but <strong>merges tickets that arrive
+  together into one batch</strong>; each time the <strong>stove (GPU / ModelRunner)</strong> "fires once", every table in the batch
+  advances <strong>one step</strong>; dishes are not served all at once but <strong>course by course (streaming output)</strong> —
+  exactly how autoregressive generation "pops one word at a time". The whole meal has two phases: the opening
+  <strong>prep and base stock</strong> (prefill, reading the entire prompt in at once) takes the most effort, after which
+  <strong>serving course by course</strong> (decode, computing only the newest word each time) is a repeated quick small step.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  A <span class="inline">generate</span>'s whole journey is just last lesson's "three-process diagram" <strong>actually walked
+  once</strong>: <strong>HTTP entry → TokenizerManager tokenize → (ZMQ) → Scheduler batch → ModelRunner forward → Sampler sample →
+  DetokenizerManager detokenize → (ZMQ) → streaming SSE back</strong>. The crucial insight: <strong>the big middle stretch loops many
+  times</strong> — one <strong>prefill</strong> reads the prompt in, then many <strong>decodes</strong> pop out word by word, and
+  continuous batching "cuts in / yields" on every turn so the GPU almost never idles.
+</div>
+
+<h2>End-to-end: a generate's whole journey</h2>
+<p>First lay the whole path out at a glance. The trace below is split by <strong>process boundary</strong> into three segments: the
+main process handles <strong>in and out</strong> (tokenize, and the final streaming return), the Scheduler subprocess is the
+<strong>real-work</strong> middle (batch, forward, sample), and the Detokenizer subprocess turns tokens <strong>back into text</strong>.
+Every crossing between processes is one <span class="inline">ZMQ</span> message:</p>
+
+<div class="trace">
+  <div class="tcap">Tracing one <b>POST /generate</b>: from text prompt to streamed text, across <b>three processes</b> (→ is one ZMQ hop)</div>
+  <div class="stations">
+    <div class="stn"><h5>① Main · entry</h5><div class="cellrow"><span class="vc hot">HTTP /generate</span></div><div class="cellrow"><span class="vc">TokenizerManager</span><span class="vc blue">tokenize</span></div><div class="tlab">text → token ids, build TokenizedGenerateReqInput</div></div>
+    <div class="op">ZMQ →</div>
+    <div class="stn"><h5>② Subprocess · brain+stove</h5><div class="cellrow"><span class="vc">Scheduler</span><span class="vc blue">batch</span></div><div class="cellrow"><span class="vc hot">ModelRunner forward</span><span class="vc">Sampler</span></div><div class="tlab">recv → queue → get_next_batch → run_batch → next token</div></div>
+    <div class="op">ZMQ →</div>
+    <div class="stn"><h5>③ Subprocess · exit</h5><div class="cellrow"><span class="vc">DetokenizerManager</span><span class="vc blue">detokenize</span></div><div class="cellrow"><span class="vc hot">SSE stream</span><span class="vc dim">via main</span></div><div class="tlab">token ids → text delta, pushed back as SSE via main</div></div>
+  </div>
+</div>
+
+<p>Walk it through: your <span class="mono">POST /generate</span> first lands in the handler in
+<span class="mono">entrypoints/http_server.py</span>, which wraps the payload into a <span class="inline">GenerateReqInput</span> and hands it
+to <span class="inline">TokenizerManager.generate_request</span>. In the <strong>main process</strong>, TokenizerManager tokenizes the
+text into token ids, normalizes params, packs a <span class="inline">TokenizedGenerateReqInput</span> (defined in
+<span class="mono">managers/io_struct.py</span>), and sends it over ZMQ to the Scheduler subprocess. The Scheduler receives, queues,
+batches, forwards and samples on the GPU, and sends newly generated tokens to the Detokenizer subprocess; the latter does
+<strong>incremental detokenization</strong>, sends "the few new characters this time" back to the main process, and the HTTP layer
+pushes them to you piece by piece as <strong>SSE (text/event-stream)</strong>, until a stop token or the length limit.</p>
+
+<p>Here is an easily overlooked but important design: <strong>detokenization must be "incremental"</strong>. Each token the model emits
+does not necessarily map to a complete character or word — some characters take several tokens to form. Re-detokenizing the
+<strong>entire</strong> generated text from scratch on every new token would be wasteful and could wrongly slice a half character. So the
+DetokenizerManager remembers "how many characters were already sent" and each time pushes only the small slice that is
+<strong>genuinely new and safe to display</strong> (called <span class="inline">sent_offset</span> in the source). That is the real
+source of answers appearing "word by word" in your UI: not the model finishing then returning, but the engine streaming text
+<strong>incrementally as it computes</strong>. Streaming improves experience so much precisely because the user starts seeing the answer
+<strong>the instant the first token is computed</strong>, instead of waiting for the whole generation to finish — especially crucial for
+long answers of hundreds of tokens.</p>
+
+<p>Compress the whole path into one mnemonic: <strong>"main tokenizes, subprocess computes, subprocess translates, main emits"</strong>.
+A request enters and is tokenized and registered in the main process, crosses one ZMQ hop to the Scheduler subprocess to be batched,
+forwarded and sampled, the new token crosses another ZMQ hop to the Detokenizer subprocess to be turned into text, and finally loops
+back to the main process to stream out as SSE. Note these four stages are <strong>not synchronously blocking</strong> — while the
+Scheduler forwards token N, the Detokenizer may still be translating token N-1, and the main process has already pushed token N-2 to the
+user; the three processes run <strong>different relay legs at the same time</strong>. It is exactly this cross-process pipeline that makes
+"a request's life" look like a straight line at the macro level yet, microscopically, the result of three parties <strong>collaborating
+in parallel</strong>. Carrying this end-to-end animation, we are ready to dive into any stage and see its internals.</p>
+
+<h2>The scheduler loop: how requests get batched and run</h2>
+<p>Across the whole path, the thing <strong>most worth seeing first</strong> is the Scheduler brain — because it is a
+<strong>never-stopping loop</strong>. It does not "compute one as each arrives" but repeatedly does four things: <strong>receive
+requests → form the next batch → run that batch on the GPU → process results</strong>. These four are the engine's heartbeat;
+here they are unrolled as vertical steps:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests</h4><p class="mono">Scheduler · via ZMQ</p><p>Receive newly arrived <span class="inline">TokenizedGenerateReqInput</span> from TokenizerManager and put it in the <strong>waiting queue</strong>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>get_next_batch_to_run</h4><p class="mono">Scheduler · decide</p><p>Decide whether this step runs <strong>prefill</strong> (eat new requests' prompts) or <strong>decode</strong> (advance running requests by one token each), and assemble a <span class="inline">ScheduleBatch</span>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>run_batch</h4><p class="mono">TpWorker · ModelRunner</p><p>Run one model forward on the GPU for logits, then <span class="inline">Sampler</span> picks each request's next token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>process_batch_result</h4><p class="mono">Scheduler → Detok</p><p>Send new tokens to the detokenizer; unfinished requests <strong>append the new token</strong> and loop on; finished ones <strong>yield their slot</strong>.</p></div></div>
+</div>
+
+<p>This loop is astonishingly short in the source — below is the "normal mode" event-loop skeleton, mapping almost one-to-one to the
+four steps above (there is also an <span class="inline">event_loop_overlap</span> variant that lets the GPU run the current batch while
+the CPU prepares the next, expanded in Lesson 21):</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::event_loop_normal</span><span class="ln">the engine's heartbeat</span></div>
+  <pre><span class="kw">def</span> <span class="fn">event_loop_normal</span>(self):
+    <span class="st">&quot;&quot;&quot;A normal scheduler loop.&quot;&quot;&quot;</span>
+    <span class="kw">while</span> True:
+        <span class="cm"># 1) receive requests (via ZMQ from TokenizerManager), enqueue</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># 2) form the next batch: prefill or decode this step?</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># 3) forward + sample on the GPU</span>
+            result = self.run_batch(batch)
+            <span class="cm"># 4) process results: send new tokens to the detokenizer</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>Here is the <strong>secret entrance</strong> to SGLang's throughput: step 2's <span class="inline">get_next_batch_to_run</span>
+<strong>re-forms the batch every turn</strong>, so <strong>continuous batching</strong> "cuts in" right here — a new request can squeeze
+into the current batch any turn, a finished one yields any turn (Lesson 5); <strong>RadixAttention</strong> computes a shared prefix's
+KV cache only once (Lesson 7); the concrete batching/queuing policy is Lesson 20, and a close source read of the whole loop is Lesson 18.</p>
+
+<p>One more key detail: step 3's <span class="inline">run_batch</span> is the <strong>only place that actually touches the GPU</strong>. It
+hands the whole batch to <span class="inline">ModelRunner.forward</span> inside the <span class="inline">TpWorker</span>, runs one model
+forward on the card to get each request's "next token" logits, then passes them to the <span class="inline">Sampler</span> to sample by
+temperature / top-p / top-k. Note the whole loop runs <strong>single-threaded</strong>, turn by turn — no callbacks flying around, no
+complex multi-thread synchronization, just a plain <span class="inline">while True</span>. This <strong>"one big loop governs
+everything"</strong> design looks simple but is exactly why it is easy to understand, debug and optimize: watch this one loop and you
+can answer "what is the engine doing now, what will it do next". The overlap variant <span class="inline">event_loop_overlap</span> is
+faster because it staggers step 3 "run this batch" and step 4 "process the last batch's result" into a pipeline, so the CPU prepares
+while the GPU computes — but the skeleton is the same loop; once you get the normal version, overlap is just its "accelerated variant".</p>
+
+<h2>The decode loop: why it goes around so many times</h2>
+<p>The biggest misconception about "one request" is that the model "writes the whole answer in one go". In fact <strong>generation is
+token-by-token, autoregressive</strong>: compute one token, append it to the input, compute the next, and so on until the model emits a
+stop token or hits the max length. So steps 2–4 <strong>loop tens to hundreds of times</strong>, advancing one word per turn:</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">recv/batch</div><div class="nd">recv + get_next_batch</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">forward</div><div class="nd">ModelRunner · logits</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">sample</div><div class="nd">Sampler · next token</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">unfinished?</div><div class="nd">append token, back to batch</div></div>
+</div>
+
+<p>Because the batch is re-formed every turn, continuous batching gets its chance to "cut in": <strong>a new request need not wait for
+the current batch to finish</strong> — it can join next turn; a finished request immediately yields its slot in the batch, and the
+freed compute goes to others at once. That is why SGLang keeps GPU utilization so high — <strong>every step</strong> of the loop is a
+chance to reshuffle, rather than "run one batch to the bitter end".</p>
+
+<p>One trap beginners hit: this "batch" is <strong>not the same</strong> as a training "batch". In training, samples in a batch are often
+length-aligned and go in and out together; in inference serving, each request <strong>arrives at a different time and generates a
+different length</strong> — one just sent in and needs prefill, one has emitted dozens of tokens and is decoding, one is about to finish.
+The essence of continuous batching (also called in-flight batching) is to <strong>not force everyone in lockstep</strong>: each step
+<strong>dynamically assembles a batch</strong> from whoever is present, adding arrivals and dropping departures. That is also why the
+scheduler loop must be <strong>fast enough</strong> — its per-turn overhead gets multiplied by "loops many times", which is exactly why
+the zero-overhead overlap scheduler (Lesson 21) hides CPU batching overhead behind GPU compute. Stack "token-by-token loop" and
+"re-batch every turn" together and you see that <strong>almost the entire story of SGLang's throughput and latency lives in this loop</strong>.</p>
+
+<h2>Prefill vs decode: two different jobs</h2>
+<p>The loop actually mixes <strong>two completely different kinds</strong> of step, and telling them apart is the prerequisite for every
+later performance lesson. <strong>Prefill</strong> happens when a request just arrives: read the <strong>entire prompt in at once</strong>
+and fill its KV cache — a prompt has hundreds to thousands of tokens computed in parallel as a big slab, so it is
+<strong>compute-bound</strong>, but usually done <strong>only once</strong>. <strong>Decode</strong> is every later turn computing only
+<strong>the single newest token</strong>; the compute is tiny, the bottleneck is repeatedly <strong>moving the huge KV cache</strong>, so
+it is <strong>memory-bound</strong> and <strong>loops many times</strong>. The timeline below puts them side by side:</p>
+
+<div class="timeline">
+  <div class="lane"><div class="lane-label">Prefill</div><div class="tslot now">read whole prompt</div><div class="tslot span">one big parallel slab · compute-bound · usually once</div></div>
+  <div class="lane"><div class="lane-label">Decode</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot now">… loop to end</div></div>
+  <div class="lane"><div class="lane-label">Bottleneck</div><div class="tslot span">prefill is bound by compute (matmul)</div><div class="tslot span">decode is bound by memory bandwidth (KV moves)</div></div>
+</div>
+
+<p>Their natures differ, so do their scheduling strategies: feeding too long a prompt in one shot blows up memory, hence
+<strong>chunked prefill (Lesson 22)</strong> slices long prompts; prefill and decode fighting over the same card drag each other down,
+so SGLang can even split them across <strong>different machines</strong> (<strong>prefill-decode disaggregation</strong>). But in the
+plainest single-machine case, just remember this throughline: <strong>one request = one prefill + many decodes</strong>, and continuous
+batching lets countless such requests <strong>pipeline out of phase</strong> on the same card. That is the entire skeleton of a
+"request's life" — every later lesson adds flesh to one joint of this skeleton.</p>
+
+<p>Why insist on telling the two phases apart? Because they decide the <strong>direction of effort</strong> for almost every later
+optimization. Prefill is compute-bound, so optimizing it works on <strong>compute</strong>: more efficient attention kernels, better
+parallel partitioning; decode is memory-bound, so optimizing it works on <strong>memory</strong>: how the KV cache is laid out, paged,
+compressed, and reused across shared prefixes (the home turf of KV cache in Lessons 4 and 29–32, paged attention in Lesson 6, and
+RadixAttention in Lesson 7). A common intuition trap is "thinking all the cost is in thinking up the answer", when in fact for long
+conversations <strong>repeatedly moving an ever-growing KV cache</strong> is the real bulk of decode-phase cost. So when you later meet
+all kinds of "save memory, lift bandwidth" tricks, return to this prefill–decode timeline and you will see exactly <strong>which phase
+they are saving</strong>. Carve this throughline into your mind: <strong>prefill once, decode hundreds of times; prefill races on
+compute, decode races on memory</strong> — it is the key to understanding all of Part 2.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Whole path</strong>: HTTP <span class="mono">/generate</span> → TokenizerManager tokenize → (ZMQ) → Scheduler batch → ModelRunner forward → Sampler sample → DetokenizerManager detokenize → (ZMQ) → SSE streaming back.</li>
+    <li><strong>Process boundaries</strong>: tokenize and return in the <strong>main process</strong>, batch+forward+sample in the <strong>Scheduler subprocess</strong>, detokenize in the <strong>Detokenizer subprocess</strong>; each crossing is one ZMQ hop.</li>
+    <li><strong>Scheduler heartbeat</strong>: <span class="inline">event_loop_normal</span> repeatedly does recv_requests → get_next_batch_to_run → run_batch → process_batch_result.</li>
+    <li><strong>Loop essence</strong>: autoregressive token-by-token, steps 2–4 loop many times; continuous batching "cuts in / yields" each turn so the GPU barely idles.</li>
+    <li><strong>Two phases</strong>: prefill (read the whole prompt, compute-bound, usually once) vs decode (one token per turn, memory-bound, many loops). One request = one prefill + many decodes.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In the scheduler's event loop, where does continuous batching's ability to cut in mainly come from?</div>
+  <ol class="opts">
+    <li>process_batch_result: it ends the whole batch together before starting the next</li>
+    <li>recv_requests: it gathers all requests once before computing anything</li>
+    <li>on_idle: it pre-generates tokens while idle</li>
+    <li>get_next_batch_to_run: it re-forms the batch every turn, so a new request can join and a finished one yield any turn, keeping the GPU busy</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Each loop turn calls get_next_batch_to_run to re-form the batch — exactly where cut-in/yield happens: a new request joins next turn, a finished one frees its slot at once, so the batch stays near full (Lessons 5, 20). This is the core of SGLang's high GPU utilization.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which statement about the prefill and decode phases is most accurate?</div>
+  <ol class="opts">
+    <li>Prefill and decode are identical, just named differently</li>
+    <li>Neither phase touches the KV cache</li>
+    <li>Decode is compute-bound and done once; prefill is memory-bound and loops many times</li>
+    <li>Prefill reads the whole prompt at once, is compute-bound, usually done once; decode computes only the newest token each turn, is memory-bound, loops many times. One request = one prefill + many decodes</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Prefill computes hundreds-to-thousands of prompt tokens in parallel as a slab and fills the KV cache — compute-bound, usually once; decode computes only the newest token per turn, bottlenecked by moving an ever-growing KV cache — memory-bound, looping many times. Telling them apart is the key to all later memory/bandwidth optimizations (Lessons 6, 22, 29–32).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does the answer appear word by word as a streaming effect in the frontend?</div>
+  <ol class="opts">
+    <li>Because of insufficient bandwidth, it can only send in pieces</li>
+    <li>Because the model finishes the whole answer first, then artificially slices it to display slowly</li>
+    <li>Because the frontend JavaScript deliberately adds a typewriter animation</li>
+    <li>Because generation is autoregressive token-by-token; the DetokenizerManager does incremental detokenization, pushing only the newly added, safe-to-show text back via the main process as SSE, without waiting for the whole generation</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Generation is inherently token-by-token: as each token is produced, the Detokenizer incrementally turns the genuinely new, safe-to-show slice (tracking progress via sent_offset) into text and the main process streams it as SSE. The user sees the answer the instant the first token is computed, not after the whole generation — crucial for long-answer experience.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Draw a generate request's whole path, marking the three process boundaries and each ZMQ hop. Then explain: while the Scheduler forwards token N, what might the Detokenizer and the main process each be doing? How does this cross-process pipeline improve both throughput and first-token latency experience?</li>
+    <li>In a customer-service system, requests vary widely in prompt length and arrival time. Using the re-batch-every-turn loop and the prefill-vs-decode distinction, explain why the scheduler loop must be fast, what problem feeding one very long prompt at once causes, and how SGLang mitigates it (hint: chunked prefill).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="02-project-map.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">项目全景地图</span><span class="lang-en">The project map</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

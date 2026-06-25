@@ -49,6 +49,10 @@ def head_meta(title, description, og_type="website"):
 PAGES = [
     ("01-what-is-sglang.html", "SGLang 是什么", "What is SGLang",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("02-project-map.html", "项目全景地图", "The project map",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("03-life-of-a-request.html", "一次请求的一生", "Life of a request",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
 ]
 
 
@@ -500,6 +504,10 @@ def page(filename, content, home_href="../index.html"):
 SUBTITLES = {
     "01-what-is-sglang.html": ("高性能 LLM/多模态服务框架 · 前端语言 + 运行时引擎 · 为何快",
                                "high-perf LLM/multimodal serving · frontend DSL + runtime engine · why it's fast"),
+    "02-project-map.html": ("两半：前端 DSL + 运行时引擎 · srt 分层 · 三进程 · ZMQ",
+                            "two halves: frontend DSL + runtime · srt layers · three processes · ZMQ"),
+    "03-life-of-a-request.html": ("端到端追踪一条 generate · 预填充 + 多次解码 · 进程边界",
+                                  "end-to-end trace of one generate · prefill + many decodes · process boundaries"),
 }
 
 

@@ -333,10 +333,12 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 1 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 3 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
+  <li>The project map</li>
+  <li>Life of a request</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -626,6 +628,514 @@ request".</p>
   <ul>
     <li>Suppose you deploy a customer-service bot: thousands of conversations all begin with the same long system prompt + company knowledge, differing only in the final user question. Using continuous batching and RadixAttention, explain why an engine like SGLang saves so much compute versus running each request independently. Which designs matter here?</li>
     <li>SGLang stresses running from a single GPU to large clusters across NVIDIA/AMD/TPU/NPU/CPU. Why should a serving engine treat portability + scalability as first-class goals? What does that demand of its internal layering (frontend DSL / runtime / operator kernels)?</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>The project map</h1>
+
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson we sketched SGLang from 10,000 feet: it is an <strong>inference serving engine</strong> made of two halves,
+a <strong>frontend language</strong> and a <strong>runtime engine</strong>. This lesson comes down to ground level and draws a
+<strong>map of the whole repository</strong>: which two big rooms the code lives in, how the runtime half splits into smaller
+departments, how that code <strong>forks into several processes</strong> at run time, and what those processes use to talk.
+After this, whenever you dive into any directory you will know <strong>where you are on the map</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture SGLang as a <strong>working office building</strong>. The <strong>front desk on floor one (TokenizerManager)</strong>
+  greets visitors and turns spoken requests into standard work orders; the <strong>dispatch room on floor two (Scheduler)</strong>
+  is the brain that decides which orders to <strong>merge into one batch</strong>, who goes first, and how to queue — but the
+  dispatcher <strong>does no hands-on work</strong>; the ones actually turning bolts on the line are the
+  <strong>technicians (TpWorker / ModelRunner)</strong> who tend the <strong>expensive machines in the machine room (GPUs and
+  operator kernels)</strong>; when a job is done, <strong>shipping &amp; packing (DetokenizerManager)</strong> translates the
+  half-product into a finished item the customer can read and mails it back. The key: <strong>front desk, dispatch+floor, and
+  shipping are three independent departments (processes)</strong> that pass work orders via the <strong>internal mail system
+  (ZMQ)</strong>, so none blocks another — that is how reception and the shop floor run <strong>at the same time</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The whole repo can first be split crudely into <strong>two halves plus a foundation</strong>:
+  <span class="mono">python/sglang/lang/</span> is the <strong>frontend DSL</strong> (how you "express" an LLM program),
+  <span class="mono">python/sglang/srt/</span> is the <strong>runtime engine</strong> (srt = <strong>SGLang RunTime</strong>, how it
+  "executes" fast and cheaply); underneath both sit <span class="mono">sgl-kernel/</span> (ahead-of-time compiled C++/CUDA ops)
+  and <span class="mono">python/sglang/jit_kernel/</span> (lightweight just-in-time kernels). <strong>The star of this guide is
+  srt/</strong> — internally it splits into a dozen-odd sub-packages, the base map for every later lesson.
+</div>
+
+<h2>The repo's two halves: lang/ and srt/</h2>
+<p>Beginners opening the repo get scared by dozens of directories, but <strong>one first cut into two halves</strong> makes it
+clear: one half teaches you <strong>how to write an LLM program</strong>, the other <strong>runs requests fast and cheaply</strong>.
+The former is a convenience layer for app authors; the latter is the source of performance and what we dig into. The name
+<span class="inline">SGLang</span> refers to both halves, but their code size, complexity, and distance from the hardware differ entirely.</p>
+
+<div class="cols">
+  <div class="col"><h4>Frontend DSL · <span class="mono">python/sglang/lang/</span></h4><p>Offers <span class="inline">gen</span> (generate a span),
+  <span class="inline">fork</span> (spawn parallel branches), <span class="inline">join</span> (merge results), plus
+  <span class="mono">system/user/assistant</span> roles and structured output. It makes "multi-step, parallel, constrained" prompt
+  logic read like an ordinary program. Key files: <span class="mono">api.py</span>, <span class="mono">ir.py</span>,
+  <span class="mono">interpreter.py</span>. It asks <strong>"how do I write this LLM program?"</strong></p></div>
+  <div class="col"><h4>Runtime engine · <span class="mono">python/sglang/srt/</span></h4><p>The real serving engine: it receives requests and does
+  <strong>tokenize → schedule → model forward → sample → detokenize</strong>, with RadixAttention, continuous batching, paged
+  attention, and tensor/pipeline/expert parallelism built in. It asks <strong>"how do I execute requests fast and cheaply?"</strong>
+  From this lesson on we mostly live in this half; it is also <strong>the thickest stack of code</strong> in the repo.</p></div>
+</div>
+
+<p>Keep this dividing line: <strong>lang/ expresses, srt/ executes</strong>. You can use srt/ alone (hit the HTTP endpoint or use the
+<span class="inline">Engine</span> class) without writing any frontend; conversely, when the frontend says the parallel structure
+explicitly, it helps the backend spot batchable, cacheable opportunities — exactly the logic behind Lesson 1's "critique the same
+passage from three angles" example.</p>
+
+<p>Why bind a "language" and a "runtime" in one repo? Because they are <strong>two ends of the same thing</strong>: the more clearly the
+frontend can express "which calls can run in parallel, which prefixes are shared", the more chances the backend has to
+<strong>cash those structures into real speedups</strong>. Many other frameworks do only the runtime and leave the frontend for users to
+hand-stitch, so the scheduler receives a pile of isolated requests "with no visible relationships" and misses batching and caching
+opportunities. SGLang puts both ends together precisely so the information between "express" and "execute" is <strong>not lost in
+transit</strong>. That is also why the <span class="inline">Lang</span> in the name is not just "language" but "the kind of language the
+runtime can understand" — a design philosophy that sets it apart from a plain inference server. For a beginner, though,
+<strong>remembering that srt/ is the star is enough</strong>: the frontend is icing, while the runtime is this engine's real engine bay,
+and the object this guide takes apart layer by layer.</p>
+
+<h2>The runtime's package layout: from entry to kernel</h2>
+<p>Slice <span class="mono">srt/</span> vertically and you see a stack of <strong>layers</strong>: at the top the entry that greets
+clients, below it the decision-making brain, below that the layer that actually computes on the GPU, and at the bottom the
+operator kernels hugging the hardware. This layer diagram is the <strong>master map</strong> of the whole guide — nearly every
+later lesson zooms into one of these layers.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Entry</span><span class="name">entrypoints/</span></div><div class="ld">The public facade: <span class="mono">http_server.py</span> (OpenAI-compatible APIs + native <span class="mono">/generate</span>), <span class="mono">engine.py</span> (offline <span class="mono">Engine</span> class), <span class="mono">launch_server.py</span>. Lessons 13–17.</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">Ingress</span><span class="name">managers/ · translators</span></div><div class="ld"><span class="mono">tokenizer_manager.py</span> tokenizes, <span class="mono">detokenizer_manager.py</span> detokenizes — converting text and token ids both ways, the engine's "in/out ports".</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">Brain</span><span class="name">managers/ · Scheduler</span></div><div class="ld"><span class="mono">scheduler.py</span> decides who joins which batch and when to forward, manages KV cache and queues. Lessons 18–23 cover scheduling.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Execute</span><span class="name">model_executor/ · model_loader/ · models/</span></div><div class="ld"><span class="mono">ModelRunner</span> runs the model forward on the GPU; <span class="mono">model_loader/</span> loads weights, <span class="mono">models/</span> holds model definitions. Lessons 24–28.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Sample</span><span class="name">sampling/ · constrained/</span></div><div class="ld">Pick the next token from logits by temperature/top-p/top-k; <span class="mono">constrained/</span> enforces structured output (JSON, regex, etc.).</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Ops</span><span class="name">layers/ · mem_cache/</span></div><div class="ld"><span class="mono">layers/</span> holds attention and other operator layers (Lessons 33–37); <span class="mono">mem_cache/</span> manages KV cache and RadixAttention memory (Lessons 29–32).</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Hardware</span><span class="name">sgl-kernel/ · jit_kernel/ · distributed/</span></div><div class="ld">High-performance kernels hugging the chip (AOT <span class="mono">sgl-kernel</span> and JIT <span class="mono">jit_kernel</span>) plus multi-GPU communication. Lessons 38–42.</div></div>
+</div>
+
+<p>This diagram also explains why SGLang spans hardware: the upper layers are <strong>hardware-agnostic</strong> scheduling and
+control; only the bottom kernels truly touch the chip. Switching hardware (AMD, TPU, NPU, CPU) mostly means <strong>swapping the
+kernel backend</strong> while upper layers barely change. The table below pairs the runtime's main sub-packages, what each owns,
+and <strong>which lesson</strong> expands it — your navigation index for when you "get lost" later:</p>
+
+<p>Why split the runtime into <strong>so many sub-packages</strong> rather than one big blob? Because each sub-package maps to a
+<strong>concern that can evolve independently</strong>: swap in a faster attention kernel today by touching only
+<span class="mono">layers/</span>; support a new model tomorrow by adding one file in <span class="mono">models/</span>; change a KV
+cache strategy the day after by touching only <span class="mono">mem_cache/</span>. This <strong>high-cohesion, low-coupling</strong>
+split keeps a thousand-contributor open-source project maintainable — you change your kernel, I add my model, and the scheduler brain is
+largely unaffected. It is friendly to learners too: you <strong>need not understand the whole engine at once</strong>; you can pick one
+sub-package and drill in, and this guide's part structure mostly follows these sub-package boundaries.</p>
+
+<table class="t">
+  <tr><th>Sub-package</th><th>What it owns</th><th>Detail</th></tr>
+  <tr><td class="mono">entrypoints/</td><td>Public entry: HTTP server, <span class="inline">Engine</span> class, launch scripts</td><td>Lessons 13–17</td></tr>
+  <tr><td class="mono">managers/</td><td>Tokenize, detokenize, and <strong>Scheduler</strong> (the engine's brain)</td><td>Lessons 18–23</td></tr>
+  <tr><td class="mono">model_executor/</td><td><span class="inline">ModelRunner</span>: organizes one model forward on the GPU</td><td>Lessons 24–28</td></tr>
+  <tr><td class="mono">model_loader/ · models/</td><td>Load weights; define model architectures (Llama, Qwen, etc.)</td><td>Lessons 24–28</td></tr>
+  <tr><td class="mono">mem_cache/</td><td>KV cache and <strong>RadixAttention</strong> memory management, paging</td><td>Lessons 29–32</td></tr>
+  <tr><td class="mono">layers/</td><td>Attention, normalization, MoE operator layers and backends</td><td>Lessons 33–37</td></tr>
+  <tr><td class="mono">distributed/</td><td>Tensor/pipeline/expert-parallel multi-GPU communication</td><td>Lessons 23, 38–42</td></tr>
+  <tr><td class="mono">speculative/ · lora/ · disaggregation/ · multimodal/</td><td>Speculative decoding, LoRA, PD disaggregation, multimodal, etc.</td><td>Advanced parts</td></tr>
+</table>
+
+<h2>The three-process model: who lives in which process, talking how</h2>
+<p>The stack above is the <strong>static code structure</strong>; but once the engine <strong>runs</strong>, it is not one big loop but
+<strong>forks into several processes</strong> working in parallel. This is the most overlooked yet most crucial point of SGLang's
+architecture: <strong>tokenize, schedule+forward, and detokenize live in different processes</strong>, passing messages over ZMQ
+IPC. Why split this way? Because tokenize/detokenize are CPU string processing while the model forward is heavy GPU compute;
+putting them in separate processes lets CPU work and GPU work <strong>truly pipeline in parallel</strong> without blocking — the
+engineering basis for "zero-overhead overlap" (Lesson 21).</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">TokenizerManager</div><div class="nd">main process · tokenize, send/recv</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Scheduler + TpWorker</div><div class="nd">subprocess · one per TP rank · GPU forward</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">DetokenizerManager</div><div class="nd">subprocess · detokenize</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">back to TokenizerManager</div><div class="nd">main process · stream out</div></div>
+</div>
+
+<p>Never confuse the three roles: <strong>TokenizerManager is in the main process</strong> (so are the HTTP server and the
+<span class="inline">Engine</span>); <strong>Scheduler is in a subprocess</strong>, and <strong>tensor parallelism (TP) starts one
+Scheduler process per rank</strong>, each holding its own <span class="inline">TpWorker</span> and <span class="inline">ModelRunner</span>
+and occupying one GPU to do the forward; <strong>DetokenizerManager is yet another subprocess</strong>. Remember: <strong>the Scheduler
+is the process holding the GPU</strong>, while the two Managers are just "translators" on the way in and out — do not lump them together.</p>
+
+<p>This "who lives in which process, how they get launched" logic is spelled out plainly in the source. The snippet below is the
+skeleton of <strong>process forking</strong> at engine startup — it first allocates ZMQ ports for all three, then launches the
+Scheduler subprocess and the Detokenizer subprocess, and finally leaves the TokenizerManager in the main process:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::_launch_subprocesses</span><span class="ln">the three-process fork point</span></div>
+  <pre><span class="kw">def</span> <span class="fn">_launch_subprocesses</span>(cls, server_args, ...):
+    <span class="cm"># 1) allocate IPC ports for all three (ZMQ communication)</span>
+    port_args = PortArgs.init_new(server_args)
+
+    <span class="cm"># 2) Scheduler subprocess: one per TP rank, holds TpWorker/ModelRunner, does GPU forward</span>
+    scheduler_init_result, scheduler_procs = cls._launch_scheduler_processes(
+        server_args, port_args, run_scheduler_process_func)
+
+    <span class="cm"># 3) DetokenizerManager subprocess: detokenize, send results back</span>
+    detoken_procs, _ = cls._launch_detokenizer_subprocesses(
+        server_args=server_args, port_args=port_args, ...)
+
+    <span class="cm"># 4) TokenizerManager stays in the main process: tokenize, send/recv</span>
+    tokenizer_manager, template_manager = init_tokenizer_manager_func(
+        server_args, port_args)
+
+    scheduler_init_result.wait_for_ready()   <span class="cm"># wait for the model to load in the subprocess</span>
+    <span class="kw">return</span> tokenizer_manager, template_manager, port_args, scheduler_init_result, ...</pre>
+</div>
+
+<p>The source comment spells out the three components: <strong>TokenizerManager</strong> tokenizes and sends requests to the
+scheduler; the <strong>Scheduler</strong> in a subprocess receives requests, forms batches, forwards them, and sends output tokens to
+the detokenizer; the <strong>DetokenizerManager</strong> in a subprocess detokenizes and sends results back. <strong>The HTTP server,
+Engine, and TokenizerManager all run in the main process</strong>, and processes talk strictly over <strong>ZMQ IPC</strong> (a port
+per process). A live deployment is wrapped in an HTTP server by <span class="mono">launch_server.py</span>; and every component's
+"switches and knobs" — model path, tensor-parallel size, memory fraction, max concurrency — live in
+<span class="inline">ServerArgs</span> in <span class="mono">srt/server_args.py</span>, the page you will most often consult when tuning.</p>
+
+<p>Why use ZMQ inter-process communication rather than writing all three as threads inside one process? At root it is the
+<strong>reality of Python and the GPU</strong>: Python's global interpreter lock (GIL) makes it hard for CPU tokenization and GPU
+forward to truly run in parallel as threads; split into <strong>separate processes</strong>, each with its own interpreter, tokenize,
+forward and detokenize can advance <strong>physically at the same time</strong> without fighting over one lock. ZMQ then provides a
+lightweight, cross-process message queue: each process binds a port, and requests and results flow between them like parcels on a
+conveyor, the sender not waiting for the receiver to finish — this <strong>asynchronous decoupling</strong> is the physical basis of
+"zero-overhead overlap scheduling". The cost is a few extra ports and subprocesses at startup, plus a <strong>watchdog</strong> keeping
+an eye out: if a subprocess crashes, the main process notices and exits promptly instead of hanging forever. Once you understand "why
+split processes, why a message queue", you have grasped the most counterintuitive and most crucial piece of SGLang's architecture.</p>
+
+<h2>Where to start reading</h2>
+<p>With this map, your first source read need not start from scratch. Three recommended routes: ① to see <strong>how a request comes
+in</strong>, follow the <span class="mono">/generate</span> entry in <span class="mono">entrypoints/http_server.py</span> (exactly the
+path Lesson 3 walks; the deep version is Lessons 13–17); ② to see <strong>the engine's brain</strong>, read the event loop in
+<span class="mono">managers/scheduler.py</span> (Lessons 18–23); ③ to see <strong>how a token is computed on the GPU</strong>, go to
+<span class="mono">model_executor/</span> and follow <span class="inline">ModelRunner.forward</span> (Lessons 24–28). Whichever door you
+enter, keep returning to this "two halves + layers + three processes" map and you will not get lost. Next lesson we take route ①
+and <strong>follow a real request through its whole life</strong>.</p>
+
+<p>One practical trick when reading the source: <strong>read along process boundaries, not along file names</strong>. Many files look
+adjacent yet live in different processes at run time, separated by a ZMQ hop; forcing them into "one call stack" gets you stuck. The
+right move is to first ask: "<strong>is the code I'm reading running in the main process or a subprocess?</strong>" — TokenizerManager's
+methods are all in the main process, Scheduler's and ModelRunner's are all in a subprocess, and the two sides communicate via the
+message structs defined in io_struct. Treat this "process boundary" as your <strong>first coordinate axis</strong> while reading code,
+overlay the layer diagram above as the second, and you can <strong>pinpoint</strong> any function: which process it is in, which layer
+it belongs to, which future lesson it maps to. This locating habit pays off across the dozens of source-reading lessons ahead.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Two halves</strong>: <span class="mono">python/sglang/lang/</span> (frontend DSL, expresses) + <span class="mono">python/sglang/srt/</span> (runtime engine, executes; srt = SGLang RunTime), with <span class="mono">sgl-kernel/</span> and <span class="mono">jit_kernel/</span> kernels underneath.</li>
+    <li><strong>srt layers</strong>: entrypoints (entry) → managers (translators + Scheduler brain) → model_executor/models (execute) → sampling → layers/mem_cache (ops &amp; cache) → kernels/distributed (hardware &amp; multi-GPU).</li>
+    <li><strong>Three processes</strong>: TokenizerManager (main) ↔ Scheduler+TpWorker (subprocess, one per TP rank, holds the GPU) ↔ DetokenizerManager (subprocess), talking over <strong>ZMQ IPC</strong>.</li>
+    <li><strong>Don't confuse</strong>: the Scheduler is the process holding ModelRunner and the GPU; the two Managers are just in/out "translators".</li>
+    <li><strong>Tuning entry</strong>: model path, parallelism, memory fraction, etc. live in <span class="inline">ServerArgs</span> in <span class="mono">srt/server_args.py</span>.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. The repo splits into python/sglang/lang/ and python/sglang/srt/. What does the srt (SGLang RunTime) half own?</div>
+  <ol class="opts">
+    <li>Model training: backprop and gradient updates</li>
+    <li>The frontend DSL: expressing multi-step parallel LLM programs with gen/fork/join</li>
+    <li>The runtime engine: actually executing requests — tokenize, schedule, model forward, sample, detokenize — with RadixAttention, continuous batching, parallelism; the source of performance</li>
+    <li>A standalone vector database for similarity search</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. srt = SGLang RunTime, the real serving engine pushing each request through tokenize→schedule→forward→sample→detokenize; lang/ is the frontend DSL. The split is express-up-front, execute-in-back, and srt/ is the star this guide digs into.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. At run time the engine forks into three processes talking over ZMQ IPC. Which statement about who holds the GPU is correct?</div>
+  <ol class="opts">
+    <li>The Scheduler subprocess holds the GPU: it owns TpWorker/ModelRunner for the forward (one per TP rank under tensor parallelism); the two Managers are just in/out translators</li>
+    <li>All three processes share the same GPU memory with no clear division</li>
+    <li>DetokenizerManager holds the GPU and runs the model forward</li>
+    <li>TokenizerManager holds the GPU; the Scheduler only queues on the CPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. TokenizerManager runs in the main process (so do the HTTP server and Engine); Scheduler and DetokenizerManager are subprocesses. The one occupying the GPU is the ModelRunner inside the Scheduler subprocess, with one Scheduler per rank under TP; the two Managers only convert text↔tokens — don't conflate them.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does SGLang split tokenize, schedule+forward, and detokenize into separate processes over ZMQ, instead of threads in one process?</div>
+  <ol class="opts">
+    <li>So each component can be written in a different programming language</li>
+    <li>Python's GIL keeps threads from truly parallelizing CPU tokenization and GPU forward; separate processes each have their own interpreter and advance physically in parallel, with ZMQ as an async-decoupled message queue — the basis of zero-overhead overlap</li>
+    <li>Purely historical baggage with no performance reason</li>
+    <li>Because ZMQ is faster than a function call and cuts CPU instructions</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The root cause is Python's global interpreter lock: threads can't truly parallelize CPU and GPU work. Split into processes, tokenize/forward/detokenize run physically at once, and ZMQ's per-process message queue decouples them asynchronously so the sender need not wait — the physical prerequisite for overlapping CPU scheduling with GPU compute (Lesson 21).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Suppose you add an attention kernel for a new hardware backend to srt/. Using this lesson's layered + sub-package map, which directories would you likely touch and which could you mostly leave alone? Why does this high-cohesion, low-coupling split matter for a thousand-contributor open-source project?</li>
+    <li>Someone proposes merging the three processes into three threads in one process to save ZMQ serialization overhead. Considering the GIL and the reality of CPU/GPU parallelism, weigh this proposal's pros and cons and how it would affect zero-overhead overlap scheduling.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Life of a request</h1>
+
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+The map is drawn; this lesson <strong>brings it to life</strong>: we follow a real <span class="inline">generate</span> request from
+the moment you hit enter, watching it <strong>cross three processes, get merged into a batch, compute one token after another on the
+GPU, then turn back into text</strong> streamed home to you. This is a "10,000-foot" end-to-end trace — each station's internals are
+left to later dedicated lessons; here we just <strong>string the whole path into one line</strong>, so you carry a replayable mental
+animation of a "request's life".
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of one request as <strong>a table's worth of dishes ordered at a restaurant</strong>. You state your needs at the
+  <strong>counter (TokenizerManager)</strong> and the server writes a standard menu ticket; the ticket goes into the
+  <strong>kitchen dispatch (Scheduler)</strong>, where the chef does not cook table by table but <strong>merges tickets that arrive
+  together into one batch</strong>; each time the <strong>stove (GPU / ModelRunner)</strong> "fires once", every table in the batch
+  advances <strong>one step</strong>; dishes are not served all at once but <strong>course by course (streaming output)</strong> —
+  exactly how autoregressive generation "pops one word at a time". The whole meal has two phases: the opening
+  <strong>prep and base stock</strong> (prefill, reading the entire prompt in at once) takes the most effort, after which
+  <strong>serving course by course</strong> (decode, computing only the newest word each time) is a repeated quick small step.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  A <span class="inline">generate</span>'s whole journey is just last lesson's "three-process diagram" <strong>actually walked
+  once</strong>: <strong>HTTP entry → TokenizerManager tokenize → (ZMQ) → Scheduler batch → ModelRunner forward → Sampler sample →
+  DetokenizerManager detokenize → (ZMQ) → streaming SSE back</strong>. The crucial insight: <strong>the big middle stretch loops many
+  times</strong> — one <strong>prefill</strong> reads the prompt in, then many <strong>decodes</strong> pop out word by word, and
+  continuous batching "cuts in / yields" on every turn so the GPU almost never idles.
+</div>
+
+<h2>End-to-end: a generate's whole journey</h2>
+<p>First lay the whole path out at a glance. The trace below is split by <strong>process boundary</strong> into three segments: the
+main process handles <strong>in and out</strong> (tokenize, and the final streaming return), the Scheduler subprocess is the
+<strong>real-work</strong> middle (batch, forward, sample), and the Detokenizer subprocess turns tokens <strong>back into text</strong>.
+Every crossing between processes is one <span class="inline">ZMQ</span> message:</p>
+
+<div class="trace">
+  <div class="tcap">Tracing one <b>POST /generate</b>: from text prompt to streamed text, across <b>three processes</b> (→ is one ZMQ hop)</div>
+  <div class="stations">
+    <div class="stn"><h5>① Main · entry</h5><div class="cellrow"><span class="vc hot">HTTP /generate</span></div><div class="cellrow"><span class="vc">TokenizerManager</span><span class="vc blue">tokenize</span></div><div class="tlab">text → token ids, build TokenizedGenerateReqInput</div></div>
+    <div class="op">ZMQ →</div>
+    <div class="stn"><h5>② Subprocess · brain+stove</h5><div class="cellrow"><span class="vc">Scheduler</span><span class="vc blue">batch</span></div><div class="cellrow"><span class="vc hot">ModelRunner forward</span><span class="vc">Sampler</span></div><div class="tlab">recv → queue → get_next_batch → run_batch → next token</div></div>
+    <div class="op">ZMQ →</div>
+    <div class="stn"><h5>③ Subprocess · exit</h5><div class="cellrow"><span class="vc">DetokenizerManager</span><span class="vc blue">detokenize</span></div><div class="cellrow"><span class="vc hot">SSE stream</span><span class="vc dim">via main</span></div><div class="tlab">token ids → text delta, pushed back as SSE via main</div></div>
+  </div>
+</div>
+
+<p>Walk it through: your <span class="mono">POST /generate</span> first lands in the handler in
+<span class="mono">entrypoints/http_server.py</span>, which wraps the payload into a <span class="inline">GenerateReqInput</span> and hands it
+to <span class="inline">TokenizerManager.generate_request</span>. In the <strong>main process</strong>, TokenizerManager tokenizes the
+text into token ids, normalizes params, packs a <span class="inline">TokenizedGenerateReqInput</span> (defined in
+<span class="mono">managers/io_struct.py</span>), and sends it over ZMQ to the Scheduler subprocess. The Scheduler receives, queues,
+batches, forwards and samples on the GPU, and sends newly generated tokens to the Detokenizer subprocess; the latter does
+<strong>incremental detokenization</strong>, sends "the few new characters this time" back to the main process, and the HTTP layer
+pushes them to you piece by piece as <strong>SSE (text/event-stream)</strong>, until a stop token or the length limit.</p>
+
+<p>Here is an easily overlooked but important design: <strong>detokenization must be "incremental"</strong>. Each token the model emits
+does not necessarily map to a complete character or word — some characters take several tokens to form. Re-detokenizing the
+<strong>entire</strong> generated text from scratch on every new token would be wasteful and could wrongly slice a half character. So the
+DetokenizerManager remembers "how many characters were already sent" and each time pushes only the small slice that is
+<strong>genuinely new and safe to display</strong> (called <span class="inline">sent_offset</span> in the source). That is the real
+source of answers appearing "word by word" in your UI: not the model finishing then returning, but the engine streaming text
+<strong>incrementally as it computes</strong>. Streaming improves experience so much precisely because the user starts seeing the answer
+<strong>the instant the first token is computed</strong>, instead of waiting for the whole generation to finish — especially crucial for
+long answers of hundreds of tokens.</p>
+
+<p>Compress the whole path into one mnemonic: <strong>"main tokenizes, subprocess computes, subprocess translates, main emits"</strong>.
+A request enters and is tokenized and registered in the main process, crosses one ZMQ hop to the Scheduler subprocess to be batched,
+forwarded and sampled, the new token crosses another ZMQ hop to the Detokenizer subprocess to be turned into text, and finally loops
+back to the main process to stream out as SSE. Note these four stages are <strong>not synchronously blocking</strong> — while the
+Scheduler forwards token N, the Detokenizer may still be translating token N-1, and the main process has already pushed token N-2 to the
+user; the three processes run <strong>different relay legs at the same time</strong>. It is exactly this cross-process pipeline that makes
+"a request's life" look like a straight line at the macro level yet, microscopically, the result of three parties <strong>collaborating
+in parallel</strong>. Carrying this end-to-end animation, we are ready to dive into any stage and see its internals.</p>
+
+<h2>The scheduler loop: how requests get batched and run</h2>
+<p>Across the whole path, the thing <strong>most worth seeing first</strong> is the Scheduler brain — because it is a
+<strong>never-stopping loop</strong>. It does not "compute one as each arrives" but repeatedly does four things: <strong>receive
+requests → form the next batch → run that batch on the GPU → process results</strong>. These four are the engine's heartbeat;
+here they are unrolled as vertical steps:</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests</h4><p class="mono">Scheduler · via ZMQ</p><p>Receive newly arrived <span class="inline">TokenizedGenerateReqInput</span> from TokenizerManager and put it in the <strong>waiting queue</strong>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>get_next_batch_to_run</h4><p class="mono">Scheduler · decide</p><p>Decide whether this step runs <strong>prefill</strong> (eat new requests' prompts) or <strong>decode</strong> (advance running requests by one token each), and assemble a <span class="inline">ScheduleBatch</span>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>run_batch</h4><p class="mono">TpWorker · ModelRunner</p><p>Run one model forward on the GPU for logits, then <span class="inline">Sampler</span> picks each request's next token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>process_batch_result</h4><p class="mono">Scheduler → Detok</p><p>Send new tokens to the detokenizer; unfinished requests <strong>append the new token</strong> and loop on; finished ones <strong>yield their slot</strong>.</p></div></div>
+</div>
+
+<p>This loop is astonishingly short in the source — below is the "normal mode" event-loop skeleton, mapping almost one-to-one to the
+four steps above (there is also an <span class="inline">event_loop_overlap</span> variant that lets the GPU run the current batch while
+the CPU prepares the next, expanded in Lesson 21):</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::event_loop_normal</span><span class="ln">the engine's heartbeat</span></div>
+  <pre><span class="kw">def</span> <span class="fn">event_loop_normal</span>(self):
+    <span class="st">&quot;&quot;&quot;A normal scheduler loop.&quot;&quot;&quot;</span>
+    <span class="kw">while</span> True:
+        <span class="cm"># 1) receive requests (via ZMQ from TokenizerManager), enqueue</span>
+        recv_reqs = self.request_receiver.recv_requests()
+        self.process_input_requests(recv_reqs)
+
+        <span class="cm"># 2) form the next batch: prefill or decode this step?</span>
+        batch = self.get_next_batch_to_run()
+        self.cur_batch = batch
+
+        <span class="kw">if</span> batch:
+            <span class="cm"># 3) forward + sample on the GPU</span>
+            result = self.run_batch(batch)
+            <span class="cm"># 4) process results: send new tokens to the detokenizer</span>
+            self.process_batch_result(batch, result)
+        <span class="kw">else</span>:
+            self.on_idle()
+
+        self.last_batch = batch</pre>
+</div>
+
+<p>Here is the <strong>secret entrance</strong> to SGLang's throughput: step 2's <span class="inline">get_next_batch_to_run</span>
+<strong>re-forms the batch every turn</strong>, so <strong>continuous batching</strong> "cuts in" right here — a new request can squeeze
+into the current batch any turn, a finished one yields any turn (Lesson 5); <strong>RadixAttention</strong> computes a shared prefix's
+KV cache only once (Lesson 7); the concrete batching/queuing policy is Lesson 20, and a close source read of the whole loop is Lesson 18.</p>
+
+<p>One more key detail: step 3's <span class="inline">run_batch</span> is the <strong>only place that actually touches the GPU</strong>. It
+hands the whole batch to <span class="inline">ModelRunner.forward</span> inside the <span class="inline">TpWorker</span>, runs one model
+forward on the card to get each request's "next token" logits, then passes them to the <span class="inline">Sampler</span> to sample by
+temperature / top-p / top-k. Note the whole loop runs <strong>single-threaded</strong>, turn by turn — no callbacks flying around, no
+complex multi-thread synchronization, just a plain <span class="inline">while True</span>. This <strong>"one big loop governs
+everything"</strong> design looks simple but is exactly why it is easy to understand, debug and optimize: watch this one loop and you
+can answer "what is the engine doing now, what will it do next". The overlap variant <span class="inline">event_loop_overlap</span> is
+faster because it staggers step 3 "run this batch" and step 4 "process the last batch's result" into a pipeline, so the CPU prepares
+while the GPU computes — but the skeleton is the same loop; once you get the normal version, overlap is just its "accelerated variant".</p>
+
+<h2>The decode loop: why it goes around so many times</h2>
+<p>The biggest misconception about "one request" is that the model "writes the whole answer in one go". In fact <strong>generation is
+token-by-token, autoregressive</strong>: compute one token, append it to the input, compute the next, and so on until the model emits a
+stop token or hits the max length. So steps 2–4 <strong>loop tens to hundreds of times</strong>, advancing one word per turn:</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">recv/batch</div><div class="nd">recv + get_next_batch</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">forward</div><div class="nd">ModelRunner · logits</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">sample</div><div class="nd">Sampler · next token</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">unfinished?</div><div class="nd">append token, back to batch</div></div>
+</div>
+
+<p>Because the batch is re-formed every turn, continuous batching gets its chance to "cut in": <strong>a new request need not wait for
+the current batch to finish</strong> — it can join next turn; a finished request immediately yields its slot in the batch, and the
+freed compute goes to others at once. That is why SGLang keeps GPU utilization so high — <strong>every step</strong> of the loop is a
+chance to reshuffle, rather than "run one batch to the bitter end".</p>
+
+<p>One trap beginners hit: this "batch" is <strong>not the same</strong> as a training "batch". In training, samples in a batch are often
+length-aligned and go in and out together; in inference serving, each request <strong>arrives at a different time and generates a
+different length</strong> — one just sent in and needs prefill, one has emitted dozens of tokens and is decoding, one is about to finish.
+The essence of continuous batching (also called in-flight batching) is to <strong>not force everyone in lockstep</strong>: each step
+<strong>dynamically assembles a batch</strong> from whoever is present, adding arrivals and dropping departures. That is also why the
+scheduler loop must be <strong>fast enough</strong> — its per-turn overhead gets multiplied by "loops many times", which is exactly why
+the zero-overhead overlap scheduler (Lesson 21) hides CPU batching overhead behind GPU compute. Stack "token-by-token loop" and
+"re-batch every turn" together and you see that <strong>almost the entire story of SGLang's throughput and latency lives in this loop</strong>.</p>
+
+<h2>Prefill vs decode: two different jobs</h2>
+<p>The loop actually mixes <strong>two completely different kinds</strong> of step, and telling them apart is the prerequisite for every
+later performance lesson. <strong>Prefill</strong> happens when a request just arrives: read the <strong>entire prompt in at once</strong>
+and fill its KV cache — a prompt has hundreds to thousands of tokens computed in parallel as a big slab, so it is
+<strong>compute-bound</strong>, but usually done <strong>only once</strong>. <strong>Decode</strong> is every later turn computing only
+<strong>the single newest token</strong>; the compute is tiny, the bottleneck is repeatedly <strong>moving the huge KV cache</strong>, so
+it is <strong>memory-bound</strong> and <strong>loops many times</strong>. The timeline below puts them side by side:</p>
+
+<div class="timeline">
+  <div class="lane"><div class="lane-label">Prefill</div><div class="tslot now">read whole prompt</div><div class="tslot span">one big parallel slab · compute-bound · usually once</div></div>
+  <div class="lane"><div class="lane-label">Decode</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot now">… loop to end</div></div>
+  <div class="lane"><div class="lane-label">Bottleneck</div><div class="tslot span">prefill is bound by compute (matmul)</div><div class="tslot span">decode is bound by memory bandwidth (KV moves)</div></div>
+</div>
+
+<p>Their natures differ, so do their scheduling strategies: feeding too long a prompt in one shot blows up memory, hence
+<strong>chunked prefill (Lesson 22)</strong> slices long prompts; prefill and decode fighting over the same card drag each other down,
+so SGLang can even split them across <strong>different machines</strong> (<strong>prefill-decode disaggregation</strong>). But in the
+plainest single-machine case, just remember this throughline: <strong>one request = one prefill + many decodes</strong>, and continuous
+batching lets countless such requests <strong>pipeline out of phase</strong> on the same card. That is the entire skeleton of a
+"request's life" — every later lesson adds flesh to one joint of this skeleton.</p>
+
+<p>Why insist on telling the two phases apart? Because they decide the <strong>direction of effort</strong> for almost every later
+optimization. Prefill is compute-bound, so optimizing it works on <strong>compute</strong>: more efficient attention kernels, better
+parallel partitioning; decode is memory-bound, so optimizing it works on <strong>memory</strong>: how the KV cache is laid out, paged,
+compressed, and reused across shared prefixes (the home turf of KV cache in Lessons 4 and 29–32, paged attention in Lesson 6, and
+RadixAttention in Lesson 7). A common intuition trap is "thinking all the cost is in thinking up the answer", when in fact for long
+conversations <strong>repeatedly moving an ever-growing KV cache</strong> is the real bulk of decode-phase cost. So when you later meet
+all kinds of "save memory, lift bandwidth" tricks, return to this prefill–decode timeline and you will see exactly <strong>which phase
+they are saving</strong>. Carve this throughline into your mind: <strong>prefill once, decode hundreds of times; prefill races on
+compute, decode races on memory</strong> — it is the key to understanding all of Part 2.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Whole path</strong>: HTTP <span class="mono">/generate</span> → TokenizerManager tokenize → (ZMQ) → Scheduler batch → ModelRunner forward → Sampler sample → DetokenizerManager detokenize → (ZMQ) → SSE streaming back.</li>
+    <li><strong>Process boundaries</strong>: tokenize and return in the <strong>main process</strong>, batch+forward+sample in the <strong>Scheduler subprocess</strong>, detokenize in the <strong>Detokenizer subprocess</strong>; each crossing is one ZMQ hop.</li>
+    <li><strong>Scheduler heartbeat</strong>: <span class="inline">event_loop_normal</span> repeatedly does recv_requests → get_next_batch_to_run → run_batch → process_batch_result.</li>
+    <li><strong>Loop essence</strong>: autoregressive token-by-token, steps 2–4 loop many times; continuous batching "cuts in / yields" each turn so the GPU barely idles.</li>
+    <li><strong>Two phases</strong>: prefill (read the whole prompt, compute-bound, usually once) vs decode (one token per turn, memory-bound, many loops). One request = one prefill + many decodes.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In the scheduler's event loop, where does continuous batching's ability to cut in mainly come from?</div>
+  <ol class="opts">
+    <li>process_batch_result: it ends the whole batch together before starting the next</li>
+    <li>recv_requests: it gathers all requests once before computing anything</li>
+    <li>on_idle: it pre-generates tokens while idle</li>
+    <li>get_next_batch_to_run: it re-forms the batch every turn, so a new request can join and a finished one yield any turn, keeping the GPU busy</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Each loop turn calls get_next_batch_to_run to re-form the batch — exactly where cut-in/yield happens: a new request joins next turn, a finished one frees its slot at once, so the batch stays near full (Lessons 5, 20). This is the core of SGLang's high GPU utilization.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which statement about the prefill and decode phases is most accurate?</div>
+  <ol class="opts">
+    <li>Prefill and decode are identical, just named differently</li>
+    <li>Neither phase touches the KV cache</li>
+    <li>Decode is compute-bound and done once; prefill is memory-bound and loops many times</li>
+    <li>Prefill reads the whole prompt at once, is compute-bound, usually done once; decode computes only the newest token each turn, is memory-bound, loops many times. One request = one prefill + many decodes</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Prefill computes hundreds-to-thousands of prompt tokens in parallel as a slab and fills the KV cache — compute-bound, usually once; decode computes only the newest token per turn, bottlenecked by moving an ever-growing KV cache — memory-bound, looping many times. Telling them apart is the key to all later memory/bandwidth optimizations (Lessons 6, 22, 29–32).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does the answer appear word by word as a streaming effect in the frontend?</div>
+  <ol class="opts">
+    <li>Because of insufficient bandwidth, it can only send in pieces</li>
+    <li>Because the model finishes the whole answer first, then artificially slices it to display slowly</li>
+    <li>Because the frontend JavaScript deliberately adds a typewriter animation</li>
+    <li>Because generation is autoregressive token-by-token; the DetokenizerManager does incremental detokenization, pushing only the newly added, safe-to-show text back via the main process as SSE, without waiting for the whole generation</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Generation is inherently token-by-token: as each token is produced, the Detokenizer incrementally turns the genuinely new, safe-to-show slice (tracking progress via sent_offset) into text and the main process streams it as SSE. The user sees the answer the instant the first token is computed, not after the whole generation — crucial for long-answer experience.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Draw a generate request's whole path, marking the three process boundaries and each ZMQ hop. Then explain: while the Scheduler forwards token N, what might the Detokenizer and the main process each be doing? How does this cross-process pipeline improve both throughput and first-token latency experience?</li>
+    <li>In a customer-service system, requests vary widely in prompt length and arrival time. Using the re-batch-every-turn loop and the prefill-vs-decode distinction, explain why the scheduler loop must be fast, what problem feeding one very long prompt at once causes, and how SGLang mitigates it (hint: chunked prefill).</li>
   </ul>
 </div>
 </div>
