@@ -2738,7 +2738,7 @@ the upper layer depends on a contract, not on the lower layer's implementation. 
 <h2>2. RuntimeEndpoint: the seam where the front-end lands on the runtime</h2>
 <p>Among all backends, <span class="mono">RuntimeEndpoint</span> matters most — <strong>it is the seam where Part 3 (front-end) snaps precisely onto Part 4+ (runtime)</strong>.
 It points at a locally launched SGLang server (default <span class="mono">http://localhost:30000</span>) and translates every <span class="mono">gen</span> / <span class="mono">fork</span> in the program into <strong>a POST /generate HTTP request</strong>,
-sent to the server we dissect layer by layer in Lessons 13–17 — the TokenizerManager at the door, the Scheduler as the brain, the ModelRunner doing the forward. <strong>Precisely because the request lands on our own runtime</strong>,
+sent to the server we dissect layer by layer <strong>from Lesson 13 onward</strong> — the TokenizerManager at the door (Lesson 14), the Scheduler as the brain (Lessons 18–23), the ModelRunner doing the forward (Lesson 24). <strong>Precisely because the request lands on our own runtime</strong>,
 the RadixAttention prefix cache (Lesson 7), fork's branch sharing (Lesson 11), and constrained decoding <strong>actually take effect</strong>: the 8 branches you fork share one prefix and the runtime computes it once — something only the <span class="mono">RuntimeEndpoint</span> backend can deliver.
 One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>, welds the front-end's full expressiveness onto the very engine we are about to open up.</p>
 
@@ -2794,7 +2794,7 @@ without rewriting a single line of client code for SGLang. One "compatibility," 
         <span class="cm"># A gen in the program becomes one POST /generate HTTP call here</span>
         data = {<span class="st">"text"</span>: s.text_, <span class="st">"sampling_params"</span>: {...}}
         res = http_request(self.base_url + <span class="st">"/generate"</span>, json=data)
-        <span class="kw">return</span> res.json()</pre>
+        <span class="kw">return</span> res.json()[<span class="st">"text"</span>], res.json()[<span class="st">"meta_info"</span>]  <span class="cm"># completion text + meta</span></pre>
 </div>
 
 <p>These few lines are <strong>the door from front-end to runtime</strong>: the constructor handshakes via <span class="mono">/get_model_info</span> to confirm the model; <span class="mono">cache_prefix</span> uses <span class="mono">max_new_tokens=0</span> to <strong>pre-warm the shared prefix into the cache</strong>,

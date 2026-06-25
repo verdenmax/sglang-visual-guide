@@ -390,7 +390,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>二、RuntimeEndpoint：前端落到运行时的那个接缝</h2>
 <p>在所有后端里，<span class="mono">RuntimeEndpoint</span> 最关键——<strong>它就是 Part 3（前端）与 Part 4+（运行时）严丝合缝对接的那个接缝</strong>。
 它指向一个本地启动的 SGLang 服务（默认 <span class="mono">http://localhost:30000</span>），把程序里每一次 <span class="mono">gen</span> / <span class="mono">fork</span> 翻译成<strong>一次 POST /generate 的 HTTP 请求</strong>，
-发给我们将在第 13–17 课逐层拆解的那台服务器——入口的 TokenizerManager、大脑 Scheduler、执行的 ModelRunner。<strong>正因为请求落到了我们自己的运行时</strong>，
+发给我们将在<strong>第 13 课起</strong>逐层拆解的那台服务器——入口的 TokenizerManager（第 14 课）、大脑 Scheduler（第 18–23 课）、执行的 ModelRunner（第 24 课）。<strong>正因为请求落到了我们自己的运行时</strong>，
 第 7 课的 RadixAttention 前缀缓存、第 11 课 fork 的分支共享、以及约束解码，<strong>才真正生效</strong>：你 fork 出的 8 个分支共享同一段前缀，运行时只算一次——这件事只有在 <span class="mono">RuntimeEndpoint</span> 后端上才兑现得了。
 一句 <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>，就把前端的全部表达力，焊接到了我们即将深入的那台引擎上。
 这也解释了一个常见困惑：为什么很多 SGLang 教程开头都要你先<strong>起一个本地服务器</strong>，再跑程序？因为只有先有了那台监听 <span class="mono">/generate</span> 的运行时，<span class="mono">RuntimeEndpoint</span> 才有地方把请求打过去。
@@ -454,7 +454,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         <span class="cm"># 程序里的一次 gen，在这里变成一次 POST /generate 的 HTTP 调用</span>
         data = {<span class="st">"text"</span>: s.text_, <span class="st">"sampling_params"</span>: {...}}
         res = http_request(self.base_url + <span class="st">"/generate"</span>, json=data)
-        <span class="kw">return</span> res.json()</pre>
+        <span class="kw">return</span> res.json()[<span class="st">"text"</span>], res.json()[<span class="st">"meta_info"</span>]  <span class="cm"># 完成文本 + 元信息</span></pre>
 </div>
 
 <p>这几行就是<strong>前端通往运行时的那扇门</strong>：构造时先 <span class="mono">/get_model_info</span> 握手确认模型；<span class="mono">cache_prefix</span> 用 <span class="mono">max_new_tokens=0</span> 把共享前缀<strong>预热进缓存</strong>，
@@ -564,7 +564,7 @@ the upper layer depends on a contract, not on the lower layer's implementation. 
 <h2>2. RuntimeEndpoint: the seam where the front-end lands on the runtime</h2>
 <p>Among all backends, <span class="mono">RuntimeEndpoint</span> matters most — <strong>it is the seam where Part 3 (front-end) snaps precisely onto Part 4+ (runtime)</strong>.
 It points at a locally launched SGLang server (default <span class="mono">http://localhost:30000</span>) and translates every <span class="mono">gen</span> / <span class="mono">fork</span> in the program into <strong>a POST /generate HTTP request</strong>,
-sent to the server we dissect layer by layer in Lessons 13–17 — the TokenizerManager at the door, the Scheduler as the brain, the ModelRunner doing the forward. <strong>Precisely because the request lands on our own runtime</strong>,
+sent to the server we dissect layer by layer <strong>from Lesson 13 onward</strong> — the TokenizerManager at the door (Lesson 14), the Scheduler as the brain (Lessons 18–23), the ModelRunner doing the forward (Lesson 24). <strong>Precisely because the request lands on our own runtime</strong>,
 the RadixAttention prefix cache (Lesson 7), fork's branch sharing (Lesson 11), and constrained decoding <strong>actually take effect</strong>: the 8 branches you fork share one prefix and the runtime computes it once — something only the <span class="mono">RuntimeEndpoint</span> backend can deliver.
 One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>, welds the front-end's full expressiveness onto the very engine we are about to open up.</p>
 
@@ -620,7 +620,7 @@ without rewriting a single line of client code for SGLang. One "compatibility," 
         <span class="cm"># A gen in the program becomes one POST /generate HTTP call here</span>
         data = {<span class="st">"text"</span>: s.text_, <span class="st">"sampling_params"</span>: {...}}
         res = http_request(self.base_url + <span class="st">"/generate"</span>, json=data)
-        <span class="kw">return</span> res.json()</pre>
+        <span class="kw">return</span> res.json()[<span class="st">"text"</span>], res.json()[<span class="st">"meta_info"</span>]  <span class="cm"># completion text + meta</span></pre>
 </div>
 
 <p>These few lines are <strong>the door from front-end to runtime</strong>: the constructor handshakes via <span class="mono">/get_model_info</span> to confirm the model; <span class="mono">cache_prefix</span> uses <span class="mono">max_new_tokens=0</span> to <strong>pre-warm the shared prefix into the cache</strong>,
