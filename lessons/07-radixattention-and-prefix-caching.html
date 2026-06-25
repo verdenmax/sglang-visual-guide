@@ -3,17 +3,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
-<title>SGLang 图解教程 · 看懂高性能 LLM 服务引擎内部 / SGLang Visual Guide</title>
-<meta name="description" content="从零理解整个 SGLang 高性能 LLM/多模态服务引擎的中英双语图解教程：前端 DSL、运行时引擎、调度器、RadixAttention 前缀缓存、模型执行器与高性能算子，每课配真实源码对应、折叠深挖与设计亮点。">
+<title>07 · RadixAttention 与前缀缓存 / RadixAttention &amp; prefix caching - SGLang 图解教程</title>
+<meta name="description" content="第二部分 · 推理前置基础｜RadixAttention 与前缀缓存 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
 <meta name="theme-color" content="#7c48e6">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
-<meta property="og:type" content="website">
+<meta property="og:type" content="article">
 <meta property="og:site_name" content="SGLang 图解教程">
-<meta property="og:title" content="SGLang 图解教程 · 看懂高性能 LLM 服务引擎内部 / SGLang Visual Guide">
-<meta property="og:description" content="从零理解整个 SGLang 高性能 LLM/多模态服务引擎的中英双语图解教程：前端 DSL、运行时引擎、调度器、RadixAttention 前缀缓存、模型执行器与高性能算子，每课配真实源码对应、折叠深挖与设计亮点。">
+<meta property="og:title" content="07 · RadixAttention 与前缀缓存 / RadixAttention &amp; prefix caching - SGLang 图解教程">
+<meta property="og:description" content="第二部分 · 推理前置基础｜RadixAttention 与前缀缓存 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="SGLang 图解教程 · 看懂高性能 LLM 服务引擎内部 / SGLang Visual Guide">
-<meta name="twitter:description" content="从零理解整个 SGLang 高性能 LLM/多模态服务引擎的中英双语图解教程：前端 DSL、运行时引擎、调度器、RadixAttention 前缀缓存、模型执行器与高性能算子，每课配真实源码对应、折叠深挖与设计亮点。">
+<meta name="twitter:title" content="07 · RadixAttention 与前缀缓存 / RadixAttention &amp; prefix caching - SGLang 图解教程">
+<meta name="twitter:description" content="第二部分 · 推理前置基础｜RadixAttention 与前缀缓存 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -330,44 +330,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </head><body>
 <div class="topbar">
   <div class="topbar-inner">
-    <span class="home">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></span>
-    <span class="pill"><span class="lang-zh">共 8 课 · 2 个部分</span><span class="lang-en">8 lessons · 2 parts</span></span>
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第二部分 · 推理前置基础</span><span class="lang-en">Part 2 · Foundations</span></span>
+    <span class="pill">07 / 08</span>
     <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
-  <div class="progress"><span style="width:100%"></span></div>
+  <div class="progress"><span style="width:87%"></span></div>
 </div>
 <div class="wrap">
-  <div class="hero index">
-    <div class="part"><span class="lang-zh">从零开始 · 面向完全新手</span><span class="lang-en">From scratch · for complete beginners</span></div>
-    <h1><span class="lang-zh">用图解读懂整个 SGLang</span><span class="lang-en">Understand all of SGLang, visually</span></h1>
-    <p class="lead"><span class="lang-zh">这套教程带你<strong>层层深入</strong>：先建立<strong>宏观全景</strong>与<strong>推理服务基础</strong>，再看懂<strong>前端 DSL 与运行时引擎</strong>的分工，
-    然后顺着请求走一遍<strong>分词</strong>·<strong>调度</strong>·<strong>模型执行</strong>·<strong>采样</strong>四个环节，深入 <strong>RadixAttention 前缀缓存</strong>与<strong>重叠调度器</strong>，最后学会<strong>本地构建与贡献</strong>。每课配真实源码对应、图解与设计亮点。</span>
-    <span class="lang-en">A layered tour: build the <strong>big picture</strong> and <strong>serving foundations</strong> first, understand how the <strong>frontend DSL</strong> and the <strong>runtime engine</strong> split the work,
-    then follow a request through <strong>tokenize</strong>, <strong>schedule</strong>, <strong>model execution</strong> and <strong>sampling</strong>, dive into <strong>RadixAttention prefix caching</strong> and the <strong>overlap scheduler</strong>, and finally learn to <strong>build and contribute</strong>. Every lesson maps to real source, with diagrams and design insights.</span></p>
-    <div class="legend">
-      <span><i style="background:var(--blue)"></i><span class="lang-zh">宏观理解</span><span class="lang-en">Big picture</span></span>
-      <span><i style="background:var(--purple)"></i><span class="lang-zh">细节 / 源码</span><span class="lang-en">Details / source</span></span>
-      <span><i style="background:var(--amber)"></i><span class="lang-zh">生活类比</span><span class="lang-en">Analogy</span></span>
-      <span><i style="background:var(--accent)"></i><span class="lang-zh">关键要点</span><span class="lang-en">Key points</span></span>
-    </div>
-    <p style="margin:.8rem 0 0;color:var(--faint);font-size:.8rem"><span class="lang-zh">📌 对照 sgl-project/sglang 仓库真实源码核实 · 源码引用以“文件 + 符号名”为主（行号随上游更新而变）</span><span class="lang-en">📌 Verified against the real sgl-project/sglang source; references cite file + symbol (line numbers drift upstream)</span></p>
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第二部分 · 推理前置基础</span><span class="lang-en">Part 2 · Foundations</span></div>
+    <h1><span class="lang-zh">RadixAttention 与前缀缓存</span><span class="lang-en">RadixAttention &amp; prefix caching</span></h1>
   </div>
-  <div class="toc-search">
-    <input id="q" type="search" placeholder="🔎 搜索课程 / Search lessons" autocomplete="off" aria-label="search">
-    <span class="qcount" id="qcount"></span>
-  </div>
-  <div class="toc"><div class="toc-part"><span class="lang-zh">第一部分 · 宏观全景</span><span class="lang-en">Part 1 · The Big Picture</span></div>
-<a href="lessons/01-what-is-sglang.html"><span class="n">01</span><span class="tt"><span class="lang-zh">SGLang 是什么</span><span class="lang-en">What is SGLang</span></span><span class="ts"><span class="lang-zh">高性能 LLM/多模态服务框架 · 前端语言 + 运行时引擎 · 为何快</span><span class="lang-en">high-perf LLM/multimodal serving · frontend DSL + runtime engine · why it's fast</span></span></a>
-<a href="lessons/02-project-map.html"><span class="n">02</span><span class="tt"><span class="lang-zh">项目全景地图</span><span class="lang-en">The project map</span></span><span class="ts"><span class="lang-zh">两半：前端 DSL + 运行时引擎 · srt 分层 · 三进程 · ZMQ</span><span class="lang-en">two halves: frontend DSL + runtime · srt layers · three processes · ZMQ</span></span></a>
-<a href="lessons/03-life-of-a-request.html"><span class="n">03</span><span class="tt"><span class="lang-zh">一次请求的一生</span><span class="lang-en">Life of a request</span></span><span class="ts"><span class="lang-zh">端到端追踪一条 generate · 预填充 + 多次解码 · 进程边界</span><span class="lang-en">end-to-end trace of one generate · prefill + many decodes · process boundaries</span></span></a>
-<div class="toc-part"><span class="lang-zh">第二部分 · 推理前置基础</span><span class="lang-en">Part 2 · Foundations</span></div>
-<a href="lessons/04-autoregressive-and-kv-cache.html"><span class="n">04</span><span class="tt"><span class="lang-zh">自回归生成与 KV 缓存</span><span class="lang-en">Autoregressive decode &amp; the KV cache</span></span><span class="ts"><span class="lang-zh">逐 token 自回归 · 缓存 K/V 让每步 O(t) · 预填充填、解码追加 · 解码受带宽限</span><span class="lang-en">token-by-token autoregression · cache K/V → O(t) per step · prefill fills, decode appends · decode is bandwidth-bound</span></span></a>
-<a href="lessons/05-continuous-batching.html"><span class="n">05</span><span class="tt"><span class="lang-zh">连续批处理</span><span class="lang-en">Continuous batching</span></span><span class="ts"><span class="lang-zh">静态/填充批处理的浪费 · 迭代级连续批处理 · 调度器每步重组批次</span><span class="lang-en">waste of static/padded batching · iteration-level continuous batching · scheduler re-forms the batch each step</span></span></a>
-<a href="lessons/06-paged-attention-and-paged-kv.html"><span class="n">06</span><span class="tt"><span class="lang-zh">PagedAttention 与分页 KV</span><span class="lang-en">PagedAttention &amp; paged KV</span></span><span class="ts"><span class="lang-zh">连续预留导致碎片 · 定长分页 + 索引表 · 按需分配、为前缀复用铺路</span><span class="lang-en">contiguous reservation fragments HBM · fixed-size pages + index table · allocate on demand, sets up prefix reuse</span></span></a>
-<a href="lessons/07-radixattention-and-prefix-caching.html"><span class="n">07</span><span class="tt"><span class="lang-zh">RadixAttention 与前缀缓存</span><span class="lang-en">RadixAttention &amp; prefix caching</span></span><span class="ts"><span class="lang-zh">把所有 KV 存进基数树 · 共享前缀只算一次、跨请求跨轮复用 · 匹配/插入/分裂 + LRU 驱逐</span><span class="lang-en">all KV in a radix tree · shared prefixes computed once, reused across requests &amp; turns · match/insert/split + LRU eviction</span></span></a>
-<a href="lessons/08-throughput-vs-latency.html"><span class="n">08</span><span class="tt"><span class="lang-zh">吞吐 vs 延迟</span><span class="lang-en">Throughput vs latency</span></span><span class="ts"><span class="lang-zh">TTFT/ITL/吞吐/有效吞吐 · 批处理拿延迟换吞吐 · 旋钮与调度张力</span><span class="lang-en">TTFT/ITL/throughput/goodput · batching trades latency for throughput · the knobs &amp; the scheduling tension</span></span></a></div>
-  <div class="toc-empty" id="tocempty"><span class="lang-zh">没有匹配的课程，换个关键词试试。</span><span class="lang-en">No matching lessons, try another keyword.</span></div>
-  <p style="margin:2.4rem 0 0;color:var(--faint);font-size:.78rem;text-align:center"><span class="lang-zh">本项目是第三方、非官方的学习材料，不含 SGLang 源码（仅引用少量标注来源的片段）；SGLang 由其作者以 Apache-2.0 许可发布。</span><span class="lang-en">Third-party, unofficial learning material; contains no SGLang source code beyond small, cited snippets. SGLang is Apache-2.0-licensed by its authors.</span></p>
+  <div class="lang-zh">PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。PLACEHOLDER RadixAttention 占位内容，稍后替换为完整正文，确保模块可被导入与构建流程跑通。</div>
+  <div class="lang-en">PLACEHOLDER RadixAttention placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER RadixAttention placeholder body, replaced later with the full lesson so the module imports and the build runs.PLACEHOLDER RadixAttention placeholder body, replaced later with the full lesson so the module imports and the build runs.</div>
+  <div class="footnav"><a class="prev" href="06-paged-attention-and-paged-kv.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">PagedAttention 与分页 KV</span><span class="lang-en">PagedAttention &amp; paged KV</span></div></a><a class="next" href="08-throughput-vs-latency.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">吞吐 vs 延迟</span><span class="lang-en">Throughput vs latency</span></div></a></div>
 </div>
 <script>
 function sgvgSetLang(l){
@@ -379,34 +356,5 @@ function sgvgSetLang(l){
 function sgvgToggleLang(){
   sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
 }
-</script>
-<script>
-(function(){
-  var q=document.getElementById('q'); if(!q) return;
-  var toc=document.querySelector('.toc');
-  var empty=document.getElementById('tocempty');
-  var count=document.getElementById('qcount');
-  var links=[].slice.call(toc.querySelectorAll('a'));
-  var heads=[].slice.call(toc.querySelectorAll('.toc-part'));
-  links.forEach(function(a){ a.setAttribute('data-s',(a.textContent||'').toLowerCase()); });
-  function run(){
-    var t=(q.value||'').toLowerCase().trim(), n=0;
-    links.forEach(function(a){
-      var hit=!t||a.getAttribute('data-s').indexOf(t)>=0;
-      a.classList.toggle('hide',!hit); if(hit)n++;
-    });
-    heads.forEach(function(h){
-      var el=h.nextElementSibling, any=false;
-      while(el && !el.classList.contains('toc-part')){
-        if(el.tagName==='A' && !el.classList.contains('hide')){any=true;break;}
-        el=el.nextElementSibling;
-      }
-      h.classList.toggle('hide',!any);
-    });
-    empty.classList.toggle('show', !!t && n===0);
-    count.textContent = t ? String(n) : '';
-  }
-  q.addEventListener('input',run);
-})();
 </script>
 </body></html>

@@ -53,6 +53,16 @@ PAGES = [
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
     ("03-life-of-a-request.html", "一次请求的一生", "Life of a request",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("04-autoregressive-and-kv-cache.html", "自回归生成与 KV 缓存", "Autoregressive decode & the KV cache",
+     "第二部分 · 推理前置基础", "Part 2 · Foundations"),
+    ("05-continuous-batching.html", "连续批处理", "Continuous batching",
+     "第二部分 · 推理前置基础", "Part 2 · Foundations"),
+    ("06-paged-attention-and-paged-kv.html", "PagedAttention 与分页 KV", "PagedAttention & paged KV",
+     "第二部分 · 推理前置基础", "Part 2 · Foundations"),
+    ("07-radixattention-and-prefix-caching.html", "RadixAttention 与前缀缓存", "RadixAttention & prefix caching",
+     "第二部分 · 推理前置基础", "Part 2 · Foundations"),
+    ("08-throughput-vs-latency.html", "吞吐 vs 延迟", "Throughput vs latency",
+     "第二部分 · 推理前置基础", "Part 2 · Foundations"),
 ]
 
 
@@ -508,6 +518,16 @@ SUBTITLES = {
                             "two halves: frontend DSL + runtime · srt layers · three processes · ZMQ"),
     "03-life-of-a-request.html": ("端到端追踪一条 generate · 预填充 + 多次解码 · 进程边界",
                                   "end-to-end trace of one generate · prefill + many decodes · process boundaries"),
+    "04-autoregressive-and-kv-cache.html": ("逐 token 自回归 · 缓存 K/V 让每步 O(t) · 预填充填、解码追加 · 解码受带宽限",
+                                            "token-by-token autoregression · cache K/V → O(t) per step · prefill fills, decode appends · decode is bandwidth-bound"),
+    "05-continuous-batching.html": ("静态/填充批处理的浪费 · 迭代级连续批处理 · 调度器每步重组批次",
+                                    "waste of static/padded batching · iteration-level continuous batching · scheduler re-forms the batch each step"),
+    "06-paged-attention-and-paged-kv.html": ("连续预留导致碎片 · 定长分页 + 索引表 · 按需分配、为前缀复用铺路",
+                                             "contiguous reservation fragments HBM · fixed-size pages + index table · allocate on demand, sets up prefix reuse"),
+    "07-radixattention-and-prefix-caching.html": ("把所有 KV 存进基数树 · 共享前缀只算一次、跨请求跨轮复用 · 匹配/插入/分裂 + LRU 驱逐",
+                                                  "all KV in a radix tree · shared prefixes computed once, reused across requests & turns · match/insert/split + LRU eviction"),
+    "08-throughput-vs-latency.html": ("TTFT/ITL/吞吐/有效吞吐 · 批处理拿延迟换吞吐 · 旋钮与调度张力",
+                                      "TTFT/ITL/throughput/goodput · batching trades latency for throughput · the knobs & the scheduling tension"),
 }
 
 
