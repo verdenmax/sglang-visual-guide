@@ -3722,9 +3722,9 @@ the <strong>stop boundary</strong> accordingly (sampling and stop details in Les
 
 <p>When generation ends, the detokenizer <strong>materializes</strong> the request's full text, calls <span class="mono">trim_matched_stop</span>
 to cut off the stop string, emits that last tail (again only <span class="mono">output_str[sent_offset:]</span>), and then deletes the request's
-decode state. Turning each new slice <strong>into an SSE stream</strong> is the TokenizerManager's job: it uses
-<span class="mono">StreamingResponse</span> with <span class="mono">media_type="text/event-stream"</span>, pushing each chunk as one
-<strong>Server-Sent Event</strong> to the browser — that's the typewriter experience of text "popping out one bit at a time". Below is the real
+decode state. Each new slice flows back via the TokenizerManager (which <strong>yields</strong> chunks per request), and the <strong>HTTP server route</strong>
+(<span class="mono">http_server.py</span>'s <span class="mono">generate_request</span>) wraps them with <span class="mono">StreamingResponse</span> /
+<span class="mono">media_type="text/event-stream"</span>, pushing each chunk as one <strong>Server-Sent Event</strong> to the browser (the offline Engine path has no SSE) — that's the typewriter experience of text "popping out one bit at a time". Below is the real
 skeleton of the detokenizer's incremental logic:</p>
 
 <div class="codefile">
@@ -3752,7 +3752,7 @@ output_strs.append(incremental_output)</pre>
     <li><strong>Message round-trip</strong>: the scheduler sends <span class="mono">BatchTokenIDOutput</span> (new token ids); the detokenizer decodes and returns <span class="mono">BatchStrOutput</span> (Lesson 16) to the TokenizerManager (Lesson 14), routed back by <span class="mono">rid</span>.</li>
     <li><strong>Incremental is key</strong>: each request keeps a <span class="mono">sent_offset</span>; each step emits only <span class="mono">output_str[sent_offset:]</span> then advances the offset — avoiding the O(n²) and duplicate prefixes of full resends.</li>
     <li><strong>Multi-byte boundaries</strong>: incomplete UTF-8 (half a Chinese character / broken emoji) must be <strong>held back</strong> until a full character forms — never stream half a character.</li>
-    <li><strong>Stop and SSE</strong>: generation ends on EOS / stop string / max_new_tokens (Lesson 28); the TokenizerManager wraps each slice into an SSE "typewriter" via <span class="mono">StreamingResponse</span>. A separate process so it can overlap the GPU (zero-overhead, Lesson 21).</li>
+    <li><strong>Stop and SSE</strong>: generation ends on EOS / stop string / max_new_tokens (Lesson 28); the TokenizerManager <strong>yields</strong> slices and the <strong>HTTP server route</strong> wraps them into an SSE "typewriter" via <span class="mono">StreamingResponse</span> (the offline Engine path has no SSE). A separate process so it can overlap the GPU (zero-overhead, Lesson 21).</li>
   </ul>
 </div>
 
@@ -3801,7 +3801,7 @@ output_strs.append(incremental_output)</pre>
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (Lesson 16) round-trip, why the detokenizer sends results back to the TokenizerManager (Lesson 14) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.</li>
-    <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the TokenizerManager turns each slice into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>).</li>
+    <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the <strong>HTTP server route</strong> turns the slices TokenizerManager yields into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>) — and why the offline Engine path has no SSE.</li>
   </ul>
 </div>
 </div>
