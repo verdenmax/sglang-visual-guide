@@ -1522,8 +1522,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "源码里 <code>run_batch</code> 后立刻 <code>result_queue.append((batch.copy(), result))</code> 不阻塞，下一拍才 <code>popleft</code> 做 <code>process_batch_result</code>——所以收尾恒落后一拍，这就是 +1 拍延迟。下一批要在当前结果未出时就搭好，采样 token / KV 记账存在跨拍依赖，靠 <code>batch_overlap</code> 的 future/event 串好。某些必须先拿到上一步结果的情形会临时退回不重叠。",
-                    "en": "In source, right after <code>run_batch</code> we <code>result_queue.append((batch.copy(), result))</code> without blocking, and only the next beat <code>popleft</code>s it for <code>process_batch_result</code>—so finishing always lags one beat, hence +1 latency. The next batch is built before the current result exists, giving sampled-token / KV-bookkeeping cross-beat dependencies threaded via <code>batch_overlap</code>'s future/event objects. Cases needing the prior result first fall back to no-overlap temporarily.",
+                    "zh": "源码里 <code>run_batch</code> 后立刻 <code>result_queue.append((batch.copy(), result))</code> 不阻塞，下一拍才 <code>popleft</code> 做 <code>process_batch_result</code>——所以收尾恒落后一拍，这就是 +1 拍延迟。下一批要在当前结果未出时就搭好，采样 token / KV 记账存在跨拍依赖，靠 <code>overlap_utils.py</code> 的 <code>FutureMap</code> 串好。某些必须先拿到上一步结果的情形会临时退回不重叠。",
+                    "en": "In source, right after <code>run_batch</code> we <code>result_queue.append((batch.copy(), result))</code> without blocking, and only the next beat <code>popleft</code>s it for <code>process_batch_result</code>—so finishing always lags one beat, hence +1 latency. The next batch is built before the current result exists, giving sampled-token / KV-bookkeeping cross-beat dependencies threaded via the <code>FutureMap</code> in <code>overlap_utils.py</code>. Cases needing the prior result first fall back to no-overlap temporarily.",
                 },
             },
         ],
