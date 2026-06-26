@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>36 · RoPE、归一化与其它算子 / RoPE, norm &amp; other ops - SGLang 图解教程</title>
+<meta name="description" content="第八部分 · Attention 与算子层｜RoPE、归一化与其它算子 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="36 · RoPE、归一化与其它算子 / RoPE, norm &amp; other ops - SGLang 图解教程">
+<meta property="og:description" content="第八部分 · Attention 与算子层｜RoPE、归一化与其它算子 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="36 · RoPE、归一化与其它算子 / RoPE, norm &amp; other ops - SGLang 图解教程">
+<meta name="twitter:description" content="第八部分 · Attention 与算子层｜RoPE、归一化与其它算子 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第八部分 · Attention 与算子层</span><span class="lang-en">Part 8 · Attention &amp; layers</span></span>
+    <span class="pill">36 / 37</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:97%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第八部分 · Attention 与算子层</span><span class="lang-en">Part 8 · Attention &amp; layers</span></div>
+    <h1><span class="lang-zh">RoPE、归一化与其它算子</span><span class="lang-en">RoPE, norm &amp; other ops</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+第 26 课你会发现，写一个 Transformer 模型其实就是把一堆<strong>现成的层拼起来</strong>：注意力是一层、MLP 是一层、归一化是一层、给位置编码的 RoPE 也是一层。前面几课讲的注意力（第 33 课）、MoE（第 34 课）、量化（第 35 课）是大块头，
+这一课要补上那些<strong>更小但同样不可或缺</strong>的算子——RoPE、RMSNorm、以及一批<strong>融合算子</strong>。它们都被打磨成可复用的 <span class="mono">nn.Module</span>，模型只管<strong>调用</strong>，底下跑哪个平台的哪个 kernel、要不要融合，由这些层自己挑。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 <strong>RoPE</strong> 想成给每个词的<strong>指南针</strong>拨一个角度：词在句子里越靠后，指针就被多转一点。两个词之间感受到的"距离"，就是两根指针的<strong>夹角</strong>——
+  谁都没有一个绝对的"门牌号"，但只要看夹角，就知道彼此<strong>相隔多远</strong>。再把 <strong>RMSNorm</strong> 想成一个<strong>轻量的音量平衡器</strong>：它不挪动音乐的"基线"（不减均值），只是把每段声音的<strong>整体响度</strong>拉到统一水平，让后面的层听得清楚、训练得稳。
+  指南针负责"我在哪、我们隔多远"，音量平衡器负责"大家响度一致"——两个小零件，撑起了整座 Transformer 的稳定运转。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  记住一句话：<strong>这些小算子，是模型用来"搭积木"的标准件</strong>。它们和注意力后端（第 33 课）、量化（第 35 课）同属一个主题——<strong>可插拔的、硬件优化过的层</strong>。
+  模型文件（第 26 课）里只写 <span class="mono">self.rotary_emb(positions, q, k)</span>、<span class="mono">self.input_layernorm(x)</span> 这样的<strong>调用</strong>，至于底下是 CUDA 融合 kernel、Triton 实现，还是 AMD/NPU 的专属版本，
+  全由这些层在运行时按<strong>平台</strong>自动挑选。于是同一份模型代码，换块卡就能跑；新出一个更快的融合 kernel，也只要在层内部接上，模型一个字都不用改。
+</div>
+
+<h2>RoPE：用"旋转"给注意力注入位置</h2>
+<p>先说一个反直觉的事实：<strong>注意力本身没有顺序概念</strong>。注意力算的是 query 和 key 的点积，而点积对"谁先谁后"是<strong>不敏感</strong>的——把句子里的词打乱，纯注意力算出来的关系几乎一样。可语言显然<strong>高度依赖顺序</strong>，"狗咬人"和"人咬狗"天差地别。
+所以必须有人把<strong>位置信息</strong>喂进去。<strong>RoPE（Rotary Position Embedding，旋转位置编码）</strong>给出的答案非常优雅：不往向量里<strong>加</strong>一个位置向量，而是按位置把每个 q/k 向量<strong>旋转</strong>一个角度——位置越靠后，转得越多。</p>
+<p>妙处在于点积的数学。把 query 旋转它所在位置的角度、把 key 旋转它所在位置的角度，再做点积，结果只取决于两个角度的<strong>差</strong>，也就是两个 token 的<strong>相对位置</strong>。于是注意力一下子变得<strong>相对位置感知</strong>：模型关心的不再是"这个词在第几个绝对位置"，而是"这两个词<strong>相隔多远</strong>"。
+这正符合语言的本质——一个代词指向几个词之前的名词，靠的是<strong>距离</strong>而非绝对坐标。RoPE 不引入任何要学习的额外参数，纯靠固定频率的旋转就把相对位置"焊"进了注意力，既省参数又泛化得好，因此成了 Llama、Qwen 等主流模型的标配。</p>
+<p>落到代码里，RoPE 是一个 <span class="mono">RotaryEmbedding</span> 层，构造时用 <span class="mono">get_rope(...)</span> 按配置造出对应变体，前向时<strong>紧贴在注意力之前</strong>对 q/k 施加旋转（注意力本身见第 33 课）。它预先算好每个位置的 <span class="mono">cos/sin</span> 缓存，前向时按 token 的 <span class="mono">positions</span> 把对应的 cos/sin 取出来，旋转向量的前 <span class="mono">rotary_dim</span> 维，剩下的维度原样透传。整个过程没有矩阵乘，只是一组逐元素的乘加，因此非常便宜，常常还会被<strong>融合</strong>进相邻算子里一并完成。</p>
+<p>这里还藏着一个容易忽略的设计：旋转<strong>不是把整个头维度都转</strong>，而只转前 <span class="mono">rotary_dim</span> 维，后面的维度原封不动透传。为什么要留一截不转？因为 RoPE 的本意是把<strong>位置</strong>编码进一部分子空间，让模型既能感知相对位置、又保留一部分<strong>与位置无关</strong>的特征通道，二者各司其职。另一个细节是 <span class="mono">is_neox_style</span>——它决定向量里哪些维度<strong>配成一对</strong>一起旋转（相邻配对，还是前后半配对），不同模型家族的约定不同，但都收敛在同一个 <span class="mono">RotaryEmbedding</span> 接口下。对模型作者来说，这些都被封装在层里：你写模型时只调用 <span class="mono">self.rotary_emb(positions, q, k)</span>，至于转多少维、怎么配对、cos/sin 怎么缓存，全不用操心。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>拿到 q / k</h4><p>注意力前，先有投影出来的 query、key 向量——但它们此刻<strong>不含任何位置信息</strong>。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>按位置施加 RoPE</h4><p>用每个 token 的 <span class="mono">positions</span> 取出对应 <span class="mono">cos/sin</span>，把 q/k 各<strong>旋转</strong>一个 ∝ 位置的角度。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>点积变成相对感知</h4><p>旋转后的 q·k 只依赖两者位置之<strong>差</strong>——注意力自动获得<strong>相对位置</strong>感。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>送入注意力</h4><p>带位置的 q/k 交给注意力后端（第 33 课）算 softmax 加权——顺序信息已经在里面了。</p></div></div>
+</div>
+
+<p>再把"旋转"这件事画得更直观一些：同一个向量，在位置 0 不转、位置 1 转一点、位置 2 转得更多——位置每往后一步，指针就多偏一个固定角度。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>同一个向量，被不同位置旋转不同角度</b>：位置越靠后，转得越多（角度 ∝ 位置）</div>
+  <div class="cells"><span class="lab">向量 v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k 只看夹角差 = 相对位置</span></div>
+</div>
+
+<h2>RoPE 如何撑长上下文</h2>
+<p>RoPE 还顺手解决了一个工程上的大难题：<strong>上下文长度扩展</strong>。一个模型训练时只见过比如 4k token 的序列，旋转角度的"频率表"也是按 4k 调好的。直接拿去服务 32k 的长文本，靠后位置的旋转角度会跑到训练时<strong>从没见过的范围</strong>，模型一脸懵，效果崩坏。
+解决办法不是重训，而是<strong>巧妙地拉伸旋转频率</strong>，让 4k 训出来的模型也能在 32k 甚至更长上从容工作。</p>
+<p>常见的几招都是 RoPE 的变体：<strong>线性缩放（linear scaling）</strong>最朴素——把所有位置等比例压缩，相当于把"尺子"整体拉长，让 32k 的位置落回模型熟悉的角度范围，简单但高频信息会被牺牲一些；<strong>NTK-aware</strong> 更聪明，它<strong>不均匀</strong>地调整不同频率，对高频（管局部细节）改动小、对低频（管长程关系）拉伸大，从而在扩展长度的同时尽量保住短距离的分辨力；
+<strong>YaRN</strong> 则在 NTK 的基础上再做温度与分段处理，是当下长上下文模型很常用的方案。这些变体在 SGLang 里都通过同一个 <span class="mono">get_rope(...)</span> 工厂按配置造出来——你在模型配置里写明 <span class="mono">rope_scaling</span> 用哪种、放大多少倍，工厂就返回对应的 <span class="mono">RotaryEmbedding</span> 子类，<strong>模型代码完全不变</strong>。这又是"可插拔"的一个缩影：换一种长度扩展策略，只是换一个 RoPE 变体而已。</p>
+<p>为什么"拉伸频率"这件事行得通，值得再多想一层。RoPE 的旋转角度其实是一组<strong>不同频率</strong>的正弦波叠出来的：高频通道转得快，负责区分<strong>相邻几个 token</strong> 的细微先后；低频通道转得慢，负责刻画<strong>跨越很远</strong>的长程关系。当序列拉长到训练没见过的 32k，最先"出界"的是那些低频通道——它们要表达的距离远远超出了训练时的角度范围。于是聪明的做法不是把所有频率一刀切地压缩（那会连高频的局部分辨力也牺牲掉，正是<strong>线性缩放</strong>的短板），而是像 <strong>NTK-aware</strong> 那样<strong>对低频多拉伸、对高频少动</strong>，把"撑长度"的代价尽量摊到对长程关系不那么敏感的通道上。<strong>YaRN</strong> 更进一步，对不同频段分段处理、并引入一个温度项校正注意力的分布，使得扩展后的模型在长文本上既不丢局部细节、又能稳住长程依赖。理解了"频率有高低、职责有分工"，你就明白这些方法不是玄学调参，而是顺着 RoPE 的数学结构，<strong>有针对性地</strong>动那些该动的频率。</p>
+
+<table class="t">
+  <tr><th>算子</th><th>做什么</th><th>为什么需要它</th></tr>
+  <tr><td class="mono">RoPE</td><td>按位置<strong>旋转</strong> q/k，注入相对位置</td><td>注意力本身无序；让点积感知 token 间<strong>距离</strong>，还能扩展上下文（NTK/YaRN/线性）</td></tr>
+  <tr><td class="mono">RMSNorm</td><td>÷ 均方根再乘缩放，<strong>稳定数值</strong></td><td>比 LayerNorm 更便宜（无减均值/无偏置），LLM 上效果一样好；常和残差加法<strong>融合</strong></td></tr>
+  <tr><td class="mono">SiluAndMul</td><td>把门控 MLP 的 <strong>SiLU(gate) × up</strong> 合成一个 kernel</td><td>少一次中间张量的读写往返，省显存带宽、提速</td></tr>
+  <tr><td class="mono">fused add-norm</td><td>残差加法 + 归一化<strong>合并</strong>成一步</td><td>避免额外的内存往返；qk-norm+rope 也可融合，小算子越融越快</td></tr>
+</table>
+
+<h2>RMSNorm：更轻的归一化</h2>
+<p>每个 Transformer 块里都夹着<strong>归一化</strong>层，作用是把激活值的尺度<strong>压稳</strong>，让深层网络训练得动、推理得稳。经典做法是 <strong>LayerNorm</strong>：先<strong>减去均值</strong>、再<strong>除以标准差</strong>把数据标准化，最后用可学习的 <strong>scale 和 shift（偏置）</strong>调回合适的分布。它有效，但每一步都要算均值、算方差，还多带一个偏置参数。</p>
+<p>Llama 一系用的是更精简的 <strong>RMSNorm（Root Mean Square Norm）</strong>。它<strong>不减均值</strong>、<strong>不加偏置</strong>，只做一件事：把向量除以它自己的<strong>均方根</strong>（元素平方和的平均再开根号），然后乘一个可学习的 scale。少了减均值这一步，也省了偏置参数——<strong>更便宜、更快</strong>，而大量实践证明在大语言模型上<strong>效果与 LayerNorm 不相上下</strong>。这就是为什么主流 LLM 几乎清一色转向了 RMSNorm。它还经常和前面的<strong>残差加法融合</strong>成一个 kernel（fused add-norm），把"加残差"和"归一化"两步并作一次内存读写完成，进一步省带宽。</p>
+<p>有人会问：减均值这一步真的可有可无吗？直觉上 LayerNorm 的"减均值"是在做<strong>居中（centering）</strong>，把激活的偏移量去掉。但研究和实践都发现，对 Transformer 这种结构，真正起稳定作用的是<strong>缩放（rescaling）</strong>那一步——也就是把向量的整体尺度拉到统一量级；而居中带来的收益很有限，却要白白多算一遍均值。RMSNorm 正是抓住了这一点，<strong>只保留缩放、砍掉居中</strong>，用更少的算术拿到几乎一样的稳定性。再加上去掉偏置参数，整层的参数量和访存都更省。把它放进"算子是可插拔标准件"的主题里看也很自然：归一化这件事"做什么"（把尺度压稳）是固定的，"怎么做"（LayerNorm 还是 RMSNorm、要不要和残差融合、跑哪个平台的 kernel）则是可替换的实现细节——模型只写一句 <span class="mono">self.input_layernorm(x)</span>，底下换哪种归一化，对模型代码完全透明。</p>
+
+<div class="cols">
+  <div class="col"><h4>LayerNorm（经典）</h4><p><strong>减均值</strong> → <strong>÷ 标准差</strong> → 乘 scale + 加 <strong>shift（偏置）</strong>。把数据完整标准化，步骤多、要算均值方差、还多一个偏置参数。</p></div>
+  <div class="col"><h4>RMSNorm（Llama 系）</h4><p><strong>不减均值、不加偏置</strong>：只 <strong>÷ 均方根</strong> 再乘 scale。更少计算、更少参数，<strong>更便宜</strong>，LLM 上效果一样好，常和残差加法<strong>融合</strong>。</p></div>
+</div>
+
+<h2>融合算子：把小步骤并成一个 kernel</h2>
+<p>最后讲一个贯穿全课的主题——<strong>算子融合（fusion）</strong>。GPU 上有个朴素的事实：每启动一个 kernel、每把张量从显存读进来再写回去，都有<strong>固定开销</strong>。一连串小算子如果各跑各的，数据就要在显存和计算单元之间<strong>来回搬好几趟</strong>，而搬运往往比计算还慢。融合就是把几个挨着的小算子<strong>合并成一个 kernel</strong>，让数据进来一次、把活全干完再出去，省掉中间那些内存往返。</p>
+<p>典型的例子：门控 MLP（第 34 课里 MoE 的专家、以及普通 MLP 都用门控结构）需要算 <span class="mono">SiLU(gate) × up</span>——<strong>SiluAndMul</strong> 就把激活函数和逐元素相乘<strong>融进一个 kernel</strong>，免去一个巨大中间张量的读写；前面说的 <strong>fused add-norm</strong> 把残差加法和 RMSNorm 并作一步；还有 <strong>qk-norm + RoPE</strong> 也能融合。这些层都是<strong>可复用、硬件优化过</strong>的标准件：模型只管调用，层内部会根据平台挑<strong>融合版还是平台专属版</strong>的 kernel——这正是继注意力后端（第 33 课）、量化（第 35 课）之后，"<strong>一切皆可插拔</strong>"主题在<strong>算子</strong>这一维上的体现。更底层的 kernel 怎么写、怎么融合，是第 38 课的内容；这里你只需记住：模型搭积木，积木自己懂硬件。</p>
+<p>把这一课收束起来：注意力和 MLP 那些大矩阵乘是 Transformer 的"主肌肉"，但真正让它跑得<strong>又对又快</strong>的，是这些不起眼的小算子。RoPE 让注意力懂得<strong>位置与距离</strong>，并顺手把上下文撑长；RMSNorm 用最省的方式把数值<strong>稳住</strong>；融合算子则把零碎的小步骤<strong>攒成一趟</strong>，省下宝贵的访存带宽。而贯穿始终的，是同一套设计哲学——它们都是<strong>可复用、按平台自适应</strong>的 <span class="mono">nn.Module</span>。模型作者（第 26 课）站在"调用"这一侧，写下 <span class="mono">self.rotary_emb(...)</span>、<span class="mono">self.input_layernorm(...)</span> 这些稳定的接口；性能与硬件工程师站在"实现"那一侧，自由地把新的融合 kernel、新的平台后端接进去，而模型代码<strong>一个字都不用改</strong>。理解了这层分工，你再看 SGLang 支持一种新模型，往往就是"把这些标准件按新结构重新拼一遍"——这正是第 8 部分反复强调的主题：<strong>把 Transformer 的每一块都打磨成可替换的策略</strong>。</p>
+
+<p>下面是 RoPE 真身的核心几行——<span class="mono">forward_native</span> 如何按位置取出 cos/sin，并把旋转施加到 q 和 k 上：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/rotary_embedding/base.py ::RotaryEmbedding</span><span class="ln">前向：按位置把旋转施加到 q/k</span></div>
+  <pre><span class="kw">def</span> forward_native(self, positions, query, key, ...):
+    <span class="cm"># 按每个 token 的 position 取出预算好的 cos / sin</span>
+    cos_sin = self.cos_sin_cache.index_select(<span class="st">0</span>, positions)
+    cos, sin = cos_sin.chunk(<span class="st">2</span>, dim=-<span class="st">1</span>)
+    query_rot = query[..., : self.rotary_dim]   <span class="cm"># 只旋转前 rotary_dim 维</span>
+    query_rot = self._apply_rotary_emb_wrapped(query_rot, cos, sin, self.is_neox_style)
+    key_rot = key[..., : self.rotary_dim]
+    key_rot = self._apply_rotary_emb_wrapped(key_rot, cos, sin, self.is_neox_style)
+    <span class="kw">return</span> query, key                          <span class="cm"># q/k 已带上位置，交给注意力</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <strong>① RoPE 用旋转注入位置</strong>：注意力本身无序，RoPE 按位置把 q/k <strong>旋转</strong>一个角度，旋转后点积只依赖位置<strong>之差</strong>——注意力变成<strong>相对位置感知</strong>，且不引入可学习参数。
+  <strong>② RoPE 撑长上下文</strong>：线性缩放 / NTK-aware / YaRN <strong>拉伸旋转频率</strong>，让 4k 训练的模型服务 32k+；都由 <span class="mono">get_rope(...)</span> 按配置造出变体，模型代码不变。
+  <strong>③ RMSNorm vs LayerNorm</strong>：RMSNorm <strong>只 ÷ 均方根再乘 scale</strong>，<strong>不减均值、不加偏置</strong>——比 LayerNorm 便宜，LLM 上效果一样好，常和残差加法融合。
+  <strong>④ 融合小算子</strong>：<span class="mono">SiluAndMul</span>、fused add-norm、qk-norm+rope 把相邻小算子并成一个 kernel，<strong>省内存往返</strong>。这些都是可复用、硬件优化的层（第 26 课搭、第 38 课讲 kernel/融合）。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 注意力本身对 token 的顺序<strong>不敏感</strong>，RoPE 是怎么把<strong>位置</strong>注入进去的？</div>
+  <ol class="opts">
+    <li>把 KV 缓存按位置重新排序</li>
+    <li>在 softmax 后乘一个和位置成正比的标量</li>
+    <li>给每个词学习一个绝对位置向量，加到词向量上</li>
+    <li><strong>按位置把每个 q/k 向量旋转一个角度（角度 ∝ 位置）</strong>，旋转后两个向量的点积只依赖它们位置<strong>之差</strong>，于是注意力变成<strong>相对位置感知</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。RoPE 不“加”位置向量，而是按位置<strong>旋转</strong> q/k。点积的数学决定了：两个旋转过的向量做点积，结果只取决于两个旋转角的<strong>差</strong>，也就是相对位置——于是注意力天然感知 token 间的距离，且不引入任何可学习参数。它不是绝对位置嵌入、不是 softmax 后的标量、也和重排 KV 无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 一个在 4k 上训练的模型，想直接服务 32k 的长文本，RoPE 系的方法（线性缩放 / NTK / YaRN）靠什么做到？</div>
+  <ol class="opts">
+    <li>在 32k 上从头重训一个新模型</li>
+    <li>把多出来的 token 直接丢弃</li>
+    <li>把模型权重重新量化到更低比特</li>
+    <li><strong>拉伸旋转频率</strong>，把超出训练范围的位置角度压回模型熟悉的区间——无需重训，只换一个 RoPE 变体（由 <span class='mono'>get_rope</span> 按配置造出），模型代码不变</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。上下文扩展的关键，是<strong>巧妙地拉伸旋转频率</strong>：线性缩放等比压缩位置、NTK 不均匀调整高低频、YaRN 再加温度分段，让 4k 训练的角度范围覆盖 32k+。这些都是 RoPE 变体，通过同一个 <span class='mono'>get_rope(...)</span> 工厂按配置造出，<strong>不必重训、不改模型代码</strong>。丢 token 会丢信息，量化是另一回事，重训则违背了“无需重训”的初衷。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 相比经典 LayerNorm，Llama 系常用的 RMSNorm 关键差别是什么？</div>
+  <ol class="opts">
+    <li>RMSNorm 精度更高但慢得多</li>
+    <li>两者完全一样，只是命名不同</li>
+    <li><strong>RMSNorm 不减均值、不加偏置</strong>，只把向量 ÷ 均方根再乘一个 scale——比 LayerNorm（减均值 ÷ 标准差 + scale + shift）<strong>更便宜</strong>，LLM 上效果一样好，还常和残差加法融合</li>
+    <li>RMSNorm 需要额外的偏置参数</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。LayerNorm 要减均值、除标准差，并带 scale+shift 两组参数；RMSNorm 砍掉了减均值和偏置，只做 ÷ 均方根再乘 scale——计算更少、参数更少、<strong>更便宜</strong>，而大量实践证明 LLM 上效果不输 LayerNorm，因此成了主流。它不是更慢，也不需要额外偏置，更不是和 LayerNorm 完全等价。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>指南针 + 夹角</strong>”的类比把 RoPE 讲透，并说清它为什么能<strong>扩展上下文</strong>。请覆盖：①注意力的点积对顺序<strong>不敏感</strong>，所以必须注入位置；②RoPE 不“加”位置向量，而是按位置把 q/k <strong>旋转</strong>一个角度（角度 ∝ 位置），旋转后点积只依赖位置<strong>之差</strong> ⇒ <strong>相对位置感知</strong>，且<strong>无可学习参数</strong>；③线性缩放 / NTK-aware / YaRN 如何<strong>拉伸旋转频率</strong>，让 4k 训练的模型服务 32k+，且都由 <span class='mono'>get_rope(...)</span> 按配置造变体、<strong>模型代码不变</strong>（前向应用见第 33 课注意力之前）。</li>
+    <li>解释<strong>为什么要把小算子融合</strong>，并把 RMSNorm、SiluAndMul、fused add-norm 放进“可插拔的硬件优化层”这条脉络里。请说明：①GPU 上每次 kernel 启动 + 显存读写都有<strong>固定开销</strong>，一串小算子各跑各的会让数据在显存和计算单元间<strong>来回搬好几趟</strong>，而搬运常比计算还慢；②融合把相邻小算子并成<strong>一个 kernel</strong>（如 <span class='mono'>SiluAndMul</span> 合 SiLU(gate)×up、fused add-norm 合残差加法+RMSNorm、qk-norm+rope），省掉中间往返；③这些都是可复用、硬件优化的 <span class='mono'>nn.Module</span>，模型只管调用（第 26 课），层内部按平台挑融合/专属 kernel——继注意力后端（第 33 课）、量化（第 35 课）之后“一切皆可插拔”在算子维的体现，更底层 kernel/融合见第 38 课。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+In Lesson 26 you'll see that writing a Transformer is really just <strong>snapping together ready-made layers</strong>: attention is a layer, the MLP is a layer, normalization is a layer, and RoPE — which supplies position — is a layer too. The previous lessons covered the heavyweights: attention (Lesson 33), MoE (Lesson 34), quantization (Lesson 35).
+This lesson fills in the <strong>smaller but equally essential</strong> ops — RoPE, RMSNorm, and a family of <strong>fused ops</strong>. Each ships as a reusable <span class="mono">nn.Module</span>; the model just <strong>calls</strong> it, and the layer itself picks which platform's kernel to run and whether to fuse.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of <strong>RoPE</strong> as turning each word's <strong>compass needle</strong> by how far into the sentence it sits: the later the word, the more the needle is rotated. The "distance" two words feel is just the <strong>angle between their needles</strong> —
+  nobody has an absolute "street address", yet from the angle alone you know <strong>how far apart</strong> they are. And think of <strong>RMSNorm</strong> as a <strong>lightweight volume-leveler</strong>: it doesn't move the music's baseline (no mean subtraction), it just pulls each segment's <strong>overall loudness</strong> to a uniform level so later layers hear clearly and training stays stable.
+  The compass handles "where I am, how far apart we are"; the volume-leveler keeps "everyone at the same loudness" — two tiny parts that keep the whole Transformer running smoothly.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Remember one line: <strong>these small ops are the standard parts the model builds with</strong>. They belong to the same theme as the attention backend (Lesson 33) and quantization (Lesson 35) — <strong>pluggable, hardware-optimized layers</strong>.
+  The model file (Lesson 26) only writes <strong>calls</strong> like <span class="mono">self.rotary_emb(positions, q, k)</span> or <span class="mono">self.input_layernorm(x)</span>; whether the real work is a fused CUDA kernel, a Triton impl, or an AMD/NPU-specific variant is chosen by the layer at runtime by <strong>platform</strong>.
+  So the same model code runs on a different card unchanged, and a faster fused kernel can be wired in without touching a single model line.
+</div>
+
+<h2>RoPE: injecting position by "rotation"</h2>
+<p>Start with a counter-intuitive fact: <strong>attention itself has no sense of order</strong>. Attention computes dot products of queries and keys, and a dot product is <strong>insensitive</strong> to who comes first — shuffle the words and pure attention sees almost the same relations. Yet language is <strong>deeply order-dependent</strong>: "dog bites man" and "man bites dog" are worlds apart.
+So something must feed in <strong>position</strong>. <strong>RoPE (Rotary Position Embedding)</strong> answers elegantly: instead of <strong>adding</strong> a position vector, it <strong>rotates</strong> each q/k vector by an angle — the later the position, the more it turns.</p>
+<p>The magic is in the dot-product math. Rotate the query by the angle of its position and the key by the angle of its position, then take the dot product, and the result depends only on the <strong>difference</strong> of the two angles — the <strong>relative position</strong> of the two tokens. So attention suddenly becomes <strong>relative-position aware</strong>: the model no longer cares about a token's absolute index, but about <strong>how far apart</strong> two tokens are.
+That matches the nature of language — a pronoun referring back to a noun a few words earlier does so by <strong>distance</strong>, not absolute coordinates. RoPE adds no learnable parameters; pure fixed-frequency rotation bakes relative position into attention, saving parameters and generalizing well, which is why it's standard in Llama, Qwen, and friends.</p>
+<p>In code, RoPE is a <span class="mono">RotaryEmbedding</span> layer; <span class="mono">get_rope(...)</span> builds the right variant from config, and the forward applies the rotation to q/k <strong>right before attention</strong> (attention itself is Lesson 33). It precomputes a <span class="mono">cos/sin</span> cache per position, picks out the entries for each token's <span class="mono">positions</span> at forward time, rotates the first <span class="mono">rotary_dim</span> dimensions of the vector, and passes the rest through. No matmul — just elementwise multiply-adds — so it's cheap, and often <strong>fused</strong> into a neighboring op.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Have q / k</h4><p>Before attention we have projected query/key vectors — but right now they carry <strong>no position info</strong>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Apply RoPE by position</h4><p>Use each token's <span class="mono">positions</span> to pick <span class="mono">cos/sin</span>, and <strong>rotate</strong> q/k each by an angle ∝ position.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Dot product turns relative</h4><p>Rotated q·k depends only on the <strong>difference</strong> of positions — attention gains <strong>relative position</strong> for free.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Into attention</h4><p>Position-bearing q/k go to the attention backend (Lesson 33) for softmax weighting — order is now inside.</p></div></div>
+</div>
+
+<p>Picture the rotation even more concretely: the same vector is unrotated at position 0, turned a bit at position 1, and turned more at position 2 — every step later adds a fixed angle.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>One vector, rotated by different positions</b>: the later the position, the larger the rotation (angle ∝ position)</div>
+  <div class="cells"><span class="lab">vector v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k sees only the angle gap = relative position</span></div>
+</div>
+
+<h2>How RoPE enables context-length extension</h2>
+<p>RoPE also solves a big engineering headache: <strong>context-length extension</strong>. A model trained on, say, 4k-token sequences has its rotation "frequency table" tuned for 4k. Serve 32k of long text directly and the rotation angles at late positions run into a range the model has <strong>never seen</strong>, and quality collapses.
+The fix isn't retraining but <strong>cleverly stretching the rotation frequencies</strong>, so a 4k-trained model works comfortably at 32k and beyond.</p>
+<p>The common tricks are all RoPE variants: <strong>linear scaling</strong> is the simplest — compress all positions proportionally, like lengthening the ruler, so 32k positions fall back into familiar angles; simple, but it sacrifices some high-frequency detail. <strong>NTK-aware</strong> is smarter, adjusting different frequencies <strong>unevenly</strong> — small changes to high frequencies (local detail) and larger stretching of low frequencies (long-range relations) — extending length while preserving short-distance resolution.
+<strong>YaRN</strong> adds temperature and segmenting on top of NTK and is a very common choice for today's long-context models. In SGLang all of these are produced by the same <span class="mono">get_rope(...)</span> factory from config — you declare in the model config which <span class="mono">rope_scaling</span> and what factor, and the factory returns the matching <span class="mono">RotaryEmbedding</span> subclass, with <strong>model code unchanged</strong>. Another miniature of "pluggability": swapping a length-extension strategy is just swapping a RoPE variant.</p>
+
+<table class="t">
+  <tr><th>Op</th><th>What it does</th><th>Why you need it</th></tr>
+  <tr><td class="mono">RoPE</td><td><strong>Rotates</strong> q/k by position, injecting relative position</td><td>Attention is orderless; makes the dot product feel token <strong>distance</strong>, and extends context (NTK/YaRN/linear)</td></tr>
+  <tr><td class="mono">RMSNorm</td><td>÷ root-mean-square then scale, <strong>stabilizing numbers</strong></td><td>Cheaper than LayerNorm (no mean subtraction / no bias), as good for LLMs; often <strong>fused</strong> with the residual add</td></tr>
+  <tr><td class="mono">SiluAndMul</td><td>Fuses a gated MLP's <strong>SiLU(gate) × up</strong> into one kernel</td><td>One fewer round-trip for the intermediate tensor — saves bandwidth, runs faster</td></tr>
+  <tr><td class="mono">fused add-norm</td><td><strong>Merges</strong> the residual add + normalization into one step</td><td>Avoids an extra memory round-trip; qk-norm+rope can fuse too — fusing small ops keeps getting faster</td></tr>
+</table>
+
+<h2>RMSNorm: a lighter normalization</h2>
+<p>Every Transformer block sandwiches in a <strong>normalization</strong> layer whose job is to keep the <strong>scale</strong> of activations stable, so deep nets train and infer reliably. The classic recipe is <strong>LayerNorm</strong>: <strong>subtract the mean</strong>, <strong>divide by the standard deviation</strong> to standardize, then apply a learnable <strong>scale and shift (bias)</strong>. Effective, but every step computes mean and variance, plus it carries a bias parameter.</p>
+<p>The Llama family uses the leaner <strong>RMSNorm (Root Mean Square Norm)</strong>. It does <strong>no mean subtraction</strong> and has <strong>no bias</strong>, doing just one thing: divide the vector by its own <strong>root-mean-square</strong> (the square root of the mean of squared elements), then multiply by a learnable scale. Dropping mean subtraction and the bias makes it <strong>cheaper and faster</strong>, and abundant practice shows it works <strong>just as well as LayerNorm</strong> for LLMs — which is why mainstream LLMs went almost uniformly to RMSNorm. It's also often <strong>fused with the preceding residual add</strong> (fused add-norm), doing the "add residual" and "normalize" steps in one memory round-trip to save more bandwidth.</p>
+
+<div class="cols">
+  <div class="col"><h4>LayerNorm (classic)</h4><p><strong>Subtract mean</strong> → <strong>÷ std</strong> → multiply by scale + add <strong>shift (bias)</strong>. Fully standardizes the data: more steps, computes mean/variance, plus one extra bias parameter.</p></div>
+  <div class="col"><h4>RMSNorm (Llama family)</h4><p><strong>No mean subtraction, no bias</strong>: just <strong>÷ root-mean-square</strong> then multiply by scale. Less compute, fewer params, <strong>cheaper</strong>, as good for LLMs, often <strong>fused</strong> with the residual add.</p></div>
+</div>
+
+<h2>Fused ops: merging small steps into one kernel</h2>
+<p>Finally, a theme running through the whole lesson — <strong>operator fusion</strong>. On a GPU there's a plain fact: every kernel launch, every read of a tensor from HBM and write back, carries a <strong>fixed overhead</strong>. A chain of small ops each running on its own makes data <strong>shuttle back and forth</strong> between HBM and compute several times, and the shuttling is often slower than the math. Fusion <strong>merges several neighboring small ops into one kernel</strong>, so data comes in once, gets all the work done, and leaves — skipping the intermediate round-trips.</p>
+<p>Typical examples: a gated MLP (the experts in Lesson 34's MoE, and ordinary MLPs, both use gating) needs <span class="mono">SiLU(gate) × up</span> — <strong>SiluAndMul</strong> fuses the activation and the elementwise multiply <strong>into one kernel</strong>, skipping the read/write of a huge intermediate tensor; the <strong>fused add-norm</strong> above merges the residual add and RMSNorm; and <strong>qk-norm + RoPE</strong> can fuse too. These layers are all <strong>reusable, hardware-optimized</strong> standard parts: the model just calls them, and the layer internally picks a <strong>fused or platform-specific</strong> kernel — this is "<strong>everything is pluggable</strong>" expressed along the <strong>ops</strong> dimension, after the attention backend (Lesson 33) and quantization (Lesson 35). How the lower-level kernels are written and fused is Lesson 38; here, just remember: the model builds with blocks, and the blocks know the hardware.</p>
+
+<p>Below are the core lines of RoPE itself — how <span class="mono">forward_native</span> picks cos/sin by position and applies the rotation to q and k:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/rotary_embedding/base.py ::RotaryEmbedding</span><span class="ln">forward: applying the rotation to q/k by position</span></div>
+  <pre><span class="kw">def</span> forward_native(self, positions, query, key, ...):
+    <span class="cm"># pick the precomputed cos / sin for each token's position</span>
+    cos_sin = self.cos_sin_cache.index_select(<span class="st">0</span>, positions)
+    cos, sin = cos_sin.chunk(<span class="st">2</span>, dim=-<span class="st">1</span>)
+    query_rot = query[..., : self.rotary_dim]   <span class="cm"># rotate only the first rotary_dim dims</span>
+    query_rot = self._apply_rotary_emb_wrapped(query_rot, cos, sin, self.is_neox_style)
+    key_rot = key[..., : self.rotary_dim]
+    key_rot = self._apply_rotary_emb_wrapped(key_rot, cos, sin, self.is_neox_style)
+    <span class="kw">return</span> query, key                          <span class="cm"># q/k now carry position, on to attention</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key points</div>
+  <strong>① RoPE injects position via rotation</strong>: attention is orderless, so RoPE <strong>rotates</strong> q/k by an angle ∝ position; after rotation the dot product depends only on the <strong>difference</strong> of positions — attention becomes <strong>relative-position aware</strong>, with no learnable parameters.
+  <strong>② RoPE enables context extension</strong>: linear scaling / NTK-aware / YaRN <strong>stretch the rotation frequencies</strong> so a 4k-trained model serves 32k+; all built by <span class="mono">get_rope(...)</span> from config, model code unchanged.
+  <strong>③ RMSNorm vs LayerNorm</strong>: RMSNorm <strong>only ÷ root-mean-square then scale</strong>, with <strong>no mean subtraction, no bias</strong> — cheaper than LayerNorm, as good for LLMs, often fused with the residual add.
+  <strong>④ Fuse small ops</strong>: <span class="mono">SiluAndMul</span>, fused add-norm, qk-norm+rope merge neighboring small ops into one kernel to <strong>save memory round-trips</strong>. All are reusable, hardware-optimized layers (built in Lesson 26; kernels/fusion in Lesson 38).
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Attention itself is <strong>insensitive</strong> to token order — how does RoPE inject <strong>position</strong>?</div>
+  <ol class="opts">
+    <li>It reorders the KV cache by position</li>
+    <li>It multiplies a scalar proportional to position after the softmax</li>
+    <li>It learns an absolute position vector per word and adds it to the token embedding</li>
+    <li><strong>It rotates each q/k vector by an angle ∝ its position</strong>; after rotation the dot product of two vectors depends only on the <strong>difference</strong> of their positions, so attention becomes <strong>relative-position aware</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. RoPE doesn't add a position vector — it <strong>rotates</strong> q/k by position. The dot-product math means two rotated vectors' product depends only on the <strong>difference</strong> of their rotation angles, i.e. relative position — so attention naturally feels inter-token distance, with no learnable parameters. It's not absolute position embedding, not a post-softmax scalar, and unrelated to reordering KV.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. To serve 32k text with a 4k-trained model, how do RoPE methods (linear scaling / NTK / YaRN) pull it off?</div>
+  <ol class="opts">
+    <li>Train a brand-new model from scratch at 32k</li>
+    <li>Drop the extra tokens beyond 4k</li>
+    <li>Re-quantize the model weights to lower bits</li>
+    <li><strong>Stretch the rotation frequencies</strong> so out-of-range position angles fall back into the familiar range — no retraining, just a different RoPE variant (built by <span class='mono'>get_rope</span> from config), model code unchanged</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Context extension hinges on <strong>cleverly stretching the rotation frequencies</strong>: linear scaling compresses positions proportionally, NTK adjusts high/low frequencies unevenly, YaRN adds temperature and segmenting — covering 32k+ with the 4k-trained angle range. All are RoPE variants built by the same <span class='mono'>get_rope(...)</span> factory from config, with <strong>no retraining and no model-code change</strong>. Dropping tokens loses info, quantization is unrelated, and retraining defeats the whole point.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Versus classic LayerNorm, what's the key difference of the RMSNorm used by the Llama family?</div>
+  <ol class="opts">
+    <li>RMSNorm is more accurate but far slower</li>
+    <li>They're identical, just named differently</li>
+    <li><strong>RMSNorm does no mean subtraction and has no bias</strong> — it just divides the vector by its root-mean-square and multiplies a scale; <strong>cheaper</strong> than LayerNorm (subtract mean, ÷ std, + scale + shift), as good for LLMs, and often fused with the residual add</li>
+    <li>RMSNorm needs an extra bias parameter</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. LayerNorm subtracts the mean, divides by std, and carries scale+shift; RMSNorm drops mean subtraction and bias, doing only ÷ root-mean-square then scale — less compute, fewer params, <strong>cheaper</strong>, and practice shows it matches LayerNorm for LLMs, hence its dominance. It isn't slower, needs no extra bias, and is not equivalent to LayerNorm.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>compass + angle gap</strong>' analogy, fully explain RoPE and why it enables <strong>context extension</strong>. Cover: (1) the attention dot product is <strong>order-insensitive</strong>, so position must be injected; (2) RoPE doesn't add a position vector but <strong>rotates</strong> q/k by an angle ∝ position, so the dot product depends only on the <strong>difference</strong> of positions ⇒ <strong>relative-position aware</strong>, with <strong>no learnable parameters</strong>; (3) how linear scaling / NTK-aware / YaRN <strong>stretch the rotation frequencies</strong> to serve 32k+ from a 4k-trained model, all built by <span class='mono'>get_rope(...)</span> from config with <strong>model code unchanged</strong> (applied right before attention, Lesson 33).</li>
+    <li>Explain <strong>why small ops get fused</strong>, and place RMSNorm, SiluAndMul, and fused add-norm in the 'pluggable hardware-optimized layers' arc. Cover: (1) on a GPU every kernel launch + HBM read/write carries <strong>fixed overhead</strong>, and a chain of separate small ops makes data <strong>shuttle back and forth</strong> between HBM and compute several times — often slower than the math; (2) fusion merges neighboring small ops into <strong>one kernel</strong> (e.g. <span class='mono'>SiluAndMul</span> for SiLU(gate)×up, fused add-norm for residual-add+RMSNorm, qk-norm+rope), skipping the intermediate round-trips; (3) all are reusable, hardware-optimized <span class='mono'>nn.Module</span>s the model merely calls (Lesson 26), and the layer picks a fused/platform kernel internally — 'everything pluggable' along the ops dimension after the attention backend (Lesson 33) and quantization (Lesson 35); lower-level kernels/fusion are Lesson 38.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="35-quantization.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">量化</span><span class="lang-en">Quantization</span></div></a><a class="next" href="37-logits-and-vocab-parallel.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">Logits 处理与词表并行</span><span class="lang-en">Logits &amp; vocab parallel</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

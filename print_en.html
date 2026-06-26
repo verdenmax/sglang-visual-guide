@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 32 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 37 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -368,6 +368,11 @@ details[open] > summary { list-style: none; }
   <li>Paged memory pools</li>
   <li>HiCache tiering</li>
   <li>Eviction & hit rate</li>
+  <li>Attention backend abstraction</li>
+  <li>The MoE layer</li>
+  <li>Quantization</li>
+  <li>RoPE, norm & other ops</li>
+  <li>Logits & vocab parallel</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -6678,6 +6683,867 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
   <ul>
     <li>Using the 'librarian weeding the shelves' analogy, fully explain eviction. Cover: (1) <strong>when</strong> it triggers (nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble the slots a new request needs does the scheduler fire <span class='mono'>evict</span> to reclaim some), and why it's reactive/on-demand rather than scheduled cleanup; (2) <strong>who</strong> gets cleared, ordered by <span class='mono'>EvictionStrategy</span>'s <span class='mono'>get_priority</span>, default LRU=<span class='mono'>last_access_time</span> (oldest-untouched first), and briefly LFU / FIFO / MRU; (3) why <strong>only leaves</strong> are evictable and reclaim goes leaf-to-root; (4) the iron rule: a <span class='mono'>lock_ref&gt;0</span> node (in use by a running request, Lesson 29) is never evicted, and how <span class='mono'>inc/dec_lock_ref</span> move nodes between the evictable and protected sets.</li>
     <li>Explain the <strong>economics</strong> of the prefix cache, tying it back to neighboring lessons. Cover: (1) what <strong>hit rate</strong> measures (fraction of prompt tokens taken from cache without recompute), how it's raised by high prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20, which reorders the queue to favor cache hits), and how it converts into higher throughput (Lesson 8); (2) the core <strong>trade</strong>: evict-and-recompute-later vs keep-in-HBM — keeping costs HBM and squeezes out concurrency, evicting costs a future thousands-token recompute, and why the whole memory part (Lessons 29–32) is about making this trade well; (3) how HiCache (Lesson 31) raises the <strong>effective</strong> hit rate by sinking evicted prefixes to lower tiers.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Attention backend abstraction</h1>
+
+<p class="lead">
+In Lesson 26 you'll write a model by hand, and inside it sits one line — <span class="mono">self.attn(q, k, v, forward_batch)</span> — where attention happens.
+Yet you <strong>never write the attention CUDA kernel</strong>, and you never care whether it runs on NVIDIA or AMD. This lesson is about the <strong>swappable abstraction</strong> behind that call:
+the model's attention layer (the <span class="inline">RadixAttention</span> <span class="mono">nn.Module</span>, concept in Lesson 7, implementation in Lesson 29) <strong>contains no kernel</strong>;
+it <strong>delegates</strong> the actual attention math to an <span class="mono">AttentionBackend</span> — an abstract base class (ABC). Which backend, which kernel, is a <strong>deployment choice</strong>, not the model author's job.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the attention layer as a <strong>power drill with interchangeable bits</strong>: the job ("make a hole" = compute attention) is <strong>fixed</strong>, but you <strong>snap in a different bit</strong> for the material —
+  one for metal, another for wood. On NVIDIA you snap in the <strong>FlashInfer</strong> bit; for run-anywhere portability you swap in the <strong>Triton</strong> bit; on an AMD box you fit the matching AMD bit.
+  The bit changes, but <strong>the drill body (the model itself) needs zero edits</strong>. The model just holds the body and pulls the trigger <span class="mono">self.attn(...)</span>; which bit is spinning is decided by <strong>who deploys it</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Remember one line: <strong>attention is a "strategy object," not welded-in code</strong>. SGLang cleanly separates "calling attention" from "implementing attention" —
+  the former is the stable <span class="mono">RadixAttention</span> layer inside the model, the latter is a family of pluggable <span class="mono">AttentionBackend</span> implementations.
+  This is another incarnation of the engine's "<strong>everything pluggable</strong>" theme: a new kernel or new hardware plugs in just by implementing the few <span class="mono">AttentionBackend</span> methods,
+  <strong>without touching a single model file</strong>. The backend is chosen explicitly by <span class="mono">--attention-backend</span>, or <strong>auto</strong>-selected by hardware/model.
+</div>
+
+<h2>The layer in the model vs. the backend that does the math</h2>
+<p>First separate two things people conflate. <strong>One</strong> is the model's <strong>attention layer</strong>: a <span class="mono">RadixAttention</span> <span class="mono">nn.Module</span>,
+the very <span class="mono">self.attn</span> you call inside a model's <span class="mono">forward</span> in Lesson 26. You've met this name in Lesson 7 (the prefix-sharing concept) and Lesson 29 (the radix-tree implementation) —
+here it means "the layer the model calls in its forward." The key point: <strong>this layer holds no kernel</strong>. It carries <strong>shape parameters</strong> (how many query/KV heads, head_dim, the scale, the layer id);
+the actual matmul + softmax + weighted sum it <strong>delegates away</strong>.</p>
+<p><strong>Two</strong> is the thing it delegates to: <span class="mono">AttentionBackend</span>, an abstract base class. It defines a <strong>contract</strong> —
+<span class="mono">init_forward_metadata(fb)</span> (plan metadata each forward), <span class="mono">forward_extend(...)</span> (the prefill path), <span class="mono">forward_decode(...)</span> (the decode path).
+The base class is mostly <span class="mono">raise NotImplementedError()</span>, leaving "how to actually compute" to subclasses. So the model author faces a <strong>stable layer interface</strong>,
+while the performance engineer faces a <strong>swappable backend implementation</strong>, the two <strong>decoupled</strong> along the <span class="mono">AttentionBackend</span> line. The model just shouts <span class="mono">self.attn(q,k,v,forward_batch)</span>,
+blissfully unaware of who is spinning behind it — and it needn't know.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Model</span><span class="name">some Transformer model (Lesson 26)</span></div><div class="ld">its forward says <span class="mono">self.attn(q, k, v, forward_batch)</span> — calls, never implements.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">Layer</span><span class="name">RadixAttention (nn.Module, Lesson 29)</span></div><div class="ld">holds <strong>shape params</strong> (heads / head_dim / scale / layer id); <strong>no kernel</strong>, <strong>delegates</strong> the math to a backend.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Interface</span><span class="name">AttentionBackend (abstract base class, ABC)</span></div><div class="ld">defines the contract: <span class="mono">init_forward_metadata</span> / <span class="mono">forward_extend</span> / <span class="mono">forward_decode</span>. Base is just <span class="mono">raise NotImplementedError</span>.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Impls</span><span class="name">FlashInfer / Triton / FlashAttention 3 / AMD·NPU…</span></div><div class="ld">each carries the real CUDA / Triton <strong>kernel</strong>. Chosen by <span class="mono">--attention-backend</span> or auto by hardware.</div></div>
+</div>
+
+<h2>Which backends exist, and what each is good at</h2>
+<p>Backends are a family, not a single thing. <strong>FlashInfer</strong> is a high-performance CUDA implementation, the <strong>default</strong> on many NVIDIA GPUs — it polishes paged-KV layout, masks, and CUDA-graph integration deeply.
+The <strong>Triton</strong> backend is written in Triton; <strong>portability</strong> is its selling point: when FlashInfer doesn't yet support a case, or the hardware/dtype doesn't match, it's the safe <strong>fallback</strong>.
+<strong>FlashAttention 3</strong> is another family of high-performance kernels that can shave off more latency on the right hardware and shapes. Beyond these there are <strong>hardware-specific</strong> backends — e.g. for AMD and NPU (multi-hardware is Lesson 42).
+To pick one, either you nail it down with <span class="mono">--attention-backend</span>, or the engine auto-decides from your <strong>GPU model, model architecture, and dtype</strong>.</p>
+<p>Keep this table in mind: they are <strong>different implementations of the same contract</strong> — all take q/k/v and <span class="mono">forward_batch</span>, all return the attention output, only the inner kernel and target hardware differ.
+Because the contract is identical, <strong>swapping backends needs no model change</strong>; because the implementation is swappable, <strong>new kernels and new hardware can evolve independently</strong>. That is the whole value of an "interface."</p>
+
+<table class="t">
+  <tr><th>Backend</th><th>Strength</th><th>When used</th></tr>
+  <tr><td class="mono">FlashInfer</td><td>high-perf CUDA; deep paged-KV / mask / CUDA-graph polish</td><td><strong>default</strong> on many NVIDIA GPUs</td></tr>
+  <tr><td class="mono">Triton</td><td>written in Triton, <strong>portable</strong>, broad compatibility</td><td>general <strong>fallback</strong>; hardware/dtypes FlashInfer can't cover</td></tr>
+  <tr><td class="mono">FlashAttention 3</td><td>another family of high-perf kernels</td><td>shave more latency on suitable hardware</td></tr>
+  <tr><td class="mono">AMD / NPU…</td><td>hardware-specific implementations</td><td>non-NVIDIA hardware (Lesson 42)</td></tr>
+</table>
+
+<h2>One forward: plan metadata, then dispatch EXTEND / DECODE</h2>
+<p>Each forward, a backend does two things. <strong>First, "plan metadata."</strong> Before calling any kernel, the backend works out this batch's <strong>read/write map</strong> —
+which <strong>pages</strong> of the KV pool (Lesson 30) each request reads its cached K/V from, what the <strong>causal mask</strong> looks like, each <strong>sequence length</strong>, and how to fill the fixed-shape buffers a CUDA graph (Lesson 27) needs.
+This step computes no attention, but it prepares "how the kernel will read memory next," hence "planning." <strong>Second</strong> comes <strong>running the right kernel</strong>.</p>
+<p>And the "right kernel" has <strong>two distinct paths</strong> — the single most important takeaway here. <strong>EXTEND / prefill</strong>: a batch of <strong>new tokens</strong> arrives together (e.g. a freshly received prompt),
+and they do <strong>full attention</strong> — each new token attends to itself and the new tokens before it (under the causal mask). <strong>DECODE</strong>: the autoregressive generation step, with <strong>just 1 query token</strong>,
+which attends to the <strong>entire cached KV</strong> (all historical tokens). The two paths differ in arithmetic shape, memory-access pattern, and optimal kernel, so the backend keeps <strong>separate implementations</strong> —
+<span class="mono">forward_extend</span> and <span class="mono">forward_decode</span>. The unified entry <span class="mono">forward</span> reads <span class="mono">forward_batch.forward_mode</span> to decide which path, then dispatches.
+Incidentally, it's exactly the DECODE path — "1 query, fixed shape" — that's the perfect fit for a CUDA graph (Lesson 27) to swallow launch overhead.</p>
+
+<div class="cols">
+  <div class="col"><h4>EXTEND / prefill (forward_extend)</h4><p>A batch of <strong>new tokens</strong> arrives together (e.g. a fresh prompt). They do <strong>full attention</strong>: each new token sees itself + the new tokens before it, under the <strong>causal mask</strong>. Heavy arithmetic, high parallelism — "read a big chunk, compute a big chunk."</p></div>
+  <div class="col"><h4>DECODE (forward_decode)</h4><p>Autoregressive generation, <strong>just 1 query token</strong>. It attends to the <strong>entire cached KV</strong> (all historical tokens, from Lesson 30's pool). Fixed shape, regular across the batch — the perfect fit for a <strong>CUDA graph</strong> (Lesson 27) to fix launch overhead.</p></div>
+</div>
+
+<p>Stringing one attention call end to end gives this pipeline: the model shouts, the backend plans, picks a path by mode, runs the kernel, and hands the output back to the model to continue.</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">self.attn(...)</div><div class="nd">model layer calls<br>(Lesson 26)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">plan metadata</div><div class="nd">which KV pages, mask,<br>seq lengths (Lesson 30)</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">pick path</div><div class="nd">read forward_mode:<br>EXTEND or DECODE</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">run kernel</div><div class="nd">FlashInfer / Triton…<br>the real matmul + softmax</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">output</div><div class="nd">attention result<br>back to the model</div></div>
+</div>
+
+<h2>Why make it an interface</h2>
+<p>Collapse it all into one question: why not hardcode attention in the model — why route through an ABC? The answer is this lesson's soul: <strong>so new kernels and new hardware can plug in without touching any model file</strong>.
+SGLang supports dozens of models (Lesson 26). If the attention kernel were hardcoded into each model, then every faster kernel and every new accelerator would force you to edit <strong>every model file</strong> — a maintenance disaster.
+Conversely, once attention is defined as the <span class="mono">AttentionBackend</span> contract, adding a new backend = <strong>writing one subclass and implementing those few methods</strong>, and model files <strong>change not a line</strong> yet benefit from it.</p>
+<p>This mirrors a design philosophy that recurs all over the engine: attention is a <strong>strategy object</strong>, just like the KV-cache strategy, the scheduling strategy, and the quantization strategy (Lesson 35) — all abstracted into "swappable parts."
+You write your model depending only on a <strong>stable layer interface</strong>, leaving the <strong>volatile, deployment-specific</strong> decisions of "how fast, on what hardware" to the backend.
+How the lower-level kernels are written (Lessons 38/40) and the details of multi-hardware support (Lesson 42) evolve independently below this interface line, <strong>fully transparent to the model</strong>. That's the payoff of abstraction: stable on top, free below.</p>
+
+<p>Below is the contract itself — the <span class="mono">AttentionBackend</span> ABC. Note how <span class="mono">forward</span> dispatches by <span class="mono">forward_mode</span> to <span class="mono">forward_decode</span> / <span class="mono">forward_extend</span>, both of which are <span class="mono">NotImplementedError</span> in the base, waiting for a subclass:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">the delegation contract: plan metadata + two forward paths</span></div>
+  <pre><span class="kw">class</span> <span class="st">AttentionBackend</span>(ABC):
+    <span class="cm"># Base class of all attention backends. The model only calls it; it</span>
+    <span class="cm"># doesn't care which kernel runs inside.</span>
+
+    <span class="kw">def</span> init_forward_metadata(self, forward_batch):
+        <span class="cm"># Each forward, first “plan metadata”: which KV pages each request</span>
+        <span class="cm"># reads, the mask, sequence lengths…</span>
+        self.init_forward_metadata_out_graph(forward_batch)
+        self.init_forward_metadata_in_graph(forward_batch)
+
+    <span class="kw">def</span> forward(self, q, k, v, layer, forward_batch, save_kv_cache=True):
+        <span class="cm"># Unified entry: dispatch by forward_mode to decode / extend paths</span>
+        <span class="kw">if</span> forward_batch.forward_mode.is_decode():
+            <span class="kw">return</span> self.forward_decode(q, k, v, layer, forward_batch)
+        <span class="kw">else</span>:
+            <span class="kw">return</span> self.forward_extend(q, k, v, layer, forward_batch)
+
+    <span class="kw">def</span> forward_decode(self, q, k, v, layer, forward_batch, ...):
+        <span class="cm"># DECODE path: 1 query token attends the whole cached KV</span>
+        <span class="kw">raise</span> NotImplementedError()   <span class="cm"># filled by a concrete backend</span>
+
+    <span class="kw">def</span> forward_extend(self, q, k, v, layer, forward_batch, ...):
+        <span class="cm"># EXTEND / prefill path: a batch of new tokens, full attention</span>
+        <span class="kw">raise</span> NotImplementedError()</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key points</div>
+  <strong>① The model's attention layer (RadixAttention, Lesson 29) holds no kernel</strong> — it carries shape params and <strong>delegates</strong> the real attention math to an <span class="mono">AttentionBackend</span> (ABC).
+  <strong>② Backends are a swappable family</strong>: FlashInfer (NV high-perf default), Triton (portable fallback), FlashAttention 3, plus hardware-specific ones like AMD/NPU (Lesson 42); chosen by <span class="mono">--attention-backend</span> or auto by hardware.
+  <strong>③ Each forward the backend first "plans metadata"</strong> (which KV pages, mask, seq lengths, Lesson 30), then dispatches to <strong>EXTEND/prefill</strong> (new tokens, full attention) or <strong>DECODE</strong> (1 query over the whole cached KV) — separate paths — integrating paged KV + CUDA graph (Lesson 27).
+  <strong>④ Making it an interface lets new kernels/hardware plug in without touching any model file</strong> (Lesson 26) — attention is a <strong>strategy object</strong>. The model just calls <span class="mono">self.attn(q,k,v,forward_batch)</span>; which backend runs is a deployment choice. Kernel details in Lessons 38/40.
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does the <span class='mono'>RadixAttention</span> layer <strong>itself</strong> — the one called by <span class='mono'>self.attn(q,k,v,forward_batch)</span> in a model's <span class='mono'>forward</span> — actually do?</div>
+  <ol class="opts">
+    <li>It's just a placeholder layer, skipped at forward time</li>
+    <li>It writes KV to disk and manages the eviction policy</li>
+    <li><strong>It holds no kernel — only shape params (heads / head_dim / scale / layer id) — and delegates the real matmul + softmax to an <span class='mono'>AttentionBackend</span></strong>. The dirty work of computing attention is the backend's kernel; the layer is just a stable call site</li>
+    <li>It hardcodes a FlashInfer CUDA kernel inside and computes all of attention itself</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. RadixAttention is the layer the model's forward calls, but it implements no kernel: it carries shape params and delegates the math to a swappable AttentionBackend. Hardcoding a kernel is exactly what it avoids; eviction/disk is the cache subsystem (Lessons 31/32); it is not a placeholder.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why are <span class='mono'>forward_extend</span> and <span class='mono'>forward_decode</span> kept as <strong>two separate paths</strong>?</div>
+  <ol class="opts">
+    <li>extend computes attention while decode only samples the next token</li>
+    <li>Purely historical; the two paths actually run identical code</li>
+    <li><strong>Because the two cases differ sharply in shape and memory access</strong>: EXTEND/prefill is a batch of <strong>new tokens</strong> doing <strong>full attention</strong> (under the causal mask); DECODE is <strong>1 query token</strong> attending the <strong>entire cached KV</strong>. Different shapes, different optimal kernels — splitting lets each be optimal (and DECODE fits CUDA graph best, Lesson 27)</li>
+    <li>One is for NVIDIA and the other for AMD</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. EXTEND (prefill) is full attention over many new tokens; DECODE is a single query over the whole cached KV — different arithmetic shapes and access patterns, so they split to use the best kernel each; DECODE's fixed shape also suits CUDA graph. The paths aren't identical code, aren't split by hardware, and decode still computes attention.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What is the core benefit of defining attention as the <span class='mono'>AttentionBackend</span> abstract base class?</div>
+  <ol class="opts">
+    <li><strong>A new kernel or new hardware plugs in just by implementing the contract, without touching any model file</strong>. SGLang supports dozens of models (Lesson 26); if the kernel were hardcoded per model, every new backend would mean editing them all — the interface decouples 'calling attention' from 'implementing attention,' making attention a swappable strategy object</li>
+    <li>It magically makes attention faster without any kernel optimization</li>
+    <li>It forces all hardware to use the exact same kernel</li>
+    <li>It merges every backend's code into one file for easier reading</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The interface's value is pluggability: implement a few AttentionBackend methods to add a backend/hardware, model files untouched. It doesn't magically speed things up (the backend kernel does), doesn't merge code, and doesn't force one kernel — quite the opposite, it lets different hardware use different kernels while the top stays stable.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>power drill with interchangeable bits</strong>' analogy, fully explain the attention backend abstraction. Cover: (1) why the model's attention layer (the <span class='mono'>RadixAttention</span> <span class='mono'>nn.Module</span>, Lesson 29) is like the 'drill body' — it <strong>holds no kernel</strong>, only shape params, and <strong>delegates</strong> the real math to an <span class='mono'>AttentionBackend</span> (ABC); (2) what the 'bits' are — FlashInfer (NV high-perf default), Triton (portable fallback), FlashAttention 3, AMD/NPU (Lesson 42), chosen by <span class='mono'>--attention-backend</span> or auto by hardware; (3) why the model author only writes <span class='mono'>self.attn(q,k,v,forward_batch)</span> (Lesson 26) and 'swapping the bit needs no change to the body.'</li>
+    <li>Explain what happens inside a backend during one attention call <strong>end to end</strong>, tying it back to neighboring lessons. Cover: (1) what 'plan metadata' means — before running the kernel, the backend computes which <strong>pages</strong> of the KV pool (Lesson 30) each request reads, the <strong>causal mask</strong>, the <strong>sequence lengths</strong>, and the fixed-shape buffers a CUDA graph (Lesson 27) needs; (2) how the backend dispatches by <span class='mono'>forward_mode</span> to <strong>EXTEND/prefill</strong> (new tokens, full attention) vs <strong>DECODE</strong> (1 query over the whole cached KV); (3) why the fixed-shape DECODE path best suits CUDA graph; (4) how lower-level kernels (Lessons 38/40) and multi-hardware support (Lesson 42) evolve independently below this interface line.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>The MoE layer</h1>
+
+<p class="lead">
+In Lesson 26 you'll write a model by hand, and in many newer models that line <span class="mono">self.mlp(x)</span> is no longer a plain multilayer perceptron but a <strong>MoE layer</strong> (Mixture of Experts).
+DeepSeek-V3, Mixtral, and Qwen-MoE all use it. Its counter-intuitive heart: <strong>the parameter count can grow tens or hundreds of times while the compute each token actually spends stays nearly flat</strong>.
+This lesson explains how that "seemingly free lunch" works — by splitting one big FFN into <strong>many small experts</strong>, adding a <strong>router</strong>, and letting each token visit only a <strong>tiny few</strong> of them.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the MoE layer as a big hospital's <strong>triage desk</strong>. The hospital staffs <strong>dozens of specialists</strong> (experts), but when a patient (token) arrives, the triage nurse (router) <strong>does not</strong> send them through every department —
+  that would be slow and wasteful. The nurse takes one look at the symptoms and <strong>picks the two most relevant specialties</strong> (top-2), say "cardiology + endocrinology," and the patient visits only those two rooms.
+  So the hospital can <strong>keep opening more specialties, accumulating ever more expertise</strong>, while <strong>each patient's visit time stays nearly constant</strong> — they always see just two doctors. That is the soul of MoE: trade "<strong>sparsity</strong>" for "<strong>far larger total capacity</strong>,"
+  instead of making everyone pay for that vastness. Finally the two doctors' opinions are <strong>combined weighted by relevance</strong> into one diagnosis — the token's output.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Remember one line: <strong>a dense layer runs every token through the same big network; an MoE layer runs each token through only a chosen few small networks</strong>. The former <strong>welds</strong> parameters to compute — smarter means slower;
+  the latter <strong>decouples</strong> them — the expert count (parameters, knowledge capacity) can climb on its own, while per-token FLOPs are pinned by <span class="mono">top-k</span> and stay roughly fixed.
+  This is the modern move for "big yet fast." SGLang implements it correctly and quickly with a layer called <span class="mono">FusedMoE</span>: routing, grouping, and per-expert batched matmul are <strong>fused into kernels</strong>,
+  not done by a sluggish Python loop over experts. Experts can also be spread across GPUs (expert parallelism, Lesson 46), and hot-expert load is balanced by EPLB (Lesson 47).
+</div>
+
+<h2>From a dense FFN to MoE: a crowd of experts plus a router</h2>
+<p>First, what it replaces. In a normal Transformer block, attention is followed by a <strong>dense FFN</strong>: a large MLP (two linears + activation) that <strong>every token passes through in full</strong>.
+That means the only way to make this FFN more "knowledgeable" is to <strong>widen and enlarge it</strong> — but once enlarged, <strong>every token's compute rises in lockstep</strong>. Parameter count and per-token compute are <strong>welded together</strong>; that is the dense layer's ceiling.</p>
+<p>An MoE layer swaps the structure. It splits that big FFN into <strong>N experts</strong> (each a <strong>smaller FFN</strong> — say 64 or 256 of them) and adds a <strong>router / gate</strong> —
+a tiny linear layer. For each incoming token, the router first <strong>scores every expert</strong>, then <strong>keeps only the top-k</strong> highest (e.g. 2 of 64).
+<strong>Only those k experts actually compute</strong>; the other dozens <strong>do nothing for this token</strong>. That is <strong>sparse activation</strong>: a layer holds enormous parameters, but each token lights up only a small handful.</p>
+<p>Do the arithmetic: with 64 experts and 2 per token, this layer's <strong>parameters</strong> are roughly 32x a dense version (huge knowledge capacity), yet each token's <strong>compute</strong> is just "pass through 2 small FFNs" —
+about a medium dense FFN, and <strong>nearly independent of the total expert count</strong>. So you can scale a model to tens or hundreds of billions of parameters while per-token inference FLOPs stay firmly pinned by <span class="mono">top-k</span>.
+That is why people say MoE "<strong>scales parameters, not per-token compute</strong>." Of course, "more parameters" means <strong>memory must hold every expert</strong>, even those idle for a given token — a cost we settle in the trade-offs at the end.</p>
+
+<div class="cols">
+  <div class="col"><h4>Dense FFN</h4><p><strong>Every token passes through the same big MLP</strong>. More knowledge means widening it — <strong>parameters and per-token compute rise together</strong>, welded. Simple and naturally balanced, but "big" and "fast" can't coexist.</p></div>
+  <div class="col"><h4>MoE layer (sparse)</h4><p><strong>N small experts + 1 router</strong>; each token visits only <span class="mono">top-k</span> (e.g. 2 of 64). <strong>Parameters soar with expert count; per-token compute pinned by top-k</strong>. Big and fast — at the cost of routing, communication, and memory (below).</p></div>
+</div>
+
+<h2>One MoE forward: route → group → grouped GEMM → weighted combine</h2>
+<p>Break a token's journey through an MoE layer into four steps and you'll see what it computes. <strong>Step 1, route</strong>: the router scores each token against all experts, takes <span class="mono">top-k</span>, yielding "which experts this token goes to" plus the matching <strong>routing weights</strong> (a set of normalized scores).
+<strong>Step 2, group</strong>: a batch holds thousands of tokens, each dispatched to different experts. Calling experts token-by-token is wildly inefficient, so tokens are <strong>regrouped by target expert</strong> —
+all tokens bound for expert 1 in one pile, those for expert 2 in another, and so on.</p>
+<p><strong>Step 3, grouped / batched GEMM</strong>: each expert now faces <strong>a whole pile of its own tokens</strong>, so it can do one <strong>efficient batched matmul</strong>,
+fusing "dozens of experts, each a small batch" into a regular, GPU-friendly big operator rather than dozens of tiny scattered matmuls. This is the <strong>compute core</strong> that lets MoE run fast (grouped-GEMM kernel details in Lesson 38).
+<strong>Step 4, scatter & combine</strong>: send each expert's result <strong>back to its original token position</strong>, then <strong>weighted-sum by the routing weights</strong> from step 1 —
+a token that went to "expert 7 and expert 12" gets output = 0.7×expert7 + 0.3×expert12 (weights from the router). After this, the MoE layer's output shape is identical to a dense FFN's; downstream is <strong>none the wiser</strong>.</p>
+<p>Here's a big engineering trap: doing those four steps with a <strong>Python loop "for each expert"</strong> is absurdly slow — dozens of kernel launches, dozens of tiny operators, data shuffled back and forth, the GPU mostly <strong>idling and waiting</strong>.
+SGLang's <span class="mono">FusedMoE</span> exists precisely for this: it <strong>fuses routing + grouping + grouped GEMM into a few kernels</strong>, with <strong>no slow per-expert Python loop</strong>.
+"Fuse" here means what used to take several passes, with Python scheduling in between, is pressed into one or two GPU kernels in one shot — launch overhead and intermediate movement gone. Here is the layer itself:</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">token x</div><div class="nd">a token enters the<br>MoE layer (Lesson 26)</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">router / gate</div><div class="nd">score every expert<br>take top-k (e.g. 2 of 64)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">group + grouped GEMM</div><div class="nd">pile same-expert tokens<br>batched matmul (Lesson 38)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">weighted combine</div><div class="nd">by routing weights<br>0.7·E7 + 0.3·E12</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">output</div><div class="nd">same shape as dense FFN<br>downstream unaware</div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/moe/fused_moe_triton/layer.py ::FusedMoE</span><span class="ln">N experts + top-k routing, fused into kernels</span></div>
+  <pre><span class="kw">class</span> <span class="st">FusedMoE</span>(torch.nn.Module):
+    <span class="cm"># MoE layer: holds both gate_up_proj(w13) and down_proj(w2) expert weights</span>
+    <span class="kw">def</span> __init__(
+        self,
+        num_experts: int,      <span class="cm"># total experts in this layer (e.g. 64 / 256)</span>
+        hidden_size: int,
+        intermediate_size: int,
+        layer_id: int,
+        top_k: Optional[int] = None,   <span class="cm"># experts picked per token (e.g. 2)</span>
+        ...
+    ):
+        self.layer_id = layer_id
+        self.top_k = top_k             <span class="cm"># sparse: only top_k experts actually run</span>
+        self.num_experts = num_experts <span class="cm"># params grow with this; compute set by top_k</span>
+        self.moe_ep_size = get_parallel().moe_ep_size  <span class="cm"># expert-parallel size (Lesson 46)</span></pre>
+</div>
+
+<h2>A few unavoidable terms</h2>
+<p>MoE docs lean on a small set of terms. Pin their meanings now and the DeepSeek-V3 / Mixtral code won't trip you up later. They are just the key roles in the four-step flow above — match each to its slot.</p>
+
+<table class="t">
+  <tr><th>Term</th><th>What it is</th><th>Role</th></tr>
+  <tr><td class="mono">expert</td><td>a <strong>smaller FFN</strong>; N of them per layer</td><td>holds knowledge; computes only if selected</td></tr>
+  <tr><td class="mono">router / gate</td><td>a <strong>tiny linear layer</strong></td><td><strong>scores</strong> each token over experts; sets routing & weights</td></tr>
+  <tr><td class="mono">top-k</td><td><strong>experts picked</strong> per token (e.g. 2)</td><td><strong>pins per-token compute</strong>; makes it sparse</td></tr>
+  <tr><td class="mono">grouped GEMM</td><td><strong>batched matmul grouped</strong> by expert</td><td>fuses tiny ops into a GPU-friendly big one (Lesson 38)</td></tr>
+  <tr><td class="mono">EP (expert parallel)</td><td>spread experts <strong>across GPUs</strong></td><td>hold a mass of experts too big for one card (Lesson 46)</td></tr>
+</table>
+
+<h2>Scaling out: expert parallelism and load balancing</h2>
+<p>Once there are many experts, a single GPU <strong>can't hold them all</strong> — one of MoE's costs. The fix is <strong>Expert Parallelism (EP, Lesson 46)</strong>: spread the N experts <strong>across different GPUs</strong>,
+each card holding only some. But tokens follow routing, and a token's chosen expert may <strong>not live on its current card</strong>, so an <strong>all-to-all dispatch</strong> is needed —
+send each token to the card holding its expert, compute, then <strong>collect back (combine)</strong> for the weighted sum. Expert parallelism lets total capacity exceed one card's memory, at the cost of this <strong>cross-GPU communication</strong>.</p>
+<p>There's another unavoidable headache: <strong>routing imbalance</strong>. The router is learned, so inevitably a few "<strong>hot experts</strong>" get chosen by far more tokens than average, while others sit nearly empty.
+Under expert parallelism, the GPU holding a hot expert becomes a <strong>bottleneck</strong> — the other cards finish and wait on it. <strong>EPLB (Expert Parallelism Load Balancer, Lesson 47)</strong> cures exactly this:
+by <strong>replicating hot experts and rearranging the expert-to-GPU placement</strong>, it spreads the load so cards stay evenly busy. The comparison below shows several tokens each routed to different experts — the highlights are each token's chosen top-2:</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Four tokens, each routed to a different top-2 of experts</b>: highlighted cells are the experts the router chose for that token and that actually compute; the other dozens <strong>do nothing</strong> for it</div>
+  <div class="cells"><span class="lab">token "sky"</span><span class="cell hl">E7 ·0.7</span><span class="cell hl">E12 ·0.3</span><span class="cell">E3</span><span class="cell">E40</span><span class="sep">→</span><span class="cell q">output = 0.7·expert7 + 0.3·expert12 (weighted by routing scores)</span></div>
+  <div class="cells"><span class="lab">token "air"</span><span class="cell">E7</span><span class="cell hl">E3 ·0.6</span><span class="cell hl">E51 ·0.4</span><span class="cell">E12</span><span class="sep">→</span><span class="cell q">same layer, different token — the chosen experts can be entirely different</span></div>
+  <div class="cells"><span class="lab">token "true"</span><span class="cell hl">E7 ·0.55</span><span class="cell">E3</span><span class="cell hl">E40 ·0.45</span><span class="cell">E9</span><span class="sep">→</span><span class="cell q">E7 chosen again — it's a <strong>hot expert</strong>, carrying heavier load</span></div>
+  <div class="cells"><span class="lab">token "good"</span><span class="cell hl">E7 ·0.5</span><span class="cell hl">E12 ·0.5</span><span class="cell">E51</span><span class="cell">E3</span><span class="sep">→</span><span class="cell q">E7 picked a third time → its card bottlenecks; EPLB evens it out (Lesson 47)</span></div>
+</div>
+
+<p>Tally MoE's trade-off as a ledger: the <strong>gain</strong> is a <strong>huge effective model</strong> (more experts = more knowledge capacity) for <strong>modest compute</strong>; the <strong>costs</strong> are three —
+first, <strong>routing imbalance</strong> lets hot experts drag the whole step (EPLB cures it); second, the <strong>all-to-all communication</strong> under expert parallelism is real overhead; third, <strong>memory must hold every expert</strong>, even those idle for a token.
+Understand these three and you truly understand MoE: it is no free lunch but a swap of the "compute bill" for a "<strong>communication + memory + balance bill</strong>" — and SGLang's <span class="mono">FusedMoE</span>, expert parallelism (Lesson 46), and EPLB (Lesson 47) exist to shrink those three bills.</p>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① An MoE layer = N small experts (FFNs) + one router</strong>: the router scores every <strong>token</strong> over experts and keeps only <span class="mono">top-k</span> (e.g. 2 of 64); only those k compute → <strong>sparse</strong>. So <strong>parameters soar with expert count while per-token compute is pinned by top-k</strong>. DeepSeek-V3 / Mixtral / Qwen-MoE all use it.
+  <strong>② Four compute steps</strong>: route → group by expert → <strong>grouped / batched GEMM</strong> → scatter back and combine weighted by routing scores. SGLang's <span class="mono">FusedMoE</span> <strong>fuses routing + grouped GEMM into kernels</strong>, with no slow per-expert Python loop (kernels in Lesson 38).
+  <strong>③ Scaling out</strong>: <strong>expert parallelism (EP, Lesson 46)</strong> spreads experts across GPUs; tokens all-to-all dispatch to the card holding their expert, then combine. <strong>EPLB (Lesson 47)</strong> balances "hot expert" load.
+  <strong>④ Trade-off</strong>: a huge effective model for modest compute, at the cost of <strong>routing imbalance + all-to-all comm + memory to hold all experts</strong>. How to place this layer when writing a model: Lesson 26.
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. An MoE layer has 64 experts with <span class='mono'>top_k=2</span>. What does the router/gate do for <strong>each token</strong>?</div>
+  <ol class="opts">
+    <li>The whole batch shares one single chosen expert</li>
+    <li><strong>It scores all 64 experts and keeps only the top-2 to actually compute</strong>; the other 62 do nothing for this token; the 2 outputs are then combined weighted by the routing scores. That is <strong>sparse activation</strong></li>
+    <li>Sends the token through all 64 experts in turn, then averages</li>
+    <li>Picks 2 experts at random, ignoring the token's content</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The router is a tiny linear layer that scores all experts per token and takes top-k (here 2 of 64); only those 2 compute, then combine by weight — that is sparsity. It does not run the token through all experts (that would be dense), is not random, and is not shared batch-wide: routing is <strong>per-token</strong>.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is MoE said to 'scale parameters, not per-token compute'?</div>
+  <ol class="opts">
+    <li>Because an MoE expert is intrinsically faster to compute than a dense FFN</li>
+    <li>Because MoE needs no matrix multiplication at all</li>
+    <li>Because the parameters are compressed to nearly zero</li>
+    <li><strong>More experts means more parameters (knowledge capacity) in the layer; but each token visits only a fixed <span class='mono'>top-k</span>, so per-token FLOPs are pinned by top-k and barely grow with the expert count</strong>. So the model can reach hundreds of billions of params while per-token inference compute stays roughly constant</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The point is decoupling: parameters grow with experts (more capacity), while each token activates only top-k, so compute is pinned by top-k. It's not that a single expert is faster (an expert is a small FFN), nor that there's no matmul or zero params — quite the opposite, params are many; memory must hold them all.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does SGLang's <span class='mono'>FusedMoE</span> layer 'fuse' into kernels?</div>
+  <ol class="opts">
+    <li><strong>It fuses routing + grouping-by-expert + grouped/batched GEMM into a few kernels, avoiding a slow 'for each expert' Python loop</strong> — which otherwise means dozens of kernel launches and tiny scattered ops with the GPU mostly idle</li>
+    <li>Merges attention and MoE into the same layer</li>
+    <li>Fuses multiple GPUs into one logical GPU</li>
+    <li>Compresses all experts' weights into a single expert</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. FusedMoE's 'fuse' means pressing routing, grouping, and grouped GEMM into a few kernels, killing the slow per-expert Python loop and tiny ops. It does not collapse experts into one (that would end the mixture), does not merge attention, and does not turn many GPUs into one — cross-GPU is expert parallelism (Lesson 46).</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>hospital triage desk</strong>' analogy, fully explain the MoE layer. Cover: (1) a <strong>dense FFN</strong> runs every token through the same big MLP, <strong>welding</strong> parameters to per-token compute; (2) an MoE layer = <strong>N small experts (FFNs) + a router/gate</strong>; the router scores <strong>each token</strong> and takes <span class='mono'>top-k</span> (e.g. 2 of 64), so only those k compute → <strong>sparse</strong>; (3) why this 'scales parameters, not per-token compute,' naming DeepSeek-V3 / Mixtral / Qwen-MoE.</li>
+    <li>Explain one MoE forward <strong>end to end</strong>, tying it to neighboring lessons. Cover: (1) the four steps — <strong>route → group by expert → grouped/batched GEMM (Lesson 38) → scatter back and combine weighted by routing scores</strong> — and why <span class='mono'>FusedMoE</span> fuses these into kernels (avoiding a slow per-expert Python loop); (2) scaling out, how <strong>expert parallelism (EP, Lesson 46)</strong> spreads experts across GPUs and all-to-all dispatches tokens to their expert's card before combining; (3) why <strong>EPLB (Lesson 47)</strong> balances 'hot experts,' and MoE's three costs (routing imbalance, all-to-all comm, memory to hold all experts).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Quantization</h1>
+
+<p class="lead">
+Models are big and slow largely because they're "heavy" — tens of billions of parameters, each stored in 16-bit float.
+<strong>Quantization</strong> is how you put those numbers on a <strong>diet</strong>: approximate the original weights with
+<strong>fewer bits</strong> (8, 4) plus a <strong>scale factor</strong>, saving HBM and bandwidth so the model is smaller and faster —
+at the cost of <strong>a little</strong> accuracy. This lesson covers why it works, which formats exist, and how SGLang <strong>plugs</strong> it into linear layers.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Quantization is like <strong>JPEG / MP3 compression</strong> for weights: instead of storing each value at full precision,
+  keep <strong>fewer bits</strong> plus a shared <strong>scale</strong> to restore the range. You lose a sliver of barely-noticeable
+  detail in exchange for a file that's <strong>far smaller and moves far faster</strong>. "<strong>Group scaling</strong>" is like
+  compressing the image in small blocks — each block keeps its own dynamic range, so distortion stays low.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  Weights are normally fp16/bf16 (16-bit). Quantization stores them in <strong>8-bit (FP8) or even 4-bit (INT4/FP4)</strong> + a scale.
+  <strong>Smaller weights = less HBM</strong> (room for KV cache and concurrency, Lessons 4/8) <strong>+ less memory bandwidth</strong>
+  (decode is memory-bound, Lesson 4) <strong>⇒ faster</strong>. In SGLang each format provides a <span class="mono">LinearMethod</span> that
+  replaces how a linear layer stores weights and does its matmul — like the attention backend (Lesson 33), quantization is a <strong>pluggable strategy</strong>.
+</div>
+
+<h2>Why quantization speeds things up: HBM and bandwidth</h2>
+<p>People assume quantization mainly saves compute, but in LLM inference the <strong>big win is memory</strong>. First, the weights'
+<strong>HBM</strong> footprint halves or quarters — a 70B model is 140GB in fp16 but ~35GB in INT4, so a GPU fits a bigger model, or
+frees HBM for the KV cache and higher concurrency (Lessons 4/8). Second, and more importantly: decode is <strong>memory-bound</strong>
+(Lesson 4) — every generated token drags the <strong>whole weight set</strong> from HBM into the compute units once; halve the bytes and
+you halve the move, so the <strong>bandwidth bottleneck eases and decode gets faster</strong>. So quantization shines for latency-sensitive,
+single-request decode. Third, on hardware with low-precision compute (FP8 on H100/B200), a <strong>low-precision matmul kernel</strong> saves FLOPs too.</p>
+
+<p>Make the memory math concrete: a 7-billion-parameter (7B) model at fp16 stores each weight in 2 bytes, so the weights alone need ~14GB; in INT4 each weight is half a byte (plus a tiny per-group scale), collapsing the weights to ~3.5GB — <strong>under a quarter</strong>. Those reclaimed gigabytes don't vanish; they turn directly into more <strong>KV-cache slots</strong> (Lesson 8): the KV pool holds thousands more tokens and dozens more concurrent requests, so the same GPU's <strong>throughput</strong> and <strong>serviceable concurrency</strong> both climb (Lessons 4/8). That's why "quantization saves memory" is usually worth more in practice than "saves compute" — in LLM serving, HBM is often the wall that actually caps concurrency, and bandwidth is the rope that drags decode down.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Original fp16 weight</h4><p>16 bits each — precise but big and slow to move.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Scale + round</h4><p>Compute one <span class="mono">scale</span> for a group, map them to 8/4-bit ints or low-precision floats.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Compact storage</h4><p>HBM holds only <strong>low-bit weights + scale</strong>, half to a quarter the size.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Dequant / low-precision matmul</h4><p>Either restore to high precision first, or run a quantized kernel (fastest).</p></div></div>
+</div>
+
+<h2>The formats: from FP8 to AWQ/GPTQ</h2>
+<p>Quantization isn't one method but a <strong>family</strong>. By bit-count and "what gets quantized" it spreads into this table:</p>
+
+<table class="t">
+  <tr><th>Format</th><th>Bits</th><th>Quantizes</th><th>Notes</th></tr>
+  <tr><td><strong>FP8</strong> (E4M3)</td><td class="mono">8</td><td>weights + activations</td><td>HW-accelerated on H100/B200, can run FP8 GEMM, tiny accuracy loss</td></tr>
+  <tr><td><strong>FP4 / INT4</strong></td><td class="mono">4</td><td>weights (usually)</td><td>most compression, most HBM saved; needs finer scales for accuracy</td></tr>
+  <tr><td><strong>AWQ</strong></td><td class="mono">4</td><td>weight-only</td><td>calibration-light PTQ protecting salient channels by activation importance</td></tr>
+  <tr><td><strong>GPTQ</strong></td><td class="mono">4</td><td>weight-only</td><td>calibrated PTQ minimizing per-layer error</td></tr>
+</table>
+
+<p>A key distinction is <strong>"weight-only" vs "weight + activation"</strong>. <strong>Weight-only (AWQ/GPTQ)</strong>: weights stored in 4 bits
+to save HBM, but compute <strong>dequantizes back to high precision</strong> first — saving storage and bandwidth, not FLOPs, which is great for
+memory-bound decode. <strong>Weight + activation (FP8)</strong>: both sides low precision, running a <strong>low-precision matmul kernel</strong>
+(FP8 GEMM) — <strong>saving FLOPs too</strong>, the favorite for throughput, but pickier about hardware and accuracy.</p>
+
+<div class="cols">
+  <div class="col"><h4>Weight-only</h4><p>4-bit weights, high-precision activations; <strong>dequant before compute</strong>. Saves <strong>HBM + bandwidth</strong>. AWQ/GPTQ are here — big win for latency-sensitive single-request decode.</p></div>
+  <div class="col"><h4>Weight + activation</h4><p>Both low precision, run a <strong>low-precision GEMM</strong> (FP8). Saves <strong>HBM + bandwidth + FLOPs</strong>, highest throughput; needs hardware support, accuracy needs more care.</p></div>
+</div>
+
+<h2>Why low bits still work: redundancy, outliers, AWQ/GPTQ</h2>
+<p>Cut weights from 16 bits to 4 and the model barely loses quality — how? The root reason is that LLM weights are <strong>highly redundant and tolerant of noise</strong>: among tens of billions of parameters, the vast majority sit in a modest range, and one weight wobbling slightly gets averaged away through layer after layer of weighted sums, with negligible effect on the final logits — the same reason a lossy-compressed photo still looks fine. The real danger is <strong>outliers</strong>: the rare weights or activations with unusually large magnitude; if a coarse scale tries to cover the whole group, they get <strong>clipped</strong> and lose information, or they force the scale large and <strong>drag down the precision of every normal value with them</strong>. So nearly all the effort in modern quantization goes into <strong>handling that handful of outliers</strong> — which is where methods pull apart in quality.</p>
+<p><strong>AWQ</strong> (Activation-aware Weight Quantization)'s insight: not all weight channels matter equally — the <strong>salient channels</strong> that get multiplied by large activations dominate the output. AWQ uses a small calibration batch to measure each channel's activation magnitude, <strong>scales up and protects</strong> the important channels (effectively giving them finer precision) before quantizing, so it skips heavy per-weight optimization yet keeps the critical information, quantizing fast and accurately. <strong>GPTQ</strong> takes another route: with a <strong>calibration set</strong> it solves a least-squares problem <strong>layer by layer</strong>, quantizing and compensating as it goes — each time it quantizes a column of weights it <strong>back-corrects</strong> the introduced error onto the not-yet-quantized columns, minimizing the layer's <strong>reconstruction error</strong> (the output difference before vs after). Both are <strong>post-training quantization (PTQ)</strong>: no retraining, just a little calibration data, turning an fp16 checkpoint into a high-quality 4-bit version in minutes, with accuracy loss often so small you only see it on a benchmark.</p>
+<p>So how much accuracy actually drops? Empirically there's a rough staircase: <strong>FP8</strong> is nearly lossless, often indistinguishable from bf16 on benchmark scores, so on H100/B200 it increasingly feels like a "just turn it on" default; <strong>INT4 (AWQ/GPTQ)</strong> gives up a little, usually on the order of a few tenths of a percent — perfectly acceptable for most applications in exchange for a 3–4× HBM saving; only at more aggressive <strong>3-bit or even 2-bit</strong> does quality degrade noticeably and need fancier methods to rescue. One often-missed detail: <strong>bigger models compress better</strong> — a 70B quantized to 4 bits typically loses relatively less than a 7B at 4 bits, because the larger model is more redundant and has more error budget. That's why in production "big model + aggressive quant" often beats "small model + full precision."</p>
+
+<h2>FP8 up close: E4M3, E5M2, and dynamic vs static scaling</h2>
+<p>FP8 isn't one format but two, differing in how the 8 bits are <strong>split between exponent and mantissa</strong>. <strong>E4M3</strong> (4 exponent, 3 mantissa bits) has more mantissa, so higher precision but a narrower representable range — good for the relatively bounded <strong>weights and forward activations</strong>, and the most common choice for inference. <strong>E5M2</strong> (5 exponent, 2 mantissa) reaches a wider range at coarser precision, better for wide-ranging <strong>gradients</strong>, mostly seen in training. Inference quantization targets <strong>E4M3</strong> by default: packing a usable float into 8 bits brings <strong>built-in dynamic range</strong> that same-width INT8 lacks, which is why FP8 often loses even less accuracy than INT8.</p>
+<p>A weight's scale is fixed at quantization time, but an <strong>activation's</strong> scale has two styles. <strong>Dynamic scaling</strong> computes the scale at runtime from the current batch's actual magnitude — most robust, but adds a max-reduction every step; <strong>static scaling</strong> uses a fixed scale precomputed during calibration — no runtime stats, fastest, but drifts a bit if the distribution shifts. Speed also hinges on the <strong>kernel</strong>: on hardware with FP8 tensor cores SGLang takes the <span class="mono">cutlass</span> FP8 GEMM fast path (the <span class="mono">cutlass_fp8_supported()</span> line is probing exactly whether that path is open), while 4-bit weights often go through a dedicated low-bit GEMM kernel like <span class="mono">Marlin</span>. <strong>H100 / B200</strong> are FP8's home turf because their Tensor Cores <strong>natively support FP8 matmul</strong> — not software emulation but hardware computing a whole tile per clock, which is how the low-precision compute advantage actually materializes instead of merely saving data movement.</p>
+
+<h2>The scale is the soul: granularity sets accuracy</h2>
+<p>The heart of quantization isn't "fewer bits" but that <strong>scale factor</strong> — it sets how big a numeric range the low bits cover.
+A group of weights shares one scale, so the wider the range and coarser the low-bit representation, the more the <strong>scale granularity</strong>
+becomes the accuracy-vs-overhead trade: <strong>per-tensor</strong> (one scale for the whole weight, cheapest, coarsest), <strong>per-channel</strong>
+(one per output channel, common, noticeably better), <strong>per-group / blockwise</strong> (one per small block, finest, best accuracy, but the
+scales cost a bit of space and complexity). Good schemes (AWQ/GPTQ/FP8 with group scales) win by <strong>choosing scales more cleverly</strong>, keeping the accuracy loss nearly invisible.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>A weight block + its scale</b>: low-bit ints times the shared scale recover the approximate originals (per-group quant)</div>
+  <div class="cells"><span class="lab">int4 block</span><span class="cell">7</span><span class="cell">-3</span><span class="cell">5</span><span class="cell">0</span><span class="sep">×</span><span class="cell hl">scale=0.08</span><span class="sep">≈</span><span class="cell q">0.56 / -0.24 / 0.40 / 0.00</span></div>
+</div>
+
+<p>Choosing granularity in practice is an "accuracy ÷ overhead" calculation. <strong>per-tensor</strong> is cheapest and fastest, but one outlier in the weights stretches the whole shared scale and drags down the effective precision of every other value, so it suits accuracy-insensitive, speed-at-all-costs cases. <strong>per-channel</strong> (one scale per output channel) is the sweet spot: near-zero overhead, yet it isolates the most common outlier pattern — "a few channels are just naturally large" — which is why it's the common default for FP8 weights. <strong>per-group / blockwise</strong> (e.g. one scale per 128 elements) is finest, and 4-bit quantization almost always needs it to survive — with only a dozen-odd levels left, the scale must hug the local range or it smears the information away. The cost: those scales must be stored too (usually fp16) and read in alongside the weights during the GEMM to dequantize, so "finer" is never a free lunch — it spends a bit of extra HBM and compute to buy accuracy.</p>
+
+<h2>How SGLang plugs it in: quantization as a pluggable strategy</h2>
+<p>SGLang doesn't rewrite models per format; it uses one abstraction: each format has a <span class="mono">QuantizationConfig</span> that
+provides a <span class="mono">LinearMethod</span> (e.g. <span class="mono">Fp8LinearMethod</span>) which <strong>replaces how a linear layer
+creates/stores its weight and does its matmul</strong>. So the model file (Lesson 26) still writes layers like
+<span class="mono">RowParallelLinear</span>; whether that layer is fp16 or fp8 underneath, and whether it runs a quantized kernel, is injected
+by config — the third example (after the attention backend, Lesson 33, and the KV pool) of SGLang's <strong>"everything pluggable"</strong>.
+Weights are read by the model loader (Lesson 25) from a <strong>pre-quantized checkpoint</strong>, or <strong>quantized on the fly</strong> at load.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/quantization/fp8.py ::Fp8LinearMethod</span><span class="ln">the FP8 method for a linear layer</span></div>
+  <pre><span class="kw">class</span> Fp8LinearMethod(LinearMethodBase):
+    <span class="cm"># FP8 linear method, supporting several quant schemes:</span>
+    <span class="cm"># - per-channel weight + per-token activation quant</span>
+    <span class="cm"># - per-tensor weight + per-tensor activation quant</span>
+    <span class="cm"># - blockwise weight + blockwise activation quant</span>
+    <span class="cm"># checkpoints: FP8, or FP16/BF16 (quantized to FP8 at load time)</span>
+    <span class="kw">def</span> __init__(self, quant_config):
+        self.quant_config = quant_config
+        self.cutlass_fp8_supported = cutlass_fp8_supported()  <span class="cm"># fast path if FP8 HW exists</span></pre>
+</div>
+
+<p>There's a <strong>related but separate</strong> knob: <strong>KV-cache quantization</strong>. Everything above slimmed the <strong>weights</strong>, but the <strong>KV cache</strong> that piles up during decode (Lesson 8) is itself an HBM hog — under long context and high concurrency it often eats more memory than the weights. Compressing KV from fp16 to FP8 or lower lets the KV pool hold nearly twice the tokens, <strong>directly raising serviceable context length and concurrency</strong>. It's a <strong>separate configuration</strong> from weight quantization: you can quantize only weights, only KV, or both — because they compress different things on different code paths (one in the linear layer's <span class="mono">LinearMethod</span>, the other in the KV pool's load/store). Keeping the two knobs distinct lets you tune the "save HBM" vs "keep accuracy" trade more finely.</p>
+
+<p>Step back and quantization is the <strong>third</strong> exemplar of SGLang's <strong>"everything pluggable"</strong> philosophy: the first was the attention backend (Lesson 33) — one attention layer, FlashAttention or FlashInfer underneath chosen by config; the second was the KV pool — one read/write interface over contiguous, paged, or tiered caches; now quantization — one <span class="mono">RowParallelLinear</span>, fp16 or fp8 underneath and quant-kernel or not, injected by a single <span class="mono">QuantizationConfig</span>, with the model file (Lesson 26) unchanged. That's the through-line of <strong>Part 8</strong>: make every Transformer block — attention, MoE (Lesson 34), quantization, the various ops (Lesson 36) — a <strong>swappable strategy</strong>, so new formats, hardware, and algorithms can "plug in" without rewriting the model each time. Once you see this abstraction, SGLang adding a new quantization scheme is just "write one more <span class="mono">LinearMethod</span>," while the whole serving scheduler, KV management, and attention compute are reused untouched.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Quantization</strong>: approximate weights with fewer bits (FP8/FP4/INT4) + a scale — <strong>saves HBM & bandwidth ⇒ faster</strong>, at a little accuracy.</li>
+    <li><strong>The win is memory</strong>: HBM halved-to-quartered + decode bandwidth halved (Lessons 4/8); low-precision hardware saves FLOPs too.</li>
+    <li><strong>Two kinds</strong>: weight-only (AWQ/GPTQ, dequant before compute, saves storage+bandwidth) vs weight+activation (FP8 GEMM, saves FLOPs too).</li>
+    <li><strong>Scale granularity</strong>: per-tensor / per-channel / per-group — finer = more accurate, more overhead.</li>
+    <li><strong>Pluggable</strong>: <span class="mono">QuantizationConfig</span> provides a <span class="mono">LinearMethod</span> replacing the linear layer's weight storage/matmul; read by the loader (Lesson 25).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Quantizing weights from fp16 to INT4 fundamentally <strong>trades</strong> what for what?</div>
+  <ol class="opts">
+    <li>Loses nothing — pure free speedup</li>
+    <li><strong>A little accuracy in exchange for HBM, memory bandwidth, and (on low-precision hardware) FLOPs</strong> — fewer bits + a scale approximate the original weights, so the model is smaller, decode moves fewer bytes, and it runs faster</li>
+    <li>Compute for model quality, saving no HBM at all</li>
+    <li>More HBM in exchange for higher accuracy</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Quantization is a trade: give up <strong>a little accuracy</strong> for HBM halved-to-quartered, decode bandwidth halved, and FLOPs too on low-precision hardware. It is not more HBM for accuracy (the opposite), does not skip HBM savings, and is not lossless — the loss is just usually too small to see outside a benchmark.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What's the key difference between <strong>weight-only</strong> quant (AWQ/GPTQ) and <strong>weight + activation</strong> quant (FP8)?</div>
+  <ol class="opts">
+    <li>They are identical, just named differently</li>
+    <li>Weight-only saves HBM; weight+activation saves none</li>
+    <li><strong>Weight-only</strong> stores 4-bit weights to save HBM but <strong>dequantizes back to high precision</strong> before the matmul, saving storage+bandwidth not FLOPs; <strong>weight+activation</strong> keeps both low precision and runs a <strong>low-precision GEMM</strong> (FP8), <strong>saving FLOPs too</strong>, but is pickier about hardware and accuracy</li>
+    <li>Weight+activation is training-only, never for inference</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weight-only (AWQ/GPTQ) must <strong>dequantize</strong> 4-bit weights to high precision before computing, so it saves only storage and bandwidth — great for memory-bound decode; weight+activation (FP8) keeps both low precision and runs FP8 GEMM to <strong>save FLOPs too</strong>, highest throughput but needs FP8 hardware and more care on accuracy. Both save HBM, they're not equivalent, and FP8 is very much used for inference.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What exactly is the <span class='mono'>scale</span> shared by a group of INT4 weights, and what does a <strong>per-group</strong> granularity mean?</div>
+  <ol class="opts">
+    <li>The scale is just the INT4 integer itself, with no extra number</li>
+    <li>Per-group means the whole model has a single global scale</li>
+    <li><strong>The scale is the multiplier that restores low-bit ints to a real numeric range</strong>: real ≈ int × scale; <strong>per-group</strong> means each small block of weights gets its own scale — finer than per-tensor (one for the whole weight) and more accurate, at the cost of the scales taking some space and complexity</li>
+    <li>The scale is the model's learning rate, used only in training</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The scale is the dequant multiplier: multiply the stored low-bit int by the scale to approximately recover the original float (real ≈ int × scale). Granularity goes per-tensor → per-channel → per-group/blockwise; finer fits the local dynamic range better for higher accuracy, but stores more scales and costs more compute. It's not a learning rate, not the integer itself, and per-group is certainly not one global scale.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>JPEG / MP3 compression</strong>' analogy, fully explain quantization and pin down <strong>what it saves</strong>. Cover: (1) weights are normally fp16 (16-bit); quantization approximates them with <strong>fewer bits (FP8/FP4/INT4) + a scale</strong>, where <strong>real ≈ int × scale</strong>; (2) why the <strong>big win is memory, not compute</strong> — HBM halved-to-quartered (room for KV cache and concurrency, Lessons 4/8), and decode being <strong>memory-bound</strong> so halving the weight bytes halves the move; (3) why low bits still work — LLM weights are <strong>redundant and tolerant</strong>, the real danger is <strong>outliers</strong>, and <strong>AWQ</strong> (protecting salient channels by activation magnitude) and <strong>GPTQ</strong> (a calibrated, per-layer minimization of reconstruction error) keep the accuracy loss nearly invisible by handling them cleverly.</li>
+    <li>Explain <strong>how quantization 'plugs into' linear layers</strong> in SGLang, and place it in the 'everything pluggable' arc. Cover: (1) each format provides a <span class='mono'>QuantizationConfig</span> → <span class='mono'>LinearMethod</span> (e.g. <span class='mono'>Fp8LinearMethod</span>) that <strong>replaces how a linear layer stores its weight and does its matmul</strong>, so the <span class='mono'>RowParallelLinear</span> in the model file (Lesson 26) is unchanged and config decides fp16 vs fp8 underneath; (2) weights come from a <strong>pre-quantized checkpoint</strong> or are <strong>quantized on the fly</strong> at load (Lesson 25); (3) <strong>FP8</strong>'s E4M3 and <strong>dynamic/static</strong> activation scaling, the <span class='mono'>cutlass</span>/<span class='mono'>Marlin</span> fast paths and native FP8 on H100/B200; (4) <strong>KV-cache quantization</strong> as a related-but-separate knob, and naming quantization the third 'pluggable' example after the attention backend (Lesson 33) and the KV pool.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>RoPE, norm & other ops</h1>
+
+<p class="lead">
+In Lesson 26 you'll see that writing a Transformer is really just <strong>snapping together ready-made layers</strong>: attention is a layer, the MLP is a layer, normalization is a layer, and RoPE — which supplies position — is a layer too. The previous lessons covered the heavyweights: attention (Lesson 33), MoE (Lesson 34), quantization (Lesson 35).
+This lesson fills in the <strong>smaller but equally essential</strong> ops — RoPE, RMSNorm, and a family of <strong>fused ops</strong>. Each ships as a reusable <span class="mono">nn.Module</span>; the model just <strong>calls</strong> it, and the layer itself picks which platform's kernel to run and whether to fuse.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of <strong>RoPE</strong> as turning each word's <strong>compass needle</strong> by how far into the sentence it sits: the later the word, the more the needle is rotated. The "distance" two words feel is just the <strong>angle between their needles</strong> —
+  nobody has an absolute "street address", yet from the angle alone you know <strong>how far apart</strong> they are. And think of <strong>RMSNorm</strong> as a <strong>lightweight volume-leveler</strong>: it doesn't move the music's baseline (no mean subtraction), it just pulls each segment's <strong>overall loudness</strong> to a uniform level so later layers hear clearly and training stays stable.
+  The compass handles "where I am, how far apart we are"; the volume-leveler keeps "everyone at the same loudness" — two tiny parts that keep the whole Transformer running smoothly.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Remember one line: <strong>these small ops are the standard parts the model builds with</strong>. They belong to the same theme as the attention backend (Lesson 33) and quantization (Lesson 35) — <strong>pluggable, hardware-optimized layers</strong>.
+  The model file (Lesson 26) only writes <strong>calls</strong> like <span class="mono">self.rotary_emb(positions, q, k)</span> or <span class="mono">self.input_layernorm(x)</span>; whether the real work is a fused CUDA kernel, a Triton impl, or an AMD/NPU-specific variant is chosen by the layer at runtime by <strong>platform</strong>.
+  So the same model code runs on a different card unchanged, and a faster fused kernel can be wired in without touching a single model line.
+</div>
+
+<h2>RoPE: injecting position by "rotation"</h2>
+<p>Start with a counter-intuitive fact: <strong>attention itself has no sense of order</strong>. Attention computes dot products of queries and keys, and a dot product is <strong>insensitive</strong> to who comes first — shuffle the words and pure attention sees almost the same relations. Yet language is <strong>deeply order-dependent</strong>: "dog bites man" and "man bites dog" are worlds apart.
+So something must feed in <strong>position</strong>. <strong>RoPE (Rotary Position Embedding)</strong> answers elegantly: instead of <strong>adding</strong> a position vector, it <strong>rotates</strong> each q/k vector by an angle — the later the position, the more it turns.</p>
+<p>The magic is in the dot-product math. Rotate the query by the angle of its position and the key by the angle of its position, then take the dot product, and the result depends only on the <strong>difference</strong> of the two angles — the <strong>relative position</strong> of the two tokens. So attention suddenly becomes <strong>relative-position aware</strong>: the model no longer cares about a token's absolute index, but about <strong>how far apart</strong> two tokens are.
+That matches the nature of language — a pronoun referring back to a noun a few words earlier does so by <strong>distance</strong>, not absolute coordinates. RoPE adds no learnable parameters; pure fixed-frequency rotation bakes relative position into attention, saving parameters and generalizing well, which is why it's standard in Llama, Qwen, and friends.</p>
+<p>In code, RoPE is a <span class="mono">RotaryEmbedding</span> layer; <span class="mono">get_rope(...)</span> builds the right variant from config, and the forward applies the rotation to q/k <strong>right before attention</strong> (attention itself is Lesson 33). It precomputes a <span class="mono">cos/sin</span> cache per position, picks out the entries for each token's <span class="mono">positions</span> at forward time, rotates the first <span class="mono">rotary_dim</span> dimensions of the vector, and passes the rest through. No matmul — just elementwise multiply-adds — so it's cheap, and often <strong>fused</strong> into a neighboring op.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Have q / k</h4><p>Before attention we have projected query/key vectors — but right now they carry <strong>no position info</strong>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Apply RoPE by position</h4><p>Use each token's <span class="mono">positions</span> to pick <span class="mono">cos/sin</span>, and <strong>rotate</strong> q/k each by an angle ∝ position.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Dot product turns relative</h4><p>Rotated q·k depends only on the <strong>difference</strong> of positions — attention gains <strong>relative position</strong> for free.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Into attention</h4><p>Position-bearing q/k go to the attention backend (Lesson 33) for softmax weighting — order is now inside.</p></div></div>
+</div>
+
+<p>Picture the rotation even more concretely: the same vector is unrotated at position 0, turned a bit at position 1, and turned more at position 2 — every step later adds a fixed angle.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>One vector, rotated by different positions</b>: the later the position, the larger the rotation (angle ∝ position)</div>
+  <div class="cells"><span class="lab">vector v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k sees only the angle gap = relative position</span></div>
+</div>
+
+<h2>How RoPE enables context-length extension</h2>
+<p>RoPE also solves a big engineering headache: <strong>context-length extension</strong>. A model trained on, say, 4k-token sequences has its rotation "frequency table" tuned for 4k. Serve 32k of long text directly and the rotation angles at late positions run into a range the model has <strong>never seen</strong>, and quality collapses.
+The fix isn't retraining but <strong>cleverly stretching the rotation frequencies</strong>, so a 4k-trained model works comfortably at 32k and beyond.</p>
+<p>The common tricks are all RoPE variants: <strong>linear scaling</strong> is the simplest — compress all positions proportionally, like lengthening the ruler, so 32k positions fall back into familiar angles; simple, but it sacrifices some high-frequency detail. <strong>NTK-aware</strong> is smarter, adjusting different frequencies <strong>unevenly</strong> — small changes to high frequencies (local detail) and larger stretching of low frequencies (long-range relations) — extending length while preserving short-distance resolution.
+<strong>YaRN</strong> adds temperature and segmenting on top of NTK and is a very common choice for today's long-context models. In SGLang all of these are produced by the same <span class="mono">get_rope(...)</span> factory from config — you declare in the model config which <span class="mono">rope_scaling</span> and what factor, and the factory returns the matching <span class="mono">RotaryEmbedding</span> subclass, with <strong>model code unchanged</strong>. Another miniature of "pluggability": swapping a length-extension strategy is just swapping a RoPE variant.</p>
+
+<table class="t">
+  <tr><th>Op</th><th>What it does</th><th>Why you need it</th></tr>
+  <tr><td class="mono">RoPE</td><td><strong>Rotates</strong> q/k by position, injecting relative position</td><td>Attention is orderless; makes the dot product feel token <strong>distance</strong>, and extends context (NTK/YaRN/linear)</td></tr>
+  <tr><td class="mono">RMSNorm</td><td>÷ root-mean-square then scale, <strong>stabilizing numbers</strong></td><td>Cheaper than LayerNorm (no mean subtraction / no bias), as good for LLMs; often <strong>fused</strong> with the residual add</td></tr>
+  <tr><td class="mono">SiluAndMul</td><td>Fuses a gated MLP's <strong>SiLU(gate) × up</strong> into one kernel</td><td>One fewer round-trip for the intermediate tensor — saves bandwidth, runs faster</td></tr>
+  <tr><td class="mono">fused add-norm</td><td><strong>Merges</strong> the residual add + normalization into one step</td><td>Avoids an extra memory round-trip; qk-norm+rope can fuse too — fusing small ops keeps getting faster</td></tr>
+</table>
+
+<h2>RMSNorm: a lighter normalization</h2>
+<p>Every Transformer block sandwiches in a <strong>normalization</strong> layer whose job is to keep the <strong>scale</strong> of activations stable, so deep nets train and infer reliably. The classic recipe is <strong>LayerNorm</strong>: <strong>subtract the mean</strong>, <strong>divide by the standard deviation</strong> to standardize, then apply a learnable <strong>scale and shift (bias)</strong>. Effective, but every step computes mean and variance, plus it carries a bias parameter.</p>
+<p>The Llama family uses the leaner <strong>RMSNorm (Root Mean Square Norm)</strong>. It does <strong>no mean subtraction</strong> and has <strong>no bias</strong>, doing just one thing: divide the vector by its own <strong>root-mean-square</strong> (the square root of the mean of squared elements), then multiply by a learnable scale. Dropping mean subtraction and the bias makes it <strong>cheaper and faster</strong>, and abundant practice shows it works <strong>just as well as LayerNorm</strong> for LLMs — which is why mainstream LLMs went almost uniformly to RMSNorm. It's also often <strong>fused with the preceding residual add</strong> (fused add-norm), doing the "add residual" and "normalize" steps in one memory round-trip to save more bandwidth.</p>
+
+<div class="cols">
+  <div class="col"><h4>LayerNorm (classic)</h4><p><strong>Subtract mean</strong> → <strong>÷ std</strong> → multiply by scale + add <strong>shift (bias)</strong>. Fully standardizes the data: more steps, computes mean/variance, plus one extra bias parameter.</p></div>
+  <div class="col"><h4>RMSNorm (Llama family)</h4><p><strong>No mean subtraction, no bias</strong>: just <strong>÷ root-mean-square</strong> then multiply by scale. Less compute, fewer params, <strong>cheaper</strong>, as good for LLMs, often <strong>fused</strong> with the residual add.</p></div>
+</div>
+
+<h2>Fused ops: merging small steps into one kernel</h2>
+<p>Finally, a theme running through the whole lesson — <strong>operator fusion</strong>. On a GPU there's a plain fact: every kernel launch, every read of a tensor from HBM and write back, carries a <strong>fixed overhead</strong>. A chain of small ops each running on its own makes data <strong>shuttle back and forth</strong> between HBM and compute several times, and the shuttling is often slower than the math. Fusion <strong>merges several neighboring small ops into one kernel</strong>, so data comes in once, gets all the work done, and leaves — skipping the intermediate round-trips.</p>
+<p>Typical examples: a gated MLP (the experts in Lesson 34's MoE, and ordinary MLPs, both use gating) needs <span class="mono">SiLU(gate) × up</span> — <strong>SiluAndMul</strong> fuses the activation and the elementwise multiply <strong>into one kernel</strong>, skipping the read/write of a huge intermediate tensor; the <strong>fused add-norm</strong> above merges the residual add and RMSNorm; and <strong>qk-norm + RoPE</strong> can fuse too. These layers are all <strong>reusable, hardware-optimized</strong> standard parts: the model just calls them, and the layer internally picks a <strong>fused or platform-specific</strong> kernel — this is "<strong>everything is pluggable</strong>" expressed along the <strong>ops</strong> dimension, after the attention backend (Lesson 33) and quantization (Lesson 35). How the lower-level kernels are written and fused is Lesson 38; here, just remember: the model builds with blocks, and the blocks know the hardware.</p>
+
+<p>Below are the core lines of RoPE itself — how <span class="mono">forward_native</span> picks cos/sin by position and applies the rotation to q and k:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/rotary_embedding/base.py ::RotaryEmbedding</span><span class="ln">forward: applying the rotation to q/k by position</span></div>
+  <pre><span class="kw">def</span> forward_native(self, positions, query, key, ...):
+    <span class="cm"># pick the precomputed cos / sin for each token's position</span>
+    cos_sin = self.cos_sin_cache.index_select(<span class="st">0</span>, positions)
+    cos, sin = cos_sin.chunk(<span class="st">2</span>, dim=-<span class="st">1</span>)
+    query_rot = query[..., : self.rotary_dim]   <span class="cm"># rotate only the first rotary_dim dims</span>
+    query_rot = self._apply_rotary_emb_wrapped(query_rot, cos, sin, self.is_neox_style)
+    key_rot = key[..., : self.rotary_dim]
+    key_rot = self._apply_rotary_emb_wrapped(key_rot, cos, sin, self.is_neox_style)
+    <span class="kw">return</span> query, key                          <span class="cm"># q/k now carry position, on to attention</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key points</div>
+  <strong>① RoPE injects position via rotation</strong>: attention is orderless, so RoPE <strong>rotates</strong> q/k by an angle ∝ position; after rotation the dot product depends only on the <strong>difference</strong> of positions — attention becomes <strong>relative-position aware</strong>, with no learnable parameters.
+  <strong>② RoPE enables context extension</strong>: linear scaling / NTK-aware / YaRN <strong>stretch the rotation frequencies</strong> so a 4k-trained model serves 32k+; all built by <span class="mono">get_rope(...)</span> from config, model code unchanged.
+  <strong>③ RMSNorm vs LayerNorm</strong>: RMSNorm <strong>only ÷ root-mean-square then scale</strong>, with <strong>no mean subtraction, no bias</strong> — cheaper than LayerNorm, as good for LLMs, often fused with the residual add.
+  <strong>④ Fuse small ops</strong>: <span class="mono">SiluAndMul</span>, fused add-norm, qk-norm+rope merge neighboring small ops into one kernel to <strong>save memory round-trips</strong>. All are reusable, hardware-optimized layers (built in Lesson 26; kernels/fusion in Lesson 38).
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Attention itself is <strong>insensitive</strong> to token order — how does RoPE inject <strong>position</strong>?</div>
+  <ol class="opts">
+    <li>It reorders the KV cache by position</li>
+    <li>It multiplies a scalar proportional to position after the softmax</li>
+    <li>It learns an absolute position vector per word and adds it to the token embedding</li>
+    <li><strong>It rotates each q/k vector by an angle ∝ its position</strong>; after rotation the dot product of two vectors depends only on the <strong>difference</strong> of their positions, so attention becomes <strong>relative-position aware</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. RoPE doesn't add a position vector — it <strong>rotates</strong> q/k by position. The dot-product math means two rotated vectors' product depends only on the <strong>difference</strong> of their rotation angles, i.e. relative position — so attention naturally feels inter-token distance, with no learnable parameters. It's not absolute position embedding, not a post-softmax scalar, and unrelated to reordering KV.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. To serve 32k text with a 4k-trained model, how do RoPE methods (linear scaling / NTK / YaRN) pull it off?</div>
+  <ol class="opts">
+    <li>Train a brand-new model from scratch at 32k</li>
+    <li>Drop the extra tokens beyond 4k</li>
+    <li>Re-quantize the model weights to lower bits</li>
+    <li><strong>Stretch the rotation frequencies</strong> so out-of-range position angles fall back into the familiar range — no retraining, just a different RoPE variant (built by <span class='mono'>get_rope</span> from config), model code unchanged</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Context extension hinges on <strong>cleverly stretching the rotation frequencies</strong>: linear scaling compresses positions proportionally, NTK adjusts high/low frequencies unevenly, YaRN adds temperature and segmenting — covering 32k+ with the 4k-trained angle range. All are RoPE variants built by the same <span class='mono'>get_rope(...)</span> factory from config, with <strong>no retraining and no model-code change</strong>. Dropping tokens loses info, quantization is unrelated, and retraining defeats the whole point.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Versus classic LayerNorm, what's the key difference of the RMSNorm used by the Llama family?</div>
+  <ol class="opts">
+    <li>RMSNorm is more accurate but far slower</li>
+    <li>They're identical, just named differently</li>
+    <li><strong>RMSNorm does no mean subtraction and has no bias</strong> — it just divides the vector by its root-mean-square and multiplies a scale; <strong>cheaper</strong> than LayerNorm (subtract mean, ÷ std, + scale + shift), as good for LLMs, and often fused with the residual add</li>
+    <li>RMSNorm needs an extra bias parameter</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. LayerNorm subtracts the mean, divides by std, and carries scale+shift; RMSNorm drops mean subtraction and bias, doing only ÷ root-mean-square then scale — less compute, fewer params, <strong>cheaper</strong>, and practice shows it matches LayerNorm for LLMs, hence its dominance. It isn't slower, needs no extra bias, and is not equivalent to LayerNorm.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>compass + angle gap</strong>' analogy, fully explain RoPE and why it enables <strong>context extension</strong>. Cover: (1) the attention dot product is <strong>order-insensitive</strong>, so position must be injected; (2) RoPE doesn't add a position vector but <strong>rotates</strong> q/k by an angle ∝ position, so the dot product depends only on the <strong>difference</strong> of positions ⇒ <strong>relative-position aware</strong>, with <strong>no learnable parameters</strong>; (3) how linear scaling / NTK-aware / YaRN <strong>stretch the rotation frequencies</strong> to serve 32k+ from a 4k-trained model, all built by <span class='mono'>get_rope(...)</span> from config with <strong>model code unchanged</strong> (applied right before attention, Lesson 33).</li>
+    <li>Explain <strong>why small ops get fused</strong>, and place RMSNorm, SiluAndMul, and fused add-norm in the 'pluggable hardware-optimized layers' arc. Cover: (1) on a GPU every kernel launch + HBM read/write carries <strong>fixed overhead</strong>, and a chain of separate small ops makes data <strong>shuttle back and forth</strong> between HBM and compute several times — often slower than the math; (2) fusion merges neighboring small ops into <strong>one kernel</strong> (e.g. <span class='mono'>SiluAndMul</span> for SiLU(gate)×up, fused add-norm for residual-add+RMSNorm, qk-norm+rope), skipping the intermediate round-trips; (3) all are reusable, hardware-optimized <span class='mono'>nn.Module</span>s the model merely calls (Lesson 26), and the layer picks a fused/platform kernel internally — 'everything pluggable' along the ops dimension after the attention backend (Lesson 33) and quantization (Lesson 35); lower-level kernels/fusion are Lesson 38.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Logits & vocab parallel</h1>
+
+<p class="lead">
+After the model finishes computing, it holds a stream of <strong>hidden vectors</strong> per position. But the user wants
+"<strong>the next word</strong>", not a vector. Translating a hidden vector into "<strong>a score for every word</strong>" is the
+model's <strong>output head, lm_head</strong>; and because vocabularies run into the hundreds of thousands, that head is too big
+for one GPU — hence <strong>vocab parallelism</strong>. This lesson covers how logits arise, why the vocab head is split, and how
+<span class="mono">LogitsProcessor</span> wraps it up for the Sampler.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the output head as a <strong>giant dictionary</strong> that must score a query against every entry. The dictionary is
+  too thick, so it's <strong>split among N librarians</strong>, each scoring only <strong>their slice of entries</strong>; at the end
+  they <strong>pool their score sheets (all-gather)</strong> into one full ranking. One more shortcut: you only care what follows the
+  <strong>last word you just wrote</strong>, so you ask only for the <strong>last position's</strong> scores, not a re-score of the whole sentence.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  After the final norm (Lesson 36), each position has a hidden vector. The <strong>lm_head</strong> (a [hidden × vocab] matrix)
+  projects it to <strong>a score per vocab token = logits</strong>, which the Sampler (Lesson 28) turns into a token. The vocab is huge
+  (30k–250k), so lm_head and the embedding are heavy — under tensor parallelism (Lesson 46) they're <strong>split along the vocab
+  dimension across ranks</strong>, each GPU computing only its slice, then an <strong>all-gather</strong> assembles the full logits.
+  <span class="mono">LogitsProcessor</span> orchestrates this (including the <strong>last-token-only</strong> optimization).
+</div>
+
+<h2>From hidden to logits: the lm_head output</h2>
+<p>The model body (Lesson 26) computes layer by layer, producing a <strong>hidden vector</strong> per input position (its dim is the
+model's hidden size, e.g. 4096). But that's an intermediate representation, not an answer. To predict the next word you need to know
+<strong>how "fitting" each candidate token in the vocab is</strong> — that is what <span class="mono">lm_head</span> does: a matrix of
+shape <span class="mono">[hidden_dim × vocab_size]</span> that, multiplied with the hidden vector, yields a score vector <strong>as long
+as the vocabulary</strong> = the <strong>logits</strong>. The larger a token's logit, the more the model thinks it should come next.
+Logits then go to the Sampler (Lesson 28) for temperature, top-k/p and sampling, ending in a concrete token. Many models <strong>tie</strong>
+the lm_head with the input embedding, since "word→vector" and "vector→word scores" are naturally inverse operations.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Body forward</h4><p>embed → N layers → final norm (Lesson 36) → a hidden per position.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Take the last token</h4><p>In decode, keep <strong>only each request's last position</strong> — only its logits predict the next word.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>lm_head projection</h4><p>hidden × lm_head → vocab-sized <strong>logits</strong> (each rank computes a slice).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Gather + sample</h4><p><strong>all-gather</strong> assembles full logits → Sampler (Lesson 28) emits the token.</p></div></div>
+</div>
+
+<div class="flow">
+  <div class="node"><div class="nt">hidden·last pos</div><div class="nd">the last position's<br>hidden per request</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">lm_head·vocab slice</div><div class="nd">this rank scores only<br>its segment of vocab</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">all-gather</div><div class="nd">stitch the partial<br>segments across GPUs</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">full logits</div><div class="nd">length = vocab size,<br>one score per token</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Sampler·Lesson 28</div><div class="nd">temperature / top-k/p<br>picks the next token</div></div>
+</div>
+
+<h2>Take only the last position: one row of logits beats two thousand</h2>
+<p>"Keep only the last position" sounds like a minor tweak, but the compute it saves is substantial. Picture a 2000-token prompt: during prefill the model genuinely has to compute hidden for <strong>all 2000 positions</strong> — every layer's attention needs the representations of all preceding positions. But when we want to predict the <strong>2001st token</strong>, the only useful hidden is the <strong>last position's</strong>: it has already "seen" the whole prompt, and its logits are the next word's distribution. The logits of the other 1999 positions are, in ordinary generation, <strong>completely unused</strong>.</p>
+<p>So before calling lm_head, <span class="mono">LogitsProcessor</span> first prunes hidden from <span class="mono">[2000, hidden]</span> to <span class="mono">[1, hidden]</span>, <strong>letting only the last row pass through that [hidden × vocab] matrix</strong>. lm_head is one of the most expensive matmuls in the whole forward (tens to hundreds of thousands of vocab columns); shrinking its input from 2000 rows to 1 cuts this step's FLOPs and HBM traffic by <strong>2000×</strong>. Batching works the same way: each request contributes only its own last position, so a batch computes only as many logit rows as it has requests, not every position of every prompt.</p>
+<p>The one exception is when <strong>the user asks for logprobs</strong>: returning the log-probability of each prompt token (used by eval, scoring, and speculative-decoding draft verification) requires keeping those positions' logits. <span class="mono">logits_metadata</span> is exactly what records "which positions in this batch need full logits and which need only the last" so LogitsProcessor prunes on demand — down to just the last by default, keeping extra rows only when needed. That's why the same code is fast for ordinary generation but a touch slower with <span class="mono">logprobs</span> on: the latter feeds that big matmul several more rows.</p>
+<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (Lesson 30) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
+
+<h2>The vocab is huge: why split it across TP</h2>
+<p>There's an easily-missed scale problem here: the <strong>vocab is very large</strong>. Common models have 30k–250k tokens, and lm_head
+is <span class="mono">[hidden × vocab]</span>, the embedding <span class="mono">[vocab × hidden]</span> — at vocab=150k, hidden=8192,
+<strong>this one table alone is over a billion parameters</strong>, a sizable chunk of the model. Under tensor parallelism (Lesson 46, which
+splits each layer's matrices across GPUs), you <strong>can't put the whole vocab head on one GPU</strong>, nor should one GPU bear that
+much matmul and HBM.</p>
+
+<p>The fix is <strong>vocab parallelism</strong>: <span class="mono">VocabParallelEmbedding</span> and <span class="mono">ParallelLMHead</span>
+split the <strong>vocab dimension</strong> into segments, one per TP rank — e.g. 4 GPUs, 150k vocab, ~37.5k tokens each. On the forward,
+<strong>each GPU uses only its slice of lm_head to compute "logits for its segment of words"</strong>, producing a <strong>partial</strong>
+score vector (only its own segment is real). To get the full logits you stitch the segments together — that step is a cross-GPU
+<strong>all-gather</strong> (or gathered in-place inside argmax/sampling). So no one holds the whole vocab head; HBM and FLOPs are spread across GPUs.</p>
+
+<p>Unpacking the mechanism: each rank's lm_head is just that narrow strip <span class="mono">[hidden × vocab/N]</span>, so what it computes is a partial score vector that is <strong>real only for its own segment and empty elsewhere</strong>. What <strong>all-gather</strong> does is have all N GPUs each send out "their stretch" and receive everyone else's, finally <strong>concatenating them end-to-end in rank order</strong> into one full logits vector as long as the entire vocab. Worth noting: for plain <strong>greedy decoding</strong> (argmax of the highest score), you can do even better — each GPU first takes a <strong>local max within its segment</strong> and all-reduces only "the local max value + its global token id", which suffices to pick the global max <strong>without ever materializing the full hundred-thousand-dim vector</strong>. SGLang takes this cheaper in-place reduction path whenever full logits aren't needed (no logprobs, no complex sampling).</p>
+
+<p>Vocab parallelism isn't an isolated trick — it's the <strong>same idea</strong> as the q/k/v and MLP splits in Lessons 25/46: cut a big matrix along some dimension into N slices, each GPU computes one, then one collective realigns the results. Attention splits the <strong>attention heads</strong>, MLP splits the <strong>intermediate dim</strong>, and here we split the <strong>vocab dim</strong>; the only difference is "which dim, and whether all-reduce or all-gather closes it out". Grasp vocab parallelism and you've <strong>completed</strong> the picture of TP's sharding at the model's two ends (input embedding, output head) and its middle layers — the whole network, end to end, is cut and reassembled by one rule.</p>
+
+<p>Two implementation details people often ask about. First, <strong>vocab alignment</strong>: the vocab size needn't divide evenly by the rank count (e.g. 150k across 8 GPUs doesn't), so <span class="mono">VocabParallelEmbedding</span> first <strong>pads the vocab up</strong> to a divisible size; the extras are "fake tokens" whose logits get masked and can never be selected, existing only to give each GPU an equal-length segment and aligned communication. Second, <strong>shared embedding and output head</strong>: when a model uses tied embeddings, the input-side <span class="mono">VocabParallelEmbedding</span> and the output-side <span class="mono">ParallelLMHead</span> are actually the <strong>same vocab-sharded weight</strong> — used to look token ids into vectors on input and to score vectors into logits on output, saving a whole big table's worth of HBM. Shared or not, the split dimension and the communication are identical.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>150k vocab split across 4 ranks</b>: each rank computes only its segment's logits, then all-gather assembles the full vector</div>
+  <div class="cells"><span class="lab">rank0</span><span class="cell hl">token 0–37499</span><span class="sep">·</span><span class="lab">rank1</span><span class="cell hl">37500–74999</span><span class="sep">·</span><span class="lab">rank2</span><span class="cell hl">75000–112499</span><span class="sep">·</span><span class="lab">rank3</span><span class="cell hl">112500–149999</span></div>
+</div>
+
+<div class="cols">
+  <div class="col"><h4>Whole vocab head on one GPU</h4><p>lm_head + embedding's billion+ params all on one GPU: <strong>HBM pressure, and this step's compute becomes a bottleneck</strong>, inconsistent with TP-splitting the other layers.</p></div>
+  <div class="col"><h4>Vocab parallel</h4><p>Each rank holds and computes <strong>one vocab segment</strong>; then <strong>all-gather</strong> assembles full logits. <strong>HBM and FLOPs spread</strong>, in line with TP.</p></div>
+</div>
+
+<h2>LogitsProcessor's job: last-token slice + cross-GPU gather</h2>
+<p>The thing that orchestrates all this is <span class="mono">LogitsProcessor</span>. At the end of the forward it takes hidden states and
+does three things: ① <strong>last-token slice</strong> — in decode each request only needs the <strong>last position's</strong> logits to predict
+the next word; in prefill, although hidden was computed for the whole prompt, <strong>only the last position's logits matter</strong> (unless
+computing logprobs). So pruning hidden to "each request's last position" greatly cuts the lm_head work. ② <strong>vocab-parallel projection</strong>
+— use <span class="mono">ParallelLMHead</span> to compute the logits for this rank's vocab segment. ③ <strong>cross-GPU all-gather</strong> —
+assemble the segments into full logits (gated by <span class="mono">do_tensor_parallel_all_gather</span>, skipped on a single GPU). The result,
+<span class="mono">next_token_logits</span>, goes to the Sampler (Lesson 28).</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/logits_processor.py ::LogitsProcessor</span><span class="ln">orchestrating the output head</span></div>
+  <pre><span class="kw">class</span> LogitsProcessor(nn.Module):
+    <span class="kw">def</span> forward(self, input_ids, hidden_states,
+                lm_head: VocabParallelEmbedding, logits_metadata):
+        <span class="cm"># 1) Both decode and prefill keep only each request's LAST hidden</span>
+        last_hidden = self._slice_last_token(hidden_states, logits_metadata)
+        <span class="cm"># 2) Vocab-parallel projection: this rank computes its vocab segment</span>
+        logits = lm_head(last_hidden)               <span class="cm"># [tokens, vocab/segment]</span>
+        <span class="kw">if</span> self.do_tensor_parallel_all_gather:       <span class="cm"># 3) stitch into full logits</span>
+            logits = tensor_model_parallel_all_gather(logits)
+        <span class="kw">return</span> LogitsProcessorOutput(next_token_logits=logits)</pre>
+</div>
+
+<h2>The last mile before sampling: logprobs, structured masks, and logit bias</h2>
+<p>After logits are stitched and before sampling actually happens, a few post-processing steps "hang" near the output head, all acting on this vocab-dimension vector. First is <strong>logprob</strong>: a log-softmax over logits gives each token's log-probability; whether the user wants top-k logprobs, to score each prompt token, or speculative decoding needs to verify draft tokens, the numbers come from here. Second is the <strong>structured-output vocab mask</strong> (Lesson 48): when a request demands valid JSON or a grammar match, the constraint engine computes "which tokens are <strong>allowed vs forbidden</strong> at this step" and drives the forbidden tokens' logits to negative infinity, so the sampler can never pick them.</p>
+<p>Third is <strong>logit bias</strong>: the user can manually add a positive or negative bias to certain tokens, raising or lowering their odds of being chosen — again, just adding a number at the corresponding position of this logits vector. What these share is that they <strong>don't touch the lm_head and vocab-parallel backbone</strong>; they merely <strong>tweak or mask scores</strong> per request in the gap between "full logits → the Sampler (Lesson 28)". Put together with the last-token slice and the cross-GPU gather, they form the entire "last mile" between <span class="mono">LogitsProcessor</span> and <span class="mono">Sampler</span>: prune, project, stitch, then mask-and-bias on demand, and only then hand off to the sampler to make its move.</p>
+<p>One ordering pitfall worth naming: <strong>masks and biases must be applied on the logits, before sampling</strong>, never patched up afterward. Because the sampler draws from a probability distribution, once an illegal token has entered the candidate set, been selected by top-k/p and drawn, it's already too late; only by driving its logit to negative infinity beforehand does its post-softmax probability become <strong>exactly zero</strong>, cutting off any chance of selection at the root. Structured output can <strong>guarantee</strong> legality at every step precisely because of this "seal it off at the score level in advance" mechanism, not by generating then validating then retrying on error. That's why this logits vector is so contested: it's the <strong>only place where</strong> "the model's raw judgment" and "the user's hard constraints" can cleanly meet.</p>
+
+<p>This lesson also <strong>closes the whole forward path</strong>: Lesson 24's ModelRunner.forward → the model body (Lesson 26, with
+attention L33, MoE L34, RoPE/Norm L36) → <strong>LogitsProcessor → logits → Sampler (Lesson 28) → the next token</strong>. Vocab parallelism
+is another TP-sharding example after q/k/v and MLP (Lessons 25/46), and together with quantization (Lesson 35) and the attention backend
+(Lesson 33) it completes Part 8's "operator layer": the model just <strong>calls</strong> these reusable, shardable, kernel-swappable layers,
+and the real engineering complexity is tucked inside them.</p>
+
+<p>Step back and this lesson really puts a period on Part 8. Lesson 33 showed how the attention backend abstracts "compute attention" into a swappable kernel, Lesson 34 how MoE gates to activate only a few experts, Lesson 35 how quantization trades fewer bits for HBM and bandwidth, Lesson 36 how RoPE injects position, RMSNorm normalizes, and small ops fuse — and this lesson's output head and vocab parallelism are the pipeline's <strong>final stop</strong>: translating all that hard-won hidden back into a token a human can use. Every one of these layers follows the same design philosophy: <strong>the model file only "calls in order", while the real parallelism, quantization, kernel swaps, and collectives are tucked inside the layers</strong>. That's exactly why SGLang can fit a very thin model file to wildly varying hardware, parallelism degrees, and precision configs — and you can now narrate the whole way from hidden to token, explaining every stop along the road: how embeddings go in, how attention computes, how norm steadies, how the output head splits, how sampling lands the move, with no black box left in the pipeline.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>lm_head</strong>: projects each position's hidden into <strong>vocab-sized scores = logits</strong>, fed to the Sampler (Lesson 28).</li>
+    <li><strong>Vocab is huge</strong> (30k–250k) ⇒ lm_head/embedding are big matrices, too big for one GPU under TP.</li>
+    <li><strong>Vocab parallel</strong>: <span class="mono">VocabParallelEmbedding</span>/<span class="mono">ParallelLMHead</span> split vocab across ranks, each computes a segment, then <strong>all-gather</strong> assembles the full logits.</li>
+    <li><strong>Last-token slice</strong>: only each request's last position's logits are needed, so prune hidden first to save compute.</li>
+    <li><strong>Closes the forward</strong>: ModelRunner.forward → model → LogitsProcessor → logits → Sampler → token; another TP-sharding example.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. After the model body finishes, what does the <span class='mono'>lm_head</span> output head actually <strong>produce</strong>?</div>
+  <ol class="opts">
+    <li>It produces the KV cache for later decode reuse</li>
+    <li>It produces an attention weight matrix for the next layer</li>
+    <li>It directly produces a final token string, no sampling needed</li>
+    <li><strong>It projects each position's hidden into a 'vocab-sized' score vector = logits</strong> — length equals the number of vocab tokens, each score saying how 'fitting' that token is as the next word, then handed to the Sampler (Lesson 28) to pick a token</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. lm_head is a big <span class='mono'>[hidden × vocab]</span> matrix; multiplying the hidden vector through it yields logits <strong>as long as the vocab</strong> — one score per vocab token. It does <strong>not</strong> emit a token directly (that's the Sampler's job, Lesson 28), nor attention weights, nor the KV cache. Logits are just raw scores that still need sampling to become a concrete token.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why split lm_head along the <strong>vocab dimension</strong> (vocab parallelism) instead of keeping it on one GPU?</div>
+  <ol class="opts">
+    <li>Splitting improves the prediction accuracy of a single token</li>
+    <li>So each GPU can independently emit full tokens with no communication</li>
+    <li>Because the vocab must be alphabetically ordered across GPUs</li>
+    <li><strong>The vocab is huge (30k–250k), so lm_head/embedding are billion-param matrices too big for one GPU to hold or compute</strong>; splitting the vocab dim across TP ranks lets each GPU hold and compute one segment, <strong>spreading HBM and FLOPs</strong>, consistent with the q/k/v and MLP TP splits (Lessons 25/46)</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Splitting the vocab is purely a <strong>scale</strong> issue: at vocab=150k, hidden=8192 this one table is over a billion params, too big for one GPU under TP and not something one GPU should bear alone. Sharding the vocab dim across ranks lets each compute one segment, spreading HBM and FLOPs, in line with other layers' TP. It doesn't improve accuracy (it's mathematically equivalent), has nothing to do with alphabetical order, and in fact <strong>requires</strong> an all-gather to assemble the full logits.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Each rank computes only its segment's partial logits — how is the <strong>full</strong> logits vector assembled?</div>
+  <ol class="opts">
+    <li>The CPU collects all GPU results and sends them back</li>
+    <li>An all-reduce sums the segments into full logits</li>
+    <li>Each GPU pads its own segment into a full vocab, no communication</li>
+    <li><strong>A cross-GPU all-gather concatenates each rank's partial segment end-to-end</strong> into a full vector as long as the whole vocab (skipped on a single GPU); for plain greedy argmax it can instead reduce local maxima in place, avoiding materializing the full vector</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The ranks' segments are <strong>non-overlapping</strong> (rank0 owns tokens 0–37499, rank1 37500–…), so they must be <strong>concatenated</strong>, not summed — exactly what <strong>all-gather</strong> does: each GPU sends its segment and receives the others', stitched in rank order into the full vector; skipped on one GPU. Note it's all-gather (concatenate), not all-reduce (sum), and not via a CPU detour; for greedy decode it can reduce the global max in place and skip building the full vector.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>giant dictionary + N librarians</strong>' analogy, fully explain the output head and vocab parallelism, and pin down the FLOPs saved by the <strong>last-token slice</strong>. Cover: (1) <span class='mono'>lm_head</span> is a big <span class='mono'>[hidden × vocab]</span> matrix that projects each position's hidden into <strong>vocab-sized logits</strong>, handed to the Sampler (Lesson 28) for a token; (2) the vocab is huge (30k–250k) ⇒ this table is a billion+ params, too big for one GPU under TP, so <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> split the <strong>vocab dim</strong> across ranks, each computing a segment then <strong>all-gather</strong>-ing into full logits (same idea as the q/k/v and MLP splits, Lessons 25/46); (3) the <strong>last-token slice</strong> — for a 2000-token prompt, prefill computes hidden for all positions but only the <strong>last position's</strong> logits predict the next word, so shrinking lm_head's input from 2000 rows to <strong>1 row</strong> cuts this step's compute by 2000× (unless logprobs are requested, keeping a few more rows).</li>
+    <li>Explain how <span class='mono'>LogitsProcessor</span> <strong>chains the output head into a pipeline</strong>, and place it in the 'closing the whole forward' arc. Cover: (1) its three steps — <strong>last-token slice</strong> (keep only each request's last hidden per <span class='mono'>logits_metadata</span>) → <strong>vocab-parallel projection</strong> (<span class='mono'>ParallelLMHead</span> computes this rank's segment) → <strong>cross-GPU all-gather</strong> (gated by <span class='mono'>do_tensor_parallel_all_gather</span>, skipped on one GPU); (2) the 'last mile' post-processing before sampling that all acts on this logits vector — <strong>logprob</strong> (log-softmax for log-probabilities), the <strong>structured-output vocab mask</strong> (Lesson 48, driving illegal tokens' logits to negative infinity), and <strong>logit bias</strong>, all of which must be applied <strong>before sampling</strong> to seal off illegal tokens at the root; (3) how this lesson closes the whole forward: Lesson 24's ModelRunner.forward → model body (Lesson 26) → LogitsProcessor → logits → Sampler (Lesson 28) → token, tying Part 8 (attention L33, MoE L34, quant L35, RoPE/Norm L36, and this lesson's logits/vocab parallelism) into the full 'pluggable operator layer' picture.</li>
   </ul>
 </div>
 </div>

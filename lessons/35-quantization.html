@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>35 · 量化 / Quantization - SGLang 图解教程</title>
+<meta name="description" content="第八部分 · Attention 与算子层｜量化 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="35 · 量化 / Quantization - SGLang 图解教程">
+<meta property="og:description" content="第八部分 · Attention 与算子层｜量化 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="35 · 量化 / Quantization - SGLang 图解教程">
+<meta name="twitter:description" content="第八部分 · Attention 与算子层｜量化 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第八部分 · Attention 与算子层</span><span class="lang-en">Part 8 · Attention &amp; layers</span></span>
+    <span class="pill">35 / 37</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:94%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第八部分 · Attention 与算子层</span><span class="lang-en">Part 8 · Attention &amp; layers</span></div>
+    <h1><span class="lang-zh">量化</span><span class="lang-en">Quantization</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+模型又大又慢，很大程度上是因为它太"重"——几百亿个参数，每个都用 16 位浮点存着。<strong>量化（quantization）</strong>
+是给这些数字"<strong>瘦身</strong>"的招式：用更少的比特（8 位、4 位）加上一个<strong>缩放因子</strong>来近似原来的权重，
+既省显存、又省带宽，于是模型更小、跑得更快——代价只是<strong>一点点</strong>精度。本课讲清楚它为什么有效、有哪些格式、以及 SGLang 怎么把它<strong>插</strong>进线性层。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  量化就像给模型权重做 <strong>JPEG / MP3 压缩</strong>：原图每个像素用很多位精确存，压缩后每个值只留<strong>更少的比特</strong>，
+  再配一个<strong>统一的缩放（scale）</strong>把范围还原回来。你损失了一丢丢看不太出来的细节，换来的是<strong>文件小得多、传输快得多</strong>。
+  "<strong>分组缩放</strong>"就更像把图片切成小块分别压缩——每个小块保留自己的动态范围，失真更小。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  权重平时是 fp16/bf16（16 位）。量化把它们存成 <strong>8 位（FP8）甚至 4 位（INT4/FP4）</strong> + 一个 scale。
+  <strong>更小的权重 = 更少显存</strong>（给 KV 缓存和并发腾地方，第 4/8 课）<strong>+ 更少的访存带宽</strong>（解码是访存密集的，第 4 课）<strong>⇒ 更快</strong>。
+  在 SGLang 里，每种量化格式提供一个 <span class="mono">LinearMethod</span>，替换掉线性层"怎么存权重、怎么做矩阵乘"——和注意力后端（第 33 课）一样，量化也是<strong>可插拔的策略</strong>。
+</div>
+
+<h2>为什么量化能加速：显存与带宽</h2>
+<p>很多人以为量化主要省的是算力，其实在 LLM 推理里，它省的<strong>大头是内存</strong>。第一，权重占的<strong>显存</strong>直接减半甚至减到四分之一——
+70B 模型 fp16 要 140GB，换成 INT4 只要约 35GB，于是单卡能装下更大的模型，或者腾出显存给 KV 缓存、容纳更高并发（第 4/8 课）。
+第二，也是更关键的：解码阶段是<strong>访存密集</strong>的（第 4 课），每生成一个 token 都要把<strong>整个模型权重</strong>从显存搬进计算单元一遍——
+权重小一半，要搬的字节就少一半，<strong>带宽瓶颈直接缓解，解码就更快</strong>。所以量化对"延迟敏感、单请求解码"的场景收益尤其明显。
+第三，在支持低精度计算的硬件上（如 H100/B200 的 FP8），还能直接用<strong>低精度矩阵乘内核</strong>把算力也一并省下。</p>
+
+<p>把内存账算具体些：一个 70 亿参数（7B）的模型，fp16 下每个权重 2 字节，光权重就要约 14GB；换成 INT4，每个权重只占半个字节（外加每组一个很小的 scale），权重整体塌缩到约 3.5GB，<strong>连四分之一都不到</strong>。省下的这十来个 GB 不是凭空消失，而是直接变成更多的 <strong>KV 缓存槽位</strong>（第 8 课）：KV 池能多放几千个 token、多塞几十条并发请求，于是同一张卡的<strong>吞吐</strong>和<strong>可服务并发</strong>都水涨船高（第 4/8 课）。这也是为什么"量化省的是内存"在工程上往往比"省算力"更值钱——在 LLM 服务里，显存常常才是真正卡住并发的那道墙，而带宽才是拖慢解码的那根绳。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>原始 fp16 权重</h4><p>每个数 16 位，精确但又大又慢搬。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>定标 + 取整</h4><p>为一组数算一个 <span class="mono">scale</span>，把它们映射到 8/4 位整数或低精度浮点。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>紧凑存储</h4><p>显存里只存<strong>低位权重 + scale</strong>，体积小一半到四分之一。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>反量化 / 低精度矩阵乘</h4><p>要么先还原回高精度再算，要么直接跑量化 kernel（最快）。</p></div></div>
+</div>
+
+<h2>有哪些格式：从 FP8 到 AWQ/GPTQ</h2>
+<p>量化不是一种方法，而是一<strong>族</strong>。按比特数和"量化谁"可以铺开成下面这张表：</p>
+
+<table class="t">
+  <tr><th>格式</th><th>位数</th><th>量化对象</th><th>备注</th></tr>
+  <tr><td><strong>FP8</strong>（E4M3）</td><td class="mono">8</td><td>权重 + 激活</td><td>H100/B200 硬件加速，可跑 FP8 GEMM，精度损失很小</td></tr>
+  <tr><td><strong>FP4 / INT4</strong></td><td class="mono">4</td><td>权重（常）</td><td>压得最狠，省显存最多，需更细的 scale 保精度</td></tr>
+  <tr><td><strong>AWQ</strong></td><td class="mono">4</td><td>仅权重</td><td>按激活重要性保护关键通道的免校准 PTQ</td></tr>
+  <tr><td><strong>GPTQ</strong></td><td class="mono">4</td><td>仅权重</td><td>逐层最小化误差的校准式 PTQ</td></tr>
+</table>
+
+<p>一条关键区分是<strong>"只量化权重"还是"权重+激活都量化"</strong>。<strong>仅权重（weight-only，如 AWQ/GPTQ）</strong>：权重存成 4 位省显存，
+但计算时<strong>先反量化回高精度</strong>再做矩阵乘——省了存和带宽，没省算力，对解码（访存密集）特别划算。<strong>权重+激活（如 FP8）</strong>：两边都压到低精度，
+直接跑<strong>低精度矩阵乘内核</strong>（如 FP8 GEMM），<strong>连算力一起省</strong>，是吞吐场景的最爱，但对硬件和精度更挑剔。</p>
+
+<div class="cols">
+  <div class="col"><h4>仅权重量化（weight-only）</h4><p>权重 4 位、激活仍高精度；算前<strong>反量化</strong>。主要省<strong>显存 + 带宽</strong>。AWQ/GPTQ 属此类，对延迟敏感、单请求解码收益大。</p></div>
+  <div class="col"><h4>权重+激活量化</h4><p>两边都低精度，跑<strong>低精度 GEMM</strong>（FP8）。<strong>显存 + 带宽 + 算力</strong>全省，吞吐最高；需要硬件支持，精度更要小心。</p></div>
+</div>
+
+<h2>为什么低比特还能用：冗余、离群值与 AWQ/GPTQ</h2>
+<p>把权重从 16 位砍到 4 位，凭什么模型还几乎不掉点？根本原因是 LLM 的权重<strong>高度冗余、对噪声很宽容</strong>：几百亿参数里，绝大多数数值都挤在一个不大的范围内，单个权重抖动一点点，被后面层层加权求和一平均，对最终 logits 的影响微乎其微——这和给照片做有损压缩却几乎看不出来是一个道理。真正危险的是<strong>离群值（outlier）</strong>：极少数幅度特别大的权重或激活，如果用一个粗糙的 scale 去套整组，它们要么被<strong>截断（clip）</strong>而丢掉信息，要么逼着 scale 被迫拉大，从而让其余正常值的精度<strong>全被陪葬</strong>。所以现代量化方法的功夫，几乎全花在<strong>怎么伺候好这一小撮离群值</strong>上——这也是不同方法拉开质量差距的地方。</p>
+<p><strong>AWQ</strong>（Activation-aware Weight Quantization）的洞见是：不是所有权重通道都一样重要，<strong>那些会乘上大激活的通道（salient channel）</strong>对输出影响最大。AWQ 用一小批校准数据统计各通道的激活幅度，给重要通道<strong>放大保护</strong>（等价于偷偷给它更细的有效精度）再量化，于是免去逐权重的繁重优化，却能保住关键信息，量化得又快又准。<strong>GPTQ</strong> 走的是另一条路：它带一个<strong>校准集</strong>，<strong>逐层</strong>地解一个最小二乘问题，一边量化一边补偿——每量化掉一列权重，就把引入的误差<strong>反向修正</strong>到尚未量化的列上去，让整层的<strong>重建误差</strong>（量化前后这一层输出之差）最小。两者都属于<strong>训练后量化（PTQ）</strong>：不重训模型，只用极少校准数据，几分钟到几十分钟，就能把一个 fp16 检查点压成一个高质量的 4 位版本，精度损失常常小到跑评测才看得出来。</p>
+<p>那精度到底掉多少？经验上有个大致的台阶：<strong>FP8</strong> 几乎无损，常常和 bf16 在评测分数上看不出差别，所以在 H100/B200 上越来越像"默认就该开"的选项；<strong>INT4（AWQ/GPTQ）</strong>会掉一点点，通常在零点几个百分点的量级，对大多数应用完全可以接受，换来的却是三四倍的显存节省；只有压到更激进的 <strong>3 位甚至 2 位</strong>，质量才会明显劣化，需要更精巧的方法去抢救。一个常被忽略的细节是：模型<strong>越大越耐压</strong>——70B 量化到 4 位的相对损失，往往比 7B 量化到 4 位还小，因为大模型的冗余度更高、容错空间更大。这也解释了为什么生产里"大模型 + 激进量化"常常比"小模型 + 全精度"更划算。</p>
+
+<h2>FP8 细看：E4M3、E5M2 与动态/静态定标</h2>
+<p>FP8 不是一种格式而是两种，区别在那 8 个比特怎么<strong>分配给指数和尾数</strong>。<strong>E4M3</strong>（4 位指数、3 位尾数）尾数多、精度高，但能表示的范围偏窄，适合数值范围相对可控的<strong>权重和前向激活</strong>，是推理里最常用的一档。<strong>E5M2</strong>（5 位指数、2 位尾数）范围更大但精度更糙，更适合数值跨度极大的<strong>梯度</strong>，主要在训练里露脸。推理量化默认就盯着 <strong>E4M3</strong>：在 8 位里塞进一个"能用的浮点"，比同样 8 位的 INT8 多了<strong>自带动态范围</strong>这个好处，这也是 FP8 的精度损失常常比 INT8 还小的原因。</p>
+<p>权重的 scale 在量化时就定死了，<strong>激活</strong>的 scale 却有两种玩法。<strong>动态定标（dynamic）</strong>在运行时按当前这一批激活的实际幅度临时算出 scale，精度最稳，但每一步都要多做一次求最大值的统计；<strong>静态定标（static）</strong>则用校准阶段预先算好的固定 scale，省掉运行时统计、最快，但碰上分布漂移就会差一点。算得快不快还要看<strong>kernel</strong>：SGLang 在有 FP8 张量核的硬件上会走 <span class="mono">cutlass</span> 的 FP8 GEMM 快路（代码里那句 <span class="mono">cutlass_fp8_supported()</span> 就是在探测这条路通不通），4 位权重则常借道 <span class="mono">Marlin</span> 这类专门的低位 GEMM kernel。<strong>H100 / B200</strong> 之所以是 FP8 的主场，是因为它们的 Tensor Core <strong>原生支持 FP8 矩阵乘</strong>——不是软件模拟，而是硬件一拍算一整片，于是低精度带来的算力优势才真正兑现，而不只是省了搬运。</p>
+
+<h2>scale 是灵魂：粒度决定精度</h2>
+<p>量化最核心的不是"砍位数"，而是那个<strong>缩放因子 scale</strong>——它决定了低位数能覆盖多大的数值范围。一组权重共用一个 scale，
+范围跨度越大、低位表示越粗，<strong>scale 的粒度</strong>就成了精度与开销的取舍：<strong>per-tensor</strong>（整张权重一个 scale，最省、最糙）、
+<strong>per-channel</strong>（每个输出通道一个 scale，常用，精度好不少）、<strong>per-group / blockwise</strong>（每一小块一个 scale，最细、精度最高，但 scale 本身也占点空间、算起来更复杂）。
+好的量化方案（AWQ/GPTQ/FP8 配分组 scale）正是靠<strong>更聪明地选 scale</strong>，把精度损失压到几乎看不出来。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>一个权重块 + 它的 scale</b>：低位整数乘以共享 scale 才还原成近似的原值（per-group 量化）</div>
+  <div class="cells"><span class="lab">int4 块</span><span class="cell">7</span><span class="cell">-3</span><span class="cell">5</span><span class="cell">0</span><span class="sep">×</span><span class="cell hl">scale=0.08</span><span class="sep">≈</span><span class="cell q">0.56 / -0.24 / 0.40 / 0.00</span></div>
+</div>
+
+<p>实践里粒度怎么选，是一道"精度 ÷ 开销"的算术题。<strong>per-tensor</strong> 最省、最快，但一旦权重里混进离群值，整张共用的 scale 就会被它撑大，把其余正常值的有效精度统统拉低，所以多用于对精度不敏感、追求极致速度的场合。<strong>per-channel</strong>（每个输出通道一个 scale）是个甜点：开销几乎可忽略，却能隔离掉"某几个通道天生幅度大"这种最常见的离群模式，因此成了 FP8 权重的常见默认。<strong>per-group / blockwise</strong>（如每 128 个元素一个 scale）最细，4 位量化几乎都得靠它才扛得住——位数已经被砍到只剩十几个台阶，必须用很贴合局部的 scale 才不至于把信息抹平。代价是这些 scale 自己也要存（通常用 fp16），还要在 GEMM 里随权重一起被读进来参与反量化，所以"更细"从来不是免费午餐，而是拿一点额外显存和算力去买精度。</p>
+
+<h2>SGLang 怎么接：量化也是可插拔策略</h2>
+<p>SGLang 不为每种格式重写模型，而是用一层抽象：每种格式有一个 <span class="mono">QuantizationConfig</span>，它提供一个 <span class="mono">LinearMethod</span>
+（如 <span class="mono">Fp8LinearMethod</span>），<strong>替换掉线性层"怎么创建/存权重"和"怎么做这次矩阵乘"</strong>。于是模型文件（第 26 课）照常写
+<span class="mono">RowParallelLinear</span> 之类的层，至于这层底下是 fp16 还是 fp8、走不走量化 kernel，全由配置注入——这正是继注意力后端（第 33 课）、KV 池之后，
+SGLang"<strong>一切皆可插拔</strong>"的第三个例子。权重则由模型加载器（第 25 课）从<strong>预量化的 checkpoint</strong> 读入，或在加载时<strong>顺手量化</strong>。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/quantization/fp8.py ::Fp8LinearMethod</span><span class="ln">线性层的 FP8 方法</span></div>
+  <pre><span class="kw">class</span> Fp8LinearMethod(LinearMethodBase):
+    <span class="cm"># FP8 线性层方法，支持多种量化方案：</span>
+    <span class="cm"># - 逐通道权重 + 逐 token 激活量化</span>
+    <span class="cm"># - 逐张量权重 + 逐张量激活量化</span>
+    <span class="cm"># - 分块(blockwise)权重 + 分块激活量化</span>
+    <span class="cm"># 支持的 checkpoint：FP8，或 FP16/BF16（加载时即时量化到 FP8）</span>
+    <span class="kw">def</span> __init__(self, quant_config):
+        self.quant_config = quant_config
+        self.cutlass_fp8_supported = cutlass_fp8_supported()  <span class="cm"># 有 FP8 硬件就走快路</span></pre>
+</div>
+
+<p>还有一个<strong>相关但独立</strong>的旋钮：<strong>KV 缓存量化</strong>。前面说的都是给<strong>权重</strong>瘦身，但解码时不断堆积的 <strong>KV 缓存</strong>（第 8 课）本身也是显存大户，尤其在长上下文、高并发下，它往往比权重还吃显存。把 KV 也从 fp16 压到 FP8 甚至更低，能让 KV 池一下子多装将近一倍的 token，<strong>直接拔高可服务的上下文长度与并发数</strong>。它和权重量化是<strong>两套独立的配置</strong>：你可以只量化权重、只量化 KV、或者两个一起开——因为它们压的是不同的东西、走的也是不同的代码路径（一个落在线性层的 <span class="mono">LinearMethod</span> 上，一个落在 KV 池的存取上）。把这两个旋钮分开来看，能帮你在"省显存"和"保精度"之间更精细地调。</p>
+
+<p>退一步看，量化是 SGLang"<strong>一切皆可插拔</strong>"哲学的<strong>第三个</strong>样板：第一个是注意力后端（第 33 课）——同一个注意力层，底下换 FlashAttention 还是 FlashInfer，由配置说了算；第二个是 KV 池——同一套读写接口，底下可以是连续、分页或分层缓存；现在是量化——同一个 <span class="mono">RowParallelLinear</span>，底下是 fp16 还是 fp8、走不走量化 kernel，同样由一个 <span class="mono">QuantizationConfig</span> 注入，模型文件（第 26 课）一个字都不用改。这正是<strong>第 8 部分</strong>的主线：把 Transformer 的每一块——注意力、MoE（第 34 课）、量化、各类算子（第 36 课）——都打磨成<strong>可替换的策略</strong>，于是新格式、新硬件、新算法都能直接"插"进来，而不必每次都重写模型。理解了这层抽象，你看 SGLang 加一种新量化方案，就只是"再写一个 <span class="mono">LinearMethod</span>"那么自然，而整套服务调度、KV 管理、注意力计算都原封不动地复用。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>量化</strong>：用更少比特（FP8/FP4/INT4）+ 一个 scale 近似权重，<strong>省显存、省带宽 ⇒ 更快</strong>，代价是一点点精度。</li>
+    <li><strong>省的是内存</strong>：显存减半到四分之一 + 解码访存带宽减半（第 4/8 课）；低精度硬件还能省算力。</li>
+    <li><strong>两类</strong>：仅权重（AWQ/GPTQ，算前反量化，省存+带宽）vs 权重+激活（FP8 GEMM，连算力一起省）。</li>
+    <li><strong>scale 粒度</strong>：per-tensor / per-channel / per-group，越细精度越高、开销越大。</li>
+    <li><strong>可插拔</strong>：<span class="mono">QuantizationConfig</span> 提供 <span class="mono">LinearMethod</span> 替换线性层的存权重/矩阵乘；由加载器（第 25 课）读入。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 量化把权重从 fp16 压到 INT4，本质上是用什么<strong>换</strong>什么？</div>
+  <ol class="opts">
+    <li>什么都不损失，纯粹免费加速</li>
+    <li><strong>用一点点精度，换显存、访存带宽，以及（在低精度硬件上）算力</strong>——更少的比特 + 一个 scale 近似原权重，于是模型更小、解码要搬的字节更少、跑得更快</li>
+    <li>用算力换模型质量，完全不省显存</li>
+    <li>用更多显存换更高精度</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。量化是一笔取舍：牺牲<strong>一点点精度</strong>，换来显存减半到四分之一、解码访存带宽减半，低精度硬件上还顺带省算力。它不是用更多显存换精度（恰恰相反），也不是不省显存，更不是完全无损——只是损失常常小到要跑评测才看得出。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. AWQ/GPTQ 这类“<strong>仅权重</strong>”量化和 FP8 这类“<strong>权重+激活</strong>”量化，最关键的差别是什么？</div>
+  <ol class="opts">
+    <li>两者完全等价，只是名字不同</li>
+    <li>仅权重更省显存，权重+激活完全不省显存</li>
+    <li><strong>仅权重</strong>把权重存成 4 位省显存，但计算前要<strong>反量化回高精度</strong>再做矩阵乘，省存+带宽不省算力；<strong>权重+激活</strong>两边都低精度，直接跑<strong>低精度 GEMM</strong>（FP8），<strong>连算力一起省</strong>，但更挑硬件和精度</li>
+    <li>权重+激活只能用于训练，不能推理</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。仅权重（AWQ/GPTQ）算前要把 4 位权重<strong>反量化</strong>回高精度，所以只省存储和带宽，对访存密集的解码特别划算；权重+激活（FP8）两边都低精度，能直接跑 FP8 GEMM <strong>把算力也省了</strong>，吞吐最高但需要 FP8 硬件、精度更需小心。两者都省显存，并非等价，FP8 也照样用于推理。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 一组 INT4 权重共享的那个 <span class='mono'>scale</span>（缩放因子）到底是什么，<strong>per-group</strong> 粒度又意味着什么？</div>
+  <ol class="opts">
+    <li>scale 就是 INT4 整数本身，没有额外的数</li>
+    <li>per-group 表示整个模型只有一个全局 scale</li>
+    <li><strong>scale 是把低位整数还原回真实数值范围的乘数</strong>：真实值 ≈ 整数 × scale；<strong>per-group</strong> 指每一小块权重各算一个 scale，比 per-tensor（整张一个）更细、精度更高，代价是 scale 本身要占点空间、算起来更复杂</li>
+    <li>scale 是模型的学习率，训练时才用</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。scale 是反量化的乘数：把存下来的低位整数乘以 scale，才近似还原成原来的浮点值（真实值 ≈ 整数 × scale）。粒度从粗到细是 per-tensor → per-channel → per-group/blockwise，越细越能贴合局部动态范围、精度越高，但要存更多 scale、计算更复杂。它不是学习率，也不是整数本身，per-group 更不是全局一个 scale。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>JPEG / MP3 压缩</strong>”这个类比把量化讲透，并算清它<strong>省的是什么</strong>。请覆盖：①权重平时是 fp16（16 位），量化用<strong>更少比特（FP8/FP4/INT4）+ 一个 scale</strong> 近似原值，<strong>真实值 ≈ 整数 × scale</strong>；②为什么<strong>大头省的是内存而非算力</strong>——显存减半到四分之一（给 KV 缓存和并发腾地方，第 4/8 课），以及解码<strong>访存密集</strong>、权重搬得少一半就快一半；③为什么低比特还能用——LLM 权重<strong>冗余、宽容</strong>，真正危险的是<strong>离群值</strong>，而 <strong>AWQ</strong>（按激活幅度保护关键通道）和 <strong>GPTQ</strong>（带校准集逐层最小化重建误差）正是靠聪明地处理它们把精度损失压到几乎看不出。</li>
+    <li>说清量化在 SGLang 里<strong>怎么“插”进线性层</strong>，并把它放进“一切皆可插拔”的脉络里。请说明：①每种格式提供一个 <span class='mono'>QuantizationConfig</span> → <span class='mono'>LinearMethod</span>（如 <span class='mono'>Fp8LinearMethod</span>），<strong>替换线性层“怎么存权重、怎么做这次矩阵乘”</strong>，于是模型文件（第 26 课）里的 <span class='mono'>RowParallelLinear</span> 一个字不改、由配置决定底下是 fp16 还是 fp8；②权重从<strong>预量化 checkpoint</strong> 读入或在加载时<strong>即时量化</strong>（第 25 课）；③<strong>FP8</strong> 的 E4M3 与<strong>动态/静态</strong>激活定标、<span class='mono'>cutlass</span>/<span class='mono'>Marlin</span> 快路与 H100/B200 原生 FP8；④<strong>KV 缓存量化</strong>是相关但独立的旋钮，并点明量化是继注意力后端（第 33 课）、KV 池之后“可插拔”的第三个例子。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Models are big and slow largely because they're "heavy" — tens of billions of parameters, each stored in 16-bit float.
+<strong>Quantization</strong> is how you put those numbers on a <strong>diet</strong>: approximate the original weights with
+<strong>fewer bits</strong> (8, 4) plus a <strong>scale factor</strong>, saving HBM and bandwidth so the model is smaller and faster —
+at the cost of <strong>a little</strong> accuracy. This lesson covers why it works, which formats exist, and how SGLang <strong>plugs</strong> it into linear layers.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Quantization is like <strong>JPEG / MP3 compression</strong> for weights: instead of storing each value at full precision,
+  keep <strong>fewer bits</strong> plus a shared <strong>scale</strong> to restore the range. You lose a sliver of barely-noticeable
+  detail in exchange for a file that's <strong>far smaller and moves far faster</strong>. "<strong>Group scaling</strong>" is like
+  compressing the image in small blocks — each block keeps its own dynamic range, so distortion stays low.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  Weights are normally fp16/bf16 (16-bit). Quantization stores them in <strong>8-bit (FP8) or even 4-bit (INT4/FP4)</strong> + a scale.
+  <strong>Smaller weights = less HBM</strong> (room for KV cache and concurrency, Lessons 4/8) <strong>+ less memory bandwidth</strong>
+  (decode is memory-bound, Lesson 4) <strong>⇒ faster</strong>. In SGLang each format provides a <span class="mono">LinearMethod</span> that
+  replaces how a linear layer stores weights and does its matmul — like the attention backend (Lesson 33), quantization is a <strong>pluggable strategy</strong>.
+</div>
+
+<h2>Why quantization speeds things up: HBM and bandwidth</h2>
+<p>People assume quantization mainly saves compute, but in LLM inference the <strong>big win is memory</strong>. First, the weights'
+<strong>HBM</strong> footprint halves or quarters — a 70B model is 140GB in fp16 but ~35GB in INT4, so a GPU fits a bigger model, or
+frees HBM for the KV cache and higher concurrency (Lessons 4/8). Second, and more importantly: decode is <strong>memory-bound</strong>
+(Lesson 4) — every generated token drags the <strong>whole weight set</strong> from HBM into the compute units once; halve the bytes and
+you halve the move, so the <strong>bandwidth bottleneck eases and decode gets faster</strong>. So quantization shines for latency-sensitive,
+single-request decode. Third, on hardware with low-precision compute (FP8 on H100/B200), a <strong>low-precision matmul kernel</strong> saves FLOPs too.</p>
+
+<p>Make the memory math concrete: a 7-billion-parameter (7B) model at fp16 stores each weight in 2 bytes, so the weights alone need ~14GB; in INT4 each weight is half a byte (plus a tiny per-group scale), collapsing the weights to ~3.5GB — <strong>under a quarter</strong>. Those reclaimed gigabytes don't vanish; they turn directly into more <strong>KV-cache slots</strong> (Lesson 8): the KV pool holds thousands more tokens and dozens more concurrent requests, so the same GPU's <strong>throughput</strong> and <strong>serviceable concurrency</strong> both climb (Lessons 4/8). That's why "quantization saves memory" is usually worth more in practice than "saves compute" — in LLM serving, HBM is often the wall that actually caps concurrency, and bandwidth is the rope that drags decode down.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Original fp16 weight</h4><p>16 bits each — precise but big and slow to move.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Scale + round</h4><p>Compute one <span class="mono">scale</span> for a group, map them to 8/4-bit ints or low-precision floats.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Compact storage</h4><p>HBM holds only <strong>low-bit weights + scale</strong>, half to a quarter the size.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Dequant / low-precision matmul</h4><p>Either restore to high precision first, or run a quantized kernel (fastest).</p></div></div>
+</div>
+
+<h2>The formats: from FP8 to AWQ/GPTQ</h2>
+<p>Quantization isn't one method but a <strong>family</strong>. By bit-count and "what gets quantized" it spreads into this table:</p>
+
+<table class="t">
+  <tr><th>Format</th><th>Bits</th><th>Quantizes</th><th>Notes</th></tr>
+  <tr><td><strong>FP8</strong> (E4M3)</td><td class="mono">8</td><td>weights + activations</td><td>HW-accelerated on H100/B200, can run FP8 GEMM, tiny accuracy loss</td></tr>
+  <tr><td><strong>FP4 / INT4</strong></td><td class="mono">4</td><td>weights (usually)</td><td>most compression, most HBM saved; needs finer scales for accuracy</td></tr>
+  <tr><td><strong>AWQ</strong></td><td class="mono">4</td><td>weight-only</td><td>calibration-light PTQ protecting salient channels by activation importance</td></tr>
+  <tr><td><strong>GPTQ</strong></td><td class="mono">4</td><td>weight-only</td><td>calibrated PTQ minimizing per-layer error</td></tr>
+</table>
+
+<p>A key distinction is <strong>"weight-only" vs "weight + activation"</strong>. <strong>Weight-only (AWQ/GPTQ)</strong>: weights stored in 4 bits
+to save HBM, but compute <strong>dequantizes back to high precision</strong> first — saving storage and bandwidth, not FLOPs, which is great for
+memory-bound decode. <strong>Weight + activation (FP8)</strong>: both sides low precision, running a <strong>low-precision matmul kernel</strong>
+(FP8 GEMM) — <strong>saving FLOPs too</strong>, the favorite for throughput, but pickier about hardware and accuracy.</p>
+
+<div class="cols">
+  <div class="col"><h4>Weight-only</h4><p>4-bit weights, high-precision activations; <strong>dequant before compute</strong>. Saves <strong>HBM + bandwidth</strong>. AWQ/GPTQ are here — big win for latency-sensitive single-request decode.</p></div>
+  <div class="col"><h4>Weight + activation</h4><p>Both low precision, run a <strong>low-precision GEMM</strong> (FP8). Saves <strong>HBM + bandwidth + FLOPs</strong>, highest throughput; needs hardware support, accuracy needs more care.</p></div>
+</div>
+
+<h2>Why low bits still work: redundancy, outliers, AWQ/GPTQ</h2>
+<p>Cut weights from 16 bits to 4 and the model barely loses quality — how? The root reason is that LLM weights are <strong>highly redundant and tolerant of noise</strong>: among tens of billions of parameters, the vast majority sit in a modest range, and one weight wobbling slightly gets averaged away through layer after layer of weighted sums, with negligible effect on the final logits — the same reason a lossy-compressed photo still looks fine. The real danger is <strong>outliers</strong>: the rare weights or activations with unusually large magnitude; if a coarse scale tries to cover the whole group, they get <strong>clipped</strong> and lose information, or they force the scale large and <strong>drag down the precision of every normal value with them</strong>. So nearly all the effort in modern quantization goes into <strong>handling that handful of outliers</strong> — which is where methods pull apart in quality.</p>
+<p><strong>AWQ</strong> (Activation-aware Weight Quantization)'s insight: not all weight channels matter equally — the <strong>salient channels</strong> that get multiplied by large activations dominate the output. AWQ uses a small calibration batch to measure each channel's activation magnitude, <strong>scales up and protects</strong> the important channels (effectively giving them finer precision) before quantizing, so it skips heavy per-weight optimization yet keeps the critical information, quantizing fast and accurately. <strong>GPTQ</strong> takes another route: with a <strong>calibration set</strong> it solves a least-squares problem <strong>layer by layer</strong>, quantizing and compensating as it goes — each time it quantizes a column of weights it <strong>back-corrects</strong> the introduced error onto the not-yet-quantized columns, minimizing the layer's <strong>reconstruction error</strong> (the output difference before vs after). Both are <strong>post-training quantization (PTQ)</strong>: no retraining, just a little calibration data, turning an fp16 checkpoint into a high-quality 4-bit version in minutes, with accuracy loss often so small you only see it on a benchmark.</p>
+<p>So how much accuracy actually drops? Empirically there's a rough staircase: <strong>FP8</strong> is nearly lossless, often indistinguishable from bf16 on benchmark scores, so on H100/B200 it increasingly feels like a "just turn it on" default; <strong>INT4 (AWQ/GPTQ)</strong> gives up a little, usually on the order of a few tenths of a percent — perfectly acceptable for most applications in exchange for a 3–4× HBM saving; only at more aggressive <strong>3-bit or even 2-bit</strong> does quality degrade noticeably and need fancier methods to rescue. One often-missed detail: <strong>bigger models compress better</strong> — a 70B quantized to 4 bits typically loses relatively less than a 7B at 4 bits, because the larger model is more redundant and has more error budget. That's why in production "big model + aggressive quant" often beats "small model + full precision."</p>
+
+<h2>FP8 up close: E4M3, E5M2, and dynamic vs static scaling</h2>
+<p>FP8 isn't one format but two, differing in how the 8 bits are <strong>split between exponent and mantissa</strong>. <strong>E4M3</strong> (4 exponent, 3 mantissa bits) has more mantissa, so higher precision but a narrower representable range — good for the relatively bounded <strong>weights and forward activations</strong>, and the most common choice for inference. <strong>E5M2</strong> (5 exponent, 2 mantissa) reaches a wider range at coarser precision, better for wide-ranging <strong>gradients</strong>, mostly seen in training. Inference quantization targets <strong>E4M3</strong> by default: packing a usable float into 8 bits brings <strong>built-in dynamic range</strong> that same-width INT8 lacks, which is why FP8 often loses even less accuracy than INT8.</p>
+<p>A weight's scale is fixed at quantization time, but an <strong>activation's</strong> scale has two styles. <strong>Dynamic scaling</strong> computes the scale at runtime from the current batch's actual magnitude — most robust, but adds a max-reduction every step; <strong>static scaling</strong> uses a fixed scale precomputed during calibration — no runtime stats, fastest, but drifts a bit if the distribution shifts. Speed also hinges on the <strong>kernel</strong>: on hardware with FP8 tensor cores SGLang takes the <span class="mono">cutlass</span> FP8 GEMM fast path (the <span class="mono">cutlass_fp8_supported()</span> line is probing exactly whether that path is open), while 4-bit weights often go through a dedicated low-bit GEMM kernel like <span class="mono">Marlin</span>. <strong>H100 / B200</strong> are FP8's home turf because their Tensor Cores <strong>natively support FP8 matmul</strong> — not software emulation but hardware computing a whole tile per clock, which is how the low-precision compute advantage actually materializes instead of merely saving data movement.</p>
+
+<h2>The scale is the soul: granularity sets accuracy</h2>
+<p>The heart of quantization isn't "fewer bits" but that <strong>scale factor</strong> — it sets how big a numeric range the low bits cover.
+A group of weights shares one scale, so the wider the range and coarser the low-bit representation, the more the <strong>scale granularity</strong>
+becomes the accuracy-vs-overhead trade: <strong>per-tensor</strong> (one scale for the whole weight, cheapest, coarsest), <strong>per-channel</strong>
+(one per output channel, common, noticeably better), <strong>per-group / blockwise</strong> (one per small block, finest, best accuracy, but the
+scales cost a bit of space and complexity). Good schemes (AWQ/GPTQ/FP8 with group scales) win by <strong>choosing scales more cleverly</strong>, keeping the accuracy loss nearly invisible.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>A weight block + its scale</b>: low-bit ints times the shared scale recover the approximate originals (per-group quant)</div>
+  <div class="cells"><span class="lab">int4 block</span><span class="cell">7</span><span class="cell">-3</span><span class="cell">5</span><span class="cell">0</span><span class="sep">×</span><span class="cell hl">scale=0.08</span><span class="sep">≈</span><span class="cell q">0.56 / -0.24 / 0.40 / 0.00</span></div>
+</div>
+
+<p>Choosing granularity in practice is an "accuracy ÷ overhead" calculation. <strong>per-tensor</strong> is cheapest and fastest, but one outlier in the weights stretches the whole shared scale and drags down the effective precision of every other value, so it suits accuracy-insensitive, speed-at-all-costs cases. <strong>per-channel</strong> (one scale per output channel) is the sweet spot: near-zero overhead, yet it isolates the most common outlier pattern — "a few channels are just naturally large" — which is why it's the common default for FP8 weights. <strong>per-group / blockwise</strong> (e.g. one scale per 128 elements) is finest, and 4-bit quantization almost always needs it to survive — with only a dozen-odd levels left, the scale must hug the local range or it smears the information away. The cost: those scales must be stored too (usually fp16) and read in alongside the weights during the GEMM to dequantize, so "finer" is never a free lunch — it spends a bit of extra HBM and compute to buy accuracy.</p>
+
+<h2>How SGLang plugs it in: quantization as a pluggable strategy</h2>
+<p>SGLang doesn't rewrite models per format; it uses one abstraction: each format has a <span class="mono">QuantizationConfig</span> that
+provides a <span class="mono">LinearMethod</span> (e.g. <span class="mono">Fp8LinearMethod</span>) which <strong>replaces how a linear layer
+creates/stores its weight and does its matmul</strong>. So the model file (Lesson 26) still writes layers like
+<span class="mono">RowParallelLinear</span>; whether that layer is fp16 or fp8 underneath, and whether it runs a quantized kernel, is injected
+by config — the third example (after the attention backend, Lesson 33, and the KV pool) of SGLang's <strong>"everything pluggable"</strong>.
+Weights are read by the model loader (Lesson 25) from a <strong>pre-quantized checkpoint</strong>, or <strong>quantized on the fly</strong> at load.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/quantization/fp8.py ::Fp8LinearMethod</span><span class="ln">the FP8 method for a linear layer</span></div>
+  <pre><span class="kw">class</span> Fp8LinearMethod(LinearMethodBase):
+    <span class="cm"># FP8 linear method, supporting several quant schemes:</span>
+    <span class="cm"># - per-channel weight + per-token activation quant</span>
+    <span class="cm"># - per-tensor weight + per-tensor activation quant</span>
+    <span class="cm"># - blockwise weight + blockwise activation quant</span>
+    <span class="cm"># checkpoints: FP8, or FP16/BF16 (quantized to FP8 at load time)</span>
+    <span class="kw">def</span> __init__(self, quant_config):
+        self.quant_config = quant_config
+        self.cutlass_fp8_supported = cutlass_fp8_supported()  <span class="cm"># fast path if FP8 HW exists</span></pre>
+</div>
+
+<p>There's a <strong>related but separate</strong> knob: <strong>KV-cache quantization</strong>. Everything above slimmed the <strong>weights</strong>, but the <strong>KV cache</strong> that piles up during decode (Lesson 8) is itself an HBM hog — under long context and high concurrency it often eats more memory than the weights. Compressing KV from fp16 to FP8 or lower lets the KV pool hold nearly twice the tokens, <strong>directly raising serviceable context length and concurrency</strong>. It's a <strong>separate configuration</strong> from weight quantization: you can quantize only weights, only KV, or both — because they compress different things on different code paths (one in the linear layer's <span class="mono">LinearMethod</span>, the other in the KV pool's load/store). Keeping the two knobs distinct lets you tune the "save HBM" vs "keep accuracy" trade more finely.</p>
+
+<p>Step back and quantization is the <strong>third</strong> exemplar of SGLang's <strong>"everything pluggable"</strong> philosophy: the first was the attention backend (Lesson 33) — one attention layer, FlashAttention or FlashInfer underneath chosen by config; the second was the KV pool — one read/write interface over contiguous, paged, or tiered caches; now quantization — one <span class="mono">RowParallelLinear</span>, fp16 or fp8 underneath and quant-kernel or not, injected by a single <span class="mono">QuantizationConfig</span>, with the model file (Lesson 26) unchanged. That's the through-line of <strong>Part 8</strong>: make every Transformer block — attention, MoE (Lesson 34), quantization, the various ops (Lesson 36) — a <strong>swappable strategy</strong>, so new formats, hardware, and algorithms can "plug in" without rewriting the model each time. Once you see this abstraction, SGLang adding a new quantization scheme is just "write one more <span class="mono">LinearMethod</span>," while the whole serving scheduler, KV management, and attention compute are reused untouched.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>Quantization</strong>: approximate weights with fewer bits (FP8/FP4/INT4) + a scale — <strong>saves HBM & bandwidth ⇒ faster</strong>, at a little accuracy.</li>
+    <li><strong>The win is memory</strong>: HBM halved-to-quartered + decode bandwidth halved (Lessons 4/8); low-precision hardware saves FLOPs too.</li>
+    <li><strong>Two kinds</strong>: weight-only (AWQ/GPTQ, dequant before compute, saves storage+bandwidth) vs weight+activation (FP8 GEMM, saves FLOPs too).</li>
+    <li><strong>Scale granularity</strong>: per-tensor / per-channel / per-group — finer = more accurate, more overhead.</li>
+    <li><strong>Pluggable</strong>: <span class="mono">QuantizationConfig</span> provides a <span class="mono">LinearMethod</span> replacing the linear layer's weight storage/matmul; read by the loader (Lesson 25).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Quantizing weights from fp16 to INT4 fundamentally <strong>trades</strong> what for what?</div>
+  <ol class="opts">
+    <li>Loses nothing — pure free speedup</li>
+    <li><strong>A little accuracy in exchange for HBM, memory bandwidth, and (on low-precision hardware) FLOPs</strong> — fewer bits + a scale approximate the original weights, so the model is smaller, decode moves fewer bytes, and it runs faster</li>
+    <li>Compute for model quality, saving no HBM at all</li>
+    <li>More HBM in exchange for higher accuracy</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Quantization is a trade: give up <strong>a little accuracy</strong> for HBM halved-to-quartered, decode bandwidth halved, and FLOPs too on low-precision hardware. It is not more HBM for accuracy (the opposite), does not skip HBM savings, and is not lossless — the loss is just usually too small to see outside a benchmark.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What's the key difference between <strong>weight-only</strong> quant (AWQ/GPTQ) and <strong>weight + activation</strong> quant (FP8)?</div>
+  <ol class="opts">
+    <li>They are identical, just named differently</li>
+    <li>Weight-only saves HBM; weight+activation saves none</li>
+    <li><strong>Weight-only</strong> stores 4-bit weights to save HBM but <strong>dequantizes back to high precision</strong> before the matmul, saving storage+bandwidth not FLOPs; <strong>weight+activation</strong> keeps both low precision and runs a <strong>low-precision GEMM</strong> (FP8), <strong>saving FLOPs too</strong>, but is pickier about hardware and accuracy</li>
+    <li>Weight+activation is training-only, never for inference</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weight-only (AWQ/GPTQ) must <strong>dequantize</strong> 4-bit weights to high precision before computing, so it saves only storage and bandwidth — great for memory-bound decode; weight+activation (FP8) keeps both low precision and runs FP8 GEMM to <strong>save FLOPs too</strong>, highest throughput but needs FP8 hardware and more care on accuracy. Both save HBM, they're not equivalent, and FP8 is very much used for inference.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What exactly is the <span class='mono'>scale</span> shared by a group of INT4 weights, and what does a <strong>per-group</strong> granularity mean?</div>
+  <ol class="opts">
+    <li>The scale is just the INT4 integer itself, with no extra number</li>
+    <li>Per-group means the whole model has a single global scale</li>
+    <li><strong>The scale is the multiplier that restores low-bit ints to a real numeric range</strong>: real ≈ int × scale; <strong>per-group</strong> means each small block of weights gets its own scale — finer than per-tensor (one for the whole weight) and more accurate, at the cost of the scales taking some space and complexity</li>
+    <li>The scale is the model's learning rate, used only in training</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The scale is the dequant multiplier: multiply the stored low-bit int by the scale to approximately recover the original float (real ≈ int × scale). Granularity goes per-tensor → per-channel → per-group/blockwise; finer fits the local dynamic range better for higher accuracy, but stores more scales and costs more compute. It's not a learning rate, not the integer itself, and per-group is certainly not one global scale.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the '<strong>JPEG / MP3 compression</strong>' analogy, fully explain quantization and pin down <strong>what it saves</strong>. Cover: (1) weights are normally fp16 (16-bit); quantization approximates them with <strong>fewer bits (FP8/FP4/INT4) + a scale</strong>, where <strong>real ≈ int × scale</strong>; (2) why the <strong>big win is memory, not compute</strong> — HBM halved-to-quartered (room for KV cache and concurrency, Lessons 4/8), and decode being <strong>memory-bound</strong> so halving the weight bytes halves the move; (3) why low bits still work — LLM weights are <strong>redundant and tolerant</strong>, the real danger is <strong>outliers</strong>, and <strong>AWQ</strong> (protecting salient channels by activation magnitude) and <strong>GPTQ</strong> (a calibrated, per-layer minimization of reconstruction error) keep the accuracy loss nearly invisible by handling them cleverly.</li>
+    <li>Explain <strong>how quantization 'plugs into' linear layers</strong> in SGLang, and place it in the 'everything pluggable' arc. Cover: (1) each format provides a <span class='mono'>QuantizationConfig</span> → <span class='mono'>LinearMethod</span> (e.g. <span class='mono'>Fp8LinearMethod</span>) that <strong>replaces how a linear layer stores its weight and does its matmul</strong>, so the <span class='mono'>RowParallelLinear</span> in the model file (Lesson 26) is unchanged and config decides fp16 vs fp8 underneath; (2) weights come from a <strong>pre-quantized checkpoint</strong> or are <strong>quantized on the fly</strong> at load (Lesson 25); (3) <strong>FP8</strong>'s E4M3 and <strong>dynamic/static</strong> activation scaling, the <span class='mono'>cutlass</span>/<span class='mono'>Marlin</span> fast paths and native FP8 on H100/B200; (4) <strong>KV-cache quantization</strong> as a related-but-separate knob, and naming quantization the third 'pluggable' example after the attention backend (Lesson 33) and the KV pool.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="34-moe-layer.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">MoE 层</span><span class="lang-en">The MoE layer</span></div></a><a class="next" href="36-rope-norm-and-ops.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">RoPE、归一化与其它算子</span><span class="lang-en">RoPE, norm &amp; other ops</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

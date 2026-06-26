@@ -111,6 +111,16 @@ PAGES = [
      "第七部分 · KV 缓存与内存", "Part 7 · KV cache & memory"),
     ("32-eviction-and-hit-rate.html", "缓存淘汰与命中", "Eviction & hit rate",
      "第七部分 · KV 缓存与内存", "Part 7 · KV cache & memory"),
+    ("33-attention-backend-abstraction.html", "Attention 后端抽象", "Attention backend abstraction",
+     "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
+    ("34-moe-layer.html", "MoE 层", "The MoE layer",
+     "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
+    ("35-quantization.html", "量化", "Quantization",
+     "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
+    ("36-rope-norm-and-ops.html", "RoPE、归一化与其它算子", "RoPE, norm & other ops",
+     "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
+    ("37-logits-and-vocab-parallel.html", "Logits 处理与词表并行", "Logits & vocab parallel",
+     "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
 ]
 
 
@@ -624,6 +634,16 @@ SUBTITLES = {
                                 "cache across GPU/CPU/disk tiers · background prefetch & writeback"),
     "32-eviction-and-hit-rate.html": ("LRU 淘汰可淘汰叶子 · 锁定的在用节点不淘汰 · 命中率即吞吐",
                                       "LRU evicts evictable leaves · locked in-use nodes survive · hit rate is throughput"),
+    "33-attention-backend-abstraction.html": ("attention 是可换的策略 · FlashInfer/Triton/FA · 按硬件选",
+                                              "attention as a swappable strategy · FlashInfer/Triton/FA · picked by hardware"),
+    "34-moe-layer.html": ("路由 top-k 专家 · 稀疏计算 · FusedMoE 融合 routing+GEMM",
+                          "route to top-k experts · sparse compute · FusedMoE fuses routing+GEMM"),
+    "35-quantization.html": ("更少比特 · FP8/FP4/INT4/AWQ/GPTQ · 省显存省带宽",
+                             "fewer bits · FP8/FP4/INT4/AWQ/GPTQ · save HBM & bandwidth"),
+    "36-rope-norm-and-ops.html": ("RoPE 按位置旋转 q/k · RMSNorm 轻量归一 · 算子融合",
+                                  "RoPE rotates q/k by position · RMSNorm lightweight norm · fused ops"),
+    "37-logits-and-vocab-parallel.html": ("词表维度按 TP 切分 · 各 rank 算一片再 gather · 接采样器",
+                                          "vocab split across TP ranks · each scores a shard then gather · into the Sampler"),
 }
 
 

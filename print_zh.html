@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang 图解学习指南 - 打印版</h1>
-<p style="color:var(--muted)">全 32 课 - 逐课分页。用浏览器 Ctrl/Cmd+P 即可导出 PDF。</p>
+<p style="color:var(--muted)">全 37 课 - 逐课分页。用浏览器 Ctrl/Cmd+P 即可导出 PDF。</p>
 <div class="print-toc"><h2>目录</h2>
 <ol>
   <li>SGLang 是什么</li>
@@ -368,6 +368,11 @@ details[open] > summary { list-style: none; }
   <li>分页内存池</li>
   <li>HiCache 分层缓存</li>
   <li>缓存淘汰与命中</li>
+  <li>Attention 后端抽象</li>
+  <li>MoE 层</li>
+  <li>量化</li>
+  <li>RoPE、归一化与其它算子</li>
+  <li>Logits 处理与词表并行</li>
 </ol></div>
 <section class="lesson-print">
 <h1>SGLang 是什么</h1>
@@ -6916,6 +6921,882 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
   <ul>
     <li>用“图书管理员清理书架”的类比，把驱逐机制讲透。请覆盖：①驱逐<strong>何时</strong>被触发（节点占着第 30 课池里的 KV 槽位，分配器凑不出新请求要的空间时，调度器才触发 <span class='mono'>evict</span> 回收若干槽位），为什么它是被动按需、而非定时清理；②<strong>清谁</strong>由 <span class='mono'>EvictionStrategy</span> 的 <span class='mono'>get_priority</span> 排序，默认 LRU=<span class='mono'>last_access_time</span>（最久未访问先走），并简述 LFU / FIFO / MRU 的区别；③为什么<strong>只有叶子</strong>可驱逐、回收从叶往根；④铁律：<span class='mono'>lock_ref&gt;0</span> 的节点（正被在跑请求使用，第 29 课）永不被驱逐，<span class='mono'>inc/dec_lock_ref</span> 如何在可驱逐集与受保护集之间搬节点。</li>
     <li>说清前缀缓存的<strong>经济学</strong>，并把它接回相邻几课。请说明：①<strong>命中率</strong>衡量什么（从缓存白拿、不重算的 prompt token 占比），它如何被高前缀共享（第 7/29 课）+ 缓存感知调度（第 20 课，主动重排队列优先放命中请求）抬高，又如何转化为更高吞吐（第 8 课）；②核心<strong>取舍</strong>：驱逐later重算 vs 留在 HBM——留占显存挤掉并发、驱省显存却赔上一次几千 token 的重算，为什么整个内存部分（第 29–32 课）都在把这笔取舍做好；③HiCache（第 31 课）如何通过把被驱逐前缀沉到下层、抬高<strong>有效</strong>命中率。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Attention 后端抽象</h1>
+
+<p class="lead">
+第 26 课你会亲手写一个模型，里面有一行 <span class="mono">self.attn(q, k, v, forward_batch)</span>——注意力就发生在这里。
+但你写模型时<strong>从不写注意力的 CUDA kernel</strong>，也从不关心它到底跑在 NVIDIA 还是 AMD 上。这一课要讲清楚的，就是这行调用背后的<strong>可替换抽象</strong>：
+模型里的注意力层（<span class="inline">RadixAttention</span> 这个 <span class="mono">nn.Module</span>，概念见第 7 课、实现见第 29 课）<strong>本身不含 kernel</strong>，
+它把真正的注意力数学<strong>委托</strong>给一个 <span class="mono">AttentionBackend</span>——一个抽象基类（ABC）。换哪个后端、跑哪个 kernel，是<strong>部署时的选择</strong>，不是模型作者的事。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把注意力层想成一把<strong>可换头的电钻</strong>：要干的活（"钻一个孔"＝做注意力）是<strong>固定</strong>的，但你会根据材料<strong>卡上不同的钻头/批头</strong>——
+  钻金属用一种、钻木头用另一种。NVIDIA 显卡卡上 <strong>FlashInfer</strong> 钻头，想要到处都能跑就换上 <strong>Triton</strong> 钻头，AMD 机器卡上对应的 AMD 钻头。
+  钻头变了，<strong>钻身（模型本体）一行都不用改</strong>。模型只管握着钻身按下扳机 <span class="mono">self.attn(...)</span>，至于此刻是哪个钻头在转，由<strong>用谁来部署</strong>决定。
+更妙的是，换钻头不需要把整把钻拆开重装：你不动模型、不动那行调用，只在启动时拨一下 <span class="mono">--attention-backend</span> 这个开关，转动的钻头就换了——这正是"可插拔"四个字最直观的样子。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  记住一句话：<strong>注意力是一个"策略对象"，不是被焊死的代码</strong>。SGLang 把"调用注意力"和"实现注意力"彻底分开——
+  前者是模型里那个稳定不变的 <span class="mono">RadixAttention</span> 层，后者是一族可插拔的 <span class="mono">AttentionBackend</span> 实现。
+  这正是整个引擎"<strong>一切皆可插拔</strong>"主题的又一个化身：新 kernel、新硬件，只要去实现 <span class="mono">AttentionBackend</span> 的那几个方法就能接进来，
+  <strong>不必碰任何一个模型文件</strong>。后端由 <span class="mono">--attention-backend</span> 显式指定，或按硬件/模型<strong>自动</strong>挑选。
+</div>
+
+<h2>模型里的层 vs 真正算注意力的后端</h2>
+<p>先把两个常被混为一谈的东西分开。<strong>第一个</strong>是模型里的<strong>注意力层</strong>：它是一个 <span class="mono">RadixAttention</span> 的 <span class="mono">nn.Module</span>，
+就是第 26 课里你写模型时 <span class="mono">forward</span> 中调用的那个 <span class="mono">self.attn</span>。这个名字你在第 7 课（前缀共享的概念）和第 29 课（基数树的实现）都见过——
+此处它指的是"模型前向里被调用的那一层"。关键在于：<strong>这一层里没有任何 kernel</strong>。它持有的是<strong>形状参数</strong>（多少个 query/KV 头、head_dim、缩放系数、层号），
+真正的矩阵乘 + softmax + 加权求和这套数学，它一概<strong>委托出去</strong>。</p>
+<p><strong>第二个</strong>就是被委托的对象：<span class="mono">AttentionBackend</span>，一个抽象基类。它定义了一份<strong>契约</strong>——
+<span class="mono">init_forward_metadata(fb)</span>（每次前向先规划元数据）、<span class="mono">forward_extend(...)</span>（prefill 路径）、<span class="mono">forward_decode(...)</span>（解码路径）。
+基类本身大多是 <span class="mono">raise NotImplementedError()</span>，把"具体怎么算"留给子类填。于是模型作者面对的是<strong>稳定的层接口</strong>，
+而性能工程师面对的是<strong>可替换的后端实现</strong>，两者在 <span class="mono">AttentionBackend</span> 这条接口线上<strong>解耦</strong>。模型只喊一句 <span class="mono">self.attn(q,k,v,forward_batch)</span>，
+背后是谁在转，它毫不知情、也无需知情。</p>
+<p>为什么一定要把这两件事掰开？因为它们的<strong>变化频率天差地别</strong>。模型结构相对稳定：一个 Llama、一个 Qwen，写好了就很少动；而注意力的<strong>实现</strong>却日新月异——
+今天 FlashInfer 出了更快的版本，明天 FlashAttention 又压低了一档延迟，后天还要支持一种全新的加速卡。如果把易变的实现焊死在稳定的模型里，那每一次 kernel 升级都要去<strong>惊动几十个模型文件</strong>，
+风险大、改动散、回归难测。SGLang 的做法是把这条<strong>变化的断层线</strong>正好画在 <span class="mono">AttentionBackend</span> 上：断层之上（模型 + 层）稳定，断层之下（后端 + kernel）自由翻新，互不牵连。
+这也是为什么你读模型代码时几乎看不到 CUDA——注意力的全部重活，早就被这层抽象<strong>挡在了模型视野之外</strong>。</p>
+<p>还要点破一个容易误会的地方：<span class="mono">RadixAttention</span> 这个名字在第 7 课、第 29 课、和本课出现，指的是<strong>同一个类</strong>，但语境侧重不同。第 7 课讲它<strong>为什么</strong>能让前缀共享，
+第 29 课钻进它<strong>怎么</strong>用基数树管理 KV 索引，而本课关心的是它在模型前向里<strong>作为一层被调用</strong>时——把注意力数学<strong>转手</strong>给后端的那一刻。三课拼起来，你才看到这个类的全貌：
+它既是缓存索引的持有者，又是注意力调用的入口，<strong>唯独不是注意力 kernel 的实现者</strong>。把"持有索引"和"实现计算"这两件事在同一个名字下分清楚，是读懂这部分代码的关键，也是后面几课不再迷路的地基。</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">模型</span><span class="name">某个 Transformer 模型（第 26 课）</span></div><div class="ld">前向里写着 <span class="mono">self.attn(q, k, v, forward_batch)</span>——只调用，不实现。</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">层</span><span class="name">RadixAttention（nn.Module，第 29 课）</span></div><div class="ld">持有头数 / head_dim / 缩放 / 层号等<strong>形状参数</strong>；<strong>不含 kernel</strong>，把数学<strong>委托</strong>给后端。</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">接口</span><span class="name">AttentionBackend（抽象基类 ABC）</span></div><div class="ld">定义契约：<span class="mono">init_forward_metadata</span> / <span class="mono">forward_extend</span> / <span class="mono">forward_decode</span>。基类只 <span class="mono">raise NotImplementedError</span>。</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">实现</span><span class="name">FlashInfer / Triton / FlashAttention 3 / AMD·NPU…</span></div><div class="ld">各自带着真正的 CUDA / Triton <strong>kernel</strong>。由 <span class="mono">--attention-backend</span> 或按硬件自动选定。</div></div>
+</div>
+
+<h2>有哪些后端，它们各自强在哪</h2>
+<p>后端是一族而非一个。<strong>FlashInfer</strong> 是高性能 CUDA 实现，在很多 NVIDIA 显卡上是<strong>默认</strong>选择——它把分页 KV 布局、各种掩码、CUDA graph 集成都打磨得很深。
+<strong>Triton</strong> 后端用 Triton 语言写成，<strong>可移植性</strong>是它的卖点：在 FlashInfer 还没支持、或硬件/数据类型不匹配时，它是稳妥的<strong>兜底</strong>。
+<strong>FlashAttention 3</strong> 是又一族高性能 kernel，在合适的硬件与场景上能再压一截延迟。除此之外还有<strong>硬件专属</strong>的后端——比如面向 AMD、NPU 的实现（多硬件话题见第 42 课）。
+选哪个，要么你用 <span class="mono">--attention-backend</span> 一锤定音，要么引擎按你的<strong>硬件型号、模型结构、数据类型</strong>替你自动判定。</p>
+<p>把这张表记在心里：它们提供的是<strong>同一份契约的不同实现</strong>——同样接收 q/k/v 和 <span class="mono">forward_batch</span>，同样返回注意力输出，只是内部 kernel 不同、适配的硬件不同。
+正因为契约一致，<strong>切后端不需要改模型</strong>；正因为实现可换，<strong>新 kernel、新硬件能独立演进</strong>。这就是"接口"二字的全部价值。</p>
+<p>那么"自动挑选"到底依据什么？大体三件事：一是<strong>硬件</strong>——你跑在什么型号的 GPU/加速卡上，决定了哪些 kernel 可用、哪个最快；二是<strong>模型结构</strong>——
+有的模型用 MHA、有的用 GQA/MLA，head_dim 和头数不同，并非每个后端都覆盖每种形状；三是<strong>数据类型</strong>——fp16、bf16、fp8 各有各的 kernel 支持矩阵。
+引擎把这三者一拼，挑出一个既<strong>能跑</strong>又<strong>尽量快</strong>的默认后端；而你随时可以用 <span class="mono">--attention-backend</span> 把这个自动决定<strong>覆盖掉</strong>，强制指定某个后端——
+比如在排查问题时切到可移植的 Triton 当对照基准，确认是不是某个高性能 kernel 的边界情况。这种"<strong>默认自动、允许手动</strong>"的设计，正是可插拔抽象给运维留下的灵活度。</p>
+
+<table class="t">
+  <tr><th>后端</th><th>强项</th><th>什么时候用</th></tr>
+  <tr><td class="mono">FlashInfer</td><td>高性能 CUDA，分页 KV / 掩码 / CUDA graph 打磨深</td><td>许多 NVIDIA 显卡上的<strong>默认</strong></td></tr>
+  <tr><td class="mono">Triton</td><td>用 Triton 写，<strong>可移植</strong>、兼容面广</td><td>通用<strong>兜底</strong>；FlashInfer 不支持的硬件/类型</td></tr>
+  <tr><td class="mono">FlashAttention 3</td><td>又一族高性能 kernel</td><td>合适硬件上进一步压低延迟</td></tr>
+  <tr><td class="mono">AMD / NPU…</td><td>硬件专属实现</td><td>非 NVIDIA 硬件（第 42 课）</td></tr>
+</table>
+
+<h2>一次前向：先规划元数据，再分派 EXTEND / DECODE 两条路</h2>
+<p>后端每次前向具体做两件事。<strong>第一件是"规划元数据"（plan metadata）</strong>：在真正调 kernel 之前，后端要先算清楚这一批请求的<strong>读写地图</strong>——
+每条请求要从 KV 池（第 30 课）的<strong>哪些页</strong>读取已缓存的 K/V、<strong>因果掩码</strong>长什么样、各条<strong>序列长度</strong>是多少、CUDA graph（第 27 课）需要的固定形状缓冲怎么填。
+这一步不算注意力，但它把"接下来 kernel 要怎么读内存"准备好，所以叫"规划"。<strong>第二件</strong>才是<strong>跑对应的 kernel</strong>。</p>
+<p>而"对应的 kernel"有<strong>两条截然不同的路径</strong>，这是本课最该记住的一点。<strong>EXTEND / prefill</strong>：一批<strong>新 token</strong>同时进来（比如刚收到的 prompt），
+它们之间要做<strong>完整的注意力</strong>——每个新 token 既看自己也看前面的新 token（受因果掩码约束）。<strong>DECODE</strong>：自回归生成阶段，<strong>只有 1 个 query token</strong>，
+它要注意<strong>整段已缓存的 KV</strong>（历史所有 token）。两条路的算术形状、访存模式、最优 kernel 都不一样，所以后端为它们准备<strong>分开的实现</strong>——
+<span class="mono">forward_extend</span> 和 <span class="mono">forward_decode</span>。统一入口 <span class="mono">forward</span> 看 <span class="mono">forward_batch.forward_mode</span> 判断走哪条，再分派下去。
+顺带一提，正是 DECODE 这条"1 个 query、固定形状"的路径，最适合用 CUDA graph（第 27 课）把启动开销吃掉。</p>
+<p>再把"规划元数据"讲得更实一点，你就明白它为什么不可省。注意力 kernel 要读 KV，而 KV 在池里是<strong>分页存放</strong>的（第 30 课）——同一条请求的历史 token，其 K/V 可能散落在<strong>互不相邻的若干页</strong>里。
+kernel 自己并不知道"这条请求该读哪些页"，必须有人先把这张<strong>页表</strong>算好、连同每条请求的序列长度、因果掩码的形状一起，整理成 kernel 能直接吃的张量。这就是"规划"在做的事：
+它把"逻辑上的 token 序列"翻译成"物理上的内存地址清单"。在用 CUDA graph 时这一步尤其讲究——graph 要求形状固定、地址稳定，所以元数据里那些<strong>会变的部分</strong>（每次 batch 不同的页号、长度）
+要小心地填进预留好的固定缓冲里，而不能每次新建张量。理解了这层，你就明白为什么后端代码里 <span class="mono">init_forward_metadata</span> 还要再分成 out-graph 与 in-graph 两半——
+一半干"不能被录进图的活"（动态形状、host 端计算），一半干"能被录进图、之后自动重放的活"。规划做对了，kernel 才能闷头快跑。</p>
+
+<div class="cols">
+  <div class="col"><h4>EXTEND / prefill（forward_extend）</h4><p>一批<strong>新 token</strong>一起进来（如刚到的 prompt）。它们做<strong>完整注意力</strong>：每个新 token 看自己 + 前面的新 token，受<strong>因果掩码</strong>约束。算术量大、并行度高，是"读一大片、算一大片"。</p></div>
+  <div class="col"><h4>DECODE（forward_decode）</h4><p>自回归生成，<strong>只有 1 个 query token</strong>。它注意<strong>整段已缓存的 KV</strong>（历史全部 token，来自第 30 课的池）。形状固定、批内规整，最适合 <strong>CUDA graph</strong>（第 27 课）固化启动开销。</p></div>
+</div>
+
+<p>把一次注意力调用从头到尾串起来，就是下面这条流水：模型喊一声，后端先规划、再按模式挑路径、跑 kernel、把输出交回模型继续往下算。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">self.attn(...)</div><div class="nd">模型层发起调用<br>（第 26 课）</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">规划元数据</div><div class="nd">读哪些 KV 页、掩码、<br>序列长度（第 30 课）</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">挑路径</div><div class="nd">看 forward_mode：<br>EXTEND 还是 DECODE</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">跑 kernel</div><div class="nd">FlashInfer / Triton…<br>真正的矩阵乘 + softmax</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">输出</div><div class="nd">注意力结果<br>交回模型继续前向</div></div>
+</div>
+
+<h2>为什么要做成一个接口</h2>
+<p>把这一切收束成一个问题：为什么不直接在模型里写死注意力，而要绕一层抽象基类？答案就是这一课的灵魂——<strong>让新 kernel 和新硬件能插进来，而不必改任何模型文件</strong>。
+SGLang 支持几十个模型（第 26 课），如果注意力 kernel 写死在每个模型里，那么每出一个更快的 kernel、每支持一种新加速卡，你都得去<strong>逐个模型文件</strong>改一遍——这是维护灾难。
+反过来，把注意力定义成 <span class="mono">AttentionBackend</span> 这份契约后，加一个新后端＝<strong>新写一个子类、实现那几个方法</strong>，模型文件<strong>一行不动</strong>就能享受到它。</p>
+<p>这正与引擎别处反复出现的设计哲学同构：注意力是一个<strong>策略对象</strong>，和 KV 缓存策略、调度策略、量化策略（第 35 课）一样，都被抽象成"可替换的零件"。
+你写模型时只依赖<strong>稳定的层接口</strong>，把"跑得多快、跑在什么硬件上"这些<strong>易变的、和部署强相关的</strong>决定，留给后端去承担。
+更底层的 kernel 本身怎么写（第 38/40 课）、多硬件适配的细节（第 42 课），都在这条接口线之下独立演化，<strong>对模型完全透明</strong>。这就是抽象的回报：上层稳定，下层自由。</p>
+<p>最后用一句话把整课收束起来：<strong>注意力是"做什么"固定、"怎么做"可换的一道工序</strong>。"做什么"——给定 q/k/v 和这一批的读写地图，算出注意力输出——由 <span class="mono">AttentionBackend</span> 的契约钉死，
+谁来实现都必须满足；"怎么做"——用哪个 kernel、读分页 KV 的哪条访存路径、要不要套 CUDA graph、跑在 NVIDIA 还是 AMD——则完全交给具体后端，按硬件和场景各显神通。
+模型作者站在"做什么"这一侧，享受永不变的 <span class="mono">self.attn(...)</span>；性能与硬件工程师站在"怎么做"那一侧，自由迭代而不惊动任何模型。这条清晰的分工线，正是 SGLang 能<strong>同时</strong>支持几十个模型、又<strong>同时</strong>拥抱层出不穷的新 kernel 和新加速卡的根本原因。</p>
+
+<p>下面是这份契约的真身——<span class="mono">AttentionBackend</span> 抽象基类。注意 <span class="mono">forward</span> 如何按 <span class="mono">forward_mode</span> 把活分派到 <span class="mono">forward_decode</span> / <span class="mono">forward_extend</span> 两条路，而它们在基类里都是 <span class="mono">NotImplementedError</span>，等子类来填：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">委托契约：规划元数据 + 两条前向路径</span></div>
+  <pre><span class="kw">class</span> <span class="st">AttentionBackend</span>(ABC):
+    <span class="cm"># 所有注意力后端的基类。模型只调用它，不关心内部跑哪个 kernel</span>
+
+    <span class="kw">def</span> init_forward_metadata(self, forward_batch):
+        <span class="cm"># 每次前向先“规划元数据”：每条请求读 KV 池的哪些页、掩码、序列长度…</span>
+        self.init_forward_metadata_out_graph(forward_batch)
+        self.init_forward_metadata_in_graph(forward_batch)
+
+    <span class="kw">def</span> forward(self, q, k, v, layer, forward_batch, save_kv_cache=True):
+        <span class="cm"># 统一入口：按 forward_mode 分派到 decode / extend 两条不同路径</span>
+        <span class="kw">if</span> forward_batch.forward_mode.is_decode():
+            <span class="kw">return</span> self.forward_decode(q, k, v, layer, forward_batch)
+        <span class="kw">else</span>:
+            <span class="kw">return</span> self.forward_extend(q, k, v, layer, forward_batch)
+
+    <span class="kw">def</span> forward_decode(self, q, k, v, layer, forward_batch, ...):
+        <span class="cm"># DECODE 路径：1 个 query token 注意整段已缓存的 KV</span>
+        <span class="kw">raise</span> NotImplementedError()   <span class="cm"># 由具体后端（FlashInfer / Triton…）实现</span>
+
+    <span class="kw">def</span> forward_extend(self, q, k, v, layer, forward_batch, ...):
+        <span class="cm"># EXTEND / prefill 路径：一批新 token 做完整注意力</span>
+        <span class="kw">raise</span> NotImplementedError()</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <strong>① 模型里的注意力层（RadixAttention，第 29 课）不含 kernel</strong>——它持有形状参数，把真正的注意力数学<strong>委托</strong>给一个 <span class="mono">AttentionBackend</span>（ABC）。
+  <strong>② 后端是一族可换实现</strong>：FlashInfer（NV 高性能默认）、Triton（可移植兜底）、FlashAttention 3、以及 AMD/NPU 等硬件专属（第 42 课）；由 <span class="mono">--attention-backend</span> 或按硬件自动选。
+  <strong>③ 后端每次前向先"规划元数据"</strong>（读哪些 KV 页、掩码、序列长度，第 30 课），再分派到 <strong>EXTEND/prefill</strong>（新 token 做完整注意力）或 <strong>DECODE</strong>（1 个 query 注意整段缓存 KV）两条独立路径，并集成分页 KV + CUDA graph（第 27 课）。
+  <strong>④ 做成接口，是为了让新 kernel/新硬件插进来而不必碰任何模型文件</strong>（第 26 课）——注意力是个<strong>策略对象</strong>。模型只喊 <span class="mono">self.attn(q,k,v,forward_batch)</span>，跑哪个后端是部署选择。kernel 细节见第 38/40 课。
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 模型 <span class='mono'>forward</span> 里那行 <span class='mono'>self.attn(q,k,v,forward_batch)</span>，调用的 <span class='mono'>RadixAttention</span> 层<strong>本身</strong>到底做了什么？</div>
+  <ol class="opts">
+    <li>它只是一个占位层，前向时被直接跳过</li>
+    <li>它负责把 KV 写到磁盘并管理驱逐策略</li>
+    <li><strong>它不含 kernel，只持有形状参数（头数 / head_dim / 缩放 / 层号），把真正的矩阵乘 + softmax 委托给一个 <span class='mono'>AttentionBackend</span></strong>。算注意力的脏活由后端的 kernel 干，层本身只是个稳定的调用入口</li>
+    <li>它内部直接写死了一段 FlashInfer CUDA kernel，亲自完成全部注意力计算</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。RadixAttention 是模型前向调用的那一层，但它不实现 kernel：它持有形状参数，把注意力数学委托给可替换的 AttentionBackend。写死 kernel 恰恰是它要避免的；驱逐/落盘是缓存子系统（第 31/32 课）的事；它绝非占位层。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <span class='mono'>forward_extend</span> 和 <span class='mono'>forward_decode</span> 为什么要做成<strong>两条分开的路径</strong>？</div>
+  <ol class="opts">
+    <li>extend 算注意力、decode 只负责采样下一个 token</li>
+    <li>纯粹是历史遗留，两条路径其实跑的是完全相同的代码</li>
+    <li><strong>因为两种场景的形状与访存模式截然不同</strong>：EXTEND/prefill 是一批<strong>新 token</strong>一起做<strong>完整注意力</strong>（受因果掩码）；DECODE 是<strong>1 个 query token</strong> 注意<strong>整段已缓存的 KV</strong>。形状不同、最优 kernel 不同，分开才能各自最优（DECODE 还最适合 CUDA graph，第 27 课）</li>
+    <li>一条给 NVIDIA 用、一条给 AMD 用</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。EXTEND（prefill）是多个新 token 的完整注意力，DECODE 是单 query 对整段缓存 KV——算术形状与访存模式不同，所以拆成两条路径各用最优 kernel；DECODE 固定形状还便于 CUDA graph。两条路并非同一份代码，也不是按硬件区分，decode 同样要算注意力。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 把注意力定义成 <span class='mono'>AttentionBackend</span> 这个抽象基类，最核心的好处是什么？</div>
+  <ol class="opts">
+    <li><strong>新 kernel、新硬件只要实现这份契约就能接进来，不必改任何模型文件</strong>。SGLang 支持几十个模型（第 26 课），若 kernel 写死在每个模型里，每出一个新后端都要逐个改——接口把“调用注意力”和“实现注意力”解耦，注意力成了可替换的策略对象</li>
+    <li>它能让注意力计算自动变快，无需任何 kernel 优化</li>
+    <li>它强制所有硬件都使用完全相同的 kernel</li>
+    <li>它把所有后端的代码合并成一个文件，便于阅读</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。接口的价值是可插拔：实现 AttentionBackend 的几个方法就能加新后端/新硬件，模型文件一行不动。它不会凭空提速（提速靠后端 kernel），不是把代码合并，更不是强制统一 kernel——恰恰相反，它让不同硬件用不同 kernel 而上层不变。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>可换头的电钻</strong>”这个类比，把注意力后端抽象讲透。请覆盖：①模型里的注意力层（<span class='mono'>RadixAttention</span> 的 <span class='mono'>nn.Module</span>，第 29 课）为什么像“钻身”——它<strong>不含 kernel</strong>，只持有形状参数，把真正的数学<strong>委托</strong>给 <span class='mono'>AttentionBackend</span>（ABC）；②有哪些“钻头”——FlashInfer（NV 高性能默认）、Triton（可移植兜底）、FlashAttention 3、AMD/NPU 等（第 42 课），由 <span class='mono'>--attention-backend</span> 或按硬件自动选；③模型作者只写 <span class='mono'>self.attn(q,k,v,forward_batch)</span>（第 26 课），为什么“换钻头不用改钻身”。</li>
+    <li>说清一次注意力调用在后端内部<strong>从头到尾</strong>发生了什么，并接回相邻几课。请说明：①什么叫“<strong>规划元数据</strong>（plan metadata）”——在跑 kernel 之前，后端要先算清每条请求读 KV 池（第 30 课）的<strong>哪些页</strong>、<strong>因果掩码</strong>、<strong>序列长度</strong>，以及 CUDA graph（第 27 课）需要的固定形状缓冲；②后端如何按 <span class='mono'>forward_mode</span> 分派到 <strong>EXTEND/prefill</strong>（新 token 完整注意力）与 <strong>DECODE</strong>（1 个 query 注意整段缓存 KV）两条路；③为什么 DECODE 这条固定形状的路最适合 CUDA graph；④更底层的 kernel 怎么写（第 38/40 课）与多硬件（第 42 课）如何在这条接口线之下独立演化。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>MoE 层</h1>
+
+<p class="lead">
+第 26 课你会亲手写一个模型，里面那行 <span class="mono">self.mlp(x)</span> 在很多新模型里早已不是一个普通的多层感知机，而是一个 <strong>MoE 层</strong>（Mixture of Experts，混合专家）。
+DeepSeek-V3、Mixtral、Qwen-MoE 都用它。它的核心反直觉之处在于：<strong>模型参数可以涨到几十上百倍，而每个 token 实际花掉的算力几乎不变</strong>。
+这一课要讲清楚的，就是这件"看似免费的午餐"是怎么做到的——靠的是把一个大 FFN 拆成<strong>很多个小专家</strong>，再加一个<strong>路由器</strong>，让每个 token 只走其中<strong>极少数几个</strong>专家。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 MoE 层想成一家大医院的<strong>分诊台</strong>。医院里坐着<strong>几十位专科医生</strong>（专家），但每位病人（token）来了，分诊护士（路由器）<strong>不会</strong>让他挨个看遍所有科室——
+  那样既慢又浪费。护士只看一眼症状，<strong>挑出最相关的两位专科</strong>（top-2），比如"心内科 + 内分泌科"，病人只去这两间诊室。
+  于是整家医院<strong>专科越开越多、总知识越来越厚</strong>，但<strong>每个病人的就诊时间几乎不变</strong>——他始终只看两位医生。这正是 MoE 的灵魂：用"<strong>稀疏</strong>"换"<strong>更大的总容量</strong>"，
+  而不是让每个人都为这份庞大买单。最后再把两位医生的意见<strong>按相关度加权</strong>汇总成一份诊断，就是这个 token 的输出。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  记住一句话：<strong>稠密层让每个 token 走同一个大网络，MoE 层让每个 token 只走被选中的几个小网络</strong>。前者参数和算力<strong>绑死</strong>——想更聪明就得更慢；
+  后者把两者<strong>解耦</strong>——专家数（参数、知识容量）可以独立往上堆，而每个 token 的 FLOPs 由 <span class="mono">top-k</span> 钉住、基本恒定。
+  这是当代大模型"既要大、又要快"的关键招式。SGLang 用一个叫 <span class="mono">FusedMoE</span> 的层把它实现得又对又快：路由、分组、按专家批量矩阵乘<strong>融合进 kernel</strong>，
+  而不是用一段慢吞吞的 Python 循环去逐个专家算。专家还能被摊到不同 GPU 上（专家并行，第 46 课），热门专家的负载由 EPLB 来均衡（第 47 课）。
+</div>
+
+<h2>从稠密 FFN 到 MoE：多了一群专家和一个路由器</h2>
+<p>先看它替代了什么。一个普通的 Transformer 块里，注意力之后跟着一个<strong>稠密 FFN</strong>：就是一个大号的 MLP（两层线性 + 激活），<strong>每一个 token 都要完整地穿过它一次</strong>。
+这意味着——想让这个 FFN 更有"知识"，唯一的办法是把它<strong>加宽加大</strong>，可一旦加大，<strong>每个 token 的计算量就同步上涨</strong>。参数量和单 token 算力<strong>焊死在一起</strong>，这就是稠密层的天花板。</p>
+<p>MoE 层换了一种结构。它把那个大 FFN 拆成 <strong>N 个专家</strong>（每个专家就是一个<strong>更小的 FFN</strong>，比如 64 个、256 个），再额外配一个<strong>路由器 / 门控（router / gate）</strong>——
+一个很小的线性层。每来一个 token，路由器先给<strong>每个专家打一个分</strong>，然后<strong>只挑出得分最高的 top-k 个</strong>（比如 64 选 2）。
+<strong>只有这 k 个专家真正参与计算</strong>，其余几十个专家<strong>对这个 token 一动不动</strong>。这就叫<strong>稀疏激活</strong>：一层里有海量参数，但每个 token 只点亮其中一小撮。</p>
+<p>关键的账要算清楚：假设有 64 个专家、每个 token 走 2 个，那么这一层的<strong>参数</strong>大约是稠密版的 32 倍（知识容量大涨），可每个 token 的<strong>计算量</strong>只相当于"过 2 个小 FFN"——
+和一个中等稠密 FFN 差不多，<strong>几乎不随专家总数增长</strong>。于是你能把模型做到几百亿、上千亿参数，而推理时每个 token 的实际 FLOPs 仍被 <span class="mono">top-k</span> 牢牢摁住。
+这就是为什么人们说 MoE "<strong>scale 参数而不 scale 每 token 算力</strong>"。当然，"参数多"意味着<strong>显存得装下全部专家</strong>，哪怕大多数专家对某个 token 没出力——这笔账留到本课末尾的权衡里再算。</p>
+<p>再换个角度体会这件事的妙处。稠密 FFN 像让<strong>每个学生都修同一门通识大课</strong>：课越厚、内容越多，每个人花的时间就越长，没有例外。MoE 则像一所<strong>开了几百门选修课的大学</strong>：
+课程总量（知识容量）可以无限往上加，但每个学生<strong>每学期只选两门</strong>，他的"学习负担"始终恒定。学校越办越大、越办越全，单个学生的时间表却不变——这正是"<strong>容量与算力解耦</strong>"最朴素的样子。
+更妙的是，不同学生选的两门课<strong>各不相同</strong>：有人选"代码 + 数学"，有人选"诗歌 + 历史"，于是同一所大学能同时服务千差万别的需求，而不必逼每个人都把所有课上一遍。
+落到模型上，这意味着不同类型的 token（不同语言、不同主题、不同结构）会<strong>自发地被路由到擅长它的那几个专家</strong>，专家之间因此分化出隐性的"专长"——这正是"混合专家"四个字的字面含义。</p>
+
+<div class="cols">
+  <div class="col"><h4>稠密 FFN（dense）</h4><p><strong>每个 token 都穿过同一个大 MLP</strong>。想更有知识只能把它加宽——<strong>参数和单 token 算力一起涨</strong>，焊死在一起。结构简单、负载天然均衡，但"大"和"快"不可兼得。</p></div>
+  <div class="col"><h4>MoE 层（sparse）</h4><p><strong>N 个小专家 + 1 个路由器</strong>，每个 token 只走 <span class="mono">top-k</span> 个（如 64 选 2）。<strong>参数随专家数猛涨，单 token 算力被 top-k 钉住</strong>。又大又快，代价是路由、通信与显存（见下文）。</p></div>
+</div>
+
+<h2>一次 MoE 前向：路由 → 分组 → 分组 GEMM → 加权合并</h2>
+<p>把一个 token 进入 MoE 层后的旅程拆成四步，你就懂了这层在算什么。<strong>第一步，路由（route）</strong>：路由器对每个 token 算出对所有专家的得分，取 <span class="mono">top-k</span>，得到"这个 token 该去哪几个专家"以及对应的<strong>路由权重</strong>（一组归一化的分数）。
+<strong>第二步，分组（group）</strong>：一个 batch 里有成千上万个 token，各自被分派到不同专家。直接逐 token 调用专家会极其低效，所以要<strong>按目标专家把 token 重新归拢到一起</strong>——
+所有要去 1 号专家的 token 排成一摞，要去 2 号的排成另一摞，以此类推。</p>
+<p>为什么"分组"这一步不可省？因为 GPU 最怕<strong>零碎</strong>。如果不分组，引擎就得"这个 token 去 7 号、下个去 12 号、再下个去 3 号"地<strong>一个一个发</strong>，每次都只喂给某个专家一丁点数据——
+GPU 的算力像一条宽阔的高速公路，你却让车一辆一辆地过收费站，<strong>大部分车道空着</strong>。分组就是先把所有去同一个专家的 token<strong>攒成一大批</strong>，让每个专家一次吃下一整摞，把高速公路<strong>填满</strong>。
+这也解释了 MoE 为什么对 batch 大小敏感：batch 越大，每个专家分到的 token 越多、那一摞越厚，grouped GEMM 的效率就越高；反之 batch 太小、专家太多时，每摞都很薄，硬件利用率反而上不去。</p>
+<p><strong>第三步，分组 / 批量 GEMM（grouped / batched GEMM）</strong>：现在每个专家面对的是<strong>一整摞属于它的 token</strong>，于是可以做一次<strong>高效的批量矩阵乘</strong>，
+把"几十个专家、每个一小批"合成一个规整的、对 GPU 友好的大算子，而不是几十次零碎的小矩阵乘。这是 MoE 能跑得快的<strong>算力核心</strong>（grouped GEMM 的 kernel 细节见第 38 课）。
+<strong>第四步，散回并加权合并（scatter & combine）</strong>：把每个专家算出的结果<strong>送回它原来的 token 位置</strong>，再按第一步那组<strong>路由权重加权求和</strong>——
+一个走了"专家 7 和专家 12"的 token，最终输出 = 0.7×专家7 + 0.3×专家12（权重来自路由器）。这一步之后，MoE 层的输出形状和稠密 FFN 完全一样，下游<strong>毫无感知</strong>。
+正因为输入输出形状都和稠密 FFN 对齐，MoE 才能<strong>无缝替换</strong>模型里原来那个 <span class="mono">self.mlp</span>——注意力层、归一化、残差连接统统不用改一行，这也是第 26 课你写模型时，把稠密块换成 MoE 块如此轻松的原因。</p>
+<p>这里有个工程上的大坑：上面四步如果用<strong>一段 Python 循环"for 每个专家"</strong>去做，会慢得离谱——几十次 kernel 启动、几十次小算子、来回搬数据，GPU 大量时间在<strong>空转等待</strong>。
+SGLang 的 <span class="mono">FusedMoE</span> 层正是为此而生：它把<strong>路由 + 分组 + 分组 GEMM 融合进少数几个 kernel</strong>，<strong>没有逐专家的慢 Python 循环</strong>。
+"融合（fuse）"在这里的意思就是——本来要分好几趟、还夹着 Python 调度的活，被压进一两个 GPU kernel 一气呵成，启动开销和中间搬运统统省掉。换句话说，<strong>慢的不是矩阵乘本身，而是"碎"</strong>：
+几十个专家被拆成几十次独立调用时，真正算数的时间可能只占一小半，剩下的全耗在<strong>调度、等待、搬运</strong>上。<span class="mono">FusedMoE</span> 把这些碎活缝合成一整块连续的 GPU 工作，让硬件一口气跑完，这才是它"又对又快"里"快"的来源。下面就是这个层的真身：</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">token x</div><div class="nd">一个 token 进入<br>MoE 层（第 26 课）</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">路由器 / 门控</div><div class="nd">给每个专家打分<br>取 top-k（如 64 选 2）</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">分组 + 分组 GEMM</div><div class="nd">同专家 token 归拢<br>批量矩阵乘（第 38 课）</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">加权合并</div><div class="nd">按路由权重<br>0.7·E7 + 0.3·E12</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">输出</div><div class="nd">形状同稠密 FFN<br>下游无感知</div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/moe/fused_moe_triton/layer.py ::FusedMoE</span><span class="ln">N 个专家 + 路由 top-k，融合进 kernel</span></div>
+  <pre><span class="kw">class</span> <span class="st">FusedMoE</span>(torch.nn.Module):
+    <span class="cm"># MoE 层：同时持有 gate_up_proj(w13) 与 down_proj(w2) 两组专家权重</span>
+    <span class="kw">def</span> __init__(
+        self,
+        num_experts: int,      <span class="cm"># 这一层里专家的总数（如 64 / 256）</span>
+        hidden_size: int,
+        intermediate_size: int,
+        layer_id: int,
+        top_k: Optional[int] = None,   <span class="cm"># 每个 token 选几个专家（如 2）</span>
+        ...
+    ):
+        self.layer_id = layer_id
+        self.top_k = top_k             <span class="cm"># 稀疏：只有 top_k 个专家真正参与</span>
+        self.num_experts = num_experts <span class="cm"># 参数随它涨，单 token 算力随 top_k 定</span>
+        self.moe_ep_size = get_parallel().moe_ep_size  <span class="cm"># 专家并行规模（第 46 课）</span></pre>
+</div>
+
+<h2>几个绕不开的名词</h2>
+<p>MoE 的文档里高频出现一小撮术语，提前钉死含义，后面读 DeepSeek-V3、Mixtral 的代码就不会卡壳。它们其实就是上面四步流程里的几个关键角色，把它们对号入座即可。要特别分清两个最容易混的：
+<strong>专家（expert）</strong>是真正"干活、存知识"的小 FFN，一层有 N 个；<strong>路由器（router）</strong>则只是个<strong>极小的线性层</strong>，它本身不存知识、不做重活，只负责"<strong>派活</strong>"——给每个 token 决定该找哪几个专家。
+专家是<strong>多</strong>而<strong>大</strong>的（参数主要堆在这里），路由器是<strong>单</strong>而<strong>小</strong>的（参数可以忽略不计）。记住这组对比，下面这张表就一目了然了。</p>
+
+<table class="t">
+  <tr><th>名词</th><th>是什么</th><th>作用</th></tr>
+  <tr><td class="mono">expert（专家）</td><td>一个<strong>较小的 FFN</strong>，一层里有 N 个</td><td>承载知识；只有被选中的才计算</td></tr>
+  <tr><td class="mono">router / gate（路由器）</td><td>一个<strong>很小的线性层</strong></td><td>给每个 token 对各专家<strong>打分</strong>，决定去向与权重</td></tr>
+  <tr><td class="mono">top-k</td><td>每个 token <strong>选中的专家数</strong>（如 2）</td><td>把<strong>单 token 算力钉死</strong>，实现稀疏</td></tr>
+  <tr><td class="mono">grouped GEMM</td><td>按专家<strong>分组的批量矩阵乘</strong></td><td>把零碎小算子合成 GPU 友好的大算子（第 38 课）</td></tr>
+  <tr><td class="mono">EP（专家并行）</td><td>把专家<strong>摊到多张 GPU</strong></td><td>容纳放不下的海量专家（第 46 课）</td></tr>
+</table>
+
+<h2>扩展到多卡：专家并行与负载均衡</h2>
+<p>专家一多，单张 GPU 就<strong>装不下全部专家</strong>了——这正是 MoE 的代价之一。解法叫<strong>专家并行（Expert Parallelism，EP，第 46 课）</strong>：把 N 个专家<strong>分散到不同 GPU 上</strong>，
+每张卡只持有一部分专家。但 token 是按路由结果走的，一个 token 想去的专家可能<strong>不在它当前所在的卡上</strong>，于是需要一次<strong>全员对全员的分发（all-to-all dispatch）</strong>——
+把每个 token 送到它的专家所在的那张卡，算完再<strong>收集回来（combine）</strong>做加权合并。专家并行让模型总容量突破单卡显存的限制，代价是多了这趟<strong>跨卡通信</strong>。这趟通信不是小数目：每一层 MoE 都要做一来一回两次 all-to-all（先把 token 分发出去、算完再收回来），层数一多、卡数一多，<strong>通信就可能成为新的瓶颈</strong>，
+所以专家并行的部署里，网络带宽和通信与计算的重叠（让通信藏在计算背后）就格外关键——这也是后面专门用一整课讲专家并行的原因。</p>
+<p>还有一个绕不开的麻烦：<strong>路由不均衡</strong>。路由器是学出来的，难免出现某几个"<strong>热门专家</strong>"被远超平均的 token 选中，而另一些专家门可罗雀。
+在专家并行下，热门专家所在的那张 GPU 就成了<strong>瓶颈</strong>——别的卡都算完了在等它。<strong>EPLB（Expert Parallelism Load Balancer，第 47 课）</strong>专治此症：
+它通过<strong>复制热门专家、重排专家到 GPU 的摆放</strong>，把负载摊匀，让各卡忙闲均衡。下面这组对比，直观展示几个 token 各自被路由到不同专家——注意高亮的就是每个 token 选中的 top-2：</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>四个 token，各自被路由到不同的 top-2 专家</b>：高亮格是路由器为该 token 选中、并真正参与计算的专家；其余几十个专家对它<strong>一动不动</strong></div>
+  <div class="cells"><span class="lab">token「天」</span><span class="cell hl">E7 ·0.7</span><span class="cell hl">E12 ·0.3</span><span class="cell">E3</span><span class="cell">E40</span><span class="sep">→</span><span class="cell q">输出 = 0.7·专家7 + 0.3·专家12（按路由权重加权）</span></div>
+  <div class="cells"><span class="lab">token「气」</span><span class="cell">E7</span><span class="cell hl">E3 ·0.6</span><span class="cell hl">E51 ·0.4</span><span class="cell">E12</span><span class="sep">→</span><span class="cell q">同一层、不同 token，选中的专家可以完全不同</span></div>
+  <div class="cells"><span class="lab">token「真」</span><span class="cell hl">E7 ·0.55</span><span class="cell">E3</span><span class="cell hl">E40 ·0.45</span><span class="cell">E9</span><span class="sep">→</span><span class="cell q">E7 又被选中——它是个<strong>热门专家</strong>，负载偏重</span></div>
+  <div class="cells"><span class="lab">token「好」</span><span class="cell hl">E7 ·0.5</span><span class="cell hl">E12 ·0.5</span><span class="cell">E51</span><span class="cell">E3</span><span class="sep">→</span><span class="cell q">E7 第三次中选 → 热门专家所在卡成瓶颈，靠 EPLB 摊匀（第 47 课）</span></div>
+</div>
+
+<p>把账本合起来看 MoE 的权衡：<strong>收益</strong>是用<strong>不大的计算</strong>换来<strong>巨大的有效模型</strong>（更多专家＝更多知识容量）；<strong>代价</strong>有三笔——
+其一，<strong>路由不均衡</strong>会让热门专家拖慢全局（EPLB 来治）；其二，专家并行下的 <strong>all-to-all 通信</strong>是实打实的开销；其三，<strong>显存要装下全部专家</strong>，哪怕大多数对某个 token 没出力。
+理解了这三笔代价，你才算真正读懂 MoE：它不是免费的午餐，而是把"算力账"换成了"<strong>通信账 + 显存账 + 均衡账</strong>"——而 SGLang 的 <span class="mono">FusedMoE</span>、专家并行（第 46 课）、EPLB（第 47 课）正是为压低这三笔账单而生。</p>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <strong>① MoE 层 = N 个小专家（FFN）+ 一个路由器</strong>：路由器给每个 <strong>token</strong> 对各专家打分，只选 <span class="mono">top-k</span>（如 64 选 2），仅这 k 个专家计算 → <strong>稀疏</strong>。于是<strong>参数随专家数猛涨，单 token 算力被 top-k 钉死</strong>。DeepSeek-V3 / Mixtral / Qwen-MoE 都用它。
+  <strong>② 计算四步</strong>：路由 → 按专家分组 → <strong>分组 / 批量 GEMM</strong> → 散回并按路由权重加权合并。SGLang 的 <span class="mono">FusedMoE</span> 把路由 + 分组 GEMM <strong>融合进 kernel</strong>，没有逐专家的慢 Python 循环（kernel 见第 38 课）。
+  <strong>③ 扩展到多卡</strong>：<strong>专家并行（EP，第 46 课）</strong>把专家摊到不同 GPU，token 经 all-to-all 分发到专家所在卡再合并；<strong>EPLB（第 47 课）</strong>均衡"热门专家"的负载。
+  <strong>④ 权衡</strong>：用不大的计算换巨大的有效模型，代价是<strong>路由不均衡 + all-to-all 通信 + 装下全部专家的显存</strong>。写模型时怎么摆这一层见第 26 课。
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 一个 MoE 层里有 64 个专家、<span class='mono'>top_k=2</span>。路由器（router/gate）对<strong>每个 token</strong> 做了什么？</div>
+  <ol class="opts">
+    <li>整个 batch 共用同一个被选中的专家</li>
+    <li><strong>给 64 个专家各打一个分，只挑出得分最高的 2 个真正参与计算</strong>，其余 62 个对这个 token 一动不动；最后按路由权重把这 2 个专家的输出加权合并。这就是<strong>稀疏激活</strong></li>
+    <li>让 token 依次穿过全部 64 个专家，再取平均</li>
+    <li>随机挑 2 个专家，不看 token 内容</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。路由器是个很小的线性层，对每个 token 给所有专家打分并取 top-k（这里 2/64），只有这 2 个专家计算、再按权重合并——这正是稀疏。它不会让 token 走遍全部专家（那就退化成稠密了），不是随机挑，也不是整个 batch 共用一个：路由是<strong>逐 token</strong> 的。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么说 MoE “scale 参数而不 scale 每 token 的算力”？</div>
+  <ol class="opts">
+    <li>因为 MoE 的专家比稠密 FFN 算得更快，单个专家本身就提速了</li>
+    <li>因为 MoE 不需要任何矩阵乘法</li>
+    <li>因为参数被压缩到几乎为零</li>
+    <li><strong>专家越多，这一层的参数（知识容量）越大；但每个 token 只走固定的 <span class='mono'>top-k</span> 个专家，单 token 的 FLOPs 由 top-k 钉死，几乎不随专家总数增长</strong>。于是模型能做到千亿参数，而推理每 token 算力基本恒定</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。关键在解耦：参数随专家数涨（容量变大），而每 token 只激活 top-k 个专家，算力被 top-k 钉住。不是单个专家更快（专家就是小 FFN），更不是没有矩阵乘或参数为零——恰恰相反，参数很多，只是显存要装下全部专家。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. SGLang 的 <span class='mono'>FusedMoE</span> 层把什么“融合（fuse）”进了 kernel？</div>
+  <ol class="opts">
+    <li><strong>把路由 + 按专家分组 + 分组/批量 GEMM 融合进少数几个 kernel，避免那段“for 每个专家”的慢 Python 循环</strong>——否则会有几十次 kernel 启动和零碎小算子，GPU 大量空转</li>
+    <li>把注意力和 MoE 合并成同一层</li>
+    <li>把多张 GPU 融合成一张逻辑 GPU</li>
+    <li>把所有专家的权重压缩成一个专家</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。FusedMoE 的“融合”指把路由、分组、分组 GEMM 压进少数 kernel，消灭逐专家的慢 Python 循环与零碎小算子。它不会把专家压成一个（那就没有混合专家了），不合并注意力，也不负责把多卡变一卡——跨卡是专家并行（第 46 课）的事。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>医院分诊台</strong>”这个类比，把 MoE 层讲透。请覆盖：①一个<strong>稠密 FFN</strong> 让每个 token 都穿过同一个大 MLP，参数和单 token 算力<strong>焊死</strong>；②MoE 层 = <strong>N 个小专家（FFN）+ 一个路由器/门控</strong>，路由器对<strong>每个 token</strong> 打分、取 <span class='mono'>top-k</span>（如 64 选 2），只有这 k 个专家计算 → <strong>稀疏</strong>；③为什么这样能“<strong>scale 参数而不 scale 每 token 算力</strong>”，并点名 DeepSeek-V3 / Mixtral / Qwen-MoE。</li>
+    <li>说清一次 MoE 前向<strong>从头到尾</strong>的计算，并接回相邻几课。请说明：①四步流程——<strong>路由 → 按专家分组 → 分组/批量 GEMM（第 38 课）→ 散回并按路由权重加权合并</strong>，以及 <span class='mono'>FusedMoE</span> 为什么要把这些融合进 kernel（避免逐专家的慢 Python 循环）；②扩展到多卡时，<strong>专家并行（EP，第 46 课）</strong>如何把专家摊到不同 GPU、token 经 all-to-all 分发到专家所在卡再合并；③<strong>EPLB（第 47 课）</strong>为什么要均衡“热门专家”，以及 MoE 的三笔代价（路由不均衡、all-to-all 通信、装下全部专家的显存）。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>量化</h1>
+
+<p class="lead">
+模型又大又慢，很大程度上是因为它太"重"——几百亿个参数，每个都用 16 位浮点存着。<strong>量化（quantization）</strong>
+是给这些数字"<strong>瘦身</strong>"的招式：用更少的比特（8 位、4 位）加上一个<strong>缩放因子</strong>来近似原来的权重，
+既省显存、又省带宽，于是模型更小、跑得更快——代价只是<strong>一点点</strong>精度。本课讲清楚它为什么有效、有哪些格式、以及 SGLang 怎么把它<strong>插</strong>进线性层。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  量化就像给模型权重做 <strong>JPEG / MP3 压缩</strong>：原图每个像素用很多位精确存，压缩后每个值只留<strong>更少的比特</strong>，
+  再配一个<strong>统一的缩放（scale）</strong>把范围还原回来。你损失了一丢丢看不太出来的细节，换来的是<strong>文件小得多、传输快得多</strong>。
+  "<strong>分组缩放</strong>"就更像把图片切成小块分别压缩——每个小块保留自己的动态范围，失真更小。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  权重平时是 fp16/bf16（16 位）。量化把它们存成 <strong>8 位（FP8）甚至 4 位（INT4/FP4）</strong> + 一个 scale。
+  <strong>更小的权重 = 更少显存</strong>（给 KV 缓存和并发腾地方，第 4/8 课）<strong>+ 更少的访存带宽</strong>（解码是访存密集的，第 4 课）<strong>⇒ 更快</strong>。
+  在 SGLang 里，每种量化格式提供一个 <span class="mono">LinearMethod</span>，替换掉线性层"怎么存权重、怎么做矩阵乘"——和注意力后端（第 33 课）一样，量化也是<strong>可插拔的策略</strong>。
+</div>
+
+<h2>为什么量化能加速：显存与带宽</h2>
+<p>很多人以为量化主要省的是算力，其实在 LLM 推理里，它省的<strong>大头是内存</strong>。第一，权重占的<strong>显存</strong>直接减半甚至减到四分之一——
+70B 模型 fp16 要 140GB，换成 INT4 只要约 35GB，于是单卡能装下更大的模型，或者腾出显存给 KV 缓存、容纳更高并发（第 4/8 课）。
+第二，也是更关键的：解码阶段是<strong>访存密集</strong>的（第 4 课），每生成一个 token 都要把<strong>整个模型权重</strong>从显存搬进计算单元一遍——
+权重小一半，要搬的字节就少一半，<strong>带宽瓶颈直接缓解，解码就更快</strong>。所以量化对"延迟敏感、单请求解码"的场景收益尤其明显。
+第三，在支持低精度计算的硬件上（如 H100/B200 的 FP8），还能直接用<strong>低精度矩阵乘内核</strong>把算力也一并省下。</p>
+
+<p>把内存账算具体些：一个 70 亿参数（7B）的模型，fp16 下每个权重 2 字节，光权重就要约 14GB；换成 INT4，每个权重只占半个字节（外加每组一个很小的 scale），权重整体塌缩到约 3.5GB，<strong>连四分之一都不到</strong>。省下的这十来个 GB 不是凭空消失，而是直接变成更多的 <strong>KV 缓存槽位</strong>（第 8 课）：KV 池能多放几千个 token、多塞几十条并发请求，于是同一张卡的<strong>吞吐</strong>和<strong>可服务并发</strong>都水涨船高（第 4/8 课）。这也是为什么"量化省的是内存"在工程上往往比"省算力"更值钱——在 LLM 服务里，显存常常才是真正卡住并发的那道墙，而带宽才是拖慢解码的那根绳。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>原始 fp16 权重</h4><p>每个数 16 位，精确但又大又慢搬。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>定标 + 取整</h4><p>为一组数算一个 <span class="mono">scale</span>，把它们映射到 8/4 位整数或低精度浮点。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>紧凑存储</h4><p>显存里只存<strong>低位权重 + scale</strong>，体积小一半到四分之一。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>反量化 / 低精度矩阵乘</h4><p>要么先还原回高精度再算，要么直接跑量化 kernel（最快）。</p></div></div>
+</div>
+
+<h2>有哪些格式：从 FP8 到 AWQ/GPTQ</h2>
+<p>量化不是一种方法，而是一<strong>族</strong>。按比特数和"量化谁"可以铺开成下面这张表：</p>
+
+<table class="t">
+  <tr><th>格式</th><th>位数</th><th>量化对象</th><th>备注</th></tr>
+  <tr><td><strong>FP8</strong>（E4M3）</td><td class="mono">8</td><td>权重 + 激活</td><td>H100/B200 硬件加速，可跑 FP8 GEMM，精度损失很小</td></tr>
+  <tr><td><strong>FP4 / INT4</strong></td><td class="mono">4</td><td>权重（常）</td><td>压得最狠，省显存最多，需更细的 scale 保精度</td></tr>
+  <tr><td><strong>AWQ</strong></td><td class="mono">4</td><td>仅权重</td><td>按激活重要性保护关键通道的免校准 PTQ</td></tr>
+  <tr><td><strong>GPTQ</strong></td><td class="mono">4</td><td>仅权重</td><td>逐层最小化误差的校准式 PTQ</td></tr>
+</table>
+
+<p>一条关键区分是<strong>"只量化权重"还是"权重+激活都量化"</strong>。<strong>仅权重（weight-only，如 AWQ/GPTQ）</strong>：权重存成 4 位省显存，
+但计算时<strong>先反量化回高精度</strong>再做矩阵乘——省了存和带宽，没省算力，对解码（访存密集）特别划算。<strong>权重+激活（如 FP8）</strong>：两边都压到低精度，
+直接跑<strong>低精度矩阵乘内核</strong>（如 FP8 GEMM），<strong>连算力一起省</strong>，是吞吐场景的最爱，但对硬件和精度更挑剔。</p>
+
+<div class="cols">
+  <div class="col"><h4>仅权重量化（weight-only）</h4><p>权重 4 位、激活仍高精度；算前<strong>反量化</strong>。主要省<strong>显存 + 带宽</strong>。AWQ/GPTQ 属此类，对延迟敏感、单请求解码收益大。</p></div>
+  <div class="col"><h4>权重+激活量化</h4><p>两边都低精度，跑<strong>低精度 GEMM</strong>（FP8）。<strong>显存 + 带宽 + 算力</strong>全省，吞吐最高；需要硬件支持，精度更要小心。</p></div>
+</div>
+
+<h2>为什么低比特还能用：冗余、离群值与 AWQ/GPTQ</h2>
+<p>把权重从 16 位砍到 4 位，凭什么模型还几乎不掉点？根本原因是 LLM 的权重<strong>高度冗余、对噪声很宽容</strong>：几百亿参数里，绝大多数数值都挤在一个不大的范围内，单个权重抖动一点点，被后面层层加权求和一平均，对最终 logits 的影响微乎其微——这和给照片做有损压缩却几乎看不出来是一个道理。真正危险的是<strong>离群值（outlier）</strong>：极少数幅度特别大的权重或激活，如果用一个粗糙的 scale 去套整组，它们要么被<strong>截断（clip）</strong>而丢掉信息，要么逼着 scale 被迫拉大，从而让其余正常值的精度<strong>全被陪葬</strong>。所以现代量化方法的功夫，几乎全花在<strong>怎么伺候好这一小撮离群值</strong>上——这也是不同方法拉开质量差距的地方。</p>
+<p><strong>AWQ</strong>（Activation-aware Weight Quantization）的洞见是：不是所有权重通道都一样重要，<strong>那些会乘上大激活的通道（salient channel）</strong>对输出影响最大。AWQ 用一小批校准数据统计各通道的激活幅度，给重要通道<strong>放大保护</strong>（等价于偷偷给它更细的有效精度）再量化，于是免去逐权重的繁重优化，却能保住关键信息，量化得又快又准。<strong>GPTQ</strong> 走的是另一条路：它带一个<strong>校准集</strong>，<strong>逐层</strong>地解一个最小二乘问题，一边量化一边补偿——每量化掉一列权重，就把引入的误差<strong>反向修正</strong>到尚未量化的列上去，让整层的<strong>重建误差</strong>（量化前后这一层输出之差）最小。两者都属于<strong>训练后量化（PTQ）</strong>：不重训模型，只用极少校准数据，几分钟到几十分钟，就能把一个 fp16 检查点压成一个高质量的 4 位版本，精度损失常常小到跑评测才看得出来。</p>
+<p>那精度到底掉多少？经验上有个大致的台阶：<strong>FP8</strong> 几乎无损，常常和 bf16 在评测分数上看不出差别，所以在 H100/B200 上越来越像"默认就该开"的选项；<strong>INT4（AWQ/GPTQ）</strong>会掉一点点，通常在零点几个百分点的量级，对大多数应用完全可以接受，换来的却是三四倍的显存节省；只有压到更激进的 <strong>3 位甚至 2 位</strong>，质量才会明显劣化，需要更精巧的方法去抢救。一个常被忽略的细节是：模型<strong>越大越耐压</strong>——70B 量化到 4 位的相对损失，往往比 7B 量化到 4 位还小，因为大模型的冗余度更高、容错空间更大。这也解释了为什么生产里"大模型 + 激进量化"常常比"小模型 + 全精度"更划算。</p>
+
+<h2>FP8 细看：E4M3、E5M2 与动态/静态定标</h2>
+<p>FP8 不是一种格式而是两种，区别在那 8 个比特怎么<strong>分配给指数和尾数</strong>。<strong>E4M3</strong>（4 位指数、3 位尾数）尾数多、精度高，但能表示的范围偏窄，适合数值范围相对可控的<strong>权重和前向激活</strong>，是推理里最常用的一档。<strong>E5M2</strong>（5 位指数、2 位尾数）范围更大但精度更糙，更适合数值跨度极大的<strong>梯度</strong>，主要在训练里露脸。推理量化默认就盯着 <strong>E4M3</strong>：在 8 位里塞进一个"能用的浮点"，比同样 8 位的 INT8 多了<strong>自带动态范围</strong>这个好处，这也是 FP8 的精度损失常常比 INT8 还小的原因。</p>
+<p>权重的 scale 在量化时就定死了，<strong>激活</strong>的 scale 却有两种玩法。<strong>动态定标（dynamic）</strong>在运行时按当前这一批激活的实际幅度临时算出 scale，精度最稳，但每一步都要多做一次求最大值的统计；<strong>静态定标（static）</strong>则用校准阶段预先算好的固定 scale，省掉运行时统计、最快，但碰上分布漂移就会差一点。算得快不快还要看<strong>kernel</strong>：SGLang 在有 FP8 张量核的硬件上会走 <span class="mono">cutlass</span> 的 FP8 GEMM 快路（代码里那句 <span class="mono">cutlass_fp8_supported()</span> 就是在探测这条路通不通），4 位权重则常借道 <span class="mono">Marlin</span> 这类专门的低位 GEMM kernel。<strong>H100 / B200</strong> 之所以是 FP8 的主场，是因为它们的 Tensor Core <strong>原生支持 FP8 矩阵乘</strong>——不是软件模拟，而是硬件一拍算一整片，于是低精度带来的算力优势才真正兑现，而不只是省了搬运。</p>
+
+<h2>scale 是灵魂：粒度决定精度</h2>
+<p>量化最核心的不是"砍位数"，而是那个<strong>缩放因子 scale</strong>——它决定了低位数能覆盖多大的数值范围。一组权重共用一个 scale，
+范围跨度越大、低位表示越粗，<strong>scale 的粒度</strong>就成了精度与开销的取舍：<strong>per-tensor</strong>（整张权重一个 scale，最省、最糙）、
+<strong>per-channel</strong>（每个输出通道一个 scale，常用，精度好不少）、<strong>per-group / blockwise</strong>（每一小块一个 scale，最细、精度最高，但 scale 本身也占点空间、算起来更复杂）。
+好的量化方案（AWQ/GPTQ/FP8 配分组 scale）正是靠<strong>更聪明地选 scale</strong>，把精度损失压到几乎看不出来。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>一个权重块 + 它的 scale</b>：低位整数乘以共享 scale 才还原成近似的原值（per-group 量化）</div>
+  <div class="cells"><span class="lab">int4 块</span><span class="cell">7</span><span class="cell">-3</span><span class="cell">5</span><span class="cell">0</span><span class="sep">×</span><span class="cell hl">scale=0.08</span><span class="sep">≈</span><span class="cell q">0.56 / -0.24 / 0.40 / 0.00</span></div>
+</div>
+
+<p>实践里粒度怎么选，是一道"精度 ÷ 开销"的算术题。<strong>per-tensor</strong> 最省、最快，但一旦权重里混进离群值，整张共用的 scale 就会被它撑大，把其余正常值的有效精度统统拉低，所以多用于对精度不敏感、追求极致速度的场合。<strong>per-channel</strong>（每个输出通道一个 scale）是个甜点：开销几乎可忽略，却能隔离掉"某几个通道天生幅度大"这种最常见的离群模式，因此成了 FP8 权重的常见默认。<strong>per-group / blockwise</strong>（如每 128 个元素一个 scale）最细，4 位量化几乎都得靠它才扛得住——位数已经被砍到只剩十几个台阶，必须用很贴合局部的 scale 才不至于把信息抹平。代价是这些 scale 自己也要存（通常用 fp16），还要在 GEMM 里随权重一起被读进来参与反量化，所以"更细"从来不是免费午餐，而是拿一点额外显存和算力去买精度。</p>
+
+<h2>SGLang 怎么接：量化也是可插拔策略</h2>
+<p>SGLang 不为每种格式重写模型，而是用一层抽象：每种格式有一个 <span class="mono">QuantizationConfig</span>，它提供一个 <span class="mono">LinearMethod</span>
+（如 <span class="mono">Fp8LinearMethod</span>），<strong>替换掉线性层"怎么创建/存权重"和"怎么做这次矩阵乘"</strong>。于是模型文件（第 26 课）照常写
+<span class="mono">RowParallelLinear</span> 之类的层，至于这层底下是 fp16 还是 fp8、走不走量化 kernel，全由配置注入——这正是继注意力后端（第 33 课）、KV 池之后，
+SGLang"<strong>一切皆可插拔</strong>"的第三个例子。权重则由模型加载器（第 25 课）从<strong>预量化的 checkpoint</strong> 读入，或在加载时<strong>顺手量化</strong>。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/quantization/fp8.py ::Fp8LinearMethod</span><span class="ln">线性层的 FP8 方法</span></div>
+  <pre><span class="kw">class</span> Fp8LinearMethod(LinearMethodBase):
+    <span class="cm"># FP8 线性层方法，支持多种量化方案：</span>
+    <span class="cm"># - 逐通道权重 + 逐 token 激活量化</span>
+    <span class="cm"># - 逐张量权重 + 逐张量激活量化</span>
+    <span class="cm"># - 分块(blockwise)权重 + 分块激活量化</span>
+    <span class="cm"># 支持的 checkpoint：FP8，或 FP16/BF16（加载时即时量化到 FP8）</span>
+    <span class="kw">def</span> __init__(self, quant_config):
+        self.quant_config = quant_config
+        self.cutlass_fp8_supported = cutlass_fp8_supported()  <span class="cm"># 有 FP8 硬件就走快路</span></pre>
+</div>
+
+<p>还有一个<strong>相关但独立</strong>的旋钮：<strong>KV 缓存量化</strong>。前面说的都是给<strong>权重</strong>瘦身，但解码时不断堆积的 <strong>KV 缓存</strong>（第 8 课）本身也是显存大户，尤其在长上下文、高并发下，它往往比权重还吃显存。把 KV 也从 fp16 压到 FP8 甚至更低，能让 KV 池一下子多装将近一倍的 token，<strong>直接拔高可服务的上下文长度与并发数</strong>。它和权重量化是<strong>两套独立的配置</strong>：你可以只量化权重、只量化 KV、或者两个一起开——因为它们压的是不同的东西、走的也是不同的代码路径（一个落在线性层的 <span class="mono">LinearMethod</span> 上，一个落在 KV 池的存取上）。把这两个旋钮分开来看，能帮你在"省显存"和"保精度"之间更精细地调。</p>
+
+<p>退一步看，量化是 SGLang"<strong>一切皆可插拔</strong>"哲学的<strong>第三个</strong>样板：第一个是注意力后端（第 33 课）——同一个注意力层，底下换 FlashAttention 还是 FlashInfer，由配置说了算；第二个是 KV 池——同一套读写接口，底下可以是连续、分页或分层缓存；现在是量化——同一个 <span class="mono">RowParallelLinear</span>，底下是 fp16 还是 fp8、走不走量化 kernel，同样由一个 <span class="mono">QuantizationConfig</span> 注入，模型文件（第 26 课）一个字都不用改。这正是<strong>第 8 部分</strong>的主线：把 Transformer 的每一块——注意力、MoE（第 34 课）、量化、各类算子（第 36 课）——都打磨成<strong>可替换的策略</strong>，于是新格式、新硬件、新算法都能直接"插"进来，而不必每次都重写模型。理解了这层抽象，你看 SGLang 加一种新量化方案，就只是"再写一个 <span class="mono">LinearMethod</span>"那么自然，而整套服务调度、KV 管理、注意力计算都原封不动地复用。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>量化</strong>：用更少比特（FP8/FP4/INT4）+ 一个 scale 近似权重，<strong>省显存、省带宽 ⇒ 更快</strong>，代价是一点点精度。</li>
+    <li><strong>省的是内存</strong>：显存减半到四分之一 + 解码访存带宽减半（第 4/8 课）；低精度硬件还能省算力。</li>
+    <li><strong>两类</strong>：仅权重（AWQ/GPTQ，算前反量化，省存+带宽）vs 权重+激活（FP8 GEMM，连算力一起省）。</li>
+    <li><strong>scale 粒度</strong>：per-tensor / per-channel / per-group，越细精度越高、开销越大。</li>
+    <li><strong>可插拔</strong>：<span class="mono">QuantizationConfig</span> 提供 <span class="mono">LinearMethod</span> 替换线性层的存权重/矩阵乘；由加载器（第 25 课）读入。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 量化把权重从 fp16 压到 INT4，本质上是用什么<strong>换</strong>什么？</div>
+  <ol class="opts">
+    <li>什么都不损失，纯粹免费加速</li>
+    <li><strong>用一点点精度，换显存、访存带宽，以及（在低精度硬件上）算力</strong>——更少的比特 + 一个 scale 近似原权重，于是模型更小、解码要搬的字节更少、跑得更快</li>
+    <li>用算力换模型质量，完全不省显存</li>
+    <li>用更多显存换更高精度</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。量化是一笔取舍：牺牲<strong>一点点精度</strong>，换来显存减半到四分之一、解码访存带宽减半，低精度硬件上还顺带省算力。它不是用更多显存换精度（恰恰相反），也不是不省显存，更不是完全无损——只是损失常常小到要跑评测才看得出。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. AWQ/GPTQ 这类“<strong>仅权重</strong>”量化和 FP8 这类“<strong>权重+激活</strong>”量化，最关键的差别是什么？</div>
+  <ol class="opts">
+    <li>两者完全等价，只是名字不同</li>
+    <li>仅权重更省显存，权重+激活完全不省显存</li>
+    <li><strong>仅权重</strong>把权重存成 4 位省显存，但计算前要<strong>反量化回高精度</strong>再做矩阵乘，省存+带宽不省算力；<strong>权重+激活</strong>两边都低精度，直接跑<strong>低精度 GEMM</strong>（FP8），<strong>连算力一起省</strong>，但更挑硬件和精度</li>
+    <li>权重+激活只能用于训练，不能推理</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。仅权重（AWQ/GPTQ）算前要把 4 位权重<strong>反量化</strong>回高精度，所以只省存储和带宽，对访存密集的解码特别划算；权重+激活（FP8）两边都低精度，能直接跑 FP8 GEMM <strong>把算力也省了</strong>，吞吐最高但需要 FP8 硬件、精度更需小心。两者都省显存，并非等价，FP8 也照样用于推理。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 一组 INT4 权重共享的那个 <span class='mono'>scale</span>（缩放因子）到底是什么，<strong>per-group</strong> 粒度又意味着什么？</div>
+  <ol class="opts">
+    <li>scale 就是 INT4 整数本身，没有额外的数</li>
+    <li>per-group 表示整个模型只有一个全局 scale</li>
+    <li><strong>scale 是把低位整数还原回真实数值范围的乘数</strong>：真实值 ≈ 整数 × scale；<strong>per-group</strong> 指每一小块权重各算一个 scale，比 per-tensor（整张一个）更细、精度更高，代价是 scale 本身要占点空间、算起来更复杂</li>
+    <li>scale 是模型的学习率，训练时才用</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。scale 是反量化的乘数：把存下来的低位整数乘以 scale，才近似还原成原来的浮点值（真实值 ≈ 整数 × scale）。粒度从粗到细是 per-tensor → per-channel → per-group/blockwise，越细越能贴合局部动态范围、精度越高，但要存更多 scale、计算更复杂。它不是学习率，也不是整数本身，per-group 更不是全局一个 scale。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>JPEG / MP3 压缩</strong>”这个类比把量化讲透，并算清它<strong>省的是什么</strong>。请覆盖：①权重平时是 fp16（16 位），量化用<strong>更少比特（FP8/FP4/INT4）+ 一个 scale</strong> 近似原值，<strong>真实值 ≈ 整数 × scale</strong>；②为什么<strong>大头省的是内存而非算力</strong>——显存减半到四分之一（给 KV 缓存和并发腾地方，第 4/8 课），以及解码<strong>访存密集</strong>、权重搬得少一半就快一半；③为什么低比特还能用——LLM 权重<strong>冗余、宽容</strong>，真正危险的是<strong>离群值</strong>，而 <strong>AWQ</strong>（按激活幅度保护关键通道）和 <strong>GPTQ</strong>（带校准集逐层最小化重建误差）正是靠聪明地处理它们把精度损失压到几乎看不出。</li>
+    <li>说清量化在 SGLang 里<strong>怎么“插”进线性层</strong>，并把它放进“一切皆可插拔”的脉络里。请说明：①每种格式提供一个 <span class='mono'>QuantizationConfig</span> → <span class='mono'>LinearMethod</span>（如 <span class='mono'>Fp8LinearMethod</span>），<strong>替换线性层“怎么存权重、怎么做这次矩阵乘”</strong>，于是模型文件（第 26 课）里的 <span class='mono'>RowParallelLinear</span> 一个字不改、由配置决定底下是 fp16 还是 fp8；②权重从<strong>预量化 checkpoint</strong> 读入或在加载时<strong>即时量化</strong>（第 25 课）；③<strong>FP8</strong> 的 E4M3 与<strong>动态/静态</strong>激活定标、<span class='mono'>cutlass</span>/<span class='mono'>Marlin</span> 快路与 H100/B200 原生 FP8；④<strong>KV 缓存量化</strong>是相关但独立的旋钮，并点明量化是继注意力后端（第 33 课）、KV 池之后“可插拔”的第三个例子。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>RoPE、归一化与其它算子</h1>
+
+<p class="lead">
+第 26 课你会发现，写一个 Transformer 模型其实就是把一堆<strong>现成的层拼起来</strong>：注意力是一层、MLP 是一层、归一化是一层、给位置编码的 RoPE 也是一层。前面几课讲的注意力（第 33 课）、MoE（第 34 课）、量化（第 35 课）是大块头，
+这一课要补上那些<strong>更小但同样不可或缺</strong>的算子——RoPE、RMSNorm、以及一批<strong>融合算子</strong>。它们都被打磨成可复用的 <span class="mono">nn.Module</span>，模型只管<strong>调用</strong>，底下跑哪个平台的哪个 kernel、要不要融合，由这些层自己挑。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 <strong>RoPE</strong> 想成给每个词的<strong>指南针</strong>拨一个角度：词在句子里越靠后，指针就被多转一点。两个词之间感受到的"距离"，就是两根指针的<strong>夹角</strong>——
+  谁都没有一个绝对的"门牌号"，但只要看夹角，就知道彼此<strong>相隔多远</strong>。再把 <strong>RMSNorm</strong> 想成一个<strong>轻量的音量平衡器</strong>：它不挪动音乐的"基线"（不减均值），只是把每段声音的<strong>整体响度</strong>拉到统一水平，让后面的层听得清楚、训练得稳。
+  指南针负责"我在哪、我们隔多远"，音量平衡器负责"大家响度一致"——两个小零件，撑起了整座 Transformer 的稳定运转。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  记住一句话：<strong>这些小算子，是模型用来"搭积木"的标准件</strong>。它们和注意力后端（第 33 课）、量化（第 35 课）同属一个主题——<strong>可插拔的、硬件优化过的层</strong>。
+  模型文件（第 26 课）里只写 <span class="mono">self.rotary_emb(positions, q, k)</span>、<span class="mono">self.input_layernorm(x)</span> 这样的<strong>调用</strong>，至于底下是 CUDA 融合 kernel、Triton 实现，还是 AMD/NPU 的专属版本，
+  全由这些层在运行时按<strong>平台</strong>自动挑选。于是同一份模型代码，换块卡就能跑；新出一个更快的融合 kernel，也只要在层内部接上，模型一个字都不用改。
+</div>
+
+<h2>RoPE：用"旋转"给注意力注入位置</h2>
+<p>先说一个反直觉的事实：<strong>注意力本身没有顺序概念</strong>。注意力算的是 query 和 key 的点积，而点积对"谁先谁后"是<strong>不敏感</strong>的——把句子里的词打乱，纯注意力算出来的关系几乎一样。可语言显然<strong>高度依赖顺序</strong>，"狗咬人"和"人咬狗"天差地别。
+所以必须有人把<strong>位置信息</strong>喂进去。<strong>RoPE（Rotary Position Embedding，旋转位置编码）</strong>给出的答案非常优雅：不往向量里<strong>加</strong>一个位置向量，而是按位置把每个 q/k 向量<strong>旋转</strong>一个角度——位置越靠后，转得越多。</p>
+<p>妙处在于点积的数学。把 query 旋转它所在位置的角度、把 key 旋转它所在位置的角度，再做点积，结果只取决于两个角度的<strong>差</strong>，也就是两个 token 的<strong>相对位置</strong>。于是注意力一下子变得<strong>相对位置感知</strong>：模型关心的不再是"这个词在第几个绝对位置"，而是"这两个词<strong>相隔多远</strong>"。
+这正符合语言的本质——一个代词指向几个词之前的名词，靠的是<strong>距离</strong>而非绝对坐标。RoPE 不引入任何要学习的额外参数，纯靠固定频率的旋转就把相对位置"焊"进了注意力，既省参数又泛化得好，因此成了 Llama、Qwen 等主流模型的标配。</p>
+<p>落到代码里，RoPE 是一个 <span class="mono">RotaryEmbedding</span> 层，构造时用 <span class="mono">get_rope(...)</span> 按配置造出对应变体，前向时<strong>紧贴在注意力之前</strong>对 q/k 施加旋转（注意力本身见第 33 课）。它预先算好每个位置的 <span class="mono">cos/sin</span> 缓存，前向时按 token 的 <span class="mono">positions</span> 把对应的 cos/sin 取出来，旋转向量的前 <span class="mono">rotary_dim</span> 维，剩下的维度原样透传。整个过程没有矩阵乘，只是一组逐元素的乘加，因此非常便宜，常常还会被<strong>融合</strong>进相邻算子里一并完成。</p>
+<p>这里还藏着一个容易忽略的设计：旋转<strong>不是把整个头维度都转</strong>，而只转前 <span class="mono">rotary_dim</span> 维，后面的维度原封不动透传。为什么要留一截不转？因为 RoPE 的本意是把<strong>位置</strong>编码进一部分子空间，让模型既能感知相对位置、又保留一部分<strong>与位置无关</strong>的特征通道，二者各司其职。另一个细节是 <span class="mono">is_neox_style</span>——它决定向量里哪些维度<strong>配成一对</strong>一起旋转（相邻配对，还是前后半配对），不同模型家族的约定不同，但都收敛在同一个 <span class="mono">RotaryEmbedding</span> 接口下。对模型作者来说，这些都被封装在层里：你写模型时只调用 <span class="mono">self.rotary_emb(positions, q, k)</span>，至于转多少维、怎么配对、cos/sin 怎么缓存，全不用操心。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>拿到 q / k</h4><p>注意力前，先有投影出来的 query、key 向量——但它们此刻<strong>不含任何位置信息</strong>。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>按位置施加 RoPE</h4><p>用每个 token 的 <span class="mono">positions</span> 取出对应 <span class="mono">cos/sin</span>，把 q/k 各<strong>旋转</strong>一个 ∝ 位置的角度。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>点积变成相对感知</h4><p>旋转后的 q·k 只依赖两者位置之<strong>差</strong>——注意力自动获得<strong>相对位置</strong>感。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>送入注意力</h4><p>带位置的 q/k 交给注意力后端（第 33 课）算 softmax 加权——顺序信息已经在里面了。</p></div></div>
+</div>
+
+<p>再把"旋转"这件事画得更直观一些：同一个向量，在位置 0 不转、位置 1 转一点、位置 2 转得更多——位置每往后一步，指针就多偏一个固定角度。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>同一个向量，被不同位置旋转不同角度</b>：位置越靠后，转得越多（角度 ∝ 位置）</div>
+  <div class="cells"><span class="lab">向量 v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k 只看夹角差 = 相对位置</span></div>
+</div>
+
+<h2>RoPE 如何撑长上下文</h2>
+<p>RoPE 还顺手解决了一个工程上的大难题：<strong>上下文长度扩展</strong>。一个模型训练时只见过比如 4k token 的序列，旋转角度的"频率表"也是按 4k 调好的。直接拿去服务 32k 的长文本，靠后位置的旋转角度会跑到训练时<strong>从没见过的范围</strong>，模型一脸懵，效果崩坏。
+解决办法不是重训，而是<strong>巧妙地拉伸旋转频率</strong>，让 4k 训出来的模型也能在 32k 甚至更长上从容工作。</p>
+<p>常见的几招都是 RoPE 的变体：<strong>线性缩放（linear scaling）</strong>最朴素——把所有位置等比例压缩，相当于把"尺子"整体拉长，让 32k 的位置落回模型熟悉的角度范围，简单但高频信息会被牺牲一些；<strong>NTK-aware</strong> 更聪明，它<strong>不均匀</strong>地调整不同频率，对高频（管局部细节）改动小、对低频（管长程关系）拉伸大，从而在扩展长度的同时尽量保住短距离的分辨力；
+<strong>YaRN</strong> 则在 NTK 的基础上再做温度与分段处理，是当下长上下文模型很常用的方案。这些变体在 SGLang 里都通过同一个 <span class="mono">get_rope(...)</span> 工厂按配置造出来——你在模型配置里写明 <span class="mono">rope_scaling</span> 用哪种、放大多少倍，工厂就返回对应的 <span class="mono">RotaryEmbedding</span> 子类，<strong>模型代码完全不变</strong>。这又是"可插拔"的一个缩影：换一种长度扩展策略，只是换一个 RoPE 变体而已。</p>
+<p>为什么"拉伸频率"这件事行得通，值得再多想一层。RoPE 的旋转角度其实是一组<strong>不同频率</strong>的正弦波叠出来的：高频通道转得快，负责区分<strong>相邻几个 token</strong> 的细微先后；低频通道转得慢，负责刻画<strong>跨越很远</strong>的长程关系。当序列拉长到训练没见过的 32k，最先"出界"的是那些低频通道——它们要表达的距离远远超出了训练时的角度范围。于是聪明的做法不是把所有频率一刀切地压缩（那会连高频的局部分辨力也牺牲掉，正是<strong>线性缩放</strong>的短板），而是像 <strong>NTK-aware</strong> 那样<strong>对低频多拉伸、对高频少动</strong>，把"撑长度"的代价尽量摊到对长程关系不那么敏感的通道上。<strong>YaRN</strong> 更进一步，对不同频段分段处理、并引入一个温度项校正注意力的分布，使得扩展后的模型在长文本上既不丢局部细节、又能稳住长程依赖。理解了"频率有高低、职责有分工"，你就明白这些方法不是玄学调参，而是顺着 RoPE 的数学结构，<strong>有针对性地</strong>动那些该动的频率。</p>
+
+<table class="t">
+  <tr><th>算子</th><th>做什么</th><th>为什么需要它</th></tr>
+  <tr><td class="mono">RoPE</td><td>按位置<strong>旋转</strong> q/k，注入相对位置</td><td>注意力本身无序；让点积感知 token 间<strong>距离</strong>，还能扩展上下文（NTK/YaRN/线性）</td></tr>
+  <tr><td class="mono">RMSNorm</td><td>÷ 均方根再乘缩放，<strong>稳定数值</strong></td><td>比 LayerNorm 更便宜（无减均值/无偏置），LLM 上效果一样好；常和残差加法<strong>融合</strong></td></tr>
+  <tr><td class="mono">SiluAndMul</td><td>把门控 MLP 的 <strong>SiLU(gate) × up</strong> 合成一个 kernel</td><td>少一次中间张量的读写往返，省显存带宽、提速</td></tr>
+  <tr><td class="mono">fused add-norm</td><td>残差加法 + 归一化<strong>合并</strong>成一步</td><td>避免额外的内存往返；qk-norm+rope 也可融合，小算子越融越快</td></tr>
+</table>
+
+<h2>RMSNorm：更轻的归一化</h2>
+<p>每个 Transformer 块里都夹着<strong>归一化</strong>层，作用是把激活值的尺度<strong>压稳</strong>，让深层网络训练得动、推理得稳。经典做法是 <strong>LayerNorm</strong>：先<strong>减去均值</strong>、再<strong>除以标准差</strong>把数据标准化，最后用可学习的 <strong>scale 和 shift（偏置）</strong>调回合适的分布。它有效，但每一步都要算均值、算方差，还多带一个偏置参数。</p>
+<p>Llama 一系用的是更精简的 <strong>RMSNorm（Root Mean Square Norm）</strong>。它<strong>不减均值</strong>、<strong>不加偏置</strong>，只做一件事：把向量除以它自己的<strong>均方根</strong>（元素平方和的平均再开根号），然后乘一个可学习的 scale。少了减均值这一步，也省了偏置参数——<strong>更便宜、更快</strong>，而大量实践证明在大语言模型上<strong>效果与 LayerNorm 不相上下</strong>。这就是为什么主流 LLM 几乎清一色转向了 RMSNorm。它还经常和前面的<strong>残差加法融合</strong>成一个 kernel（fused add-norm），把"加残差"和"归一化"两步并作一次内存读写完成，进一步省带宽。</p>
+<p>有人会问：减均值这一步真的可有可无吗？直觉上 LayerNorm 的"减均值"是在做<strong>居中（centering）</strong>，把激活的偏移量去掉。但研究和实践都发现，对 Transformer 这种结构，真正起稳定作用的是<strong>缩放（rescaling）</strong>那一步——也就是把向量的整体尺度拉到统一量级；而居中带来的收益很有限，却要白白多算一遍均值。RMSNorm 正是抓住了这一点，<strong>只保留缩放、砍掉居中</strong>，用更少的算术拿到几乎一样的稳定性。再加上去掉偏置参数，整层的参数量和访存都更省。把它放进"算子是可插拔标准件"的主题里看也很自然：归一化这件事"做什么"（把尺度压稳）是固定的，"怎么做"（LayerNorm 还是 RMSNorm、要不要和残差融合、跑哪个平台的 kernel）则是可替换的实现细节——模型只写一句 <span class="mono">self.input_layernorm(x)</span>，底下换哪种归一化，对模型代码完全透明。</p>
+
+<div class="cols">
+  <div class="col"><h4>LayerNorm（经典）</h4><p><strong>减均值</strong> → <strong>÷ 标准差</strong> → 乘 scale + 加 <strong>shift（偏置）</strong>。把数据完整标准化，步骤多、要算均值方差、还多一个偏置参数。</p></div>
+  <div class="col"><h4>RMSNorm（Llama 系）</h4><p><strong>不减均值、不加偏置</strong>：只 <strong>÷ 均方根</strong> 再乘 scale。更少计算、更少参数，<strong>更便宜</strong>，LLM 上效果一样好，常和残差加法<strong>融合</strong>。</p></div>
+</div>
+
+<h2>融合算子：把小步骤并成一个 kernel</h2>
+<p>最后讲一个贯穿全课的主题——<strong>算子融合（fusion）</strong>。GPU 上有个朴素的事实：每启动一个 kernel、每把张量从显存读进来再写回去，都有<strong>固定开销</strong>。一连串小算子如果各跑各的，数据就要在显存和计算单元之间<strong>来回搬好几趟</strong>，而搬运往往比计算还慢。融合就是把几个挨着的小算子<strong>合并成一个 kernel</strong>，让数据进来一次、把活全干完再出去，省掉中间那些内存往返。</p>
+<p>典型的例子：门控 MLP（第 34 课里 MoE 的专家、以及普通 MLP 都用门控结构）需要算 <span class="mono">SiLU(gate) × up</span>——<strong>SiluAndMul</strong> 就把激活函数和逐元素相乘<strong>融进一个 kernel</strong>，免去一个巨大中间张量的读写；前面说的 <strong>fused add-norm</strong> 把残差加法和 RMSNorm 并作一步；还有 <strong>qk-norm + RoPE</strong> 也能融合。这些层都是<strong>可复用、硬件优化过</strong>的标准件：模型只管调用，层内部会根据平台挑<strong>融合版还是平台专属版</strong>的 kernel——这正是继注意力后端（第 33 课）、量化（第 35 课）之后，"<strong>一切皆可插拔</strong>"主题在<strong>算子</strong>这一维上的体现。更底层的 kernel 怎么写、怎么融合，是第 38 课的内容；这里你只需记住：模型搭积木，积木自己懂硬件。</p>
+<p>把这一课收束起来：注意力和 MLP 那些大矩阵乘是 Transformer 的"主肌肉"，但真正让它跑得<strong>又对又快</strong>的，是这些不起眼的小算子。RoPE 让注意力懂得<strong>位置与距离</strong>，并顺手把上下文撑长；RMSNorm 用最省的方式把数值<strong>稳住</strong>；融合算子则把零碎的小步骤<strong>攒成一趟</strong>，省下宝贵的访存带宽。而贯穿始终的，是同一套设计哲学——它们都是<strong>可复用、按平台自适应</strong>的 <span class="mono">nn.Module</span>。模型作者（第 26 课）站在"调用"这一侧，写下 <span class="mono">self.rotary_emb(...)</span>、<span class="mono">self.input_layernorm(...)</span> 这些稳定的接口；性能与硬件工程师站在"实现"那一侧，自由地把新的融合 kernel、新的平台后端接进去，而模型代码<strong>一个字都不用改</strong>。理解了这层分工，你再看 SGLang 支持一种新模型，往往就是"把这些标准件按新结构重新拼一遍"——这正是第 8 部分反复强调的主题：<strong>把 Transformer 的每一块都打磨成可替换的策略</strong>。</p>
+
+<p>下面是 RoPE 真身的核心几行——<span class="mono">forward_native</span> 如何按位置取出 cos/sin，并把旋转施加到 q 和 k 上：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">layers/rotary_embedding/base.py ::RotaryEmbedding</span><span class="ln">前向：按位置把旋转施加到 q/k</span></div>
+  <pre><span class="kw">def</span> forward_native(self, positions, query, key, ...):
+    <span class="cm"># 按每个 token 的 position 取出预算好的 cos / sin</span>
+    cos_sin = self.cos_sin_cache.index_select(<span class="st">0</span>, positions)
+    cos, sin = cos_sin.chunk(<span class="st">2</span>, dim=-<span class="st">1</span>)
+    query_rot = query[..., : self.rotary_dim]   <span class="cm"># 只旋转前 rotary_dim 维</span>
+    query_rot = self._apply_rotary_emb_wrapped(query_rot, cos, sin, self.is_neox_style)
+    key_rot = key[..., : self.rotary_dim]
+    key_rot = self._apply_rotary_emb_wrapped(key_rot, cos, sin, self.is_neox_style)
+    <span class="kw">return</span> query, key                          <span class="cm"># q/k 已带上位置，交给注意力</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <strong>① RoPE 用旋转注入位置</strong>：注意力本身无序，RoPE 按位置把 q/k <strong>旋转</strong>一个角度，旋转后点积只依赖位置<strong>之差</strong>——注意力变成<strong>相对位置感知</strong>，且不引入可学习参数。
+  <strong>② RoPE 撑长上下文</strong>：线性缩放 / NTK-aware / YaRN <strong>拉伸旋转频率</strong>，让 4k 训练的模型服务 32k+；都由 <span class="mono">get_rope(...)</span> 按配置造出变体，模型代码不变。
+  <strong>③ RMSNorm vs LayerNorm</strong>：RMSNorm <strong>只 ÷ 均方根再乘 scale</strong>，<strong>不减均值、不加偏置</strong>——比 LayerNorm 便宜，LLM 上效果一样好，常和残差加法融合。
+  <strong>④ 融合小算子</strong>：<span class="mono">SiluAndMul</span>、fused add-norm、qk-norm+rope 把相邻小算子并成一个 kernel，<strong>省内存往返</strong>。这些都是可复用、硬件优化的层（第 26 课搭、第 38 课讲 kernel/融合）。
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 注意力本身对 token 的顺序<strong>不敏感</strong>，RoPE 是怎么把<strong>位置</strong>注入进去的？</div>
+  <ol class="opts">
+    <li>把 KV 缓存按位置重新排序</li>
+    <li>在 softmax 后乘一个和位置成正比的标量</li>
+    <li>给每个词学习一个绝对位置向量，加到词向量上</li>
+    <li><strong>按位置把每个 q/k 向量旋转一个角度（角度 ∝ 位置）</strong>，旋转后两个向量的点积只依赖它们位置<strong>之差</strong>，于是注意力变成<strong>相对位置感知</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。RoPE 不“加”位置向量，而是按位置<strong>旋转</strong> q/k。点积的数学决定了：两个旋转过的向量做点积，结果只取决于两个旋转角的<strong>差</strong>，也就是相对位置——于是注意力天然感知 token 间的距离，且不引入任何可学习参数。它不是绝对位置嵌入、不是 softmax 后的标量、也和重排 KV 无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 一个在 4k 上训练的模型，想直接服务 32k 的长文本，RoPE 系的方法（线性缩放 / NTK / YaRN）靠什么做到？</div>
+  <ol class="opts">
+    <li>在 32k 上从头重训一个新模型</li>
+    <li>把多出来的 token 直接丢弃</li>
+    <li>把模型权重重新量化到更低比特</li>
+    <li><strong>拉伸旋转频率</strong>，把超出训练范围的位置角度压回模型熟悉的区间——无需重训，只换一个 RoPE 变体（由 <span class='mono'>get_rope</span> 按配置造出），模型代码不变</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。上下文扩展的关键，是<strong>巧妙地拉伸旋转频率</strong>：线性缩放等比压缩位置、NTK 不均匀调整高低频、YaRN 再加温度分段，让 4k 训练的角度范围覆盖 32k+。这些都是 RoPE 变体，通过同一个 <span class='mono'>get_rope(...)</span> 工厂按配置造出，<strong>不必重训、不改模型代码</strong>。丢 token 会丢信息，量化是另一回事，重训则违背了“无需重训”的初衷。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 相比经典 LayerNorm，Llama 系常用的 RMSNorm 关键差别是什么？</div>
+  <ol class="opts">
+    <li>RMSNorm 精度更高但慢得多</li>
+    <li>两者完全一样，只是命名不同</li>
+    <li><strong>RMSNorm 不减均值、不加偏置</strong>，只把向量 ÷ 均方根再乘一个 scale——比 LayerNorm（减均值 ÷ 标准差 + scale + shift）<strong>更便宜</strong>，LLM 上效果一样好，还常和残差加法融合</li>
+    <li>RMSNorm 需要额外的偏置参数</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。LayerNorm 要减均值、除标准差，并带 scale+shift 两组参数；RMSNorm 砍掉了减均值和偏置，只做 ÷ 均方根再乘 scale——计算更少、参数更少、<strong>更便宜</strong>，而大量实践证明 LLM 上效果不输 LayerNorm，因此成了主流。它不是更慢，也不需要额外偏置，更不是和 LayerNorm 完全等价。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>指南针 + 夹角</strong>”的类比把 RoPE 讲透，并说清它为什么能<strong>扩展上下文</strong>。请覆盖：①注意力的点积对顺序<strong>不敏感</strong>，所以必须注入位置；②RoPE 不“加”位置向量，而是按位置把 q/k <strong>旋转</strong>一个角度（角度 ∝ 位置），旋转后点积只依赖位置<strong>之差</strong> ⇒ <strong>相对位置感知</strong>，且<strong>无可学习参数</strong>；③线性缩放 / NTK-aware / YaRN 如何<strong>拉伸旋转频率</strong>，让 4k 训练的模型服务 32k+，且都由 <span class='mono'>get_rope(...)</span> 按配置造变体、<strong>模型代码不变</strong>（前向应用见第 33 课注意力之前）。</li>
+    <li>解释<strong>为什么要把小算子融合</strong>，并把 RMSNorm、SiluAndMul、fused add-norm 放进“可插拔的硬件优化层”这条脉络里。请说明：①GPU 上每次 kernel 启动 + 显存读写都有<strong>固定开销</strong>，一串小算子各跑各的会让数据在显存和计算单元间<strong>来回搬好几趟</strong>，而搬运常比计算还慢；②融合把相邻小算子并成<strong>一个 kernel</strong>（如 <span class='mono'>SiluAndMul</span> 合 SiLU(gate)×up、fused add-norm 合残差加法+RMSNorm、qk-norm+rope），省掉中间往返；③这些都是可复用、硬件优化的 <span class='mono'>nn.Module</span>，模型只管调用（第 26 课），层内部按平台挑融合/专属 kernel——继注意力后端（第 33 课）、量化（第 35 课）之后“一切皆可插拔”在算子维的体现，更底层 kernel/融合见第 38 课。</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Logits 处理与词表并行</h1>
+
+<p class="lead">
+模型一路算到最后，手里是每个位置的一串<strong>隐藏向量</strong>。可用户要的是"<strong>下一个词</strong>"，不是一串向量。
+把隐藏向量翻译成"<strong>每个词的得分</strong>"的，是模型的<strong>输出头 lm_head</strong>；而因为词表动辄十几万，这个头大到一张卡装不下——
+于是有了<strong>词表并行（vocab parallel）</strong>。这一课讲清楚 logits 怎么来、词表头为什么要切开、以及 <span class="mono">LogitsProcessor</span> 怎么把它收束好交给采样器。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把输出头想成一本<strong>超大词典</strong>，要给查询词打"和每个词条的匹配分"。词典太厚，于是<strong>拆给 N 个管理员</strong>，
+  每人只负责其中<strong>一段词条</strong>、只打自己那段的分；最后大家把各自的分数表<strong>汇总（all-gather）</strong>成完整排名。
+  还有个省力诀窍：你只关心<strong>刚写下的最后一个字</strong>该接什么，所以只问"<strong>最后一位</strong>"的分，不必把整句重新打分。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  末端归一（第 36 课）后，每个位置一个隐藏向量。<strong>lm_head</strong>（一个 [hidden × vocab] 的大矩阵）把它投影成
+  <strong>每个词表 token 一个分数 = logits</strong>，再由采样器（第 28 课）选出 token。词表很大（3 万~25 万），
+  lm_head 与词嵌入矩阵都很重，所以在张量并行（第 46 课）下按<strong>词表维度切分到各 rank</strong>，每卡只算自己那一片，
+  再 <strong>all-gather</strong> 拼成完整 logits。<span class="mono">LogitsProcessor</span> 负责把这套流程（含<strong>只取末位</strong>的优化）串起来。
+</div>
+
+<h2>从 hidden 到 logits：输出头 lm_head</h2>
+<p>模型的主体（第 26 课）一层层算下来，给每个输入位置产出一个 <strong>hidden 向量</strong>（维度就是模型的隐藏维，比如 4096）。
+但这只是"中间表示"，不是答案。要预测下一个词，得知道<strong>词表里每个候选 token 有多"合适"</strong>——这就是 <span class="mono">lm_head</span> 干的事：
+它是一个形状为 <span class="mono">[hidden_dim × vocab_size]</span> 的大矩阵，把 hidden 向量乘上去，得到一个<strong>长度等于词表大小</strong>的分数向量，
+这就是 <strong>logits</strong>。logits 越大的 token，模型越认为它该是下一个词。logits 接着交给采样器（第 28 课）做温度、top-k/p、采样，最终落成一个具体 token。
+很多模型还会让 lm_head 与输入词嵌入<strong>共享权重</strong>（tied embedding），因为"把词变向量"和"把向量变回词分数"本就是一对互逆的事。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>主体前向</h4><p>嵌入 → N 层 → 末端归一（第 36 课），得到每位置的 hidden。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>取末位</h4><p>解码时<strong>只留每条请求的最后一个位置</strong>——只有它的 logits 用来预测下一个词。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>lm_head 投影</h4><p>hidden × lm_head → 词表维度的 <strong>logits</strong>（按 rank 各算一片）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>跨卡汇总 + 采样</h4><p><strong>all-gather</strong> 拼出完整 logits → 采样器（第 28 课）出 token。</p></div></div>
+</div>
+
+<div class="flow">
+  <div class="node"><div class="nt">hidden·末位</div><div class="nd">每条请求最后一位<br>的隐藏向量</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">lm_head·按词表切片</div><div class="nd">本 rank 只算<br>自己那段词表的分</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">all-gather</div><div class="nd">跨卡拼接各段<br>残缺分数向量</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">完整 logits</div><div class="nd">长度 = 词表大小<br>每个 token 一个分</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">Sampler·第 28 课</div><div class="nd">温度 / top-k/p<br>选出下一个 token</div></div>
+</div>
+
+<h2>只取末位：一行 logits 胜过两千行</h2>
+<p>"只取最后一位"听上去像个小优化，实则省下的算力相当可观。设想一条 2000 token 的 prompt：预填充阶段，模型确实要为<strong>全部 2000 个位置</strong>都算出 hidden——因为每一层的注意力都需要前面所有位置的表示。但当我们要预测"<strong>第 2001 个 token</strong>"时，真正有用的只有<strong>最后一个位置</strong>的 hidden：它已经"看过"了整段 prompt，它的 logits 才是下一个词的分布。前面 1999 个位置的 logits，在普通生成里<strong>一个都用不上</strong>。</p>
+<p>于是 <span class="mono">LogitsProcessor</span> 在调用 lm_head 之前，先把 hidden 从 <span class="mono">[2000, hidden]</span> 裁成 <span class="mono">[1, hidden]</span>，<strong>只让最后一行过那张 [hidden × vocab] 的大矩阵</strong>。lm_head 是整个前向里数一数二贵的矩阵乘（词表几万到几十万列），把它的输入从 2000 行压到 1 行，等于把这步的算力和访存直接<strong>砍掉了两千倍</strong>。批处理时也一样：每条请求只贡献它自己的末位，一个 batch 有多少条请求，就只算多少行 logits，而不是把整批 prompt 的全部位置都算一遍。</p>
+<p>唯一的例外是<strong>用户要 logprob</strong>：要返回每个 prompt token 的对数概率（评测、打分、推测解码的草稿校验都会用到），就得保留那些位置的 logits。<span class="mono">logits_metadata</span> 正是用来记录"这一批里哪些位置需要完整 logits、哪些只要末位"，让 LogitsProcessor 按需裁剪——默认省到只剩末位，需要时才多留几行。这也解释了为什么同一份代码，普通生成飞快、而开了 <span class="mono">logprobs</span> 的请求会稍慢一点：后者让那张大矩阵乘多吃了好些行输入。</p>
+
+<p>解码阶段这个优化更是天然成立：每步只往前走一个 token，每条请求的 hidden 本来就只有<strong>一行</strong>（最新那个位置），lm_head 自然只算一行。所以"末位切片"在预填充时是<strong>主动裁剪</strong>、在解码时是<strong>本就如此</strong>——两种模式（第 30 课）在这里被统一成同一句话：<strong>每条请求只取一行 hidden 去算 logits</strong>。也正因为输出头只处理这薄薄的几行，它在整个前向里的耗时占比通常很小；真正的大头还是中间那几十层注意力与 MLP。把这件事想清楚，你就能解释一个常见困惑：模型参数里词表头占了一大块<strong>显存</strong>，但它在每步解码里花的<strong>时间</strong>却很少——因为算的行数实在太少了。</p>
+
+<h2>词表太大：为什么要按 TP 切分</h2>
+<p>这里藏着一个容易被忽视的规模问题：<strong>词表非常大</strong>。常见模型的词表在 3 万到 25 万 token 之间，而 lm_head 是
+<span class="mono">[hidden × vocab]</span>、词嵌入是 <span class="mono">[vocab × hidden]</span>——当 vocab=15 万、hidden=8192 时，<strong>单这一张表就有十几亿参数</strong>，
+占整个模型相当可观的一块。在张量并行（第 46 课，把每层矩阵切到多卡）下，<strong>没法把整张词表头塞进一张卡</strong>，也不该让一张卡独扛这么大的乘法和显存。</p>
+
+<p>解决办法叫<strong>词表并行（vocab parallelism）</strong>：<span class="mono">VocabParallelEmbedding</span> 与 <span class="mono">ParallelLMHead</span>
+把<strong>词表维度</strong>切成若干段，分给各个 TP rank——比如 4 卡、15 万词表，每卡负责约 3.75 万个 token。前向时，<strong>每卡只用自己那段 lm_head 算出"本段词的 logits"</strong>，
+得到的是一个<strong>残缺的</strong>分数向量（只有自己负责那段是真值）。要得到完整的 logits，就需要把各卡的片段拼起来——这一步是跨卡的 <strong>all-gather</strong>（或在 argmax/采样里就地汇总）。
+这样，谁也不用独存整张词表头，显存与算力都被均摊到了多卡上。</p>
+
+<p>把这套机制摊开看：每个 rank 手里的 lm_head 只有 <span class="mono">[hidden × vocab/N]</span> 那一窄条，算出来的自然是一个<strong>只有自己那段是真值、其余全空</strong>的部分分数向量。<strong>all-gather</strong> 做的事，就是让 N 张卡各自把"本段那截"发出去、也收下别人那截，最后<strong>按 rank 顺序首尾拼接</strong>成一条完整的、长度等于整个词表的 logits。值得一提的是，如果只是要<strong>贪心解码</strong>（argmax 取分数最大那个 token），其实可以更省：每张卡先在<strong>本段内求局部最大</strong>，只把"局部最大值 + 它对应的全局 token id"这一点点信息做 all-reduce，就能选出全局最大，<strong>根本不必把十几万维的完整向量物化出来</strong>。SGLang 会在不需要完整 logits（不算 logprob、不做复杂采样）时尽量走这种更省带宽的就地汇总路径。</p>
+
+<p>词表并行并不是一个孤立技巧，它和第 25/46 课里 q/k/v、MLP 的切法是<strong>同一套思路</strong>：把一个大矩阵沿某个维度切成 N 片、每卡算一片、再用一次集合通信把结果对齐。注意力把<strong>注意力头</strong>切开、MLP 把<strong>中间维</strong>切开，而这里把<strong>词表维</strong>切开；区别只在"切哪一维、最后用 all-reduce 还是 all-gather 收口"。理解了词表并行，也就把 TP 在模型首尾两端（输入嵌入、输出头）和中间各层的切分图景<strong>补全</strong>了——整张网络从头到尾都是按同一条规则切开、再拼回来的。</p>
+
+<p>实现里还有两个常被问到的细节。其一是<strong>词表对齐</strong>：词表大小未必能被 rank 数整除（比如 15 万词表切 8 卡除不尽），所以 <span class="mono">VocabParallelEmbedding</span> 会先把词表<strong>向上补齐</strong>到能整除的大小，多出来的是"假 token"，它们的 logit 会被屏蔽掉、永远不会被选中，只为让每张卡分到等长的一段、对齐通信。其二是<strong>嵌入与输出头共享</strong>：当模型用 tied embedding 时，输入端的 <span class="mono">VocabParallelEmbedding</span> 和输出端的 <span class="mono">ParallelLMHead</span> 其实是<strong>同一份按词表切好的权重</strong>，输入时用它把 token id 查成向量、输出时用它把向量打成分数，省下一整张大表的显存。无论共享与否，切分的维度和通信的方式都一致。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>15 万词表切到 4 个 rank</b>：每个 rank 只算自己那段的 logits，再 all-gather 拼成完整向量</div>
+  <div class="cells"><span class="lab">rank0</span><span class="cell hl">token 0–37499</span><span class="sep">·</span><span class="lab">rank1</span><span class="cell hl">37500–74999</span><span class="sep">·</span><span class="lab">rank2</span><span class="cell hl">75000–112499</span><span class="sep">·</span><span class="lab">rank3</span><span class="cell hl">112500–149999</span></div>
+</div>
+
+<div class="cols">
+  <div class="col"><h4>整张词表头放一张卡</h4><p>lm_head 与嵌入十几亿参数全压在一卡上：<strong>显存吃紧、这步算力也成瓶颈</strong>，和 TP 切分其它层的思路也不一致。</p></div>
+  <div class="col"><h4>词表并行</h4><p>每 rank 只持有、只算<strong>一段词表</strong>；末了 <strong>all-gather</strong> 拼完整 logits。<strong>显存与算力均摊</strong>，与 TP 一脉相承。</p></div>
+</div>
+
+<h2>LogitsProcessor 的活：末位切片 + 跨卡汇总</h2>
+<p>把上面这套流程编排起来的，是 <span class="mono">LogitsProcessor</span>。它在前向的最后接过 hidden states，做三件事：
+①<strong>末位切片</strong>——解码时，每条请求其实只需要<strong>最后一个位置</strong>的 logits 来预测下一个词；而预填充时虽然算了整段 prompt 的 hidden，
+但同样<strong>只有最后一位的 logits 有用</strong>（除非要算 logprob）。所以先把 hidden 裁到"每条请求的末位"，能大幅减少 lm_head 这步的计算量。
+②<strong>词表并行投影</strong>——用 <span class="mono">ParallelLMHead</span> 算出本 rank 负责那段词表的 logits。③<strong>跨卡 all-gather</strong>——
+把各 rank 的片段汇总成完整 logits（由 <span class="mono">do_tensor_parallel_all_gather</span> 控制，单卡时跳过）。最后产出 <span class="mono">next_token_logits</span> 交给采样器（第 28 课）。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/logits_processor.py ::LogitsProcessor</span><span class="ln">输出头的编排</span></div>
+  <pre><span class="kw">class</span> LogitsProcessor(nn.Module):
+    <span class="kw">def</span> forward(self, input_ids, hidden_states,
+                lm_head: VocabParallelEmbedding, logits_metadata):
+        <span class="cm"># 1) 解码/预填充都只取每条请求的“最后一位” hidden</span>
+        last_hidden = self._slice_last_token(hidden_states, logits_metadata)
+        <span class="cm"># 2) 词表并行投影：本 rank 只算自己那段词表的 logits</span>
+        logits = lm_head(last_hidden)               <span class="cm"># [tokens, vocab/这段]</span>
+        <span class="kw">if</span> self.do_tensor_parallel_all_gather:       <span class="cm"># 3) 跨卡拼成完整 logits</span>
+            logits = tensor_model_parallel_all_gather(logits)
+        <span class="kw">return</span> LogitsProcessorOutput(next_token_logits=logits)</pre>
+</div>
+
+<h2>采样之前的最后一公里：logprob、结构化掩码与 logit bias</h2>
+<p>logits 拼齐之后、真正采样之前，还有几道"挂"在输出头附近的后处理，全都作用在这条词表维向量上。其一是 <strong>logprob</strong>：把 logits 过一次 log-softmax，就得到每个 token 的对数概率；用户要 top-k logprob、要给 prompt 里每个 token 打分、或推测解码要校验草稿 token，都从这里取数。其二是<strong>结构化输出的词表掩码</strong>（第 48 课）：当请求要求输出必须是合法 JSON 或匹配某个语法时，约束引擎会算出"当前这一步<strong>哪些 token 允许、哪些禁止</strong>"，把禁止的那些 token 的 logit 直接压到负无穷，于是采样器无论如何都选不到它们。</p>
+<p>其三是 <strong>logit bias</strong>：用户可以手动给某些 token 加正负偏置，抬高或压低它们被选中的概率——同样是在这条 logits 向量的对应位置上加一个数。这几样东西的共同点是：它们都<strong>不改变 lm_head 和词表并行的主干</strong>，只是在"完整 logits → 采样器（第 28 课）"这段缝隙里，按每条请求的需求<strong>对分数做微调或屏蔽</strong>。把它们和末位切片、跨卡汇总放在一起，就构成了 <span class="mono">LogitsProcessor</span> 到 <span class="mono">Sampler</span> 之间这"最后一公里"的全部工作：先裁、再投影、再拼齐、再按需打掩码加偏置，最后才交给采样器落子。</p>
+
+<p>这里有个容易踩的顺序问题值得点明：<strong>掩码和偏置必须在 logits 上、采样之前施加</strong>，而不能在采样之后补救。因为采样器是从一个概率分布里抽样，一旦某个非法 token 进入了候选、被 top-k/p 选中并抽出来，就已经晚了；唯有事先把它的 logit 压成负无穷，softmax 之后它的概率才<strong>恰好为零</strong>，从根上断绝被选中的可能。结构化输出之所以能<strong>保证</strong>每一步都合法，正是靠这种"在分数层面提前封死"的机制，而不是生成完再校验、出错再重试。这也是为什么 logits 这条向量是兵家必争之地：它是"模型的原始判断"与"用户的硬约束"<strong>唯一能干净汇合</strong>的地方。</p>
+
+<p>这一课也把<strong>整条前向路径收束</strong>了：第 24 课 ModelRunner.forward → 模型主体（第 26 课，含注意力第 33 课、MoE 第 34 课、RoPE/Norm 第 36 课）
+→ <strong>LogitsProcessor → logits → Sampler（第 28 课）→ 下一个 token</strong>。词表并行也是继 q/k/v、MLP 之后又一个 TP 切分的例子（第 25/46 课），
+它和前面的量化（第 35 课）、注意力后端（第 33 课）一起，构成了 Part 8"算子层"的全貌：模型只管<strong>调用</strong>这些可复用、可切分、可换内核的层，真正的工程复杂度都被收进了层内部。</p>
+
+<p>站远一点看，这一课其实给 Part 8 画上了句号。第 33 课讲注意力后端怎么把"算注意力"这件事抽象成可换的 kernel，第 34 课讲 MoE 怎么用门控只激活少数专家，第 35 课讲量化怎么用更少比特换显存与带宽，第 36 课讲 RoPE 注入位置、RMSNorm 做归一、以及小算子怎么融合——而本课的输出头与词表并行，正是这条流水线的<strong>最后一站</strong>：把算了半天的 hidden 翻译回人能用的 token。这些层无一例外都遵循同一条设计哲学：<strong>模型文件只负责"按顺序调用"，真正的并行、量化、换内核、集合通信都被收进层的内部</strong>。正因如此，SGLang 才能用一份很薄的模型代码，去适配千变万化的硬件、并行度和精度配置——而你现在已经能从 hidden 一路讲到 token，把这条路上的每一站都说清楚了——嵌入怎么进、注意力怎么算、归一怎么稳、输出头怎么切、采样怎么落子，整条流水线再没有黑箱。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>lm_head</strong>：把每位置的 hidden 投影成<strong>词表大小的分数 = logits</strong>，交采样器（第 28 课）出 token。</li>
+    <li><strong>词表很大</strong>（3 万~25 万）⇒ lm_head/嵌入是大矩阵，TP 下放不下一张卡。</li>
+    <li><strong>词表并行</strong>：<span class="mono">VocabParallelEmbedding</span>/<span class="mono">ParallelLMHead</span> 按词表维切到各 rank，每卡算一段，再 <strong>all-gather</strong> 拼完整。</li>
+    <li><strong>末位切片</strong>：只需每条请求最后一位的 logits，先裁 hidden 大幅省算力。</li>
+    <li><strong>收束前向</strong>：ModelRunner.forward → 模型 → LogitsProcessor → logits → Sampler → token；又一个 TP 切分例子。</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 模型主体算完后，<span class='mono'>lm_head</span> 这个输出头到底<strong>产出什么</strong>？</div>
+  <ol class="opts">
+    <li>产出 KV 缓存，供后续解码复用</li>
+    <li>产出注意力权重矩阵，给下一层用</li>
+    <li>直接产出一个最终的 token 字符串，不再需要采样</li>
+    <li><strong>把每个位置的 hidden 投影成一条“词表大小”的分数向量 = logits</strong>——长度等于词表 token 数，每个分数表示该 token 有多“该”当下一个词，随后交采样器（第 28 课）选出 token</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。lm_head 是个 <span class='mono'>[hidden × vocab]</span> 的大矩阵，把 hidden 向量乘上去，得到一条<strong>长度等于词表大小</strong>的 logits——每个词表 token 一个分数。它<strong>不</strong>直接出 token（那是采样器第 28 课的活），不是注意力权重，也不是 KV 缓存。logits 只是“原始打分”，还要经过采样才落成具体 token。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么要把 lm_head 沿<strong>词表维度</strong>切分（词表并行），而不是放一张卡上？</div>
+  <ol class="opts">
+    <li>切分能提高单个 token 的预测精度</li>
+    <li>为了让每张卡都能独立完整地输出 token，不需通信</li>
+    <li>因为词表必须按字母顺序排在不同卡上</li>
+    <li><strong>词表很大（3 万~25 万），lm_head/嵌入是十几亿参数的大矩阵，一张卡装不下也算不动</strong>；按词表维切到各 TP rank，每卡只持有、只算一段，<strong>显存与算力均摊</strong>，且与 q/k/v、MLP 的 TP 切分（第 25/46 课）一脉相承</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。切词表纯粹是<strong>规模</strong>问题：vocab=15 万、hidden=8192 时，单这张表就十几亿参数，TP 下放不下一张卡、也不该让一卡独扛这步乘法。按词表维切给各 rank，每卡只算一段，显存算力均摊，和其它层的 TP 切分一致。它不提升精度（数学等价），与字母顺序无关，而且恰恰<strong>需要</strong> all-gather 通信才能拼出完整 logits。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 每个 rank 只算出“本段词表”的部分 logits，完整 logits 是<strong>怎么拼出来</strong>的？</div>
+  <ol class="opts">
+    <li>由 CPU 把各卡结果收集后再发回</li>
+    <li>用一次 all-reduce 把各段相加成完整 logits</li>
+    <li>每张卡各自把自己那段补全成完整词表，不需通信</li>
+    <li><strong>用一次跨卡 all-gather，把各 rank 的残缺片段按顺序首尾拼接</strong>成长度等于整个词表的完整向量（单卡时跳过）；若只做贪心 argmax，还能就地汇总局部最大、免去物化完整向量</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。各 rank 的片段<strong>互不重叠</strong>（rank0 管词 0–37499，rank1 管 37500–…），所以要把它们<strong>拼接</strong>而非相加——这正是 <strong>all-gather</strong> 干的事：每卡发出本段、收下别人段，按 rank 顺序拼成完整向量；单卡时直接跳过。注意是 all-gather（拼接）不是 all-reduce（求和），更不靠 CPU 中转；贪心解码时还能就地求全局最大、免去拼出完整向量。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“<strong>超大词典 + N 个管理员</strong>”的类比把输出头与词表并行讲透，并算清<strong>末位切片</strong>省下的算力。请覆盖：①<span class='mono'>lm_head</span> 是 <span class='mono'>[hidden × vocab]</span> 大矩阵，把每位置 hidden 投影成<strong>词表大小的 logits</strong>，再交采样器（第 28 课）出 token；②词表很大（3 万~25 万）⇒ 这张表十几亿参数，TP 下放不下一卡，于是 <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> 按<strong>词表维</strong>切给各 rank，每卡算一段、再 <strong>all-gather</strong> 拼成完整 logits（和 q/k/v、MLP 的切法同源，第 25/46 课）；③<strong>末位切片</strong>——一条 2000 token 的 prompt，预填充虽算了全部位置的 hidden，但<strong>只有最后一位</strong>的 logits 用来预测下一个词，于是把 lm_head 的输入从 2000 行压到 <strong>1 行</strong>，这步算力直接砍掉两千倍（除非要 logprob 才多留几行）。</li>
+    <li>说清 <span class='mono'>LogitsProcessor</span> 如何把输出头<strong>串成一条流水线</strong>，并把它放进“整条前向收束”的脉络里。请说明：①它的三步——<strong>末位切片</strong>（按 <span class='mono'>logits_metadata</span> 只留每条请求的末位 hidden）→ <strong>词表并行投影</strong>（<span class='mono'>ParallelLMHead</span> 算本 rank 那段）→ <strong>跨卡 all-gather</strong>（<span class='mono'>do_tensor_parallel_all_gather</span> 控制，单卡跳过）；②采样前“最后一公里”的后处理都作用在这条 logits 向量上——<strong>logprob</strong>（log-softmax 取对数概率）、<strong>结构化输出词表掩码</strong>（第 48 课，把非法 token 的 logit 压成负无穷）、<strong>logit bias</strong>，且都必须在<strong>采样之前</strong>施加才能从根上封死非法 token；③本课如何收束整条前向：第 24 课 ModelRunner.forward → 模型主体（第 26 课）→ LogitsProcessor → logits → Sampler（第 28 课）→ token，并把 Part 8（注意力第 33、MoE 第 34、量化第 35、RoPE/Norm 第 36、本课 logits/词表并行）连成“可插拔算子层”的全貌。</li>
   </ul>
 </div>
 </div>

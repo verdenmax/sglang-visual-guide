@@ -2352,6 +2352,376 @@ QUIZZES = {
             },
         ],
     },
+    "33-attention-backend-abstraction.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "模型 <span class='mono'>forward</span> 里那行 <span class='mono'>self.attn(q,k,v,forward_batch)</span>，调用的 <span class='mono'>RadixAttention</span> 层<strong>本身</strong>到底做了什么？",
+                    "en": "What does the <span class='mono'>RadixAttention</span> layer <strong>itself</strong> — the one called by <span class='mono'>self.attn(q,k,v,forward_batch)</span> in a model's <span class='mono'>forward</span> — actually do?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>它不含 kernel，只持有形状参数（头数 / head_dim / 缩放 / 层号），把真正的矩阵乘 + softmax 委托给一个 <span class='mono'>AttentionBackend</span></strong>。算注意力的脏活由后端的 kernel 干，层本身只是个稳定的调用入口",
+                        "en": "<strong>It holds no kernel — only shape params (heads / head_dim / scale / layer id) — and delegates the real matmul + softmax to an <span class='mono'>AttentionBackend</span></strong>. The dirty work of computing attention is the backend's kernel; the layer is just a stable call site",
+                    },
+                    {"zh": "它内部直接写死了一段 FlashInfer CUDA kernel，亲自完成全部注意力计算", "en": "It hardcodes a FlashInfer CUDA kernel inside and computes all of attention itself"},
+                    {"zh": "它负责把 KV 写到磁盘并管理驱逐策略", "en": "It writes KV to disk and manages the eviction policy"},
+                    {"zh": "它只是一个占位层，前向时被直接跳过", "en": "It's just a placeholder layer, skipped at forward time"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "RadixAttention 是模型前向调用的那一层，但它不实现 kernel：它持有形状参数，把注意力数学委托给可替换的 AttentionBackend。写死 kernel 恰恰是它要避免的；驱逐/落盘是缓存子系统（第 31/32 课）的事；它绝非占位层。",
+                    "en": "RadixAttention is the layer the model's forward calls, but it implements no kernel: it carries shape params and delegates the math to a swappable AttentionBackend. Hardcoding a kernel is exactly what it avoids; eviction/disk is the cache subsystem (Lessons 31/32); it is not a placeholder.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>forward_extend</span> 和 <span class='mono'>forward_decode</span> 为什么要做成<strong>两条分开的路径</strong>？",
+                    "en": "Why are <span class='mono'>forward_extend</span> and <span class='mono'>forward_decode</span> kept as <strong>two separate paths</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>因为两种场景的形状与访存模式截然不同</strong>：EXTEND/prefill 是一批<strong>新 token</strong>一起做<strong>完整注意力</strong>（受因果掩码）；DECODE 是<strong>1 个 query token</strong> 注意<strong>整段已缓存的 KV</strong>。形状不同、最优 kernel 不同，分开才能各自最优（DECODE 还最适合 CUDA graph，第 27 课）",
+                        "en": "<strong>Because the two cases differ sharply in shape and memory access</strong>: EXTEND/prefill is a batch of <strong>new tokens</strong> doing <strong>full attention</strong> (under the causal mask); DECODE is <strong>1 query token</strong> attending the <strong>entire cached KV</strong>. Different shapes, different optimal kernels — splitting lets each be optimal (and DECODE fits CUDA graph best, Lesson 27)",
+                    },
+                    {"zh": "纯粹是历史遗留，两条路径其实跑的是完全相同的代码", "en": "Purely historical; the two paths actually run identical code"},
+                    {"zh": "一条给 NVIDIA 用、一条给 AMD 用", "en": "One is for NVIDIA and the other for AMD"},
+                    {"zh": "extend 算注意力、decode 只负责采样下一个 token", "en": "extend computes attention while decode only samples the next token"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "EXTEND（prefill）是多个新 token 的完整注意力，DECODE 是单 query 对整段缓存 KV——算术形状与访存模式不同，所以拆成两条路径各用最优 kernel；DECODE 固定形状还便于 CUDA graph。两条路并非同一份代码，也不是按硬件区分，decode 同样要算注意力。",
+                    "en": "EXTEND (prefill) is full attention over many new tokens; DECODE is a single query over the whole cached KV — different arithmetic shapes and access patterns, so they split to use the best kernel each; DECODE's fixed shape also suits CUDA graph. The paths aren't identical code, aren't split by hardware, and decode still computes attention.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把注意力定义成 <span class='mono'>AttentionBackend</span> 这个抽象基类，最核心的好处是什么？",
+                    "en": "What is the core benefit of defining attention as the <span class='mono'>AttentionBackend</span> abstract base class?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>新 kernel、新硬件只要实现这份契约就能接进来，不必改任何模型文件</strong>。SGLang 支持几十个模型（第 26 课），若 kernel 写死在每个模型里，每出一个新后端都要逐个改——接口把“调用注意力”和“实现注意力”解耦，注意力成了可替换的策略对象",
+                        "en": "<strong>A new kernel or new hardware plugs in just by implementing the contract, without touching any model file</strong>. SGLang supports dozens of models (Lesson 26); if the kernel were hardcoded per model, every new backend would mean editing them all — the interface decouples 'calling attention' from 'implementing attention,' making attention a swappable strategy object",
+                    },
+                    {"zh": "它能让注意力计算自动变快，无需任何 kernel 优化", "en": "It magically makes attention faster without any kernel optimization"},
+                    {"zh": "它把所有后端的代码合并成一个文件，便于阅读", "en": "It merges every backend's code into one file for easier reading"},
+                    {"zh": "它强制所有硬件都使用完全相同的 kernel", "en": "It forces all hardware to use the exact same kernel"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "接口的价值是可插拔：实现 AttentionBackend 的几个方法就能加新后端/新硬件，模型文件一行不动。它不会凭空提速（提速靠后端 kernel），不是把代码合并，更不是强制统一 kernel——恰恰相反，它让不同硬件用不同 kernel 而上层不变。",
+                    "en": "The interface's value is pluggability: implement a few AttentionBackend methods to add a backend/hardware, model files untouched. It doesn't magically speed things up (the backend kernel does), doesn't merge code, and doesn't force one kernel — quite the opposite, it lets different hardware use different kernels while the top stays stable.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“<strong>可换头的电钻</strong>”这个类比，把注意力后端抽象讲透。请覆盖：①模型里的注意力层（<span class='mono'>RadixAttention</span> 的 <span class='mono'>nn.Module</span>，第 29 课）为什么像“钻身”——它<strong>不含 kernel</strong>，只持有形状参数，把真正的数学<strong>委托</strong>给 <span class='mono'>AttentionBackend</span>（ABC）；②有哪些“钻头”——FlashInfer（NV 高性能默认）、Triton（可移植兜底）、FlashAttention 3、AMD/NPU 等（第 42 课），由 <span class='mono'>--attention-backend</span> 或按硬件自动选；③模型作者只写 <span class='mono'>self.attn(q,k,v,forward_batch)</span>（第 26 课），为什么“换钻头不用改钻身”。",
+                "en": "Using the '<strong>power drill with interchangeable bits</strong>' analogy, fully explain the attention backend abstraction. Cover: (1) why the model's attention layer (the <span class='mono'>RadixAttention</span> <span class='mono'>nn.Module</span>, Lesson 29) is like the 'drill body' — it <strong>holds no kernel</strong>, only shape params, and <strong>delegates</strong> the real math to an <span class='mono'>AttentionBackend</span> (ABC); (2) what the 'bits' are — FlashInfer (NV high-perf default), Triton (portable fallback), FlashAttention 3, AMD/NPU (Lesson 42), chosen by <span class='mono'>--attention-backend</span> or auto by hardware; (3) why the model author only writes <span class='mono'>self.attn(q,k,v,forward_batch)</span> (Lesson 26) and 'swapping the bit needs no change to the body.'",
+            },
+            {
+                "zh": "说清一次注意力调用在后端内部<strong>从头到尾</strong>发生了什么，并接回相邻几课。请说明：①什么叫“<strong>规划元数据</strong>（plan metadata）”——在跑 kernel 之前，后端要先算清每条请求读 KV 池（第 30 课）的<strong>哪些页</strong>、<strong>因果掩码</strong>、<strong>序列长度</strong>，以及 CUDA graph（第 27 课）需要的固定形状缓冲；②后端如何按 <span class='mono'>forward_mode</span> 分派到 <strong>EXTEND/prefill</strong>（新 token 完整注意力）与 <strong>DECODE</strong>（1 个 query 注意整段缓存 KV）两条路；③为什么 DECODE 这条固定形状的路最适合 CUDA graph；④更底层的 kernel 怎么写（第 38/40 课）与多硬件（第 42 课）如何在这条接口线之下独立演化。",
+                "en": "Explain what happens inside a backend during one attention call <strong>end to end</strong>, tying it back to neighboring lessons. Cover: (1) what 'plan metadata' means — before running the kernel, the backend computes which <strong>pages</strong> of the KV pool (Lesson 30) each request reads, the <strong>causal mask</strong>, the <strong>sequence lengths</strong>, and the fixed-shape buffers a CUDA graph (Lesson 27) needs; (2) how the backend dispatches by <span class='mono'>forward_mode</span> to <strong>EXTEND/prefill</strong> (new tokens, full attention) vs <strong>DECODE</strong> (1 query over the whole cached KV); (3) why the fixed-shape DECODE path best suits CUDA graph; (4) how lower-level kernels (Lessons 38/40) and multi-hardware support (Lesson 42) evolve independently below this interface line.",
+            },
+        ],
+    },
+    "34-moe-layer.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "一个 MoE 层里有 64 个专家、<span class='mono'>top_k=2</span>。路由器（router/gate）对<strong>每个 token</strong> 做了什么？",
+                    "en": "An MoE layer has 64 experts with <span class='mono'>top_k=2</span>. What does the router/gate do for <strong>each token</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>给 64 个专家各打一个分，只挑出得分最高的 2 个真正参与计算</strong>，其余 62 个对这个 token 一动不动；最后按路由权重把这 2 个专家的输出加权合并。这就是<strong>稀疏激活</strong>",
+                        "en": "<strong>It scores all 64 experts and keeps only the top-2 to actually compute</strong>; the other 62 do nothing for this token; the 2 outputs are then combined weighted by the routing scores. That is <strong>sparse activation</strong>",
+                    },
+                    {"zh": "让 token 依次穿过全部 64 个专家，再取平均", "en": "Sends the token through all 64 experts in turn, then averages"},
+                    {"zh": "随机挑 2 个专家，不看 token 内容", "en": "Picks 2 experts at random, ignoring the token's content"},
+                    {"zh": "整个 batch 共用同一个被选中的专家", "en": "The whole batch shares one single chosen expert"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "路由器是个很小的线性层，对每个 token 给所有专家打分并取 top-k（这里 2/64），只有这 2 个专家计算、再按权重合并——这正是稀疏。它不会让 token 走遍全部专家（那就退化成稠密了），不是随机挑，也不是整个 batch 共用一个：路由是<strong>逐 token</strong> 的。",
+                    "en": "The router is a tiny linear layer that scores all experts per token and takes top-k (here 2 of 64); only those 2 compute, then combine by weight — that is sparsity. It does not run the token through all experts (that would be dense), is not random, and is not shared batch-wide: routing is <strong>per-token</strong>.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么说 MoE “scale 参数而不 scale 每 token 的算力”？",
+                    "en": "Why is MoE said to 'scale parameters, not per-token compute'?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>专家越多，这一层的参数（知识容量）越大；但每个 token 只走固定的 <span class='mono'>top-k</span> 个专家，单 token 的 FLOPs 由 top-k 钉死，几乎不随专家总数增长</strong>。于是模型能做到千亿参数，而推理每 token 算力基本恒定",
+                        "en": "<strong>More experts means more parameters (knowledge capacity) in the layer; but each token visits only a fixed <span class='mono'>top-k</span>, so per-token FLOPs are pinned by top-k and barely grow with the expert count</strong>. So the model can reach hundreds of billions of params while per-token inference compute stays roughly constant",
+                    },
+                    {"zh": "因为 MoE 的专家比稠密 FFN 算得更快，单个专家本身就提速了", "en": "Because an MoE expert is intrinsically faster to compute than a dense FFN"},
+                    {"zh": "因为 MoE 不需要任何矩阵乘法", "en": "Because MoE needs no matrix multiplication at all"},
+                    {"zh": "因为参数被压缩到几乎为零", "en": "Because the parameters are compressed to nearly zero"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键在解耦：参数随专家数涨（容量变大），而每 token 只激活 top-k 个专家，算力被 top-k 钉住。不是单个专家更快（专家就是小 FFN），更不是没有矩阵乘或参数为零——恰恰相反，参数很多，只是显存要装下全部专家。",
+                    "en": "The point is decoupling: parameters grow with experts (more capacity), while each token activates only top-k, so compute is pinned by top-k. It's not that a single expert is faster (an expert is a small FFN), nor that there's no matmul or zero params — quite the opposite, params are many; memory must hold them all.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SGLang 的 <span class='mono'>FusedMoE</span> 层把什么“融合（fuse）”进了 kernel？",
+                    "en": "What does SGLang's <span class='mono'>FusedMoE</span> layer 'fuse' into kernels?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>把路由 + 按专家分组 + 分组/批量 GEMM 融合进少数几个 kernel，避免那段“for 每个专家”的慢 Python 循环</strong>——否则会有几十次 kernel 启动和零碎小算子，GPU 大量空转",
+                        "en": "<strong>It fuses routing + grouping-by-expert + grouped/batched GEMM into a few kernels, avoiding a slow 'for each expert' Python loop</strong> — which otherwise means dozens of kernel launches and tiny scattered ops with the GPU mostly idle",
+                    },
+                    {"zh": "把所有专家的权重压缩成一个专家", "en": "Compresses all experts' weights into a single expert"},
+                    {"zh": "把注意力和 MoE 合并成同一层", "en": "Merges attention and MoE into the same layer"},
+                    {"zh": "把多张 GPU 融合成一张逻辑 GPU", "en": "Fuses multiple GPUs into one logical GPU"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "FusedMoE 的“融合”指把路由、分组、分组 GEMM 压进少数 kernel，消灭逐专家的慢 Python 循环与零碎小算子。它不会把专家压成一个（那就没有混合专家了），不合并注意力，也不负责把多卡变一卡——跨卡是专家并行（第 46 课）的事。",
+                    "en": "FusedMoE's 'fuse' means pressing routing, grouping, and grouped GEMM into a few kernels, killing the slow per-expert Python loop and tiny ops. It does not collapse experts into one (that would end the mixture), does not merge attention, and does not turn many GPUs into one — cross-GPU is expert parallelism (Lesson 46).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“<strong>医院分诊台</strong>”这个类比，把 MoE 层讲透。请覆盖：①一个<strong>稠密 FFN</strong> 让每个 token 都穿过同一个大 MLP，参数和单 token 算力<strong>焊死</strong>；②MoE 层 = <strong>N 个小专家（FFN）+ 一个路由器/门控</strong>，路由器对<strong>每个 token</strong> 打分、取 <span class='mono'>top-k</span>（如 64 选 2），只有这 k 个专家计算 → <strong>稀疏</strong>；③为什么这样能“<strong>scale 参数而不 scale 每 token 算力</strong>”，并点名 DeepSeek-V3 / Mixtral / Qwen-MoE。",
+                "en": "Using the '<strong>hospital triage desk</strong>' analogy, fully explain the MoE layer. Cover: (1) a <strong>dense FFN</strong> runs every token through the same big MLP, <strong>welding</strong> parameters to per-token compute; (2) an MoE layer = <strong>N small experts (FFNs) + a router/gate</strong>; the router scores <strong>each token</strong> and takes <span class='mono'>top-k</span> (e.g. 2 of 64), so only those k compute → <strong>sparse</strong>; (3) why this 'scales parameters, not per-token compute,' naming DeepSeek-V3 / Mixtral / Qwen-MoE.",
+            },
+            {
+                "zh": "说清一次 MoE 前向<strong>从头到尾</strong>的计算，并接回相邻几课。请说明：①四步流程——<strong>路由 → 按专家分组 → 分组/批量 GEMM（第 38 课）→ 散回并按路由权重加权合并</strong>，以及 <span class='mono'>FusedMoE</span> 为什么要把这些融合进 kernel（避免逐专家的慢 Python 循环）；②扩展到多卡时，<strong>专家并行（EP，第 46 课）</strong>如何把专家摊到不同 GPU、token 经 all-to-all 分发到专家所在卡再合并；③<strong>EPLB（第 47 课）</strong>为什么要均衡“热门专家”，以及 MoE 的三笔代价（路由不均衡、all-to-all 通信、装下全部专家的显存）。",
+                "en": "Explain one MoE forward <strong>end to end</strong>, tying it to neighboring lessons. Cover: (1) the four steps — <strong>route → group by expert → grouped/batched GEMM (Lesson 38) → scatter back and combine weighted by routing scores</strong> — and why <span class='mono'>FusedMoE</span> fuses these into kernels (avoiding a slow per-expert Python loop); (2) scaling out, how <strong>expert parallelism (EP, Lesson 46)</strong> spreads experts across GPUs and all-to-all dispatches tokens to their expert's card before combining; (3) why <strong>EPLB (Lesson 47)</strong> balances 'hot experts,' and MoE's three costs (routing imbalance, all-to-all comm, memory to hold all experts).",
+            },
+        ],
+    },
+    "35-quantization.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "量化把权重从 fp16 压到 INT4，本质上是用什么<strong>换</strong>什么？",
+                    "en": "Quantizing weights from fp16 to INT4 fundamentally <strong>trades</strong> what for what?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>用一点点精度，换显存、访存带宽，以及（在低精度硬件上）算力</strong>——更少的比特 + 一个 scale 近似原权重，于是模型更小、解码要搬的字节更少、跑得更快",
+                        "en": "<strong>A little accuracy in exchange for HBM, memory bandwidth, and (on low-precision hardware) FLOPs</strong> — fewer bits + a scale approximate the original weights, so the model is smaller, decode moves fewer bytes, and it runs faster",
+                    },
+                    {"zh": "用更多显存换更高精度", "en": "More HBM in exchange for higher accuracy"},
+                    {"zh": "用算力换模型质量，完全不省显存", "en": "Compute for model quality, saving no HBM at all"},
+                    {"zh": "什么都不损失，纯粹免费加速", "en": "Loses nothing — pure free speedup"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "量化是一笔取舍：牺牲<strong>一点点精度</strong>，换来显存减半到四分之一、解码访存带宽减半，低精度硬件上还顺带省算力。它不是用更多显存换精度（恰恰相反），也不是不省显存，更不是完全无损——只是损失常常小到要跑评测才看得出。",
+                    "en": "Quantization is a trade: give up <strong>a little accuracy</strong> for HBM halved-to-quartered, decode bandwidth halved, and FLOPs too on low-precision hardware. It is not more HBM for accuracy (the opposite), does not skip HBM savings, and is not lossless — the loss is just usually too small to see outside a benchmark.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "AWQ/GPTQ 这类“<strong>仅权重</strong>”量化和 FP8 这类“<strong>权重+激活</strong>”量化，最关键的差别是什么？",
+                    "en": "What's the key difference between <strong>weight-only</strong> quant (AWQ/GPTQ) and <strong>weight + activation</strong> quant (FP8)?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>仅权重</strong>把权重存成 4 位省显存，但计算前要<strong>反量化回高精度</strong>再做矩阵乘，省存+带宽不省算力；<strong>权重+激活</strong>两边都低精度，直接跑<strong>低精度 GEMM</strong>（FP8），<strong>连算力一起省</strong>，但更挑硬件和精度",
+                        "en": "<strong>Weight-only</strong> stores 4-bit weights to save HBM but <strong>dequantizes back to high precision</strong> before the matmul, saving storage+bandwidth not FLOPs; <strong>weight+activation</strong> keeps both low precision and runs a <strong>low-precision GEMM</strong> (FP8), <strong>saving FLOPs too</strong>, but is pickier about hardware and accuracy",
+                    },
+                    {"zh": "仅权重更省显存，权重+激活完全不省显存", "en": "Weight-only saves HBM; weight+activation saves none"},
+                    {"zh": "两者完全等价，只是名字不同", "en": "They are identical, just named differently"},
+                    {"zh": "权重+激活只能用于训练，不能推理", "en": "Weight+activation is training-only, never for inference"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "仅权重（AWQ/GPTQ）算前要把 4 位权重<strong>反量化</strong>回高精度，所以只省存储和带宽，对访存密集的解码特别划算；权重+激活（FP8）两边都低精度，能直接跑 FP8 GEMM <strong>把算力也省了</strong>，吞吐最高但需要 FP8 硬件、精度更需小心。两者都省显存，并非等价，FP8 也照样用于推理。",
+                    "en": "Weight-only (AWQ/GPTQ) must <strong>dequantize</strong> 4-bit weights to high precision before computing, so it saves only storage and bandwidth — great for memory-bound decode; weight+activation (FP8) keeps both low precision and runs FP8 GEMM to <strong>save FLOPs too</strong>, highest throughput but needs FP8 hardware and more care on accuracy. Both save HBM, they're not equivalent, and FP8 is very much used for inference.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一组 INT4 权重共享的那个 <span class='mono'>scale</span>（缩放因子）到底是什么，<strong>per-group</strong> 粒度又意味着什么？",
+                    "en": "What exactly is the <span class='mono'>scale</span> shared by a group of INT4 weights, and what does a <strong>per-group</strong> granularity mean?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>scale 是把低位整数还原回真实数值范围的乘数</strong>：真实值 ≈ 整数 × scale；<strong>per-group</strong> 指每一小块权重各算一个 scale，比 per-tensor（整张一个）更细、精度更高，代价是 scale 本身要占点空间、算起来更复杂",
+                        "en": "<strong>The scale is the multiplier that restores low-bit ints to a real numeric range</strong>: real ≈ int × scale; <strong>per-group</strong> means each small block of weights gets its own scale — finer than per-tensor (one for the whole weight) and more accurate, at the cost of the scales taking some space and complexity",
+                    },
+                    {"zh": "scale 是模型的学习率，训练时才用", "en": "The scale is the model's learning rate, used only in training"},
+                    {"zh": "scale 就是 INT4 整数本身，没有额外的数", "en": "The scale is just the INT4 integer itself, with no extra number"},
+                    {"zh": "per-group 表示整个模型只有一个全局 scale", "en": "Per-group means the whole model has a single global scale"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "scale 是反量化的乘数：把存下来的低位整数乘以 scale，才近似还原成原来的浮点值（真实值 ≈ 整数 × scale）。粒度从粗到细是 per-tensor → per-channel → per-group/blockwise，越细越能贴合局部动态范围、精度越高，但要存更多 scale、计算更复杂。它不是学习率，也不是整数本身，per-group 更不是全局一个 scale。",
+                    "en": "The scale is the dequant multiplier: multiply the stored low-bit int by the scale to approximately recover the original float (real ≈ int × scale). Granularity goes per-tensor → per-channel → per-group/blockwise; finer fits the local dynamic range better for higher accuracy, but stores more scales and costs more compute. It's not a learning rate, not the integer itself, and per-group is certainly not one global scale.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“<strong>JPEG / MP3 压缩</strong>”这个类比把量化讲透，并算清它<strong>省的是什么</strong>。请覆盖：①权重平时是 fp16（16 位），量化用<strong>更少比特（FP8/FP4/INT4）+ 一个 scale</strong> 近似原值，<strong>真实值 ≈ 整数 × scale</strong>；②为什么<strong>大头省的是内存而非算力</strong>——显存减半到四分之一（给 KV 缓存和并发腾地方，第 4/8 课），以及解码<strong>访存密集</strong>、权重搬得少一半就快一半；③为什么低比特还能用——LLM 权重<strong>冗余、宽容</strong>，真正危险的是<strong>离群值</strong>，而 <strong>AWQ</strong>（按激活幅度保护关键通道）和 <strong>GPTQ</strong>（带校准集逐层最小化重建误差）正是靠聪明地处理它们把精度损失压到几乎看不出。",
+                "en": "Using the '<strong>JPEG / MP3 compression</strong>' analogy, fully explain quantization and pin down <strong>what it saves</strong>. Cover: (1) weights are normally fp16 (16-bit); quantization approximates them with <strong>fewer bits (FP8/FP4/INT4) + a scale</strong>, where <strong>real ≈ int × scale</strong>; (2) why the <strong>big win is memory, not compute</strong> — HBM halved-to-quartered (room for KV cache and concurrency, Lessons 4/8), and decode being <strong>memory-bound</strong> so halving the weight bytes halves the move; (3) why low bits still work — LLM weights are <strong>redundant and tolerant</strong>, the real danger is <strong>outliers</strong>, and <strong>AWQ</strong> (protecting salient channels by activation magnitude) and <strong>GPTQ</strong> (a calibrated, per-layer minimization of reconstruction error) keep the accuracy loss nearly invisible by handling them cleverly.",
+            },
+            {
+                "zh": "说清量化在 SGLang 里<strong>怎么“插”进线性层</strong>，并把它放进“一切皆可插拔”的脉络里。请说明：①每种格式提供一个 <span class='mono'>QuantizationConfig</span> → <span class='mono'>LinearMethod</span>（如 <span class='mono'>Fp8LinearMethod</span>），<strong>替换线性层“怎么存权重、怎么做这次矩阵乘”</strong>，于是模型文件（第 26 课）里的 <span class='mono'>RowParallelLinear</span> 一个字不改、由配置决定底下是 fp16 还是 fp8；②权重从<strong>预量化 checkpoint</strong> 读入或在加载时<strong>即时量化</strong>（第 25 课）；③<strong>FP8</strong> 的 E4M3 与<strong>动态/静态</strong>激活定标、<span class='mono'>cutlass</span>/<span class='mono'>Marlin</span> 快路与 H100/B200 原生 FP8；④<strong>KV 缓存量化</strong>是相关但独立的旋钮，并点明量化是继注意力后端（第 33 课）、KV 池之后“可插拔”的第三个例子。",
+                "en": "Explain <strong>how quantization 'plugs into' linear layers</strong> in SGLang, and place it in the 'everything pluggable' arc. Cover: (1) each format provides a <span class='mono'>QuantizationConfig</span> → <span class='mono'>LinearMethod</span> (e.g. <span class='mono'>Fp8LinearMethod</span>) that <strong>replaces how a linear layer stores its weight and does its matmul</strong>, so the <span class='mono'>RowParallelLinear</span> in the model file (Lesson 26) is unchanged and config decides fp16 vs fp8 underneath; (2) weights come from a <strong>pre-quantized checkpoint</strong> or are <strong>quantized on the fly</strong> at load (Lesson 25); (3) <strong>FP8</strong>'s E4M3 and <strong>dynamic/static</strong> activation scaling, the <span class='mono'>cutlass</span>/<span class='mono'>Marlin</span> fast paths and native FP8 on H100/B200; (4) <strong>KV-cache quantization</strong> as a related-but-separate knob, and naming quantization the third 'pluggable' example after the attention backend (Lesson 33) and the KV pool.",
+            },
+        ],
+    },
+    "36-rope-norm-and-ops.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "注意力本身对 token 的顺序<strong>不敏感</strong>，RoPE 是怎么把<strong>位置</strong>注入进去的？",
+                    "en": "Attention itself is <strong>insensitive</strong> to token order — how does RoPE inject <strong>position</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>按位置把每个 q/k 向量旋转一个角度（角度 ∝ 位置）</strong>，旋转后两个向量的点积只依赖它们位置<strong>之差</strong>，于是注意力变成<strong>相对位置感知</strong>",
+                        "en": "<strong>It rotates each q/k vector by an angle ∝ its position</strong>; after rotation the dot product of two vectors depends only on the <strong>difference</strong> of their positions, so attention becomes <strong>relative-position aware</strong>",
+                    },
+                    {"zh": "给每个词学习一个绝对位置向量，加到词向量上", "en": "It learns an absolute position vector per word and adds it to the token embedding"},
+                    {"zh": "在 softmax 后乘一个和位置成正比的标量", "en": "It multiplies a scalar proportional to position after the softmax"},
+                    {"zh": "把 KV 缓存按位置重新排序", "en": "It reorders the KV cache by position"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "RoPE 不“加”位置向量，而是按位置<strong>旋转</strong> q/k。点积的数学决定了：两个旋转过的向量做点积，结果只取决于两个旋转角的<strong>差</strong>，也就是相对位置——于是注意力天然感知 token 间的距离，且不引入任何可学习参数。它不是绝对位置嵌入、不是 softmax 后的标量、也和重排 KV 无关。",
+                    "en": "RoPE doesn't add a position vector — it <strong>rotates</strong> q/k by position. The dot-product math means two rotated vectors' product depends only on the <strong>difference</strong> of their rotation angles, i.e. relative position — so attention naturally feels inter-token distance, with no learnable parameters. It's not absolute position embedding, not a post-softmax scalar, and unrelated to reordering KV.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个在 4k 上训练的模型，想直接服务 32k 的长文本，RoPE 系的方法（线性缩放 / NTK / YaRN）靠什么做到？",
+                    "en": "To serve 32k text with a 4k-trained model, how do RoPE methods (linear scaling / NTK / YaRN) pull it off?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>拉伸旋转频率</strong>，把超出训练范围的位置角度压回模型熟悉的区间——无需重训，只换一个 RoPE 变体（由 <span class='mono'>get_rope</span> 按配置造出），模型代码不变",
+                        "en": "<strong>Stretch the rotation frequencies</strong> so out-of-range position angles fall back into the familiar range — no retraining, just a different RoPE variant (built by <span class='mono'>get_rope</span> from config), model code unchanged",
+                    },
+                    {"zh": "把多出来的 token 直接丢弃", "en": "Drop the extra tokens beyond 4k"},
+                    {"zh": "把模型权重重新量化到更低比特", "en": "Re-quantize the model weights to lower bits"},
+                    {"zh": "在 32k 上从头重训一个新模型", "en": "Train a brand-new model from scratch at 32k"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "上下文扩展的关键，是<strong>巧妙地拉伸旋转频率</strong>：线性缩放等比压缩位置、NTK 不均匀调整高低频、YaRN 再加温度分段，让 4k 训练的角度范围覆盖 32k+。这些都是 RoPE 变体，通过同一个 <span class='mono'>get_rope(...)</span> 工厂按配置造出，<strong>不必重训、不改模型代码</strong>。丢 token 会丢信息，量化是另一回事，重训则违背了“无需重训”的初衷。",
+                    "en": "Context extension hinges on <strong>cleverly stretching the rotation frequencies</strong>: linear scaling compresses positions proportionally, NTK adjusts high/low frequencies unevenly, YaRN adds temperature and segmenting — covering 32k+ with the 4k-trained angle range. All are RoPE variants built by the same <span class='mono'>get_rope(...)</span> factory from config, with <strong>no retraining and no model-code change</strong>. Dropping tokens loses info, quantization is unrelated, and retraining defeats the whole point.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "相比经典 LayerNorm，Llama 系常用的 RMSNorm 关键差别是什么？",
+                    "en": "Versus classic LayerNorm, what's the key difference of the RMSNorm used by the Llama family?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>RMSNorm 不减均值、不加偏置</strong>，只把向量 ÷ 均方根再乘一个 scale——比 LayerNorm（减均值 ÷ 标准差 + scale + shift）<strong>更便宜</strong>，LLM 上效果一样好，还常和残差加法融合",
+                        "en": "<strong>RMSNorm does no mean subtraction and has no bias</strong> — it just divides the vector by its root-mean-square and multiplies a scale; <strong>cheaper</strong> than LayerNorm (subtract mean, ÷ std, + scale + shift), as good for LLMs, and often fused with the residual add",
+                    },
+                    {"zh": "RMSNorm 精度更高但慢得多", "en": "RMSNorm is more accurate but far slower"},
+                    {"zh": "RMSNorm 需要额外的偏置参数", "en": "RMSNorm needs an extra bias parameter"},
+                    {"zh": "两者完全一样，只是命名不同", "en": "They're identical, just named differently"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LayerNorm 要减均值、除标准差，并带 scale+shift 两组参数；RMSNorm 砍掉了减均值和偏置，只做 ÷ 均方根再乘 scale——计算更少、参数更少、<strong>更便宜</strong>，而大量实践证明 LLM 上效果不输 LayerNorm，因此成了主流。它不是更慢，也不需要额外偏置，更不是和 LayerNorm 完全等价。",
+                    "en": "LayerNorm subtracts the mean, divides by std, and carries scale+shift; RMSNorm drops mean subtraction and bias, doing only ÷ root-mean-square then scale — less compute, fewer params, <strong>cheaper</strong>, and practice shows it matches LayerNorm for LLMs, hence its dominance. It isn't slower, needs no extra bias, and is not equivalent to LayerNorm.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“<strong>指南针 + 夹角</strong>”的类比把 RoPE 讲透，并说清它为什么能<strong>扩展上下文</strong>。请覆盖：①注意力的点积对顺序<strong>不敏感</strong>，所以必须注入位置；②RoPE 不“加”位置向量，而是按位置把 q/k <strong>旋转</strong>一个角度（角度 ∝ 位置），旋转后点积只依赖位置<strong>之差</strong> ⇒ <strong>相对位置感知</strong>，且<strong>无可学习参数</strong>；③线性缩放 / NTK-aware / YaRN 如何<strong>拉伸旋转频率</strong>，让 4k 训练的模型服务 32k+，且都由 <span class='mono'>get_rope(...)</span> 按配置造变体、<strong>模型代码不变</strong>（前向应用见第 33 课注意力之前）。",
+                "en": "Using the '<strong>compass + angle gap</strong>' analogy, fully explain RoPE and why it enables <strong>context extension</strong>. Cover: (1) the attention dot product is <strong>order-insensitive</strong>, so position must be injected; (2) RoPE doesn't add a position vector but <strong>rotates</strong> q/k by an angle ∝ position, so the dot product depends only on the <strong>difference</strong> of positions ⇒ <strong>relative-position aware</strong>, with <strong>no learnable parameters</strong>; (3) how linear scaling / NTK-aware / YaRN <strong>stretch the rotation frequencies</strong> to serve 32k+ from a 4k-trained model, all built by <span class='mono'>get_rope(...)</span> from config with <strong>model code unchanged</strong> (applied right before attention, Lesson 33).",
+            },
+            {
+                "zh": "解释<strong>为什么要把小算子融合</strong>，并把 RMSNorm、SiluAndMul、fused add-norm 放进“可插拔的硬件优化层”这条脉络里。请说明：①GPU 上每次 kernel 启动 + 显存读写都有<strong>固定开销</strong>，一串小算子各跑各的会让数据在显存和计算单元间<strong>来回搬好几趟</strong>，而搬运常比计算还慢；②融合把相邻小算子并成<strong>一个 kernel</strong>（如 <span class='mono'>SiluAndMul</span> 合 SiLU(gate)×up、fused add-norm 合残差加法+RMSNorm、qk-norm+rope），省掉中间往返；③这些都是可复用、硬件优化的 <span class='mono'>nn.Module</span>，模型只管调用（第 26 课），层内部按平台挑融合/专属 kernel——继注意力后端（第 33 课）、量化（第 35 课）之后“一切皆可插拔”在算子维的体现，更底层 kernel/融合见第 38 课。",
+                "en": "Explain <strong>why small ops get fused</strong>, and place RMSNorm, SiluAndMul, and fused add-norm in the 'pluggable hardware-optimized layers' arc. Cover: (1) on a GPU every kernel launch + HBM read/write carries <strong>fixed overhead</strong>, and a chain of separate small ops makes data <strong>shuttle back and forth</strong> between HBM and compute several times — often slower than the math; (2) fusion merges neighboring small ops into <strong>one kernel</strong> (e.g. <span class='mono'>SiluAndMul</span> for SiLU(gate)×up, fused add-norm for residual-add+RMSNorm, qk-norm+rope), skipping the intermediate round-trips; (3) all are reusable, hardware-optimized <span class='mono'>nn.Module</span>s the model merely calls (Lesson 26), and the layer picks a fused/platform kernel internally — 'everything pluggable' along the ops dimension after the attention backend (Lesson 33) and quantization (Lesson 35); lower-level kernels/fusion are Lesson 38.",
+            },
+        ],
+    },
+    "37-logits-and-vocab-parallel.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "模型主体算完后，<span class='mono'>lm_head</span> 这个输出头到底<strong>产出什么</strong>？",
+                    "en": "After the model body finishes, what does the <span class='mono'>lm_head</span> output head actually <strong>produce</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>把每个位置的 hidden 投影成一条“词表大小”的分数向量 = logits</strong>——长度等于词表 token 数，每个分数表示该 token 有多“该”当下一个词，随后交采样器（第 28 课）选出 token",
+                        "en": "<strong>It projects each position's hidden into a 'vocab-sized' score vector = logits</strong> — length equals the number of vocab tokens, each score saying how 'fitting' that token is as the next word, then handed to the Sampler (Lesson 28) to pick a token",
+                    },
+                    {"zh": "直接产出一个最终的 token 字符串，不再需要采样", "en": "It directly produces a final token string, no sampling needed"},
+                    {"zh": "产出注意力权重矩阵，给下一层用", "en": "It produces an attention weight matrix for the next layer"},
+                    {"zh": "产出 KV 缓存，供后续解码复用", "en": "It produces the KV cache for later decode reuse"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "lm_head 是个 <span class='mono'>[hidden × vocab]</span> 的大矩阵，把 hidden 向量乘上去，得到一条<strong>长度等于词表大小</strong>的 logits——每个词表 token 一个分数。它<strong>不</strong>直接出 token（那是采样器第 28 课的活），不是注意力权重，也不是 KV 缓存。logits 只是“原始打分”，还要经过采样才落成具体 token。",
+                    "en": "lm_head is a big <span class='mono'>[hidden × vocab]</span> matrix; multiplying the hidden vector through it yields logits <strong>as long as the vocab</strong> — one score per vocab token. It does <strong>not</strong> emit a token directly (that's the Sampler's job, Lesson 28), nor attention weights, nor the KV cache. Logits are just raw scores that still need sampling to become a concrete token.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么要把 lm_head 沿<strong>词表维度</strong>切分（词表并行），而不是放一张卡上？",
+                    "en": "Why split lm_head along the <strong>vocab dimension</strong> (vocab parallelism) instead of keeping it on one GPU?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>词表很大（3 万~25 万），lm_head/嵌入是十几亿参数的大矩阵，一张卡装不下也算不动</strong>；按词表维切到各 TP rank，每卡只持有、只算一段，<strong>显存与算力均摊</strong>，且与 q/k/v、MLP 的 TP 切分（第 25/46 课）一脉相承",
+                        "en": "<strong>The vocab is huge (30k–250k), so lm_head/embedding are billion-param matrices too big for one GPU to hold or compute</strong>; splitting the vocab dim across TP ranks lets each GPU hold and compute one segment, <strong>spreading HBM and FLOPs</strong>, consistent with the q/k/v and MLP TP splits (Lessons 25/46)",
+                    },
+                    {"zh": "切分能提高单个 token 的预测精度", "en": "Splitting improves the prediction accuracy of a single token"},
+                    {"zh": "因为词表必须按字母顺序排在不同卡上", "en": "Because the vocab must be alphabetically ordered across GPUs"},
+                    {"zh": "为了让每张卡都能独立完整地输出 token，不需通信", "en": "So each GPU can independently emit full tokens with no communication"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "切词表纯粹是<strong>规模</strong>问题：vocab=15 万、hidden=8192 时，单这张表就十几亿参数，TP 下放不下一张卡、也不该让一卡独扛这步乘法。按词表维切给各 rank，每卡只算一段，显存算力均摊，和其它层的 TP 切分一致。它不提升精度（数学等价），与字母顺序无关，而且恰恰<strong>需要</strong> all-gather 通信才能拼出完整 logits。",
+                    "en": "Splitting the vocab is purely a <strong>scale</strong> issue: at vocab=150k, hidden=8192 this one table is over a billion params, too big for one GPU under TP and not something one GPU should bear alone. Sharding the vocab dim across ranks lets each compute one segment, spreading HBM and FLOPs, in line with other layers' TP. It doesn't improve accuracy (it's mathematically equivalent), has nothing to do with alphabetical order, and in fact <strong>requires</strong> an all-gather to assemble the full logits.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "每个 rank 只算出“本段词表”的部分 logits，完整 logits 是<strong>怎么拼出来</strong>的？",
+                    "en": "Each rank computes only its segment's partial logits — how is the <strong>full</strong> logits vector assembled?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>用一次跨卡 all-gather，把各 rank 的残缺片段按顺序首尾拼接</strong>成长度等于整个词表的完整向量（单卡时跳过）；若只做贪心 argmax，还能就地汇总局部最大、免去物化完整向量",
+                        "en": "<strong>A cross-GPU all-gather concatenates each rank's partial segment end-to-end</strong> into a full vector as long as the whole vocab (skipped on a single GPU); for plain greedy argmax it can instead reduce local maxima in place, avoiding materializing the full vector",
+                    },
+                    {"zh": "每张卡各自把自己那段补全成完整词表，不需通信", "en": "Each GPU pads its own segment into a full vocab, no communication"},
+                    {"zh": "用一次 all-reduce 把各段相加成完整 logits", "en": "An all-reduce sums the segments into full logits"},
+                    {"zh": "由 CPU 把各卡结果收集后再发回", "en": "The CPU collects all GPU results and sends them back"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "各 rank 的片段<strong>互不重叠</strong>（rank0 管词 0–37499，rank1 管 37500–…），所以要把它们<strong>拼接</strong>而非相加——这正是 <strong>all-gather</strong> 干的事：每卡发出本段、收下别人段，按 rank 顺序拼成完整向量；单卡时直接跳过。注意是 all-gather（拼接）不是 all-reduce（求和），更不靠 CPU 中转；贪心解码时还能就地求全局最大、免去拼出完整向量。",
+                    "en": "The ranks' segments are <strong>non-overlapping</strong> (rank0 owns tokens 0–37499, rank1 37500–…), so they must be <strong>concatenated</strong>, not summed — exactly what <strong>all-gather</strong> does: each GPU sends its segment and receives the others', stitched in rank order into the full vector; skipped on one GPU. Note it's all-gather (concatenate), not all-reduce (sum), and not via a CPU detour; for greedy decode it can reduce the global max in place and skip building the full vector.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“<strong>超大词典 + N 个管理员</strong>”的类比把输出头与词表并行讲透，并算清<strong>末位切片</strong>省下的算力。请覆盖：①<span class='mono'>lm_head</span> 是 <span class='mono'>[hidden × vocab]</span> 大矩阵，把每位置 hidden 投影成<strong>词表大小的 logits</strong>，再交采样器（第 28 课）出 token；②词表很大（3 万~25 万）⇒ 这张表十几亿参数，TP 下放不下一卡，于是 <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> 按<strong>词表维</strong>切给各 rank，每卡算一段、再 <strong>all-gather</strong> 拼成完整 logits（和 q/k/v、MLP 的切法同源，第 25/46 课）；③<strong>末位切片</strong>——一条 2000 token 的 prompt，预填充虽算了全部位置的 hidden，但<strong>只有最后一位</strong>的 logits 用来预测下一个词，于是把 lm_head 的输入从 2000 行压到 <strong>1 行</strong>，这步算力直接砍掉两千倍（除非要 logprob 才多留几行）。",
+                "en": "Using the '<strong>giant dictionary + N librarians</strong>' analogy, fully explain the output head and vocab parallelism, and pin down the FLOPs saved by the <strong>last-token slice</strong>. Cover: (1) <span class='mono'>lm_head</span> is a big <span class='mono'>[hidden × vocab]</span> matrix that projects each position's hidden into <strong>vocab-sized logits</strong>, handed to the Sampler (Lesson 28) for a token; (2) the vocab is huge (30k–250k) ⇒ this table is a billion+ params, too big for one GPU under TP, so <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> split the <strong>vocab dim</strong> across ranks, each computing a segment then <strong>all-gather</strong>-ing into full logits (same idea as the q/k/v and MLP splits, Lessons 25/46); (3) the <strong>last-token slice</strong> — for a 2000-token prompt, prefill computes hidden for all positions but only the <strong>last position's</strong> logits predict the next word, so shrinking lm_head's input from 2000 rows to <strong>1 row</strong> cuts this step's compute by 2000× (unless logprobs are requested, keeping a few more rows).",
+            },
+            {
+                "zh": "说清 <span class='mono'>LogitsProcessor</span> 如何把输出头<strong>串成一条流水线</strong>，并把它放进“整条前向收束”的脉络里。请说明：①它的三步——<strong>末位切片</strong>（按 <span class='mono'>logits_metadata</span> 只留每条请求的末位 hidden）→ <strong>词表并行投影</strong>（<span class='mono'>ParallelLMHead</span> 算本 rank 那段）→ <strong>跨卡 all-gather</strong>（<span class='mono'>do_tensor_parallel_all_gather</span> 控制，单卡跳过）；②采样前“最后一公里”的后处理都作用在这条 logits 向量上——<strong>logprob</strong>（log-softmax 取对数概率）、<strong>结构化输出词表掩码</strong>（第 48 课，把非法 token 的 logit 压成负无穷）、<strong>logit bias</strong>，且都必须在<strong>采样之前</strong>施加才能从根上封死非法 token；③本课如何收束整条前向：第 24 课 ModelRunner.forward → 模型主体（第 26 课）→ LogitsProcessor → logits → Sampler（第 28 课）→ token，并把 Part 8（注意力第 33、MoE 第 34、量化第 35、RoPE/Norm 第 36、本课 logits/词表并行）连成“可插拔算子层”的全貌。",
+                "en": "Explain how <span class='mono'>LogitsProcessor</span> <strong>chains the output head into a pipeline</strong>, and place it in the 'closing the whole forward' arc. Cover: (1) its three steps — <strong>last-token slice</strong> (keep only each request's last hidden per <span class='mono'>logits_metadata</span>) → <strong>vocab-parallel projection</strong> (<span class='mono'>ParallelLMHead</span> computes this rank's segment) → <strong>cross-GPU all-gather</strong> (gated by <span class='mono'>do_tensor_parallel_all_gather</span>, skipped on one GPU); (2) the 'last mile' post-processing before sampling that all acts on this logits vector — <strong>logprob</strong> (log-softmax for log-probabilities), the <strong>structured-output vocab mask</strong> (Lesson 48, driving illegal tokens' logits to negative infinity), and <strong>logit bias</strong>, all of which must be applied <strong>before sampling</strong> to seal off illegal tokens at the root; (3) how this lesson closes the whole forward: Lesson 24's ModelRunner.forward → model body (Lesson 26) → LogitsProcessor → logits → Sampler (Lesson 28) → token, tying Part 8 (attention L33, MoE L34, quant L35, RoPE/Norm L36, and this lesson's logits/vocab parallelism) into the full 'pluggable operator layer' picture.",
+            },
+        ],
+    },
 }
 
 
