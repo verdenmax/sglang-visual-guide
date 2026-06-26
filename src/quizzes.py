@@ -3832,6 +3832,302 @@ QUIZZES = {
             },
         ],
     },
+    "53-build-and-run.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "为什么说 <span class='mono'>ServerArgs</span> 是“把全书旋钮收成 CLI flag”？这对调优部署意味着什么？",
+                    "en": "Why is <span class='mono'>ServerArgs</span> described as \"gathering the whole guide's knobs into CLI flags\", and what does that mean for tuning a deployment?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>ServerArgs</span> 是一个 dataclass，<strong>每个字段自动映射成一个 --kebab-case flag</strong>（如 <span class='mono'>tp_size</span>→<span class='mono'>--tp-size</span>）；前面学的每个组件都成了一个旋钮，调优 = 设置对的 flag</strong>",
+                        "en": "<strong><span class='mono'>ServerArgs</span> is a dataclass and <strong>each field auto-maps to a --kebab-case flag</strong> (e.g. <span class='mono'>tp_size</span>→<span class='mono'>--tp-size</span>); every component you learned becomes a knob, so tuning = setting the right flags</strong>",
+                    },
+                    {"zh": "ServerArgs 只存模型路径，其它参数都写在配置文件里", "en": "ServerArgs only stores the model path; everything else lives in a config file"},
+                    {"zh": "每个 flag 都要手写解析函数，和组件没有对应关系", "en": "Each flag needs a hand-written parser and has no correspondence to components"},
+                    {"zh": "flag 名是随机生成的，无法从字段名推断", "en": "Flag names are randomly generated and cannot be inferred from field names"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>ServerArgs</span> 是 <span class='mono'>@dataclasses.dataclass</span>，字段名按 kebab-case 规则自动变成 CLI flag。于是“一墙 flag”其实就是字段清单，每个 flag 背后都是你学过的机制（并行、注意力后端、量化、KV 显存……），调优部署就是拧对这些旋钮。",
+                    "en": "<span class='mono'>ServerArgs</span> is a <span class='mono'>@dataclasses.dataclass</span> whose field names auto-become kebab-case CLI flags. The 'wall of flags' is just the field list, and each flag is a mechanism you already learned (parallelism, attention backend, quantization, KV memory…), so tuning is twisting the right knobs.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你想让 KV 缓存池占用更多 GPU 显存，并在 flashinfer / triton / fa 之间切换注意力内核，分别该设哪个 flag？",
+                    "en": "To give the KV cache pool more GPU memory and to switch the attention kernel among flashinfer / triton / fa, which flags do you set?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>--mem-fraction-static</span> 控制 KV 池占的 GPU 显存（第30/31课）；<span class='mono'>--attention-backend</span> 选注意力内核（第33课）</strong>",
+                        "en": "<strong><span class='mono'>--mem-fraction-static</span> controls the GPU memory the KV pool gets (Lessons 30/31); <span class='mono'>--attention-backend</span> picks the attention kernel (Lesson 33)</strong>",
+                    },
+                    {"zh": "<span class='mono'>--tp-size</span> 控制显存，<span class='mono'>--quantization</span> 选注意力内核", "en": "<span class='mono'>--tp-size</span> controls memory and <span class='mono'>--quantization</span> picks the attention kernel"},
+                    {"zh": "<span class='mono'>--max-running-requests</span> 控制显存，<span class='mono'>--dp-size</span> 选注意力内核", "en": "<span class='mono'>--max-running-requests</span> controls memory and <span class='mono'>--dp-size</span> picks the attention kernel"},
+                    {"zh": "<span class='mono'>--chunked-prefill-size</span> 控制显存，<span class='mono'>--speculative-algorithm</span> 选注意力内核", "en": "<span class='mono'>--chunked-prefill-size</span> controls memory and <span class='mono'>--speculative-algorithm</span> picks the attention kernel"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>--mem-fraction-static</span> 决定静态显存中分给 KV 池的比例；<span class='mono'>--attention-backend</span> 在 flashinfer/triton/fa 之间选内核。其它 flag 各管各的：<span class='mono'>--tp-size</span>/<span class='mono'>--dp-size</span> 管并行，<span class='mono'>--quantization</span> 管量化，<span class='mono'>--chunked-prefill-size</span> 切 prefill，<span class='mono'>--max-running-requests</span> 限批大小。",
+                    "en": "<span class='mono'>--mem-fraction-static</span> decides the share of static memory given to the KV pool; <span class='mono'>--attention-backend</span> chooses among flashinfer/triton/fa. Other flags do their own jobs: <span class='mono'>--tp-size</span>/<span class='mono'>--dp-size</span> for parallelism, <span class='mono'>--quantization</span> for quantization, <span class='mono'>--chunked-prefill-size</span> to split prefills, <span class='mono'>--max-running-requests</span> to cap the batch.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在批量离线评测脚本里，不想起 HTTP 服务、不走网络，直接在内存里调用生成，应选哪种模式？",
+                    "en": "For a batch offline-eval script that wants no HTTP server and no network, calling generation directly in memory, which mode should you choose?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>Engine</span>——进程内 / 离线模式，在 Python 脚本里直接实例化，无 HTTP；而 HTTP 服务器是面向在线、多客户端的常驻服务</strong>",
+                        "en": "<strong><span class='mono'>Engine</span> — the in-process / offline mode, instantiated directly in a Python script with no HTTP; the HTTP server is the long-lived online service for many clients</strong>",
+                    },
+                    {"zh": "必须启动 HTTP 服务器，再用 localhost 自己请求自己", "en": "You must launch the HTTP server and then request yourself over localhost"},
+                    {"zh": "两种模式都需要网络，Engine 只是端口不同", "en": "Both modes need the network; Engine just uses a different port"},
+                    {"zh": "Engine 不支持生成，只能做健康检查", "en": "Engine cannot generate and is only for health checks"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>Engine</span> 是离线 / 进程内门面：直接 import 实例化，在内存里调用生成，省去起服务和发 HTTP 的全部开销，适合脚本化与评测。HTTP 服务器则是在线门面，监听端口、对外暴露 <span class='mono'>/generate</span> 与 <span class='mono'>/v1/...</span>。两者共享同一内核。",
+                    "en": "<span class='mono'>Engine</span> is the offline / in-process facade: import and instantiate it, call generation in memory, skipping all the overhead of standing up a service and firing HTTP — ideal for scripting and eval. The HTTP server is the online facade, listening on a port and exposing <span class='mono'>/generate</span> and <span class='mono'>/v1/...</span>. Both share the same core.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话描述一条 <span class='mono'>python -m sglang.launch_server</span> 命令背后发生的事：从 <span class='mono'>run_server</span> 调用 <span class='mono'>prepare_server_args</span> 解析进 <span class='mono'>ServerArgs</span>，到启动引擎三件套（第13课），再到暴露 HTTP 端点（第15课）。并说明为什么“每个 dataclass 字段自动映射成 --kebab-case flag”能把“一墙 flag”变成“我早就理解的组件”。",
+                "en": "In your own words, describe what happens behind one <span class='mono'>python -m sglang.launch_server</span> command: from <span class='mono'>run_server</span> calling <span class='mono'>prepare_server_args</span> to parse into <span class='mono'>ServerArgs</span>, to booting the engine trio (Lesson 13), to exposing the HTTP endpoint (Lesson 15). Explain why \"each dataclass field auto-maps to a --kebab-case flag\" turns a 'wall of flags' into 'components I already understand'.",
+            },
+            {
+                "zh": "对比 <span class='mono'>Engine</span>（离线 / 进程内，无 HTTP）与 HTTP 服务器（在线）两种门面：各自的使用场景、开销与对外接口是什么？再举出至少 4 个你会用到的 flag（如 <span class='mono'>--tp-size</span>、<span class='mono'>--quantization</span>、<span class='mono'>--mem-fraction-static</span>、<span class='mono'>--max-running-requests</span>），分别说明它们控制什么、对应前面哪一课。",
+                "en": "Contrast the two facades — <span class='mono'>Engine</span> (offline / in-process, no HTTP) versus the HTTP server (online): what are their use cases, overhead, and external interfaces? Then name at least 4 flags you'd use (e.g. <span class='mono'>--tp-size</span>, <span class='mono'>--quantization</span>, <span class='mono'>--mem-fraction-static</span>, <span class='mono'>--max-running-requests</span>), explaining what each controls and which earlier lesson it maps to.",
+            },
+        ],
+    },
+    "54-benchmark-and-profiling.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "把 batch 堆大后，<span class='mono'>output_throughput</span> 上去了，但单条请求感觉更卡了。最可能是哪个指标变差，为什么？",
+                    "en": "After enlarging the batch, <span class='mono'>output_throughput</span> went up but a single request feels choppier. Which metric most likely got worse, and why?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>tpot</span>（token 间隔 / ITL）变大——吞吐与延迟是取舍（第8课），堆大 batch 提高了整体每秒 token，却拉长了单条请求相邻 token 的间隔</strong>",
+                        "en": "<strong><span class='mono'>tpot</span> (inter-token latency / ITL) increased — throughput and latency trade off (Lesson 8); a bigger batch raises overall tokens/s but stretches the gap between a single request's adjacent tokens</strong>",
+                    },
+                    {"zh": "<span class='mono'>completed</span> 变小，因为请求都失败了", "en": "<span class='mono'>completed</span> dropped because requests all failed"},
+                    {"zh": "<span class='mono'>input_throughput</span> 变大导致更卡", "en": "<span class='mono'>input_throughput</span> grew, which causes the choppiness"},
+                    {"zh": "和任何指标都无关，纯粹是网络抖动", "en": "Unrelated to any metric; purely network jitter"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>output_throughput</span> 衡量整台服务器每秒吐多少 token，而单条请求的顺滑度由 <span class='mono'>tpot</span>（相邻 token 间隔，即 ITL）决定。堆大 batch 提高总吞吐，却可能延长每条请求的 token 间隔，于是用户感觉变卡——这正是第8课吞吐/延迟取舍在压测数字上的体现。",
+                    "en": "<span class='mono'>output_throughput</span> measures the whole server's tokens/s, but a single request's smoothness is set by <span class='mono'>tpot</span> (the gap between adjacent tokens, i.e. ITL). A bigger batch lifts total throughput yet can lengthen each request's inter-token gap, so it feels choppier — exactly Lesson 8's throughput/latency trade-off showing up in benchmark numbers.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "压测报告里 <span class='mono'>mean_ttft_ms</span> 看着不错，但用户抱怨“有时候巨慢”。你最该盯哪个数字？",
+                    "en": "In the report <span class='mono'>mean_ttft_ms</span> looks fine, yet users complain it's \"sometimes painfully slow.\" Which number should you watch most?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>p99_ttft_ms</span>——延迟是分布不是单值；负载下的长尾(p99)才是用户真正感受到的卡顿，只看 mean 会掩盖尾部</strong>",
+                        "en": "<strong><span class='mono'>p99_ttft_ms</span> — latency is a distribution, not one value; under load the tail (p99) is what users actually feel, and the mean hides it</strong>",
+                    },
+                    {"zh": "只看 <span class='mono'>mean_ttft_ms</span> 就够了，分位数没意义", "en": "<span class='mono'>mean_ttft_ms</span> alone is enough; percentiles are meaningless"},
+                    {"zh": "<span class='mono'>request_throughput</span>，因为它等于延迟", "en": "<span class='mono'>request_throughput</span>, because it equals latency"},
+                    {"zh": "<span class='mono'>completed</span>，越大延迟越低", "en": "<span class='mono'>completed</span>; bigger means lower latency"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "同一批请求的 ttft 是一条分布（mean/median/p90/p95/p99）。高并发下排队、CUDA graph 重放抖动、偶发长 prompt 会制造长尾，99% 很快但 1% 极慢正是用户印象最深的体验。所以负载之下要报 <span class='mono'>p99</span>，而不是只报均值。",
+                    "en": "The ttft of one batch is a distribution (mean/median/p90/p95/p99). Under concurrency, queuing, CUDA-graph replay jitter, and occasional long prompts create a tail; 99% fast but 1% very slow is the impression users remember. So under load report <span class='mono'>p99</span>, not just the mean.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "压测数字证实“确实慢”，但你不知道慢在哪一步。下一步该用什么、怎么用？",
+                    "en": "The benchmark confirms \"it's slow,\" but you don't know which step. What's the next tool and how do you use it?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>用 profiler：设 <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> 或调 <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> 抓 torch trace，在 <span class='mono'>chrome://tracing</span>/Perfetto 看每个 CUDA kernel，分辨 prefill/decode、gap、CUDA graph(第27课)</strong>",
+                        "en": "<strong>Use the profiler: set <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> or call <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> to capture a torch trace, then in <span class='mono'>chrome://tracing</span>/Perfetto inspect each CUDA kernel to tell prefill/decode, gaps, CUDA graph (Lesson 27) apart</strong>",
+                    },
+                    {"zh": "再跑一遍 bench_serving，数字会自己解释原因", "en": "Re-run bench_serving; the numbers will explain the cause by themselves"},
+                    {"zh": "直接重启服务器，慢的问题会消失", "en": "Just restart the server and the slowness goes away"},
+                    {"zh": "把 mean 改成 median 上报就行", "en": "Report median instead of mean and you're done"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "benchmark 是黑盒（量化“有多慢”），profiler 是白盒（定位“为什么慢”）。设 <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> 或用 <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> 抓 trace，在 <span class='mono'>chrome://tracing</span> 打开时间线，就能看到每个 CUDA kernel、prefill/decode 区段、gap(launch 开销)与 CUDA graph 重放，把“它慢”翻译成“这个 kernel/这段空隙的问题”。",
+                    "en": "The benchmark is black-box (quantify \"how slow\"); the profiler is white-box (locate \"why slow\"). Set <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> or use <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> to capture a trace, open the timeline in <span class='mono'>chrome://tracing</span>, and see every CUDA kernel, prefill/decode regions, gaps (launch overhead), and CUDA-graph replay — translating \"it's slow\" into \"this kernel/gap is the problem.\"",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释“压测负责量化、分析负责定位”的两段式循环：<span class='mono'>bench_serving</span> 如何向运行中的服务器发射负载并产出 <span class='mono'>BenchmarkMetrics</span>？再说明 <span class='mono'>ttft</span>（=prefill 延迟）与 <span class='mono'>tpot</span>（=token 间隔/ITL）分别对应用户的什么体验，并联系第4课（prefill 计算受限 vs decode 带宽受限）。",
+                "en": "In your own words explain the two-stage loop of \"benchmark quantifies, profile locates\": how does <span class='mono'>bench_serving</span> fire a load at a running server and produce <span class='mono'>BenchmarkMetrics</span>? Then explain what <span class='mono'>ttft</span> (= prefill latency) and <span class='mono'>tpot</span> (= inter-token latency / ITL) each correspond to in the user's experience, tying in Lesson 4 (prefill compute-bound vs decode bandwidth-bound).",
+            },
+            {
+                "zh": "为什么一份诚实的压测报告必须给出分位数（mean/median/p90/p95/p99）而不是只报均值？请结合“长尾在负载下产生的来源”作答。另外，<span class='mono'>bench_serving</span> 与 <span class='mono'>bench_one_batch</span> 各适合什么场景，为什么 kernel 级 A/B 用后者？",
+                "en": "Why must an honest benchmark report give percentiles (mean/median/p90/p95/p99) rather than only the mean? Answer in terms of where the tail comes from under load. Also, when is <span class='mono'>bench_serving</span> appropriate versus <span class='mono'>bench_one_batch</span>, and why use the latter for kernel-level A/B?",
+            },
+        ],
+    },
+    "55-test-suite-and-ci.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "你想验证一个采样函数算得对，希望它在每个 PR 上都快速跑一遍。该写哪种测试，怎么写？",
+                    "en": "You want to verify a sampling function computes correctly and have it run fast on every PR. Which kind of test, and how?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>单元测试：直接 <span class='mono'>import</span> 这个函数，构造输入并 <span class='mono'>assert</span> 输出——不启动服务、毫秒级、CI 每个 PR 都跑</strong>",
+                        "en": "<strong>A unit test: directly <span class='mono'>import</span> the function, build inputs and <span class='mono'>assert</span> the output — no server, millisecond-scale, CI runs it on every PR</strong>",
+                    },
+                    {"zh": "端到端测试：必须先用 <span class='mono'>popen_launch_server</span> 拉起服务器才能测函数", "en": "An e2e test: you must launch a server with <span class='mono'>popen_launch_server</span> first to test a function"},
+                    {"zh": "不写测试，直接在生产里观察", "en": "Skip tests and just observe in production"},
+                    {"zh": "只能手动在 REPL 里试，无法自动化", "en": "Only manual REPL trials; it can't be automated"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "单元测试不需要服务器：import 目标函数/类、构造输入、断言输出即可。它快、稳、便宜，所以 CI 在每个 PR 上都跑。端到端测试才需要 <span class='mono'>popen_launch_server</span> 拉起真实服务器，用于校验整套系统的输出/准确率。",
+                    "en": "A unit test needs no server: import the target function/class, build inputs, assert the output. It's fast, stable, and cheap, so CI runs it on every PR. Only e2e tests need <span class='mono'>popen_launch_server</span> to launch a real server, used to verify the whole system's outputs/accuracy.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SGLang 的测试为什么继承 <span class='mono'>CustomTestCase</span> 而不是裸的 <span class='mono'>unittest.TestCase</span>？它解决了什么问题？",
+                    "en": "Why do SGLang tests inherit <span class='mono'>CustomTestCase</span> instead of bare <span class='mono'>unittest.TestCase</span>? What problem does it solve?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>它包裹 <span class='mono'>setUpClass</span>，保证即便 setup 抛异常 <span class='mono'>tearDownClass</span> 也一定执行——原生 unittest 会跳过收尾，导致泄漏端口/GPU 进程、连累后面的测试</strong>",
+                        "en": "<strong>It wraps <span class='mono'>setUpClass</span> so that <span class='mono'>tearDownClass</span> always runs even if setup raises — plain unittest skips teardown, leaking ports/GPU processes and cascade-failing later tests</strong>",
+                    },
+                    {"zh": "它让测试跑得更快，因为跳过了 teardown", "en": "It makes tests faster by skipping teardown"},
+                    {"zh": "它替换了 pytest，成为新的运行器", "en": "It replaces pytest as the new runner"},
+                    {"zh": "它自动给每个测试加上网络 mock", "en": "It auto-mocks the network for every test"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "原生 <span class='mono'>unittest</span> 在 <span class='mono'>setUpClass</span> 失败时会跳过 <span class='mono'>tearDownClass</span>。在会启动服务器的套件里，这意味着已占用的端口和拉起的 GPU 进程不会被回收，后续测试连环失败。<span class='mono'>CustomTestCase</span> 包裹 setUpClass、保证清理一定发生，让一个坏掉的 setup 不会毒害整套测试。",
+                    "en": "Plain <span class='mono'>unittest</span> skips <span class='mono'>tearDownClass</span> when <span class='mono'>setUpClass</span> fails. In a suite that launches servers, that means occupied ports and spawned GPU processes aren't reclaimed, and later tests cascade-fail. <span class='mono'>CustomTestCase</span> wraps setUpClass and guarantees cleanup happens, so one broken setup doesn't poison the whole suite.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 CI 真正跑测试之前，是什么先把代码风格/lint 卡了一道关？测试又是怎样在 GPU 上跑完一整套的？",
+                    "en": "Before CI even runs the tests, what first gates code style/lint? And how does the whole suite finish on GPUs?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>pre-commit</span> 先在本地和 CI 卡风格/lint；测试登记在 <span class='mono'>test/registered/</span> 下，被分片(partition)派发到打标签的 GPU 运行机上并行跑完</strong>",
+                        "en": "<strong><span class='mono'>pre-commit</span> first gates style/lint locally and in CI; tests are registered under <span class='mono'>test/registered/</span> and partitioned across labelled GPU runners to run in parallel</strong>",
+                    },
+                    {"zh": "没有任何风格检查；所有测试在一台机器上串行跑", "en": "No style check at all; all tests run serially on one machine"},
+                    {"zh": "<span class='mono'>pytest</span> 负责 lint，测试只在 CPU 上跑", "en": "<span class='mono'>pytest</span> does the linting and tests run only on CPU"},
+                    {"zh": "CI 随机抽一个测试跑，其余忽略", "en": "CI runs one random test and ignores the rest"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>pre-commit</span> 在 CI 开跑前先把风格/lint 卡一道——风格不过后面都免谈。测试登记在 <span class='mono'>test/registered/</span>，CI 把它们分片派发到多台打标签的 GPU 机并行执行，于是庞大的套件也能在合理时间内跑完。贡献者工作流：在 <span class='mono'>test/registered/unit/…</span> 找/加测试 → 本地 pytest → push → CI 真机重跑。",
+                    "en": "<span class='mono'>pre-commit</span> gates style/lint before CI starts — if style fails, nothing else matters. Tests live under <span class='mono'>test/registered/</span>, and CI partitions them across multiple labelled GPU machines to run in parallel, so even a huge suite finishes in reasonable time. Contributor workflow: find/add a test under <span class='mono'>test/registered/unit/…</span> → local pytest → push → CI re-runs on real hardware.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释单元测试与端到端测试的分工：为什么单元测试能在每个 PR 上快跑，而端到端测试要用 <span class='mono'>popen_launch_server</span> 拉起真实的 <span class='mono'>sglang.launch_server</span>（第13课）再校验输出/准确率？两者各能抓到哪类 bug？",
+                "en": "In your own words explain the division of labor between unit and e2e tests: why can unit tests run fast on every PR, while e2e tests must launch a real <span class='mono'>sglang.launch_server</span> (Lesson 13) via <span class='mono'>popen_launch_server</span> and then verify outputs/accuracy? What class of bug does each catch?",
+            },
+            {
+                "zh": "详细说明 <span class='mono'>CustomTestCase</span> 为什么要包裹 <span class='mono'>setUpClass</span>：原生 <span class='mono'>unittest</span> 在 setup 失败时的行为是什么，会造成什么后果（端口/GPU 进程泄漏、连累后面测试）？再把测试体系和第56课（运行这些测试的 PR 流程）联系起来。",
+                "en": "Explain in detail why <span class='mono'>CustomTestCase</span> wraps <span class='mono'>setUpClass</span>: what does plain <span class='mono'>unittest</span> do when setup fails, and what consequences follow (leaked ports/GPU processes, cascade-failing later tests)? Then connect the test system to Lesson 56 (the PR flow that runs these tests).",
+            },
+        ],
+    },
+    "56-code-conventions-and-pr.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "你刚 clone 完代码，想给 SGLang 贡献一个功能。正确的起手流程是怎样的？",
+                    "en": "You've just cloned the code and want to contribute a feature to SGLang. What's the correct opening flow?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>先 <span class='mono'>fork</span> 官方仓库（新贡献者没有 push 权限）→ clone 你的 fork → <span class='mono'>git checkout -b</span> 开分支 → 改动 → <span class='mono'>pre-commit</span> + 测试 → push → 对着 <span class='mono'>main</span> 开 PR</strong>",
+                        "en": "<strong>First <span class='mono'>fork</span> the official repo (new contributors have no push access) → clone your fork → <span class='mono'>git checkout -b</span> a branch → change → <span class='mono'>pre-commit</span> + test → push → open a PR against <span class='mono'>main</span></strong>",
+                    },
+                    {"zh": "直接 push 到官方仓库的 <span class='mono'>main</span> 分支", "en": "Push directly to the official repo's <span class='mono'>main</span> branch"},
+                    {"zh": "在官方仓库上直接改，不开分支也不 fork", "en": "Edit the official repo directly, no branch and no fork"},
+                    {"zh": "先开 PR，再慢慢补代码和测试", "en": "Open the PR first, then slowly fill in code and tests later"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "新贡献者没有官方仓库的写权限，所以必须先 fork 一份属于自己的副本，再 clone 这个 fork、开分支改动。改完用 <span class='mono'>pre-commit</span> 过格式/lint、按第55课补测试并本地跑通，最后 push 到你的 fork 并对着 <span class='mono'>main</span> 开 PR。每一环都不能跳。",
+                    "en": "New contributors have no write access to the official repo, so you must fork your own copy first, then clone that fork and branch. After changing, run <span class='mono'>pre-commit</span> for format/lint, add a test per Lesson 55 and run it locally, then push to your fork and open a PR against <span class='mono'>main</span>. No link can be skipped.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你跑 <span class='mono'>pre-commit run --all-files</span>，第一次就失败了，还改动了你的文件。这说明什么？该怎么办？",
+                    "en": "You run <span class='mono'>pre-commit run --all-files</span> and it fails the first time, having also modified your files. What does that mean and what should you do?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>它在就地自动修复（重排 import、补空行等），不是 bug——把这些改动 add 进来再重跑，反复直到全部 PASS，再开 PR</strong>",
+                        "en": "<strong>It auto-fixes in place (reordering imports, adding blank lines, etc.), not a bug — add those changes and re-run, repeating until everything PASSES, then open the PR</strong>",
+                    },
+                    {"zh": "说明 <span class='mono'>pre-commit</span> 坏了，应该卸载它", "en": "It means <span class='mono'>pre-commit</span> is broken and should be uninstalled"},
+                    {"zh": "忽略它，直接 push，CI 会帮你修", "en": "Ignore it and just push; CI will fix it for you"},
+                    {"zh": "把被改动的文件 revert 掉再 push", "en": "Revert the modified files and then push"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>pre-commit</span> 是格式/lint 关卡，第一次失败通常是它在就地修复你的文件（black、isort 等）。正确做法是把这些自动改动 add 进来后再跑一次，反复重跑直到全绿。必须在开 PR 之前过关，因为 CI（第55课）会跑完全相同的检查，本地不过 CI 也不过，PR 会被卡住。",
+                    "en": "<span class='mono'>pre-commit</span> is the format/lint gate, and a first failure is usually it fixing your files in place (black, isort, etc.). The right move is to add those auto-changes and run again, repeating until all green. It must pass before you open a PR, because CI (Lesson 55) runs the exact same checks — if it fails locally it fails in CI, and the PR is blocked.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你改了 <span class='mono'>python/sglang/srt/</span> 下的一个文件，还想顺手更新文档。按 SGLang 的约定该怎么做？",
+                    "en": "You modified a file under <span class='mono'>python/sglang/srt/</span> and also want to update docs. What do SGLang's conventions require?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>去 <span class='mono'>test/registered/unit/</span> 给你的改动加/补测试；文档只写在 <span class='mono'>docs_new/</span>（改老的 <span class='mono'>docs/</span> 会被 lint 拒绝）</strong>",
+                        "en": "<strong>Add/extend a test under <span class='mono'>test/registered/unit/</span> for your change; docs go only in <span class='mono'>docs_new/</span> (editing the old <span class='mono'>docs/</span> is rejected by lint)</strong>",
+                    },
+                    {"zh": "运行时核心代码不需要测试；文档随便写在 <span class='mono'>docs/</span> 或 <span class='mono'>docs_new/</span>", "en": "Runtime-core code needs no test; docs can go in either <span class='mono'>docs/</span> or <span class='mono'>docs_new/</span>"},
+                    {"zh": "另起一套新结构，不必模仿现有模块模式", "en": "Invent a brand-new structure; no need to follow existing module patterns"},
+                    {"zh": "测试和文档都交给 reviewer 补", "en": "Leave both tests and docs for the reviewer to add"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "改运行时核心（<span class='mono'>python/sglang/srt/</span>）必须在 <span class='mono'>test/registered/unit/</span> 补上覆盖，没有测试护栏不会被接受。文档目录已经冻结，老 <span class='mono'>docs/</span> 的改动会被 lint 直接拒绝，新文档一律写 <span class='mono'>docs_new/</span>。再加上顺着已有可插拔接缝（第33/42课）模仿现成结构，reviewer 才审得快。",
+                    "en": "Changing runtime core (<span class='mono'>python/sglang/srt/</span>) requires coverage under <span class='mono'>test/registered/unit/</span>; without a test guardrail it won't be accepted. The docs tree is frozen — edits to the old <span class='mono'>docs/</span> are rejected by lint, so all new docs go in <span class='mono'>docs_new/</span>. Plus, follow existing pluggable seams (Lessons 33/42) so a reviewer reviews fast.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话讲清楚从 fork 到 PR 合并的完整流程，并说明 <span class='mono'>pre-commit</span> 为什么是一道必须在开 PR 之前通过的关卡（联系第55课的 CI）。",
+                "en": "In your own words, walk through the full flow from fork to merged PR, and explain why <span class='mono'>pre-commit</span> is a gate that must pass before opening a PR (connect it to CI in Lesson 55).",
+            },
+            {
+                "zh": "什么样的 PR 是「好 PR」？从大小、聚焦、测试、动机四个角度说明，并解释「一切皆可插拔」（新后端第33/42课、新模型第26课、新处理器第49课）为什么让贡献变得容易、也让你的改动更容易被接受。",
+                "en": "What makes a PR a 'good PR'? Discuss size, focus, tests, and motivation, and explain why 'everything is pluggable' (new backend Lessons 33/42, new model Lesson 26, new processor Lesson 49) makes contributing easy and your change more likely to be accepted.",
+            },
+        ],
+    },
 }
 
 

@@ -16,6 +16,7 @@ import part8
 import part9
 import part10
 import part11
+import part12
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -71,4 +72,9 @@ CONTENT = {
     "50-multi-lora-batching.html": part11.LESSON_50,
     "51-rl-rollout-and-weight-sync.html": part11.LESSON_51,
     "52-diffusion-models.html": part11.LESSON_52,
+    "53-build-and-run.html": part12.LESSON_53,
+    "54-benchmark-and-profiling.html": part12.LESSON_54,
+    "55-test-suite-and-ci.html": part12.LESSON_55,
+    "56-code-conventions-and-pr.html": part12.LESSON_56,
+    "57-glossary.html": part12.LESSON_57,
 }

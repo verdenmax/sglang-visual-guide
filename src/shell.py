@@ -151,6 +151,16 @@ PAGES = [
      "第十一部分 · 进阶选读", "Part 11 · Advanced (optional)"),
     ("52-diffusion-models.html", "扩散模型", "Diffusion models",
      "第十一部分 · 进阶选读", "Part 11 · Advanced (optional)"),
+    ("53-build-and-run.html", "构建与运行", "Build & run",
+     "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
+    ("54-benchmark-and-profiling.html", "压测与性能分析", "Benchmark & profiling",
+     "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
+    ("55-test-suite-and-ci.html", "测试套件与 CI", "Test suite & CI",
+     "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
+    ("56-code-conventions-and-pr.html", "代码规范与提 PR", "Conventions & opening a PR",
+     "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
+    ("57-glossary.html", "术语速查表", "Glossary",
+     "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
 ]
 
 
@@ -704,6 +714,16 @@ SUBTITLES = {
                                            "SGLang as the RL rollout engine · in-place weight updates without restart · bucket tensors to speed the sync"),
     "52-diffusion-models.html": ("扩散是迭代去噪不是自回归 · 复用 sgl-kernel/调度/CUDA Graph · 一套栈两种范式",
                                  "diffusion is iterative denoising, not autoregression · reuses sgl-kernel/scheduler/CUDA graph · one stack, two paradigms"),
+    "53-build-and-run.html": ("一行命令起服务 · ServerArgs 把全书旋钮收成 CLI · Engine 离线 / HTTP 在线",
+                              "one command starts a server · ServerArgs gathers the whole guide's knobs into CLI flags · Engine offline / HTTP online"),
+    "54-benchmark-and-profiling.html": ("bench_serving 给吞吐与 TTFT/TPOT 分位数 · profiler 看内核时间线 · 黑盒数 + 白盒线",
+                                        "bench_serving reports throughput + TTFT/TPOT percentiles · the profiler shows the kernel timeline · black-box numbers + white-box trace"),
+    "55-test-suite-and-ci.html": ("单测免起服务 / e2e 起服务 · CustomTestCase 保证清理 · pre-commit 先于 CI",
+                                  "unit tests need no server / e2e launches one · CustomTestCase guarantees cleanup · pre-commit gates before CI"),
+    "56-code-conventions-and-pr.html": ("fork→分支→pre-commit→测试→PR · 改 srt 就补测试 · 文档进 docs_new",
+                                        "fork→branch→pre-commit→test→PR · touch srt then add a test · docs go under docs_new"),
+    "57-glossary.html": ("全书术语速查 · 一句话定义 + 课次回查 · 按主题归拢成表",
+                         "whole-guide term lookup · one-line definitions + lesson back-refs · grouped into tables by theme"),
 }
 
 

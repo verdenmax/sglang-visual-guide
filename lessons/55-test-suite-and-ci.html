@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>55 · 测试套件与 CI / Test suite &amp; CI - SGLang 图解教程</title>
+<meta name="description" content="第十二部分 · 实战与贡献｜测试套件与 CI - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="55 · 测试套件与 CI / Test suite &amp; CI - SGLang 图解教程">
+<meta property="og:description" content="第十二部分 · 实战与贡献｜测试套件与 CI - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="55 · 测试套件与 CI / Test suite &amp; CI - SGLang 图解教程">
+<meta name="twitter:description" content="第十二部分 · 实战与贡献｜测试套件与 CI - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十二部分 · 实战与贡献</span><span class="lang-en">Part 12 · Practice &amp; contributing</span></span>
+    <span class="pill">55 / 57</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:96%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十二部分 · 实战与贡献</span><span class="lang-en">Part 12 · Practice &amp; contributing</span></div>
+    <h1><span class="lang-zh">测试套件与 CI</span><span class="lang-en">Test suite &amp; CI</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">没有测试的代码就像没有刹车的赛车——跑得越快越危险。这一课我们看 SGLang 是怎么被测试的：<strong>单元测试</strong>（不启动服务，直接验证函数与类）与<strong>端到端测试</strong>（真的拉起一个服务器再发请求），以及把它们串起来跑在 GPU 上的 <span class="mono">CI</span> 流水线。一个推理引擎每天都在被无数 PR 修改，如果没有一张严密的测试网兜底，任何一次看似无害的改动都可能悄悄破坏正确性或性能。理解了测试体系，你给 SGLang 加功能时才能心里有底，也才知道自己的改动该补哪一类测试、会在 CI 的哪个环节被检验，更能在失败时迅速判断问题出在风格、单测还是端到端这一层。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象一座新装修的房子要交付验收。<strong>单元测试</strong>像是工人单独检查每一个插座：拿电笔点一下，确认有没有电——又快又便宜，不用通整栋楼的电。<strong>端到端测试</strong>则像是真的合上总闸、烧一壶水、开一次空调：把整套系统跑起来，看实际效果对不对。两种检查缺一不可：插座单测能快速定位某根线接错了，而通电跑一遍才知道整屋协同有没有问题。只验插座不通电，可能漏掉线路之间的相互干扰；只通电不验插座，出了问题又很难说清到底是哪一根线的错。</p>
+<p>更妙的是验收流程里那条铁律：<strong>无论检查中途出了什么岔子，最后都必须把电闸拉下来、把工具收走</strong>。否则下一户人家来验收时，发现总闸还合着、工具乱放，整个排期就被拖垮，而且他们还会以为是自己这边出了问题，白白浪费大量排查时间。SGLang 的测试基类干的正是这件「保证善后」的事：哪怕开场布置出错，也要先把现场恢复干净，再把错误报出来。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>SGLang 是一个服务化的推理引擎，它的正确性既体现在「单个算子/函数算得对」，也体现在「整台服务器端到端答得对」。所以测试天然分成两层：底层用 Python 自带的 <span class="mono">unittest</span> 框架写断言，用 <span class="mono">pytest</span> 作为运行器；上层在 CI 里把成百上千个测试<strong>分片</strong>派发到打了标签的 GPU 机器上并行跑完。所有测试都继承一个叫 <span class="mono">CustomTestCase</span> 的基类，它用一个不起眼但关键的小技巧保证「就算开场失败，也一定收尾」，从而不会泄漏端口和 GPU 进程、连累后面的测试。把这几件事连起来看，你会发现整个体系都在围绕一个目标设计：让大规模、要真拉服务器的测试既能并行跑得快，又能在出错时干净利落、互不污染。</p>
+</div>
+
+<h2>一、两种测试：单元 vs 端到端</h2>
+<p><strong>单元测试（unit test）</strong>不需要服务器。你直接 <span class="mono">import</span> 一个函数或类，构造输入，断言输出符合预期。它快、稳、便宜，所以在每一个 <span class="mono">PR</span> 上都会被 CI 跑一遍。比如一个采样函数、一个张量布局的转换、一个调度器的小逻辑，都可以这样被单独验证。因为不牵涉网络、不占显存、不拉起进程，单元测试往往在毫秒级就给出结果，开发时可以反复快速迭代。它的另一个好处是<strong>定位精准</strong>：一旦失败，你几乎能立刻锁定是哪一个函数、哪一个分支算错了，而不必在一大坨日志里大海捞针。正因为又快又准，单元测试构成了整张测试网最密的那一层，把绝大多数低级错误挡在合并之前。</p>
+<p><strong>端到端测试（e2e test）</strong>需要真正的服务器。它通过一个像 <span class="mono">popen_launch_server</span> 这样的辅助函数，拉起一个真实的 <span class="mono">sglang.launch_server</span>（见<strong>第13课</strong>），向它发请求，然后检查返回的文本、或者跑一个数据集核对<strong>准确率</strong>。这类测试慢、吃 GPU，但它是唯一能证明「整套系统真的能正确服务」的方式：分词、调度、批处理、注意力内核、采样、流式返回，所有环节必须协同正确，端到端测试才会通过。单元测试保证每个零件没问题，端到端测试保证整台机器装起来还能跑——两者缺一不可，谁也替代不了谁。一个常见的误区是只写单元测试就觉得万事大吉，但很多 bug 恰恰藏在「零件之间的接缝」处：单看每个函数都对，连起来却因为约定不一致而出错，这种问题只有端到端测试才抓得住。</p>
+<p>反过来，只依赖端到端测试也不行：它太慢太贵，无法在每个 PR 上覆盖所有细节，而且一旦失败，你只知道「整台服务器答错了」，却要花大力气才能定位到具体哪一行代码。所以健康的做法是金字塔形：大量便宜的单元测试打底，少量昂贵的端到端测试守住关键路径。</p>
+
+<div class="cols"><div class="col">
+<p><strong>单元测试 · 不启动服务</strong></p>
+<p>直接 <span class="mono">import</span> 目标函数/类 → 构造输入 → <span class="mono">assert</span> 输出。毫秒级，每个 PR 都跑。定位精准：哪根「线」接错了一目了然。</p>
+</div><div class="col">
+<p><strong>端到端测试 · 启动服务</strong></p>
+<p>用 <span class="mono">popen_launch_server</span> 拉起真实服务器 → 发请求 → 校验输出/准确率。慢、吃 GPU，但能证明整屋「通电」无误。</p>
+</div></div>
+
+<h2>二、基类 CustomTestCase：保证善后</h2>
+<p>SGLang 的测试不直接继承裸的 <span class="mono">unittest.TestCase</span>，而是继承 <span class="mono">CustomTestCase</span>。它做的事看似微小却很关键：<strong>包裹 <span class="mono">setUpClass</span>，使得即便 <span class="mono">setUpClass</span> 抛异常，<span class="mono">tearDownClass</span> 也一定会被调用</strong>。这里要先理解 <span class="mono">setUpClass</span> 与 <span class="mono">tearDownClass</span> 是一对：前者在一个测试类里所有用例开始前跑一次（往往就是在这里拉起服务器、占用端口、申请显存），后者在所有用例结束后跑一次（负责把这些资源全部释放掉）。</p>
+<p>为什么重要？原生 <span class="mono">unittest</span> 的行为是：如果 <span class="mono">setUpClass</span> 失败，它会<strong>跳过</strong> <span class="mono">tearDownClass</span>。在一个会启动服务器的测试套件里，这意味着已经占用的<strong>端口</strong>和拉起的 <span class="mono">GPU</span> 进程不会被回收——于是端口被占、显存被占，后面的测试想再拉一台服务器时，要么端口冲突起不来，要么显存不足直接崩，最终<strong>连环失败</strong>。更糟的是，这种失败往往看起来和真正出问题的那个测试毫无关系，排查起来极其费神。<span class="mono">CustomTestCase</span> 用 <span class="mono">__init_subclass__</span> 在每个子类定义时自动把 <span class="mono">setUpClass</span> 包一层 <span class="mono">try/except</span>，异常时先调用 <span class="mono">tearDownClass</span> 清理、再把异常重新抛出，从而保证清理一定发生。这让「一个坏掉的 setup 不会毒害整套测试」，正是上面类比里那条「无论如何都要拉闸收工」的铁律。</p>
+<p>这里有个值得细品的设计选择：为什么用 <span class="mono">__init_subclass__</span> 而不是让每个测试自己记得写 <span class="mono">try/finally</span>？因为靠人自觉是最不可靠的——总会有人忘记。把这层保护放进基类，意味着只要你继承了 <span class="mono">CustomTestCase</span>，就<strong>自动</strong>获得这份健壮性，不需要任何额外代码，也不可能漏写。这是一种「让正确的事情默认发生」的工程智慧：与其在评审里反复提醒，不如把规则固化进基础设施，从根上杜绝这类资源泄漏。注意它在 <span class="mono">except</span> 里调用完 <span class="mono">tearDownClass</span> 后用裸 <span class="mono">raise</span> 把原异常原样抛出，所以测试报告里看到的仍是真正的失败原因，清理动作是「悄悄」补上的，不会掩盖问题。</p>
+<p>顺带一提，这种「在套件级别启动一次、结束清理一次」的设计，正是为了摊薄启动成本：拉起一台服务器动辄要几十秒加载权重，如果每个测试方法都各拉一次，时间根本承受不起。所以同一个测试类里的多个 <span class="mono">test_</span> 方法会<strong>共享</strong>一台由 <span class="mono">setUpClass</span> 拉起的服务器，跑完所有方法再统一在 <span class="mono">tearDownClass</span> 里关闭。这也反过来解释了为什么 <span class="mono">tearDownClass</span> 的可靠执行如此关键——它管理着一个被全类共享、又格外昂贵的资源，一旦泄漏，代价远比一个普通对象大得多。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::CustomTestCase</span><span class="ln">包裹 setUpClass，保证失败时也跑 tearDownClass，不泄漏端口/进程</span></div><pre>class CustomTestCase(unittest.TestCase):
+    # base class for SGLang tests
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # wrap setUpClass so tearDownClass is ALWAYS called, even if setUpClass
+        # raises. Plain unittest SKIPS tearDownClass on setup failure, which would
+        # leak ports / GPU processes and cascade-fail later tests.
+        setup = cls.setUpClass
+        @classmethod
+        def safe_setUpClass(klass):
+            try:
+                setup.__func__(klass)
+            except Exception:
+                klass.tearDownClass()   # clean up before re-raising
+                raise
+        cls.setUpClass = safe_setUpClass</pre></div>
+
+<h2>三、CI 流水线：分片、并行、门禁</h2>
+<p>测试登记在 <span class="mono">test/registered/</span> 目录下，CI 会把它们<strong>分片（partition）</strong>派发到多台打了标签的 <span class="mono">GPU</span> 运行机上并行执行，这样庞大的套件也能在合理时间里跑完。试想如果几百个端到端测试都挤在一台机器上一个接一个地跑，光是反复拉起、关闭服务器就要花上几个小时；而分片之后，每台带特定标签（标明 GPU 型号、数量）的机器只认领属于自己的那一片，整体耗时被压到可以接受的范围。在 CI 真正开跑之前，<span class="mono">pre-commit</span> 会先在本地和 CI 上把<strong>代码风格与 lint</strong> 卡一道关——风格不过，后面都免谈，这样能在最便宜的阶段就拦下格式问题，不浪费宝贵的 GPU 机时。</p>
+<p>这套「先便宜后昂贵」的分层把关其实是 CI 设计的通用原则：越靠前的关卡越快越省，越靠后的关卡越慢越贵。<span class="mono">pre-commit</span> 几乎瞬间就能在本地跑完，能在你提交之前就揪出缩进、空行、import 顺序之类的小毛病；接着是单元测试这层，秒级到分钟级；最后才是要真拉服务器的端到端测试，可能要占用多卡跑上十几分钟。把关卡按成本从低到高排列，意味着大多数问题都在最省钱的环节被挡下，只有真正通过了前面所有检查的改动，才值得动用昂贵的 GPU 集群去做最终验证。这也是为什么强烈建议你在本地就装好 <span class="mono">pre-commit</span> 钩子：与其推上去等 CI 几分钟后告诉你格式错了，不如在 <span class="mono">git commit</span> 的一瞬间就自动修好。</p>
+<p>一个贡献者的典型工作流是：在 <span class="mono">test/registered/unit/…</span> 下<strong>找到或新增</strong>对应的测试，先用 <span class="mono">pytest</span> 在本地跑通，然后推送；CI 会在真实 GPU 上把它重新跑一遍。知道这条链路，你就能为自己的改动<strong>自信地补上覆盖</strong>：改了采样逻辑就加个采样的单元测试，改了某个模型的支持就加个端到端的准确率测试。这把第13课（端到端测试拉起的那台服务器）和<strong>第56课</strong>（真正运行这些测试的 PR 流程）串了起来。项目里还有一个专门写 SGLang 测试的约定/技能可以参考，照着它的模板写，能少踩很多坑、更容易通过评审。</p>
+<p>这里「打标签的运行机」是关键一环：不同测试对硬件的要求不同——有的只需一张消费级显卡，有的要多卡做张量并行，有的要特定型号才能复现某个内核的行为。CI 通过标签把每一片测试精确地投递到符合要求的机器上，既不会让小测试白占大机器，也不会让大测试被分到带不动的机器上。理解了这套分片加标签的调度，你就能明白为什么有时你的 PR 要排队等某类 GPU 空闲，也能在写测试时主动声明它真正需要的资源，避免浪费集群算力、拖慢所有人的 CI。</p>
+
+<div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit 风格/lint</div><div class="arrow">→</div><div class="node">CI 分片 · GPU 运行机</div><div class="arrow">→</div><div class="node">合并门禁 merge</div></div>
+
+<h2>四、把工具对号入座</h2>
+<p>记住几个关键辅助件各自的角色，写测试时就不会乱。它们分工明确：基类管「善后」，启动器管「拉起服务」，运行器管「发现并执行」。理清这三者，你就能看懂任意一个 SGLang 测试文件的骨架。</p>
+
+<table class="t"><tr><th>测试辅助件</th><th>角色</th></tr>
+<tr><td><span class="mono">CustomTestCase</span></td><td>测试基类：包裹 setUpClass，保证失败也收尾，不泄漏端口/GPU 进程</td></tr>
+<tr><td><span class="mono">popen_launch_server</span></td><td>端到端测试用它拉起真实 sglang.launch_server，再发请求校验</td></tr>
+<tr><td><span class="mono">pytest</span></td><td>运行器：发现并执行 unittest 写的用例，本地与 CI 共用</td></tr>
+</table>
+
+<p>把它落到动作上，一次完整的「写测试到合并」是这样一条直线：先在登记目录里写好测试并继承 <span class="mono">CustomTestCase</span>，本地用 <span class="mono">pytest</span> 反复跑到通过，推送上 PR 触发 <span class="mono">pre-commit</span> 与 CI，最后 CI 在 GPU 上分片重跑、全绿即可进入合并门禁。当你下次打开任意一个 SGLang 测试文件，就能一眼读懂它的骨架：开头继承 <span class="mono">CustomTestCase</span>，<span class="mono">setUpClass</span> 里用 <span class="mono">popen_launch_server</span> 拉起服务器并记下进程句柄，若干个 <span class="mono">test_</span> 方法发请求并断言输出或准确率，<span class="mono">tearDownClass</span> 里把服务器关掉。理解了这套约定，你既能看懂别人的测试，也能照葫芦画瓢为自己的改动写出符合规范、稳定可靠的覆盖，让 CI 这张安全网真正为你的代码兜底。</p>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>写一个测试</h4><p class="mono">test/registered/unit/…</p><p>在对应目录找到或新增测试，继承 CustomTestCase。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>本地跑通</h4><p class="mono">pytest</p><p>用 pytest 在本地运行，快速迭代到通过。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>push 到 PR</h4><p class="mono">git push</p><p>推送后触发 CI，pre-commit 先卡风格/lint。</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>CI 变绿</h4><p class="mono">GPU runners</p><p>CI 在真实 GPU 上分片重跑，全绿即可合并。</p></div></div></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>两类测试</strong>：单元测试不启动服务，直接 import 后断言，快、每个 PR 都跑；端到端测试用 <span class="mono">popen_launch_server</span> 拉起真实服务器再校验输出/准确率。</li>
+<li>SGLang 用 Python 自带的 <span class="mono">unittest</span> 框架写断言，用 <span class="mono">pytest</span> 作运行器。</li>
+<li><strong>所有测试继承 <span class="mono">CustomTestCase</span></strong>，它包裹 <span class="mono">setUpClass</span>，保证即便 setup 失败 <span class="mono">tearDownClass</span> 也一定执行——避免泄漏端口/GPU 进程、连累后面的测试。</li>
+<li><strong>CI</strong> 把 <span class="mono">test/registered/</span> 下的测试<strong>分片</strong>派发到打标签的 GPU 机并行跑；<span class="mono">pre-commit</span> 先卡风格/lint。</li>
+<li>贡献者工作流：在 <span class="mono">test/registered/unit/…</span> 找/加测试 → 本地 <span class="mono">pytest</span> → push → CI 真机重跑。串起第13课（服务器）与第56课（PR 流程）。</li>
+<li>记住测试金字塔：大量便宜的单元测试打底，少量昂贵的端到端测试守关键路径；前者抓零件 bug，后者抓接缝处的协同 bug。</li>
+<li>分层把关原则：越靠前的关卡越快越省（pre-commit），越靠后越慢越贵（GPU 端到端）；本地装好 pre-commit 钩子能在提交瞬间就修好格式，省下排队等 CI 的时间。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 你想验证一个采样函数算得对，希望它在每个 PR 上都快速跑一遍。该写哪种测试，怎么写？</div>
+  <ol class="opts">
+    <li><strong>单元测试：直接 <span class='mono'>import</span> 这个函数，构造输入并 <span class='mono'>assert</span> 输出——不启动服务、毫秒级、CI 每个 PR 都跑</strong></li>
+    <li>端到端测试：必须先用 <span class='mono'>popen_launch_server</span> 拉起服务器才能测函数</li>
+    <li>只能手动在 REPL 里试，无法自动化</li>
+    <li>不写测试，直接在生产里观察</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。单元测试不需要服务器：import 目标函数/类、构造输入、断言输出即可。它快、稳、便宜，所以 CI 在每个 PR 上都跑。端到端测试才需要 <span class='mono'>popen_launch_server</span> 拉起真实服务器，用于校验整套系统的输出/准确率。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. SGLang 的测试为什么继承 <span class='mono'>CustomTestCase</span> 而不是裸的 <span class='mono'>unittest.TestCase</span>？它解决了什么问题？</div>
+  <ol class="opts">
+    <li>它让测试跑得更快，因为跳过了 teardown</li>
+    <li><strong>它包裹 <span class='mono'>setUpClass</span>，保证即便 setup 抛异常 <span class='mono'>tearDownClass</span> 也一定执行——原生 unittest 会跳过收尾，导致泄漏端口/GPU 进程、连累后面的测试</strong></li>
+    <li>它替换了 pytest，成为新的运行器</li>
+    <li>它自动给每个测试加上网络 mock</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。原生 <span class='mono'>unittest</span> 在 <span class='mono'>setUpClass</span> 失败时会跳过 <span class='mono'>tearDownClass</span>。在会启动服务器的套件里，这意味着已占用的端口和拉起的 GPU 进程不会被回收，后续测试连环失败。<span class='mono'>CustomTestCase</span> 包裹 setUpClass、保证清理一定发生，让一个坏掉的 setup 不会毒害整套测试。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在 CI 真正跑测试之前，是什么先把代码风格/lint 卡了一道关？测试又是怎样在 GPU 上跑完一整套的？</div>
+  <ol class="opts">
+    <li>没有任何风格检查；所有测试在一台机器上串行跑</li>
+    <li><span class='mono'>pytest</span> 负责 lint，测试只在 CPU 上跑</li>
+    <li><strong><span class='mono'>pre-commit</span> 先在本地和 CI 卡风格/lint；测试登记在 <span class='mono'>test/registered/</span> 下，被分片(partition)派发到打标签的 GPU 运行机上并行跑完</strong></li>
+    <li>CI 随机抽一个测试跑，其余忽略</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。<span class='mono'>pre-commit</span> 在 CI 开跑前先把风格/lint 卡一道——风格不过后面都免谈。测试登记在 <span class='mono'>test/registered/</span>，CI 把它们分片派发到多台打标签的 GPU 机并行执行，于是庞大的套件也能在合理时间内跑完。贡献者工作流：在 <span class='mono'>test/registered/unit/…</span> 找/加测试 → 本地 pytest → push → CI 真机重跑。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释单元测试与端到端测试的分工：为什么单元测试能在每个 PR 上快跑，而端到端测试要用 <span class='mono'>popen_launch_server</span> 拉起真实的 <span class='mono'>sglang.launch_server</span>（第13课）再校验输出/准确率？两者各能抓到哪类 bug？</li>
+    <li>详细说明 <span class='mono'>CustomTestCase</span> 为什么要包裹 <span class='mono'>setUpClass</span>：原生 <span class='mono'>unittest</span> 在 setup 失败时的行为是什么，会造成什么后果（端口/GPU 进程泄漏、连累后面测试）？再把测试体系和第56课（运行这些测试的 PR 流程）联系起来。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">Code without tests is like a race car without brakes—the faster it goes, the more dangerous it gets. This lesson looks at how SGLang is tested: <strong>unit tests</strong> (no server, assert directly on functions and classes) and <strong>end-to-end tests</strong> (actually launch a server and send requests), plus the <span class="mono">CI</span> pipeline that runs them all on GPUs. Once you understand the test system, you can add features to SGLang with confidence.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a freshly renovated house going through final inspection. A <strong>unit test</strong> is like an electrician checking each outlet on its own: touch a test pen to it and confirm there's current—fast and cheap, no need to power the whole building. An <strong>end-to-end test</strong> is like actually flipping the main breaker, boiling a kettle, and running the AC: bring the whole system up and see if it really works. You need both: the outlet unit test pinpoints which wire was miswired, while powering everything up reveals whether the whole house cooperates.</p>
+<p>Even better is the iron rule of the inspection process: <strong>no matter what goes wrong mid-check, you must flip the breaker back off and pack up your tools</strong>. Otherwise the next household's inspection finds the main breaker still on and tools scattered, and the whole schedule is derailed. SGLang's test base class does exactly this "guarantee cleanup" job.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>SGLang is a server-style inference engine, and its correctness shows up both in "a single operator/function computes right" and in "the whole server answers right end to end." So testing naturally splits into two layers: the lower layer writes assertions with Python's built-in <span class="mono">unittest</span> framework, using <span class="mono">pytest</span> as the runner; the upper layer, in CI, <strong>partitions</strong> hundreds of tests across labelled GPU machines to run in parallel. Every test inherits a base class called <span class="mono">CustomTestCase</span>, which uses an inconspicuous but crucial trick to guarantee "even if setup fails, teardown still runs," so it never leaks ports or GPU processes and never cascade-fails later tests.</p>
+</div>
+
+<h2>1. Two kinds of tests: unit vs end-to-end</h2>
+<p>A <strong>unit test</strong> needs no server. You directly <span class="mono">import</span> a function or class, build inputs, and assert the output matches expectations. It's fast, stable, and cheap, so CI runs it on every <span class="mono">PR</span>. A sampling function, a tensor-layout conversion, a small bit of scheduler logic—all can be verified in isolation this way.</p>
+<p>An <strong>e2e test</strong> needs a real server. Through a helper like <span class="mono">popen_launch_server</span>, it launches a real <span class="mono">sglang.launch_server</span> (see <strong>Lesson 13</strong>), sends requests, then checks the returned text—or runs a dataset to verify <strong>accuracy</strong>. These tests are slow and GPU-hungry, but they're the only way to prove "the whole system really serves correctly."</p>
+
+<div class="cols"><div class="col">
+<p><strong>Unit test · no server</strong></p>
+<p>Directly <span class="mono">import</span> the target function/class → build inputs → <span class="mono">assert</span> output. Millisecond-scale, runs on every PR. Pinpoints precisely which "wire" was miswired.</p>
+</div><div class="col">
+<p><strong>E2E test · launch a server</strong></p>
+<p>Use <span class="mono">popen_launch_server</span> to bring up a real server → send requests → verify outputs/accuracy. Slow and GPU-hungry, but proves the whole house is "powered" correctly.</p>
+</div></div>
+
+<h2>2. The base class CustomTestCase: guarantee cleanup</h2>
+<p>SGLang tests don't inherit bare <span class="mono">unittest.TestCase</span>; they inherit <span class="mono">CustomTestCase</span>. What it does looks tiny but matters a lot: it <strong>wraps <span class="mono">setUpClass</span> so that even if <span class="mono">setUpClass</span> raises, <span class="mono">tearDownClass</span> is still called</strong>.</p>
+<p>Why does this matter? Plain <span class="mono">unittest</span> behaves like this: if <span class="mono">setUpClass</span> fails, it <strong>skips</strong> <span class="mono">tearDownClass</span>. In a suite that launches servers, that means the <strong>ports</strong> already taken and the <span class="mono">GPU</span> processes already spawned won't be reclaimed—so ports stay occupied, VRAM stays occupied, and later tests cascade-fail. <span class="mono">CustomTestCase</span> guarantees cleanup happens, so "one broken setup doesn't poison the whole suite." This is exactly the "flip the breaker and pack up no matter what" rule from the analogy.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::CustomTestCase</span><span class="ln">wraps setUpClass so tearDownClass always runs, leaking no ports / processes</span></div><pre>class CustomTestCase(unittest.TestCase):
+    # base class for SGLang tests
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # wrap setUpClass so tearDownClass is ALWAYS called, even if setUpClass
+        # raises. Plain unittest SKIPS tearDownClass on setup failure, which would
+        # leak ports / GPU processes and cascade-fail later tests.
+        setup = cls.setUpClass
+        @classmethod
+        def safe_setUpClass(klass):
+            try:
+                setup.__func__(klass)
+            except Exception:
+                klass.tearDownClass()   # clean up before re-raising
+                raise
+        cls.setUpClass = safe_setUpClass</pre></div>
+
+<h2>3. The CI pipeline: partitioning, parallelism, gating</h2>
+<p>Tests are registered under <span class="mono">test/registered/</span>, and CI <strong>partitions</strong> them across multiple labelled <span class="mono">GPU</span> runners to execute in parallel, so even a huge suite finishes in reasonable time. Before CI even starts, <span class="mono">pre-commit</span> first gates <strong>code style and lint</strong> locally and in CI—if style doesn't pass, nothing else matters.</p>
+<p>A contributor's typical workflow: <strong>find or add</strong> the matching test under <span class="mono">test/registered/unit/…</span>, run it locally with <span class="mono">pytest</span> until it passes, then push; CI re-runs it on real GPUs. Knowing this chain lets you <strong>confidently add coverage</strong> for your change. This ties Lesson 13 (the server those e2e tests launch) to <strong>Lesson 56</strong> (the PR flow that actually runs these tests). There's also a dedicated project convention/skill for writing SGLang tests to reference.</p>
+
+<div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit style/lint</div><div class="arrow">→</div><div class="node">CI partitioned · GPU runners</div><div class="arrow">→</div><div class="node">merge gate</div></div>
+
+<h2>4. Matching the tools to their roles</h2>
+<p>Remember the role of each key helper and you won't get lost when writing tests:</p>
+
+<table class="t"><tr><th>Test helper</th><th>Role</th></tr>
+<tr><td><span class="mono">CustomTestCase</span></td><td>Test base class: wraps setUpClass, guarantees cleanup on failure, leaks no ports / GPU processes</td></tr>
+<tr><td><span class="mono">popen_launch_server</span></td><td>E2E tests use it to launch a real sglang.launch_server, then send requests and verify</td></tr>
+<tr><td><span class="mono">pytest</span></td><td>Runner: discovers and executes unittest-written cases, shared by local and CI</td></tr>
+</table>
+
+<p>Put into actions, one complete "write a test to merge" is a straight line:</p>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>write a test</h4><p class="mono">test/registered/unit/…</p><p>Find or add a test in the right directory, inheriting CustomTestCase.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>run locally</h4><p class="mono">pytest</p><p>Run it locally with pytest, iterating fast until it passes.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>push to PR</h4><p class="mono">git push</p><p>Pushing triggers CI; pre-commit gates style/lint first.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>CI turns green</h4><p class="mono">GPU runners</p><p>CI re-runs partitioned on real GPUs; all green means merge-ready.</p></div></div></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Two kinds of tests</strong>: unit tests launch no server, just import and assert—fast, run on every PR; e2e tests use <span class="mono">popen_launch_server</span> to launch a real server, then verify outputs/accuracy.</li>
+<li>SGLang writes assertions with Python's built-in <span class="mono">unittest</span> framework and uses <span class="mono">pytest</span> as the runner.</li>
+<li><strong>All tests inherit <span class="mono">CustomTestCase</span></strong>, which wraps <span class="mono">setUpClass</span> so that even if setup fails, <span class="mono">tearDownClass</span> still runs—avoiding leaked ports/GPU processes and cascade-failing later tests.</li>
+<li><strong>CI</strong> <strong>partitions</strong> the tests under <span class="mono">test/registered/</span> across labelled GPU machines to run in parallel; <span class="mono">pre-commit</span> gates style/lint first.</li>
+<li>Contributor workflow: find/add a test under <span class="mono">test/registered/unit/…</span> → local <span class="mono">pytest</span> → push → CI re-runs on real hardware. Ties Lesson 13 (the server) to Lesson 56 (the PR flow).</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. You want to verify a sampling function computes correctly and have it run fast on every PR. Which kind of test, and how?</div>
+  <ol class="opts">
+    <li><strong>A unit test: directly <span class='mono'>import</span> the function, build inputs and <span class='mono'>assert</span> the output — no server, millisecond-scale, CI runs it on every PR</strong></li>
+    <li>An e2e test: you must launch a server with <span class='mono'>popen_launch_server</span> first to test a function</li>
+    <li>Only manual REPL trials; it can't be automated</li>
+    <li>Skip tests and just observe in production</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A unit test needs no server: import the target function/class, build inputs, assert the output. It's fast, stable, and cheap, so CI runs it on every PR. Only e2e tests need <span class='mono'>popen_launch_server</span> to launch a real server, used to verify the whole system's outputs/accuracy.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why do SGLang tests inherit <span class='mono'>CustomTestCase</span> instead of bare <span class='mono'>unittest.TestCase</span>? What problem does it solve?</div>
+  <ol class="opts">
+    <li>It makes tests faster by skipping teardown</li>
+    <li><strong>It wraps <span class='mono'>setUpClass</span> so that <span class='mono'>tearDownClass</span> always runs even if setup raises — plain unittest skips teardown, leaking ports/GPU processes and cascade-failing later tests</strong></li>
+    <li>It replaces pytest as the new runner</li>
+    <li>It auto-mocks the network for every test</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Plain <span class='mono'>unittest</span> skips <span class='mono'>tearDownClass</span> when <span class='mono'>setUpClass</span> fails. In a suite that launches servers, that means occupied ports and spawned GPU processes aren't reclaimed, and later tests cascade-fail. <span class='mono'>CustomTestCase</span> wraps setUpClass and guarantees cleanup happens, so one broken setup doesn't poison the whole suite.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Before CI even runs the tests, what first gates code style/lint? And how does the whole suite finish on GPUs?</div>
+  <ol class="opts">
+    <li>No style check at all; all tests run serially on one machine</li>
+    <li><span class='mono'>pytest</span> does the linting and tests run only on CPU</li>
+    <li><strong><span class='mono'>pre-commit</span> first gates style/lint locally and in CI; tests are registered under <span class='mono'>test/registered/</span> and partitioned across labelled GPU runners to run in parallel</strong></li>
+    <li>CI runs one random test and ignores the rest</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. <span class='mono'>pre-commit</span> gates style/lint before CI starts — if style fails, nothing else matters. Tests live under <span class='mono'>test/registered/</span>, and CI partitions them across multiple labelled GPU machines to run in parallel, so even a huge suite finishes in reasonable time. Contributor workflow: find/add a test under <span class='mono'>test/registered/unit/…</span> → local pytest → push → CI re-runs on real hardware.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words explain the division of labor between unit and e2e tests: why can unit tests run fast on every PR, while e2e tests must launch a real <span class='mono'>sglang.launch_server</span> (Lesson 13) via <span class='mono'>popen_launch_server</span> and then verify outputs/accuracy? What class of bug does each catch?</li>
+    <li>Explain in detail why <span class='mono'>CustomTestCase</span> wraps <span class='mono'>setUpClass</span>: what does plain <span class='mono'>unittest</span> do when setup fails, and what consequences follow (leaked ports/GPU processes, cascade-failing later tests)? Then connect the test system to Lesson 56 (the PR flow that runs these tests).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="54-benchmark-and-profiling.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">压测与性能分析</span><span class="lang-en">Benchmark &amp; profiling</span></div></a><a class="next" href="56-code-conventions-and-pr.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">代码规范与提 PR</span><span class="lang-en">Conventions &amp; opening a PR</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

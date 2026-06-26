@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>54 · 压测与性能分析 / Benchmark &amp; profiling - SGLang 图解教程</title>
+<meta name="description" content="第十二部分 · 实战与贡献｜压测与性能分析 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="54 · 压测与性能分析 / Benchmark &amp; profiling - SGLang 图解教程">
+<meta property="og:description" content="第十二部分 · 实战与贡献｜压测与性能分析 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="54 · 压测与性能分析 / Benchmark &amp; profiling - SGLang 图解教程">
+<meta name="twitter:description" content="第十二部分 · 实战与贡献｜压测与性能分析 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十二部分 · 实战与贡献</span><span class="lang-en">Part 12 · Practice &amp; contributing</span></span>
+    <span class="pill">54 / 57</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:94%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十二部分 · 实战与贡献</span><span class="lang-en">Part 12 · Practice &amp; contributing</span></div>
+    <h1><span class="lang-zh">压测与性能分析</span><span class="lang-en">Benchmark &amp; profiling</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">第8课我们讲过<strong>吞吐</strong>与<strong>延迟</strong>是一对此消彼长的指标，但那时只是定性地说"它们会冲突"。这一课我们要学会真正<strong>量化</strong>它们：用 <span class="mono">bench_serving</span> 给一台正在运行的服务器打分，读懂 <span class="mono">request_throughput</span>、<span class="mono">ttft</span>、<span class="mono">tpot</span> 这些数字，再用 <strong>profiler</strong> 把"它很慢"变成"就是这个 kernel 慢"。一句话：<strong>压测负责回答"有多慢"，分析负责回答"为什么慢"</strong>。这两件事缺一不可：只压测不分析，你知道系统慢却找不到病根；只分析不压测，你盯着一堆 kernel 却不知道哪个真正影响了用户。把它们配成一对，才构成一个能持续改进性能的闭环。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>把服务器想象成一家<strong>餐厅</strong>。<strong>压测（benchmark）</strong>就像派一群顾客按固定节奏进店点餐，然后在门口记录两件事：每小时上了多少道菜（<span class="mono">throughput</span>），以及每位顾客从坐下到<strong>第一口菜上桌</strong>等了多久（这就是 <span class="mono">ttft</span>），后续每道菜之间的间隔有多稳（这就是 <span class="mono">tpot</span>）。你站在门口只看到这些<strong>黑盒数字</strong>，并不知道厨房里发生了什么。</p>
+<p>而 <strong>性能分析（profile）</strong>就是直接走进厨房，架起一台摄像机录下整条流水线：哪一步在切菜（prefill）、哪一步在装盘（decode）、哪个厨师在发呆等炉子（gap/bubble）。当门口的数字难看时，只有走进厨房才知道到底是谁拖了后腿。<strong>先在门口量化，再进厨房定位</strong>——这就是本课的全部思路。这个类比还提醒我们一件事：摄像机本身也会占用厨房的人手，录像会让出菜稍微变慢，所以你不会全天候开着它，而是在怀疑某段时间有问题时才打开、录一小段就关掉。profiler 同理——开着它会拖慢服务、产生庞大的 trace，因此只在定位问题时短暂启用，平时让服务器全速干活。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>性能调优永远是一个<strong>两段式循环</strong>：<span class="mono">benchmark → profile → 优化 → 再 benchmark</span>。<strong>benchmark 是黑盒</strong>，它向一台真实运行的服务器发射可配置的请求流（请求速率、输入/输出长度、ShareGPT 这类数据集），最后吐出一份 <span class="mono">BenchmarkMetrics</span> 汇总，告诉你"快还是慢、慢在第几分位"。<strong>profiler 是白盒</strong>，它录下 GPU 上每一个 CUDA kernel 的时间线，告诉你"慢在哪个阶段、哪个 kernel"。</p>
+<p>关键认知：在压力之下，延迟不是一个数，而是一条<strong>分布</strong>——mean / median / p90 / p95 / p99。普通用户感受到的卡顿往往来自<strong>长尾（p99）</strong>，而不是平均值。所以一份诚实的压测报告必须给出<strong>分位数</strong>，而不是只报一个漂亮的均值。再换个角度看这两件工具的分工：benchmark 给你的是<strong>结果</strong>（多快、多稳、能扛多大并发），profiler 给你的是<strong>过程</strong>（这段时间里 GPU 到底在忙什么）。结果告诉你"该不该优化、优化目标是否达成"，过程告诉你"具体动哪里"。一个负责对外承诺 SLA，一个负责对内指导改代码，二者合起来才能把性能工作从玄学变成工程。</p>
+</div>
+
+这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
+
+<h2>一、压测：给运行中的服务器打分</h2>
+<p>SGLang 自带的压测工具是 <span class="mono">python -m sglang.bench_serving</span>。它的工作方式很直白：你先把服务器跑起来，然后这个脚本<strong>不修改服务器</strong>，只是按你设定的<strong>请求速率（request rate）</strong>和<strong>输入/输出长度</strong>，从外部发射一批请求，逐个记录每条请求的 <span class="mono">ttft</span> 和 <span class="mono">tpot</span>，跑完后聚合成一份 <span class="mono">BenchmarkMetrics</span>。你可以用 ShareGPT 这样的真实对话数据集，让请求长度分布贴近线上场景。</p>
+<p>为什么强调"对运行中的服务器"？因为压测要测的不是某段代码理论上能多快，而是<strong>真实部署在并发压力下的综合表现</strong>。请求速率决定了压力大小：速率越高，调度器排队越久，<span class="mono">ttft</span> 的长尾就越明显；输入长度影响 prefill 的计算量，输出长度影响 decode 的步数。把这些旋钮调到贴近线上流量，压测数字才有参考价值，否则容易得到"实验室里很快、上线就崩"的误导结论。</p>
+<p>这里有个容易混淆的对照：<span class="mono">bench_serving</span> 测的是<strong>整台服务器在并发负载下的端到端表现</strong>；而 <span class="mono">bench_one_batch</span> 测的是<strong>单个 batch 在隔离环境下的延迟</strong>，根本不需要起服务器，特别适合做 kernel 级别的 A/B 对比（比如换一个 attention 实现快了多少）。一句话区分：要看"系统级表现"用 <span class="mono">bench_serving</span>，要看"某段计算本身有多快"用 <span class="mono">bench_one_batch</span>。两者各有用武之地：前者贴近用户真实体验，后者排除了排队、网络、调度的干扰，能干净地比较两份内核实现的纯计算耗时。做优化时常常是先用 <span class="mono">bench_serving</span> 发现整体慢，再用 <span class="mono">bench_one_batch</span> 把某个可疑算子单独拎出来精确对比。还要注意数据集的选择会显著影响结论：用全是等长的合成请求，得到的数字往往过于乐观，因为它掩盖了真实流量里长短不一带来的排队与碎片化；而用 ShareGPT 这类真实对话，请求长度参差，更能暴露调度器在混合负载下的真实表现。所以"用什么数据集压测"本身就是一个需要交代清楚的实验条件。</p>
+
+<h2>二、读懂那些数字：吞吐与延迟</h2>
+<p>压测报告里的数字分成两大类。<strong>吞吐类</strong>回答"单位时间干了多少活"：<span class="mono">request_throughput</span> 是每秒完成多少条请求；<span class="mono">input_throughput</span> 是每秒吃进多少 prompt token；<span class="mono">output_throughput</span> 是每秒吐出多少 token——这个值约等于<strong>decode 速度</strong>，是衡量生成快慢最直接的指标。吞吐高，意味着同样的 GPU 单位时间能服务更多用户、摊薄每条请求的成本，所以它是运维和成本核算最关心的数字。</p>
+<p><strong>延迟类</strong>回答"用户要等多久"：<span class="mono">ttft</span>（Time To First Token）是从发出请求到<strong>第一个 token 出现</strong>的时间，本质上就是 <strong>prefill 延迟</strong>，也是用户盯着屏幕"还没出字"那段焦灼的等待；<span class="mono">tpot</span>（Time Per Output Token）是<strong>相邻两个 token 之间的间隔</strong>，也叫 inter-token latency（ITL），决定了文字往外蹦得<strong>顺不顺、卡不卡</strong>。这两个指标对应着用户体验的两个阶段：<span class="mono">ttft</span> 决定"点了发送之后多久看到反应"，<span class="mono">tpot</span> 决定"开始出字之后读起来流不流畅"。一个聊天应用如果 ttft 很长，用户会觉得"卡住了没反应"；如果 tpot 不稳，用户会觉得"字一顿一顿地蹦"。</p>
+<p>回想第8课：吞吐高未必延迟低，把 batch 堆大能拉高 <span class="mono">output_throughput</span>，却可能把单条请求的 <span class="mono">tpot</span> 拖长——这正是压测要帮你权衡的取舍。换句话说，同一份硬件上，你可以选择"高吞吐、稍高延迟"的服务策略（适合离线批量任务），也可以选择"低延迟、稍低吞吐"的策略（适合实时交互）。压测的价值就在于把这条取舍曲线<strong>量化成具体数字</strong>，让你能根据业务的 SLA（比如"p99 的 ttft 必须低于 500ms"）去反推该怎么配置服务器。没有这些数字，所谓"调优"就只是凭感觉拍脑袋。</p>
+
+<p>这两个吞吐与延迟指标之间还有一层换算直觉值得建立：一条请求的端到端耗时大致等于 <span class="mono">ttft</span> 加上"输出 token 数 × <span class="mono">tpot</span>"。也就是说，prefill 阶段贡献了开头那一下等待，decode 阶段则按 token 数线性累加。对短输出请求，<span class="mono">ttft</span> 往往主导体验；对长输出请求（比如写长文、出代码），<span class="mono">tpot</span> 才是大头。理解这个拆分，你就知道：想让"首屏出字"更快该去优化 prefill，想让"长篇生成"整体更快该去优化 decode——而 trace 里 prefill 区段和 decode 区段的相对长度，正好印证你的请求形态落在哪一侧。</p>
+
+<h2>三、为什么必须看分位数</h2>
+<p>同一批请求的 <span class="mono">ttft</span> 和 <span class="mono">tpot</span> 从来不是一个固定值，而是一条<strong>分布</strong>。压测会给出 mean、median、p90、p95、p99 多个口径。为什么 p99 这么重要？因为在高并发下，调度排队、CUDA graph 重放(replay)的抖动、偶发的长 prompt 都会制造<strong>长尾</strong>——也许 99% 的请求都很快，但那 1% 的卡顿恰恰是用户印象最深的"它有时候巨慢"。只报均值会掩盖这种尾部痛苦。</p>
+<p>举个直观的例子：假设 100 条请求里 99 条的 ttft 是 100ms，1 条因为排在长 prompt 后面变成了 5000ms。算平均值大约是 149ms，看上去很漂亮；但那 1 条 5000ms 的请求背后是一个真实的、正在抓狂的用户。<span class="mono">p99</span> 会忠实地把这个 5000ms 暴露出来，而均值把它稀释掉了。线上系统的口碑往往不是被平均体验决定的，而是被<strong>最差的那批体验</strong>决定的——这就是为什么严肃的 SLA 几乎都用分位数来定义，而不是用均值。</p>
+<p>所以记住：<strong>负载之下，报 p99，别只报 mean</strong>。同时也别忘了 median（p50）——当 mean 和 median 差得很远时，本身就说明分布是偏斜的、存在长尾，这是一个值得深究的信号。一份合格的压测报告应该把 mean / median / p90 / p95 / p99 一起列出来，让你既看到典型情况，也看到最坏情况。</p>
+<p>分位数还有一个实用价值：它让<strong>容量规划</strong>变得有据可依。当你逐步提高请求速率，p99 的 ttft 会先平稳、再在某个临界点陡然飙升——那个拐点就是这台服务器的<strong>承载上限</strong>。低于拐点，加压几乎不影响尾延迟；越过拐点，队列开始堆积，尾延迟一发不可收拾。把"速率—p99"这条曲线画出来，你就能回答"这台机器在保证 SLA 的前提下最多能扛多少 QPS"，进而决定要不要扩容、扩几台。这远比"看 GPU 利用率拍脑袋"靠谱得多。</p>
+
+<h2>四、性能分析：把"慢"定位到 kernel</h2>
+<p>当数字难看时，光知道"慢"没用，你得知道"慢在哪"。SGLang 支持设置环境变量 <span class="mono">SGLANG_TORCH_PROFILER_DIR</span>（或调用 <span class="mono">/start_profile</span> 与 <span class="mono">/stop_profile</span> 两个 HTTP 端点）来抓取一段 <strong>torch profiler trace</strong>，然后用 Chrome 的 <span class="mono">chrome://tracing</span> 或 Perfetto 打开。这条时间线会画出 GPU 上<strong>每一个 CUDA kernel</strong>，于是你能一眼分辨出 <strong>prefill 区段</strong>和 <strong>decode 区段</strong>，看到 kernel 之间的<strong>空隙（gap/bubble，往往是 launch 开销）</strong>，也能看到第27课讲的 <strong>CUDA graph 重放</strong>把许多小 kernel 合并后的样子。至此，"它很慢"就被翻译成了"就是这个 kernel / 这段空隙的问题"。</p>
+<p>用环境变量和用 HTTP 端点抓 trace 的区别在于时机：环境变量适合"从头到尾全程录制"，端点则适合"在服务器已经跑起来、想精准框出某一小段时间"——你在压测脚本发射负载前调 <span class="mono">/start_profile</span>，结束后调 <span class="mono">/stop_profile</span>，就只录下这段最有代表性的负载，trace 文件也不会大到打不开。打开 trace 后要重点看三件事：哪些 kernel 占了最多时间（热点）、kernel 之间有没有大段空白（说明 CPU 来不及喂 GPU，是 launch 或调度开销）、decode 区段的小 kernel 是否已经被 CUDA graph 收拢成密实的一片。</p>
+<p>把这套思路和前面几课串起来：第4课告诉我们 prefill 是<strong>计算受限（compute-bound）</strong>、decode 是<strong>带宽受限（bandwidth-bound）</strong>，所以在 trace 里这两段长得就不一样——prefill 区段往往是少数几个又大又满的矩阵乘 kernel，decode 区段则是大量又小又碎、每步只处理一个 token 的 kernel；第8课的吞吐/延迟取舍正是这些指标在度量的东西；第27课的 CUDA graph 会让 decode 区段的小 kernel 变得密实整齐，消除掉那些 launch 空隙。把握住"benchmark 量化、profile 定位"这条主线，你就能在"它慢"和"为什么慢"之间自由切换。下一课（第55课）我们会把这套"压测 + 分析"的方法真正跑起来。</p>
+<p>最后强调一个常被忽视的纪律：<strong>压测的可重复性</strong>。同一台机器、同一个模型，如果两次压测的请求速率、输入输出长度、数据集、并发数不一致，得到的数字就没有可比性。要做有意义的 A/B（比如"开了 CUDA graph 快多少"），必须<strong>只改一个变量</strong>，其余全部固定，并且每次都先充分预热再正式测量。同样地，profile 也要在<strong>稳态</strong>下采集——别把冷启动、第一次 graph 捕获那几步算进来，否则 trace 里全是一次性的开销，会把你引向错误的瓶颈。养成"固定变量、预热、采稳态、报分位"的习惯，你的性能数字才经得起复现和质疑，优化才不会建立在噪声之上。</p>
+
+<div class="flow"><div class="node">负载生成器<br><span class="mono">bench_serving</span></div><div class="arrow">→</div><div class="node">运行中的<br>SGLang 服务器</div><div class="arrow">→</div><div class="node">逐请求收集<br>TTFT / TPOT</div><div class="arrow">→</div><div class="node">聚合成<br><span class="mono">BenchmarkMetrics</span></div></div>
+
+<table class="t"><tr><th>指标</th><th>含义</th></tr>
+<tr><td><span class="mono">request_throughput</span></td><td>每秒完成的请求数（req/s）</td></tr>
+<tr><td><span class="mono">input_throughput</span></td><td>每秒吃进的 prompt token 数（tokens/s）</td></tr>
+<tr><td><span class="mono">output_throughput</span></td><td>每秒吐出的 token 数 ≈ decode 速度</td></tr>
+<tr><td><span class="mono">ttft</span></td><td>Time To First Token = prefill 延迟，用户等待出字的时间</td></tr>
+<tr><td><span class="mono">tpot</span></td><td>Time Per Output Token = token 间隔（ITL），decode 顺滑度</td></tr>
+<tr><td><span class="mono">p99</span></td><td>分布的尾部——负载之下用户真正感受到的卡顿</td></tr></table>
+
+<div class="cols"><div class="col"><strong>benchmark（黑盒数字）</strong><br>向真实服务器发射负载，问"有多慢？慢在第几分位？"。产出 <span class="mono">request_throughput</span>、<span class="mono">ttft</span>、<span class="mono">tpot</span> 等汇总数字，负责<strong>量化</strong>。</div><div class="col"><strong>profiler（白盒时间线）</strong><br>录下每个 CUDA kernel 的时间线，问"为什么慢？慢在哪个 kernel / 哪个阶段？"。产出可在 <span class="mono">chrome://tracing</span> 打开的 trace，负责<strong>定位</strong>。</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>预热服务器（warm up）</h4><p>先发几条请求，让 CUDA graph 捕获、显存分配、缓存都就绪，避免冷启动污染数据。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>发射负载</h4><p>设定 <span class="mono">request rate</span> / 输入输出长度 / 数据集（如 ShareGPT），正式打压。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>读取分位数</h4><p>看 mean / median / p90 / p95 / <span class="mono">p99</span>，重点关注尾部。</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>打开 profiler trace</h4><p>用 <span class="mono">chrome://tracing</span> / Perfetto 查看每个 kernel，定位瓶颈。</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::BenchmarkMetrics</span><span class="ln">吞吐 + TTFT/TPOT 的分位数汇总</span></div><pre>@dataclass
+class BenchmarkMetrics:
+    completed: int                 # 完成的请求数
+    request_throughput: float      # 每秒请求数 (req/s)
+    input_throughput: float        # 每秒输入(prompt) token 数
+    output_throughput: float       # 每秒输出 token 数 (decode 速度)
+    mean_ttft_ms: float            # Time To First Token = prefill 延迟
+    median_ttft_ms: float
+    p99_ttft_ms: float             # 负载下用户真正感受到的尾部
+    mean_tpot_ms: float            # Time Per Output Token = token 间隔 (ITL)
+    p99_tpot_ms: float
+    # ... 还有 p90 / p95 变体, 以及 e2e 端到端延迟</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>两段式循环</strong>：<span class="mono">benchmark</span> 量化"有多慢"，<span class="mono">profile</span> 定位"为什么慢"。</li>
+<li><span class="mono">python -m sglang.bench_serving</span> 向<strong>运行中的</strong>服务器发射可配置负载，产出 <span class="mono">BenchmarkMetrics</span> 汇总。</li>
+<li><strong>吞吐</strong>：<span class="mono">request_throughput</span> / <span class="mono">input_throughput</span> / <span class="mono">output_throughput</span>（输出吞吐≈decode 速度）。</li>
+<li><strong>延迟</strong>：<span class="mono">ttft</span> = prefill 等待，<span class="mono">tpot</span> = token 间隔(ITL) = decode 顺滑度。</li>
+<li>延迟是<strong>分布</strong>：报 mean / median / <strong>p99</strong>，负载之下尾部才是用户的真实体验。</li>
+<li><span class="mono">bench_one_batch</span> 在<strong>无服务器</strong>下测单 batch 延迟，适合 kernel 级 A/B。</li>
+<li>用 <span class="mono">SGLANG_TORCH_PROFILER_DIR</span> 或 <span class="mono">/start_profile</span>+<span class="mono">/stop_profile</span> 抓 trace，在 <span class="mono">chrome://tracing</span> 看 prefill/decode、gap、CUDA graph(第27课)。</li>
+<li>串联：第8课吞吐/延迟取舍、第4课 prefill 计算受限 vs decode 带宽受限；下节第55课实操。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 把 batch 堆大后，<span class='mono'>output_throughput</span> 上去了，但单条请求感觉更卡了。最可能是哪个指标变差，为什么？</div>
+  <ol class="opts">
+    <li><span class='mono'>input_throughput</span> 变大导致更卡</li>
+    <li><strong><span class='mono'>tpot</span>（token 间隔 / ITL）变大——吞吐与延迟是取舍（第8课），堆大 batch 提高了整体每秒 token，却拉长了单条请求相邻 token 的间隔</strong></li>
+    <li><span class='mono'>completed</span> 变小，因为请求都失败了</li>
+    <li>和任何指标都无关，纯粹是网络抖动</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。<span class='mono'>output_throughput</span> 衡量整台服务器每秒吐多少 token，而单条请求的顺滑度由 <span class='mono'>tpot</span>（相邻 token 间隔，即 ITL）决定。堆大 batch 提高总吞吐，却可能延长每条请求的 token 间隔，于是用户感觉变卡——这正是第8课吞吐/延迟取舍在压测数字上的体现。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 压测报告里 <span class='mono'>mean_ttft_ms</span> 看着不错，但用户抱怨“有时候巨慢”。你最该盯哪个数字？</div>
+  <ol class="opts">
+    <li>只看 <span class='mono'>mean_ttft_ms</span> 就够了，分位数没意义</li>
+    <li><span class='mono'>request_throughput</span>，因为它等于延迟</li>
+    <li><span class='mono'>completed</span>，越大延迟越低</li>
+    <li><strong><span class='mono'>p99_ttft_ms</span>——延迟是分布不是单值；负载下的长尾(p99)才是用户真正感受到的卡顿，只看 mean 会掩盖尾部</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。同一批请求的 ttft 是一条分布（mean/median/p90/p95/p99）。高并发下排队、CUDA graph 重放抖动、偶发长 prompt 会制造长尾，99% 很快但 1% 极慢正是用户印象最深的体验。所以负载之下要报 <span class='mono'>p99</span>，而不是只报均值。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 压测数字证实“确实慢”，但你不知道慢在哪一步。下一步该用什么、怎么用？</div>
+  <ol class="opts">
+    <li>直接重启服务器，慢的问题会消失</li>
+    <li><strong>用 profiler：设 <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> 或调 <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> 抓 torch trace，在 <span class='mono'>chrome://tracing</span>/Perfetto 看每个 CUDA kernel，分辨 prefill/decode、gap、CUDA graph(第27课)</strong></li>
+    <li>再跑一遍 bench_serving，数字会自己解释原因</li>
+    <li>把 mean 改成 median 上报就行</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。benchmark 是黑盒（量化“有多慢”），profiler 是白盒（定位“为什么慢”）。设 <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> 或用 <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> 抓 trace，在 <span class='mono'>chrome://tracing</span> 打开时间线，就能看到每个 CUDA kernel、prefill/decode 区段、gap(launch 开销)与 CUDA graph 重放，把“它慢”翻译成“这个 kernel/这段空隙的问题”。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释“压测负责量化、分析负责定位”的两段式循环：<span class='mono'>bench_serving</span> 如何向运行中的服务器发射负载并产出 <span class='mono'>BenchmarkMetrics</span>？再说明 <span class='mono'>ttft</span>（=prefill 延迟）与 <span class='mono'>tpot</span>（=token 间隔/ITL）分别对应用户的什么体验，并联系第4课（prefill 计算受限 vs decode 带宽受限）。</li>
+    <li>为什么一份诚实的压测报告必须给出分位数（mean/median/p90/p95/p99）而不是只报均值？请结合“长尾在负载下产生的来源”作答。另外，<span class='mono'>bench_serving</span> 与 <span class='mono'>bench_one_batch</span> 各适合什么场景，为什么 kernel 级 A/B 用后者？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">In Lesson 8 we learned that <strong>throughput</strong> and <strong>latency</strong> are a trade-off pair, but back then we only said qualitatively that "they conflict." This lesson is about truly <strong>quantifying</strong> them: using <span class="mono">bench_serving</span> to score a running server, reading numbers like <span class="mono">request_throughput</span>, <span class="mono">ttft</span>, <span class="mono">tpot</span>, and then using a <strong>profiler</strong> to turn "it's slow" into "it's exactly this kernel that's slow." In one line: <strong>benchmark answers "how slow," profiling answers "why slow."</strong> Neither can be skipped: benchmark without profile and you know the system is slow but can't find the root cause; profile without benchmark and you stare at a pile of kernels without knowing which actually hurt users. Pair them up and you have a closed loop that keeps improving performance.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture the server as a <strong>restaurant</strong>. A <strong>benchmark</strong> is like sending a stream of customers in at a fixed pace to order, then standing at the door recording two things: how many dishes come out per hour (<span class="mono">throughput</span>), and how long each guest waits from sitting down to the <strong>first dish arriving</strong> (that's <span class="mono">ttft</span>), plus how steady the gaps between later dishes are (that's <span class="mono">tpot</span>). At the door you only see these <strong>black-box numbers</strong>; you have no idea what's happening in the kitchen.</p>
+<p>A <strong>profile</strong> means walking straight into the kitchen and mounting a camera over the whole line: which step is chopping (prefill), which is plating (decode), which cook is idly waiting on a burner (a gap/bubble). When the numbers at the door look bad, only by going into the kitchen do you find who held things up. <strong>Quantify at the door, then locate in the kitchen</strong> — that's the whole idea of this lesson. This analogy also reminds us of something: the camera itself ties up kitchen hands, recording makes plating a bit slower, so you don't leave it on all day but only switch it on when you suspect a stretch is problematic, record a short clip, and turn it off. The profiler is the same — leaving it on slows the service and produces huge traces, so enable it only briefly while locating a problem and otherwise let the server run at full speed.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Performance tuning is always a <strong>two-stage loop</strong>: <span class="mono">benchmark → profile → optimize → benchmark again</span>. <strong>The benchmark is black-box</strong>: it fires a configurable request load (request rate, input/output lengths, datasets like ShareGPT) at a real running server and finally emits a <span class="mono">BenchmarkMetrics</span> summary telling you "fast or slow, and slow at which percentile." <strong>The profiler is white-box</strong>: it records the timeline of every CUDA kernel on the GPU, telling you "which phase, which kernel is slow."</p>
+<p>The key insight: under load, latency is not a single number but a <strong>distribution</strong> — mean / median / p90 / p95 / p99. The lag ordinary users feel usually comes from the <strong>tail (p99)</strong>, not the mean. So an honest benchmark report must give <strong>percentiles</strong>, not just one pretty average. Another way to see the division of labor between these two tools: the benchmark gives you <strong>results</strong> (how fast, how steady, how much concurrency it sustains), the profiler gives you <strong>process</strong> (what the GPU is actually busy with during that time). Results tell you "whether to optimize and whether the goal is met," process tells you "exactly where to act." One commits SLAs externally, the other guides code changes internally; together they turn performance work from black magic into engineering.</p>
+</div>
+
+This two-stage loop isn't a one-shot but iterates repeatedly: after each optimization, re-benchmark to confirm the numbers really improved, then decide whether to keep analyzing the next bottleneck. Performance optimization has no end, only the judgment of "is it good enough under the current SLA."</p>
+
+<h2>1. Benchmark: scoring a running server</h2>
+<p>SGLang's built-in benchmark tool is <span class="mono">python -m sglang.bench_serving</span>. Its workflow is straightforward: you start the server first, then this script <strong>does not modify the server</strong> — it just fires a batch of requests from outside at your chosen <strong>request rate</strong> and <strong>input/output lengths</strong>, records each request's <span class="mono">ttft</span> and <span class="mono">tpot</span>, and aggregates them into a <span class="mono">BenchmarkMetrics</span> when done. You can use a real conversation dataset like ShareGPT so request-length distributions match production.</p>
+<p>Why insist on "a running server"? Because what we want to measure is not how fast some code can theoretically be, but the <strong>overall behavior of a real deployment under concurrent pressure</strong>. The request rate sets the pressure: the higher the rate, the longer the scheduler queues and the more pronounced the <span class="mono">ttft</span> tail; input length affects prefill compute, output length affects the number of decode steps. Only by tuning these knobs close to real traffic do the numbers become meaningful — otherwise you get the misleading "fast in the lab, crashes in production" conclusion.</p>
+<p>Here's an easily confused contrast: <span class="mono">bench_serving</span> measures the <strong>end-to-end behavior of a whole server under concurrent load</strong>; whereas <span class="mono">bench_one_batch</span> measures the <strong>latency of a single batch in isolation</strong>, needing no server at all, ideal for kernel-level A/B comparisons (e.g., how much faster a new attention impl is). One-line distinction: use <span class="mono">bench_serving</span> for "system-level behavior," use <span class="mono">bench_one_batch</span> for "how fast a piece of compute itself is." Each has its place: the former hugs real user experience, while the latter removes the interference of queuing, network, and scheduling to cleanly compare the pure compute time of two kernel implementations. When optimizing, you often first use <span class="mono">bench_serving</span> to find the system is slow, then use <span class="mono">bench_one_batch</span> to pull a suspect operator out for a precise comparison. Note too that the choice of dataset significantly affects conclusions: synthetic requests all of equal length tend to give overly optimistic numbers because they hide the queuing and fragmentation that varied lengths cause in real traffic; whereas a real conversation set like ShareGPT, with uneven request lengths, better exposes the scheduler's true behavior under mixed load. So "which dataset you benchmark with" is itself an experimental condition that must be stated clearly.</p>
+
+<h2>2. Reading the numbers: throughput and latency</h2>
+<p>The numbers in a benchmark report fall into two groups. <strong>Throughput</strong> answers "how much work per unit time": <span class="mono">request_throughput</span> is requests finished per second; <span class="mono">input_throughput</span> is prompt tokens ingested per second; <span class="mono">output_throughput</span> is tokens emitted per second — this value roughly equals <strong>decode speed</strong> and is the most direct measure of generation speed. High throughput means the same GPU can serve more users per unit time and amortize the cost per request, so it's the number ops and cost accounting care about most.</p>
+<p><strong>Latency</strong> answers "how long the user waits": <span class="mono">ttft</span> (Time To First Token) is the time from sending a request to the <strong>first token appearing</strong>, essentially the <strong>prefill latency</strong>, that anxious stretch where the user stares at a screen with "no text yet"; <span class="mono">tpot</span> (Time Per Output Token) is the <strong>gap between two adjacent tokens</strong>, also called inter-token latency (ITL), which determines how <strong>smooth or choppy</strong> the text streams out. These two map to two stages of user experience: <span class="mono">ttft</span> decides "how long after hitting send before I see a reaction," <span class="mono">tpot</span> decides "once text starts, how fluently it reads." If a chat app's ttft is long, users feel "it froze, no response"; if tpot is unstable, users feel "the text stutters out."</p>
+<p>Recall Lesson 8: high throughput doesn't mean low latency — piling up the batch can raise <span class="mono">output_throughput</span> yet stretch a single request's <span class="mono">tpot</span>, exactly the trade-off the benchmark helps you weigh. In other words, on the same hardware you can choose a "high throughput, slightly higher latency" strategy (good for offline batch jobs) or a "low latency, slightly lower throughput" strategy (good for real-time interaction). The value of benchmarking is <strong>quantifying this trade-off curve into concrete numbers</strong>, so you can work backward from your business SLA (e.g., "p99 ttft must be under 500ms") to how the server should be configured. Without these numbers, so-called "tuning" is just guessing.</p>
+
+<p>One more conversion intuition worth building between these throughput and latency metrics: a request's end-to-end time is roughly <span class="mono">ttft</span> plus "number of output tokens × <span class="mono">tpot</span>." That is, the prefill phase contributes the initial wait, while the decode phase accumulates linearly with token count. For short-output requests, <span class="mono">ttft</span> often dominates the experience; for long-output requests (writing long text, generating code), <span class="mono">tpot</span> is the bigger share. Grasp this split and you know: to make "first text on screen" faster, optimize prefill; to make "long-form generation" faster overall, optimize decode — and the relative lengths of the prefill and decode regions in the trace confirm exactly which side your request shape falls on.</p>
+
+<h2>3. Why you must look at percentiles</h2>
+<p>The <span class="mono">ttft</span> and <span class="mono">tpot</span> of one batch of requests are never a fixed value but a <strong>distribution</strong>. The benchmark reports mean, median, p90, p95, p99. Why does p99 matter so much? Because under high concurrency, scheduling queues, jitter from CUDA-graph replay, and the occasional long prompt all create a <strong>long tail</strong> — maybe 99% of requests are fast, but that 1% of lag is exactly the "sometimes it's painfully slow" impression users remember most. Reporting only the mean hides that tail pain.</p>
+<p>A concrete example: suppose of 100 requests, 99 have a ttft of 100ms and 1 — stuck behind a long prompt — becomes 5000ms. The mean is about 149ms, which looks great; but behind that one 5000ms request is a real, exasperated user. <span class="mono">p99</span> faithfully exposes that 5000ms, while the mean dilutes it away. The reputation of a production system is often determined not by the average experience but by the <strong>worst batch of experiences</strong> — which is why serious SLAs are almost always defined with percentiles, not means.</p>
+<p>So remember: <strong>under load, report p99, not just the mean</strong>. And don't forget the median (p50) — when mean and median diverge widely, that itself signals a skewed distribution with a long tail, a signal worth digging into. A solid benchmark report should list mean / median / p90 / p95 / p99 together, letting you see both the typical case and the worst case.</p>
+<p>Percentiles also have a practical payoff: they make <strong>capacity planning</strong> evidence-based. As you gradually raise the request rate, p99 ttft stays flat and then, past some critical point, suddenly spikes — that knee is the server's <strong>carrying limit</strong>. Below the knee, adding load barely affects tail latency; past it, queues pile up and tail latency runs away. Plot this "rate vs p99" curve and you can answer "how much QPS can this machine sustain while meeting the SLA," and from there decide whether and by how much to scale out. That is far more reliable than eyeballing GPU utilization and guessing.</p>
+
+<h2>4. Profiling: pinning "slow" to a kernel</h2>
+<p>When the numbers look bad, knowing "it's slow" is useless — you need to know "slow where." SGLang lets you set the environment variable <span class="mono">SGLANG_TORCH_PROFILER_DIR</span> (or call the <span class="mono">/start_profile</span> and <span class="mono">/stop_profile</span> HTTP endpoints) to capture a <strong>torch profiler trace</strong>, then open it in Chrome's <span class="mono">chrome://tracing</span> or Perfetto. This timeline draws <strong>every CUDA kernel</strong> on the GPU, so you can tell at a glance the <strong>prefill region</strong> from the <strong>decode region</strong>, see the <strong>gaps (bubbles, often launch overhead)</strong> between kernels, and see what Lesson 27's <strong>CUDA-graph replay</strong> looks like after merging many small kernels. At this point "it's slow" is translated into "it's exactly this kernel / this gap that's the problem."</p>
+<p>The difference between capturing a trace via the environment variable versus the HTTP endpoints is timing: the env var suits "record from start to finish," while the endpoints suit "the server is already running and you want to frame a small slice precisely" — you call <span class="mono">/start_profile</span> before your benchmark fires the load and <span class="mono">/stop_profile</span> after, so only the most representative slice is recorded and the trace file won't be too big to open. Once open, focus on three things: which kernels take the most time (hot spots), whether there are large blanks between kernels (the CPU can't feed the GPU fast enough — launch or scheduling overhead), and whether the small kernels in the decode region have already been gathered into a dense band by CUDA graph.</p>
+<p>Tying this to earlier lessons: Lesson 4 told us prefill is <strong>compute-bound</strong> and decode is <strong>bandwidth-bound</strong>, so the two regions look different in the trace — the prefill region is often a handful of large, full matmul kernels, while the decode region is a swarm of tiny, fragmented kernels each handling just one token per step; Lesson 8's throughput/latency trade-off is precisely what these metrics measure; Lesson 27's CUDA graph makes the small kernels in the decode region dense and tidy, eliminating those launch gaps. Hold onto the main thread of "benchmark quantifies, profile locates" and you can freely switch between "it's slow" and "why it's slow." Next lesson (Lesson 55) we'll actually run this "benchmark + profile" methodology for real.</p>
+<p>Finally, one often-overlooked discipline: <strong>benchmark reproducibility</strong>. On the same machine and model, if two runs differ in request rate, input/output lengths, dataset, or concurrency, their numbers aren't comparable. To do a meaningful A/B (e.g., "how much faster with CUDA graph on"), you must <strong>change only one variable</strong>, fix everything else, and warm up fully before measuring each time. Likewise, profile in <strong>steady state</strong> — don't include cold start or the first graph-capture steps, or the trace will be full of one-off overhead that leads you to the wrong bottleneck. Build the habit of "fix variables, warm up, sample steady state, report percentiles," and your performance numbers will withstand reproduction and scrutiny, so optimization isn't built on noise.</p>
+
+<div class="flow"><div class="node">load generator<br><span class="mono">bench_serving</span></div><div class="arrow">→</div><div class="node">running<br>SGLang server</div><div class="arrow">→</div><div class="node">collect per-request<br>TTFT / TPOT</div><div class="arrow">→</div><div class="node">aggregate into<br><span class="mono">BenchmarkMetrics</span></div></div>
+
+<table class="t"><tr><th>Metric</th><th>Meaning</th></tr>
+<tr><td><span class="mono">request_throughput</span></td><td>requests finished per second (req/s)</td></tr>
+<tr><td><span class="mono">input_throughput</span></td><td>prompt tokens ingested per second (tokens/s)</td></tr>
+<tr><td><span class="mono">output_throughput</span></td><td>tokens emitted per second ≈ decode speed</td></tr>
+<tr><td><span class="mono">ttft</span></td><td>Time To First Token = prefill latency, the wait before text appears</td></tr>
+<tr><td><span class="mono">tpot</span></td><td>Time Per Output Token = inter-token latency (ITL), decode smoothness</td></tr>
+<tr><td><span class="mono">p99</span></td><td>the tail of the distribution — what users actually feel under load</td></tr></table>
+
+<div class="cols"><div class="col"><strong>benchmark (black-box numbers)</strong><br>Fires load at a real server, asking "how slow? slow at which percentile?". Produces summary numbers like <span class="mono">request_throughput</span>, <span class="mono">ttft</span>, <span class="mono">tpot</span> — it <strong>quantifies</strong>.</div><div class="col"><strong>profiler (white-box timeline)</strong><br>Records the timeline of every CUDA kernel, asking "why slow? which kernel / which phase?". Produces a trace you open in <span class="mono">chrome://tracing</span> — it <strong>locates</strong>.</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>warm up the server</h4><p>Send a few requests first so CUDA-graph capture, memory allocation, and caches are ready, avoiding cold-start contamination.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>run the load</h4><p>Set <span class="mono">request rate</span> / input-output lengths / dataset (e.g. ShareGPT) and fire for real.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>read the percentiles</h4><p>Look at mean / median / p90 / p95 / <span class="mono">p99</span>, focusing on the tail.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>open the profiler trace</h4><p>Use <span class="mono">chrome://tracing</span> / Perfetto to inspect each kernel and locate the bottleneck.</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::BenchmarkMetrics</span><span class="ln">throughput + the TTFT/TPOT percentile summary</span></div><pre>@dataclass
+class BenchmarkMetrics:
+    completed: int                 # number of finished requests
+    request_throughput: float      # requests / second
+    input_throughput: float        # input (prompt) tokens / second
+    output_throughput: float       # output tokens / second  (decode speed)
+    mean_ttft_ms: float            # Time To First Token = prefill latency
+    median_ttft_ms: float
+    p99_ttft_ms: float             # the tail users actually feel under load
+    mean_tpot_ms: float            # Time Per Output Token = inter-token latency (ITL)
+    p99_tpot_ms: float
+    # ... also p90 / p95 variants, and e2e latency</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Two-stage loop</strong>: <span class="mono">benchmark</span> quantifies "how slow," <span class="mono">profile</span> locates "why slow."</li>
+<li><span class="mono">python -m sglang.bench_serving</span> fires a configurable load at a <strong>running</strong> server and produces a <span class="mono">BenchmarkMetrics</span> summary.</li>
+<li><strong>Throughput</strong>: <span class="mono">request_throughput</span> / <span class="mono">input_throughput</span> / <span class="mono">output_throughput</span> (output throughput ≈ decode speed).</li>
+<li><strong>Latency</strong>: <span class="mono">ttft</span> = prefill wait, <span class="mono">tpot</span> = inter-token latency (ITL) = decode smoothness.</li>
+<li>Latency is a <strong>distribution</strong>: report mean / median / <strong>p99</strong> — under load the tail is the real user experience.</li>
+<li><span class="mono">bench_one_batch</span> measures single-batch latency with <strong>no server</strong>, ideal for kernel-level A/B.</li>
+<li>Use <span class="mono">SGLANG_TORCH_PROFILER_DIR</span> or <span class="mono">/start_profile</span>+<span class="mono">/stop_profile</span> to capture a trace, view prefill/decode, gaps, CUDA graph (Lesson 27) in <span class="mono">chrome://tracing</span>.</li>
+<li>Connections: Lesson 8's throughput/latency trade-off, Lesson 4's prefill compute-bound vs decode bandwidth-bound; Lesson 55 does the hands-on next.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. After enlarging the batch, <span class='mono'>output_throughput</span> went up but a single request feels choppier. Which metric most likely got worse, and why?</div>
+  <ol class="opts">
+    <li><span class='mono'>input_throughput</span> grew, which causes the choppiness</li>
+    <li><strong><span class='mono'>tpot</span> (inter-token latency / ITL) increased — throughput and latency trade off (Lesson 8); a bigger batch raises overall tokens/s but stretches the gap between a single request's adjacent tokens</strong></li>
+    <li><span class='mono'>completed</span> dropped because requests all failed</li>
+    <li>Unrelated to any metric; purely network jitter</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <span class='mono'>output_throughput</span> measures the whole server's tokens/s, but a single request's smoothness is set by <span class='mono'>tpot</span> (the gap between adjacent tokens, i.e. ITL). A bigger batch lifts total throughput yet can lengthen each request's inter-token gap, so it feels choppier — exactly Lesson 8's throughput/latency trade-off showing up in benchmark numbers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. In the report <span class='mono'>mean_ttft_ms</span> looks fine, yet users complain it's "sometimes painfully slow." Which number should you watch most?</div>
+  <ol class="opts">
+    <li><span class='mono'>mean_ttft_ms</span> alone is enough; percentiles are meaningless</li>
+    <li><span class='mono'>request_throughput</span>, because it equals latency</li>
+    <li><span class='mono'>completed</span>; bigger means lower latency</li>
+    <li><strong><span class='mono'>p99_ttft_ms</span> — latency is a distribution, not one value; under load the tail (p99) is what users actually feel, and the mean hides it</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The ttft of one batch is a distribution (mean/median/p90/p95/p99). Under concurrency, queuing, CUDA-graph replay jitter, and occasional long prompts create a tail; 99% fast but 1% very slow is the impression users remember. So under load report <span class='mono'>p99</span>, not just the mean.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. The benchmark confirms "it's slow," but you don't know which step. What's the next tool and how do you use it?</div>
+  <ol class="opts">
+    <li>Just restart the server and the slowness goes away</li>
+    <li><strong>Use the profiler: set <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> or call <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> to capture a torch trace, then in <span class='mono'>chrome://tracing</span>/Perfetto inspect each CUDA kernel to tell prefill/decode, gaps, CUDA graph (Lesson 27) apart</strong></li>
+    <li>Re-run bench_serving; the numbers will explain the cause by themselves</li>
+    <li>Report median instead of mean and you're done</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The benchmark is black-box (quantify "how slow"); the profiler is white-box (locate "why slow"). Set <span class='mono'>SGLANG_TORCH_PROFILER_DIR</span> or use <span class='mono'>/start_profile</span>+<span class='mono'>/stop_profile</span> to capture a trace, open the timeline in <span class='mono'>chrome://tracing</span>, and see every CUDA kernel, prefill/decode regions, gaps (launch overhead), and CUDA-graph replay — translating "it's slow" into "this kernel/gap is the problem."</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words explain the two-stage loop of "benchmark quantifies, profile locates": how does <span class='mono'>bench_serving</span> fire a load at a running server and produce <span class='mono'>BenchmarkMetrics</span>? Then explain what <span class='mono'>ttft</span> (= prefill latency) and <span class='mono'>tpot</span> (= inter-token latency / ITL) each correspond to in the user's experience, tying in Lesson 4 (prefill compute-bound vs decode bandwidth-bound).</li>
+    <li>Why must an honest benchmark report give percentiles (mean/median/p90/p95/p99) rather than only the mean? Answer in terms of where the tail comes from under load. Also, when is <span class='mono'>bench_serving</span> appropriate versus <span class='mono'>bench_one_batch</span>, and why use the latter for kernel-level A/B?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="53-build-and-run.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">构建与运行</span><span class="lang-en">Build &amp; run</span></div></a><a class="next" href="55-test-suite-and-ci.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">测试套件与 CI</span><span class="lang-en">Test suite &amp; CI</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
