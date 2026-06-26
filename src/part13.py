@@ -708,15 +708,12 @@ LESSON_62 = {"zh": r"""
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">面向接口编程的范型：实现它就能接入，不碰引擎核心</span></div><pre>class AttentionBackend(ABC):
     # the archetypal pluggable seam: model code calls THIS, never a raw kernel
-    @abstractmethod
     def init_forward_metadata(self, forward_batch):
-        ...   # plan whatever this backend needs for the batch
-    @abstractmethod
+        ...   # plan whatever this backend needs for the batch (has a default)
     def forward_extend(self, q, k, v, layer, forward_batch):
-        ...   # prefill attention
-    @abstractmethod
+        raise NotImplementedError   # prefill attention — each backend overrides
     def forward_decode(self, q, k, v, layer, forward_batch):
-        ...   # decode attention
+        raise NotImplementedError   # decode attention — each backend overrides
     # FlashInfer / Triton / FA each implement these; chosen at deploy time,
     # the model code never changes</pre></div>
 
@@ -779,15 +776,12 @@ LESSON_62 = {"zh": r"""
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">the program-to-an-interface archetype: implement it to plug in, never touch the core</span></div><pre>class AttentionBackend(ABC):
     # the archetypal pluggable seam: model code calls THIS, never a raw kernel
-    @abstractmethod
     def init_forward_metadata(self, forward_batch):
-        ...   # plan whatever this backend needs for the batch
-    @abstractmethod
+        ...   # plan whatever this backend needs for the batch (has a default)
     def forward_extend(self, q, k, v, layer, forward_batch):
-        ...   # prefill attention
-    @abstractmethod
+        raise NotImplementedError   # prefill attention — each backend overrides
     def forward_decode(self, q, k, v, layer, forward_batch):
-        ...   # decode attention
+        raise NotImplementedError   # decode attention — each backend overrides
     # FlashInfer / Triton / FA each implement these; chosen at deploy time,
     # the model code never changes</pre></div>
 
