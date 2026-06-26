@@ -2056,6 +2056,302 @@ QUIZZES = {
             },
         ],
     },
+    "29-radixattention-implementation.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "一个 <strong>TreeNode 的 value</strong> 字段到底装的是什么？",
+                    "en": "What does a <strong>TreeNode's value</strong> field actually hold?",
+                },
+                "opts": [
+                    {
+                        "zh": "装的是这段 token 对应的 <strong>KV 槽位号（indices）</strong>——也就是<strong>指向显存池（第 30 课）的指针</strong>，而<strong>不是 KV 张量本身</strong>。树只当索引，真正的 K/V 张量躺在池里；两条请求共享前缀，就是它们拿到同一串 indices、指向同一批物理槽位",
+                        "en": "It holds the <strong>KV slot numbers (indices)</strong> for this run — i.e. <strong>pointers into the memory pool (Lesson 30)</strong>, <strong>not the KV tensors themselves</strong>. The tree is just the index; the real K/V tensors live in the pool. Two requests sharing a prefix get the same run of indices pointing at the same physical slots",
+                    },
+                    {"zh": "装的是这段 token 的 K/V 张量本体", "en": "It holds the actual K/V tensors for this run"},
+                    {"zh": "装的是这段 token 的原始文本字符串", "en": "It holds the raw text string of this run"},
+                    {"zh": "装的是子节点的列表", "en": "It holds the list of child nodes"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "树是索引、池是存储是本课的灵魂：value 存的是指向池子的 indices，不是张量。正因为存的是指针，复用前缀才能零拷贝——两请求拿到同一串 indices 就指向同一批物理槽位。张量本体在第 30 课的池里；子节点在 children 字段，不在 value。",
+                    "en": "Tree-is-index, pool-is-storage is the soul of this lesson: value stores indices into the pool, not tensors. Because it's a pointer, prefix reuse is zero-copy — two requests get the same indices pointing at the same physical slots. The tensors live in the Lesson-30 pool; children live in the children field, not value.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>match_prefix</span> 下行时，<strong>什么情况下会调用 <span class='mono'>_split_node</span> 把一个节点切成两层</strong>？",
+                    "en": "While <span class='mono'>match_prefix</span> descends, <strong>when does it call <span class='mono'>_split_node</span> to cut a node into two levels</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "当传入 token 只匹配了某条边 <span class='mono'>key</span> 的<strong>前一部分</strong>就分叉时（<span class='mono'>prefix_len &lt; len(child.key)</span>）：必须在<strong>分歧点</strong>把节点切开，公共前缀升为可共享的父节点、原来的尾巴降为子节点，这样新旧两条路径才能共享前半段",
+                        "en": "When the incoming tokens match only the <strong>front part</strong> of an edge's <span class='mono'>key</span> before diverging (<span class='mono'>prefix_len &lt; len(child.key)</span>): the node must be split at the <strong>divergence point</strong> — the common prefix becomes a shareable parent and the original tail becomes a child, so the old and new paths can share the front part",
+                    },
+                    {"zh": "每次匹配到一个完整节点时都会分裂一次", "en": "It splits once every time a full node is matched"},
+                    {"zh": "当某个节点的 lock_ref 超过阈值时", "en": "When a node's lock_ref exceeds a threshold"},
+                    {"zh": "当显存池满了需要驱逐时", "en": "When the pool is full and needs eviction"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "分裂只发生在“半条边匹配”这一刻：代码里 prefix_len < len(child.key) 为真就调 _split_node，在分歧点把公共前缀提为父、尾巴降为子。整边命中不分裂，直接收下继续下探。分裂与 lock_ref、驱逐无关——它纯粹是为了让共享前缀按需长出来。",
+                    "en": "Splitting happens only at the 'half-edge match' instant: when prefix_len < len(child.key) the code calls _split_node, lifting the common prefix into a parent and trimming the tail into a child. A whole-edge hit doesn't split — it's taken and descent continues. Splitting is unrelated to lock_ref or eviction; it purely grows shared prefixes on demand.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>inc_lock_ref</span> 从命中节点<strong>一路向上给每个祖先加锁</strong>，它到底在防什么？",
+                    "en": "<span class='mono'>inc_lock_ref</span> walks <strong>upward locking every ancestor</strong> from the matched node — what is it actually preventing?",
+                },
+                "opts": [
+                    {
+                        "zh": "防止<strong>正在被在跑请求使用的 KV 被驱逐回收</strong>：驱逐是从叶子往上回收的（第 32 课），只要这段前缀在飞，它的每个祖先都不能被当成可驱逐叶子清掉，否则请求会读到一片被回收的垃圾槽位。请求结束再 <span class='mono'>dec_lock_ref</span> 逐节点解锁",
+                        "en": "It prevents <strong>KV currently in use by a running request from being evicted</strong>: eviction reclaims from leaves upward (Lesson 32), so while this prefix is in flight none of its ancestors may be treated as an evictable leaf, or the request would read reclaimed garbage slots. On finish, <span class='mono'>dec_lock_ref</span> unlocks node by node",
+                    },
+                    {"zh": "防止两条请求同时匹配到同一个前缀", "en": "It prevents two requests from matching the same prefix at once"},
+                    {"zh": "防止节点的 key 被其它请求修改", "en": "It prevents a node's key from being modified by other requests"},
+                    {"zh": "防止树的深度超过最大限制", "en": "It prevents the tree depth from exceeding a maximum"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "lock_ref 守护“在用的 KV 不被回收”这条铁律。驱逐自叶向上回收，所以要把命中节点到根的整条链都加锁，任一祖先被清都会让在飞请求读到垃圾。共享前缀本就允许多请求同时命中（不是要防这个）；锁与改 key、限深度无关。",
+                    "en": "lock_ref guards the rule that in-use KV is never reclaimed. Eviction reclaims leaf-upward, so the whole chain from the matched node to the root is locked; reclaiming any ancestor would let an in-flight request read garbage. Shared prefixes are meant to be hit by many requests at once (not what this prevents); locking is unrelated to editing keys or limiting depth.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“共享文件夹树（路径 trie）”这个类比，把 <span class='mono'>RadixCache</span> 的数据结构与三大操作讲透。请覆盖：①一个 <span class='mono'>TreeNode</span> 的五个字段各装什么——key（边上一段 token）、children（首 token 索引的字典）、value（指向池子的 KV indices，<strong>不是张量</strong>，第 30 课）、lock_ref（在用计数）、last_access_time（LRU，第 32 课）；②<span class='mono'>match_prefix</span> 如何沿 children 下行、逐边匹配，以及“半条边匹配”时 <span class='mono'>_split_node</span> 为什么要在分歧点把公共前缀提为父节点；③为什么说“树是索引、池是存储”，以及共享的本质是复用指针而非复制 KV。",
+                "en": "Using the 'shared folder tree (path trie)' analogy, fully explain <span class='mono'>RadixCache</span>'s data structure and three core operations. Cover: (1) what each of a <span class='mono'>TreeNode</span>'s five fields holds — key (a run of tokens on the edge), children (dict keyed by first token), value (KV indices pointing into the pool, <strong>not tensors</strong>, Lesson 30), lock_ref (in-use count), last_access_time (LRU, Lesson 32); (2) how <span class='mono'>match_prefix</span> descends via children matching edge by edge, and why a half-edge match makes <span class='mono'>_split_node</span> lift the common prefix into a parent at the divergence point; (3) why 'tree is index, pool is storage,' and that sharing reuses pointers rather than copying KV.",
+            },
+            {
+                "zh": "把 <span class='mono'>match_prefix</span> → <span class='mono'>insert</span> → <span class='mono'>inc/dec_lock_ref</span> 串成一条请求生命周期讲清楚。请说明：①match 返回的两样东西（命中的 KV indices 用于复用、最深匹配节点用作落脚点）；②insert 如何把分叉后缀挂成新子节点、并与 match 共用同一套分裂逻辑保持树规范；③请求开始用某段前缀时为什么要从命中节点<strong>向上锁到根</strong>（驱逐自叶向上，第 32 课），结束时 dec_lock_ref 如何逐节点解锁、归零后才重新可驱逐；④把这棵树接回上层：概念动机在第 7 课、indices 指向的池在第 30 课、HiCache 分层子类在第 31 课、缓存感知调度在第 20 课。",
+                "en": "Trace a request's lifecycle through <span class='mono'>match_prefix</span> → <span class='mono'>insert</span> → <span class='mono'>inc/dec_lock_ref</span>. Cover: (1) the two things match returns (matched KV indices for reuse, deepest matched node as a foothold); (2) how insert attaches the diverging suffix as a new child and shares match's split logic to keep the tree canonical; (3) why starting to use a prefix walks the lock <strong>upward to the root</strong> (eviction is leaf-upward, Lesson 32), and how dec_lock_ref unlocks node by node, with a node becoming evictable again only at zero; (4) tie the tree back up the stack: the concept motivation in Lesson 7, the pool the indices point into in Lesson 30, the HiCache tiering subclass in Lesson 31, and cache-aware scheduling in Lesson 20.",
+            },
+        ],
+    },
+    "31-hicache-tiering.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "HiCache 把前缀缓存铺在<strong>三层</strong>上，这三层从快到慢、从小到大依次是什么？",
+                    "en": "HiCache spreads the prefix cache across <strong>three tiers</strong> — from fastest/smallest to slowest/largest, what are they?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>GPU HBM（热）→ CPU 主机内存（温）→ 磁盘 / 对象存储（冷）</strong>：HBM 最快最贵最小、前向直接读；CPU 内存大 10–100 倍、当写回暂存层；磁盘几乎无限、放超大共享前缀。被驱逐的 KV 向下沉、命中时向上取",
+                        "en": "<strong>GPU HBM (hot) → CPU host memory (warm) → disk / object store (cold)</strong>: HBM is fastest/priciest/smallest and read directly by the forward; CPU RAM is 10–100× bigger as the writeback stash; disk is near-infinite for huge shared prefixes. Evicted KV sinks down, hits fetch up",
+                    },
+                    {"zh": "L1 缓存 → L2 缓存 → L3 缓存，全在 GPU 芯片内部", "en": "L1 → L2 → L3 cache, all inside the GPU chip"},
+                    {"zh": "磁盘（热）→ CPU 内存（温）→ GPU HBM（冷），越往下越快", "en": "Disk (hot) → CPU RAM (warm) → GPU HBM (cold), faster going down"},
+                    {"zh": "三个不同 GPU 的 HBM，靠 NVLink 连起来", "en": "Three different GPUs' HBM linked by NVLink"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "三层是 GPU HBM（热、最快最小）→ CPU 内存（温、大 10–100 倍）→ 磁盘/对象存储（冷、近乎无限）。方向是被驱逐的 KV 写回下沉、命中时预取上移。它不是片上 L1/L2/L3，也不是多 GPU 的 HBM；把顺序倒过来（磁盘最快）更是错的。",
+                    "en": "The tiers are GPU HBM (hot, fastest/smallest) → CPU RAM (warm, 10–100× bigger) → disk/object store (cold, near-infinite). The direction is: evicted KV writes back down, hits prefetch up. It's not on-chip L1/L2/L3, nor multi-GPU HBM; reversing the order (disk fastest) is wrong.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 <span class='mono'>HiCacheController</span> 要把<strong>写回和预取放到后台线程 / 拷贝流</strong>上、与 GPU 计算重叠，而不是在主调度循环里同步做？",
+                    "en": "Why does <span class='mono'>HiCacheController</span> run <strong>writeback and prefetch on background threads / copy streams</strong> overlapped with GPU compute, instead of doing them synchronously in the main scheduling loop?",
+                },
+                "opts": [
+                    {
+                        "zh": "否则调度器会<strong>停下来干等一次 CPU↔GPU 拷贝</strong>，把本该省下的时间又赔进去。放后台与计算重叠（第 21 课精神）后，当前批在 GPU 算前向的同时，控制器并行地把上批 KV 往下搬、把下批要用的 KV 往上预取，等前向真正要用时它<strong>已经</strong>在 HBM 里了",
+                        "en": "Otherwise the scheduler would <strong>stall waiting on a CPU↔GPU copy</strong>, giving back the time it was supposed to save. Run in the background overlapped with compute (Lesson 21's spirit), so while the current batch runs its forward the controller shuttles the last batch's KV down and prefetches the next batch's KV up in parallel — by the time the forward needs it, it's <strong>already</strong> in HBM",
+                    },
+                    {"zh": "后台线程能让拷贝本身变得更快", "en": "Background threads make the copy itself faster"},
+                    {"zh": "因为 Python 的 GIL 不允许在主线程里做拷贝", "en": "Because Python's GIL forbids copies on the main thread"},
+                    {"zh": "为了把 KV 数据加密后再落盘", "en": "To encrypt the KV before writing to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "拷贝要花时间，若让调度器同步等一次 CPU↔GPU 拷贝，就抵消了 HiCache 省下的重算。放后台 + 与计算重叠（第 21 课），I/O 与前向并行，前向要用时 KV 已就位，调度器几乎不为 I/O 阻塞。后台并不会让拷贝更快，也与 GIL、加密无关。",
+                    "en": "Copies take time; making the scheduler synchronously wait on a CPU↔GPU copy would cancel the recompute HiCache saved. Background + overlap with compute (Lesson 21) runs I/O in parallel with the forward, so the KV is ready when needed and the scheduler is almost never blocked on I/O. Background doesn't speed the copy itself, and it's unrelated to the GIL or encryption.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "相比第 29 课朴素的 HBM-only 基数树，HiCache 在一次驱逐 → 再命中时，本质上<strong>用什么换了什么</strong>？",
+                    "en": "Compared with Lesson 29's naive HBM-only radix tree, on an evict-then-rehit, what does HiCache fundamentally <strong>trade for what</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "用一次<strong>便宜的 CPU→GPU 拷贝</strong>，换掉一次<strong>昂贵的前向重算</strong>。朴素缓存驱逐即丢弃，再命中等于没命中、得从头算几千 token；HiCache 把驱逐变成降级（写回下层），再命中只需把备份拷回 GPU",
+                        "en": "A cheap <strong>CPU→GPU copy</strong> in place of an expensive <strong>forward recompute</strong>. The naive cache drops on eviction, so a rehit is a miss and recomputes thousands of tokens; HiCache turns eviction into demotion (writeback to a lower tier), so a rehit just copies the backup back to GPU",
+                    },
+                    {"zh": "用更多 GPU 显存，换更低的 CPU 占用", "en": "More GPU memory in exchange for lower CPU usage"},
+                    {"zh": "用更高的精度，换更小的模型体积", "en": "Higher precision in exchange for a smaller model"},
+                    {"zh": "用更长的上下文窗口，换更短的输出", "en": "A longer context window in exchange for shorter outputs"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "HiCache 的核心交易是“拷贝换计算”：把驱逐从“丢弃→重算”改成“降级→拷回”，再命中只付一次便宜的 CPU→GPU 拷贝，省掉一次昂贵的前向。它不是省显存换 CPU（反而要多花 CPU/磁盘），也与精度、上下文窗口无关。",
+                    "en": "HiCache's core trade is copy-for-compute: it changes eviction from drop→recompute into demote→copy-back, so a rehit pays one cheap CPU→GPU copy and skips an expensive forward. It's not saving GPU memory at the cost of CPU (it actually spends extra CPU/disk), and it's unrelated to precision or context window.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“书桌 → 抽屉 → 异地仓库”这个三层类比，把 HiCache 的机制讲透。请覆盖：①三层各对应什么（GPU HBM 热 / CPU 内存 温 / 磁盘 冷），它们在<strong>延迟与容量</strong>上的取舍；②<span class='mono'>HiRadixCache</span> 为什么是第 29 课 <span class='mono'>RadixCache</span> 的<strong>子类</strong>、它在 <span class='mono'>TreeNode</span> 上多挂的 <span class='mono'>host_value</span> 用来记什么；③两个方向的动作——驱逐时 <span class='mono'>write_backup</span> 把 KV<strong>写回下沉</strong>、命中下层时 <span class='mono'>load_back</span> <strong>预取上移</strong>；④为什么这套机制相对朴素 HBM-only 基数树（第 29 课）能提升有效命中率。",
+                "en": "Using the 'desk → drawer → off-site warehouse' three-tier analogy, fully explain HiCache. Cover: (1) what each tier maps to (GPU HBM hot / CPU RAM warm / disk cold) and their <strong>latency vs capacity</strong> trade-offs; (2) why <span class='mono'>HiRadixCache</span> is a <strong>subclass</strong> of Lesson 29's <span class='mono'>RadixCache</span> and what the extra <span class='mono'>host_value</span> field on <span class='mono'>TreeNode</span> records; (3) the two directional actions — <span class='mono'>write_backup</span> <strong>writes KV back down</strong> on eviction, <span class='mono'>load_back</span> <strong>prefetches up</strong> on a lower-tier hit; (4) why this raises the effective hit rate over the naive HBM-only tree of Lesson 29.",
+            },
+            {
+                "zh": "说清 HiCache 的<strong>代价、收益与适用场景</strong>，并把它接回相邻几课。请说明：①核心交易是“用一次便宜的 CPU→GPU 拷贝换掉一次昂贵的重算”，以及为什么写回 / 预取要放<strong>后台线程并与计算重叠</strong>（第 21 课精神）、不堵调度；②代价有哪些（额外 CPU 内存 / 磁盘、拷贝带宽、多层一致性复杂度），以及为什么 HiCache 是<strong>可选开关</strong>；③它对哪类负载收益最大（大前缀、高复用、塞不进 HBM——长系统提示、大 RAG、多轮聊天），收益最终体现为吞吐 / 延迟（第 8 课）；④把它接回上下文：索引指向的显存池见第 30 课、驱逐与命中率见第 32 课。",
+                "en": "Explain HiCache's <strong>cost, payoff, and where it fits</strong>, tying it back to neighboring lessons. Cover: (1) the core trade — one cheap CPU→GPU copy replacing one expensive recompute — and why writeback/prefetch run on <strong>background threads overlapped with compute</strong> (Lesson 21's spirit) without stalling the scheduler; (2) the costs (extra CPU RAM/disk, copy bandwidth, cross-tier consistency complexity) and why HiCache is an <strong>optional flag</strong>; (3) which workloads benefit most (big prefixes, high reuse, won't fit in HBM — long system prompts, big RAG, many-turn chats), with the payoff showing up as throughput/latency (Lesson 8); (4) tie it back: the memory pool the indices point into is Lesson 30, and eviction & hit rate is Lesson 32.",
+            },
+        ],
+    },
+    "32-eviction-and-hit-rate.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "显存吃紧、默认用 LRU 策略时，<span class='mono'>evict</span> 会优先清掉<strong>哪一个</strong>节点？",
+                    "en": "Under memory pressure with the default LRU strategy, which node does <span class='mono'>evict</span> clear <strong>first</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>最久未被访问、且 lock_ref=0 的那个可驱逐叶子</strong>：LRU 的 <span class='mono'>get_priority</span> 直接返回 <span class='mono'>last_access_time</span>，时间最老的排在堆顶最先被清；而且只有叶子能驱逐、被锁的根本不在候选集里",
+                        "en": "<strong>The oldest-untouched evictable leaf with lock_ref=0</strong>: LRU's <span class='mono'>get_priority</span> just returns <span class='mono'>last_access_time</span>, so the oldest sits at the heap top and goes first; only leaves are evictable and locked nodes aren't even candidates",
+                    },
+                    {"zh": "命中次数最多的那个热门前缀，因为它最占地方", "en": "The most-hit popular prefix, because it takes the most space"},
+                    {"zh": "树里最深的那个节点，不管它是不是叶子", "en": "The deepest node in the tree, whether or not it's a leaf"},
+                    {"zh": "随便挑一个，驱逐是随机的", "en": "Any node at random — eviction is random"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "默认 LRU 的优先级就是 last_access_time，最久未访问者排堆顶先走；同时只有 lock_ref=0 的叶子才在可驱逐集里。清最热门的恰恰相反，深节点若非叶子不能清，驱逐也绝非随机。",
+                    "en": "Default LRU's priority is last_access_time, so the oldest-untouched pops first; and only lock_ref=0 leaves are in the evictable set. Clearing the hottest is backwards, a non-leaf deep node can't be cleared, and eviction is not random.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么<strong>只有叶子</strong>可被驱逐，而一个 <span class='mono'>lock_ref&gt;0</span> 的节点<strong>永远</strong>不可被驱逐？",
+                    "en": "Why are <strong>only leaves</strong> evictable, and why is a <span class='mono'>lock_ref&gt;0</span> node <strong>never</strong> evictable?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>非叶节点下面还挂着更长的路径，那条路径依赖这段前缀的 KV，抽掉它孩子就悬空</strong>；而 lock_ref&gt;0 表示有在跑的请求正用这段前缀——它的前向正在读那批 KV 槽位，回收了就会读到被覆盖的垃圾、结果崩坏。所以回收只能从叶往根、且绕开在用链",
+                        "en": "<strong>A non-leaf still has longer paths hanging below that depend on this prefix's KV — pull it and its children dangle</strong>; and lock_ref&gt;0 means a running request is using this prefix — its forward is reading those KV slots, so reclaiming them would read overwritten garbage and corrupt the result. Reclaim must go leaf-to-root and skip the in-use chain",
+                    },
+                    {"zh": "叶子比内部节点占用更多显存，清它们最划算", "en": "Leaves use more memory than internal nodes, so clearing them pays most"},
+                    {"zh": "因为内部节点没有 KV 槽位可释放", "en": "Because internal nodes have no KV slots to free"},
+                    {"zh": "lock_ref 只是个统计字段，对驱逐没有实际约束", "en": "lock_ref is just a stats field with no real constraint on eviction"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "内部节点有更长路径依赖其前缀 KV，清它会让孩子悬空，所以回收从叶往根。lock_ref>0 的节点正被在飞前向读着，回收其槽位会破坏正确性，是铁律而非统计。内部节点同样持有 KV 槽位，体积也并非叶子更大。",
+                    "en": "Internal nodes have longer paths depending on their prefix KV; clearing them dangles children, so reclaim is leaf-to-root. A lock_ref>0 node is being read by an in-flight forward, so freeing its slots breaks correctness — an iron rule, not mere stats. Internal nodes also hold KV slots, and leaves aren't bigger.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<strong>命中率</strong>衡量什么，为什么说它最终等价于<strong>吞吐</strong>？",
+                    "en": "What does <strong>hit rate</strong> measure, and why is it ultimately equivalent to <strong>throughput</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>它衡量有多少 prompt token 是从缓存直接拿到、不必重算的比例</strong>。命中越多→需要跑前向重算的 token 越少→同样的 GPU 时间能服务更多请求，于是吞吐越高（第 8 课）。高前缀共享（第 7/29 课）+ 缓存感知调度（第 20 课）把命中率抬上去，HiCache（第 31 课）再抬高有效命中率",
+                        "en": "<strong>It measures the fraction of prompt tokens served straight from the cache with no recompute</strong>. More hits → fewer tokens to recompute in a forward → the same GPU time serves more requests, so throughput rises (Lesson 8). High prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) lift it; HiCache (Lesson 31) raises the effective hit rate",
+                    },
+                    {"zh": "它衡量 GPU 显存占用率，越满吞吐越高", "en": "It measures GPU memory utilization — fuller means higher throughput"},
+                    {"zh": "它衡量模型预测下一个 token 的准确率", "en": "It measures the model's next-token prediction accuracy"},
+                    {"zh": "它衡量网络请求的成功率，与重算无关", "en": "It measures network request success rate, unrelated to recompute"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "命中率 = 从缓存白拿、不必重算的 prompt token 占比。命中越多、重算越少，同样 GPU 时间服务更多请求 → 吞吐越高（第 8 课）。它不是显存占用率、不是预测准确率、也不是网络成功率。",
+                    "en": "Hit rate = the fraction of prompt tokens taken free from the cache without recompute. More hits, less recompute, more requests per unit GPU time → higher throughput (Lesson 8). It's not memory utilization, not prediction accuracy, and not network success rate.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“图书管理员清理书架”的类比，把驱逐机制讲透。请覆盖：①驱逐<strong>何时</strong>被触发（节点占着第 30 课池里的 KV 槽位，分配器凑不出新请求要的空间时，调度器才触发 <span class='mono'>evict</span> 回收若干槽位），为什么它是被动按需、而非定时清理；②<strong>清谁</strong>由 <span class='mono'>EvictionStrategy</span> 的 <span class='mono'>get_priority</span> 排序，默认 LRU=<span class='mono'>last_access_time</span>（最久未访问先走），并简述 LFU / FIFO / MRU 的区别；③为什么<strong>只有叶子</strong>可驱逐、回收从叶往根；④铁律：<span class='mono'>lock_ref&gt;0</span> 的节点（正被在跑请求使用，第 29 课）永不被驱逐，<span class='mono'>inc/dec_lock_ref</span> 如何在可驱逐集与受保护集之间搬节点。",
+                "en": "Using the 'librarian weeding the shelves' analogy, fully explain eviction. Cover: (1) <strong>when</strong> it triggers (nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble the slots a new request needs does the scheduler fire <span class='mono'>evict</span> to reclaim some), and why it's reactive/on-demand rather than scheduled cleanup; (2) <strong>who</strong> gets cleared, ordered by <span class='mono'>EvictionStrategy</span>'s <span class='mono'>get_priority</span>, default LRU=<span class='mono'>last_access_time</span> (oldest-untouched first), and briefly LFU / FIFO / MRU; (3) why <strong>only leaves</strong> are evictable and reclaim goes leaf-to-root; (4) the iron rule: a <span class='mono'>lock_ref&gt;0</span> node (in use by a running request, Lesson 29) is never evicted, and how <span class='mono'>inc/dec_lock_ref</span> move nodes between the evictable and protected sets.",
+            },
+            {
+                "zh": "说清前缀缓存的<strong>经济学</strong>，并把它接回相邻几课。请说明：①<strong>命中率</strong>衡量什么（从缓存白拿、不重算的 prompt token 占比），它如何被高前缀共享（第 7/29 课）+ 缓存感知调度（第 20 课，主动重排队列优先放命中请求）抬高，又如何转化为更高吞吐（第 8 课）；②核心<strong>取舍</strong>：驱逐later重算 vs 留在 HBM——留占显存挤掉并发、驱省显存却赔上一次几千 token 的重算，为什么整个内存部分（第 29–32 课）都在把这笔取舍做好；③HiCache（第 31 课）如何通过把被驱逐前缀沉到下层、抬高<strong>有效</strong>命中率。",
+                "en": "Explain the <strong>economics</strong> of the prefix cache, tying it back to neighboring lessons. Cover: (1) what <strong>hit rate</strong> measures (fraction of prompt tokens taken from cache without recompute), how it's raised by high prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20, which reorders the queue to favor cache hits), and how it converts into higher throughput (Lesson 8); (2) the core <strong>trade</strong>: evict-and-recompute-later vs keep-in-HBM — keeping costs HBM and squeezes out concurrency, evicting costs a future thousands-token recompute, and why the whole memory part (Lessons 29–32) is about making this trade well; (3) how HiCache (Lesson 31) raises the <strong>effective</strong> hit rate by sinking evicted prefixes to lower tiers.",
+            },
+        ],
+    },
+    "30-paged-memory-pools.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "从一条请求出发取到它的<strong>物理 K/V</strong>，要走<strong>哪条两跳寻址链路</strong>？",
+                    "en": "Starting from a request, what is the <strong>two-hop addressing path</strong> to its <strong>physical K/V</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "请求 →（<span class='mono'>ReqToTokenPool</span> 按 <span class='mono'>req_pool_idx</span> 取行）→ 一串 <strong>token 槽位号 (indices)</strong> →（<span class='mono'>token_to_kv</span> 池按槽位号）→ <strong>每层的物理 K/V</strong>。账本只记编号、不装张量；仓库才装真正吃显存的 K/V",
+                        "en": "request →(<span class='mono'>ReqToTokenPool</span> reads the row by <span class='mono'>req_pool_idx</span>)→ a run of <strong>token slot ids (indices)</strong> →(<span class='mono'>token_to_kv</span> pool by slot)→ <strong>per-layer physical K/V</strong>. The ledger holds only numbers, no tensors; the warehouse holds the K/V that actually eats memory",
+                    },
+                    {"zh": "请求直接在自己的表里存 K/V 张量，一跳到位", "en": "the request stores K/V tensors directly in its own table, one hop"},
+                    {"zh": "请求 → 基数树节点 → 节点里直接存的 K/V 张量", "en": "request → radix tree node → K/V tensors stored directly in the node"},
+                    {"zh": "请求 → 分配器 → 分配器内部缓存的 K/V", "en": "request → allocator → K/V cached inside the allocator"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "两个池、两跳是本课核心：ReqToTokenPool 是每请求私有账本（按 req_pool_idx 索引），只记 token 槽位号；token_to_kv 池（MHATokenToKVPool）才按槽位号存每层真正的 K/V。请求不直接存张量；树存的也是 indices 不是张量（第 29 课）；分配器只发槽/回收槽，不存 K/V。",
+                    "en": "Two pools, two hops is the core: ReqToTokenPool is the per-request private ledger (indexed by req_pool_idx) holding only token slot numbers; the token_to_kv pool (MHATokenToKVPool) stores the real per-layer K/V by slot. The request doesn't store tensors; the tree also stores indices not tensors (Lesson 29); the allocator only hands out/reclaims slots, it stores no K/V.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>ReqToTokenPool</span> 和 <span class='mono'>token_to_kv</span> 池<strong>各自映射什么</strong>？为什么要拆成两张表？",
+                    "en": "What does <span class='mono'>ReqToTokenPool</span> map vs. the <span class='mono'>token_to_kv</span> pool, and why split into two tables?",
+                },
+                "opts": [
+                    {
+                        "zh": "<span class='mono'>ReqToTokenPool</span> 映射“每条请求 → 它依次拥有的 token 槽位号列表”（每请求记账，按 <span class='mono'>req_pool_idx</span> 索引）；<span class='mono'>token_to_kv</span> 池映射“token 槽位号 → 每层物理 K/V”（共享大仓库）。拆开是为了让槽位能<strong>非连续</strong>（分页，第 6 课）且<strong>被多请求共享</strong>（第 29 课），账本只管“哪些编号是我的”",
+                        "en": "<span class='mono'>ReqToTokenPool</span> maps 'each request → the list of token slot numbers it owns' (per-request bookkeeping, indexed by <span class='mono'>req_pool_idx</span>); the <span class='mono'>token_to_kv</span> pool maps 'token slot id → per-layer physical K/V' (one shared warehouse). The split lets slots be <strong>non-contiguous</strong> (paging, Lesson 6) and <strong>shared across requests</strong> (Lesson 29), while the ledger only tracks 'which numbers are mine'",
+                    },
+                    {"zh": "两张表装的内容完全一样，只是为了冗余备份", "en": "the two tables hold identical content, just for redundant backup"},
+                    {"zh": "ReqToTokenPool 装 K/V 张量，token_to_kv 池装编号", "en": "ReqToTokenPool holds K/V tensors and the token_to_kv pool holds the numbers"},
+                    {"zh": "拆开纯粹是历史遗留，没有实际作用", "en": "the split is purely a historical accident with no real purpose"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "账本（ReqToTokenPool）记编号、按 req_pool_idx 索引；仓库（token_to_kv 池）按槽位号存每层真 K/V。若合成一张让请求直接存 K/V，就既无法表达非连续的分页槽位、也无法让两请求共享同一批物理槽位——拆开正是为这两件事。两表内容不同、角色不同，绝非冗余或遗留。",
+                    "en": "The ledger (ReqToTokenPool) holds numbers indexed by req_pool_idx; the warehouse (token_to_kv pool) holds the real per-layer K/V by slot. Merging them so a request stores K/V directly would make non-contiguous paged slots inexpressible and cross-request sharing impossible — the split exists for exactly these. The two tables differ in content and role; not redundancy or legacy.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "第 29 课基数树节点的 <span class='mono'>value</span> 既然是 <strong>indices 而不是张量</strong>，那“<strong>两请求共享前缀</strong>”在内存池里到底意味着什么？",
+                    "en": "Since a Lesson-29 node's <span class='mono'>value</span> is <strong>indices, not tensors</strong>, what does 'two requests sharing a prefix' actually mean in the pools?",
+                },
+                "opts": [
+                    {
+                        "zh": "两条请求的账本里写着<strong>同一批 token 槽位号</strong>，于是注意力都去 <span class='mono'>token_to_kv</span> 池读<strong>同一批物理 K/V</strong>——共享部分<strong>零额外显存</strong>。驱逐（第 32 课）就是把这些槽位号还给分配器；正因为树存的是编号而非张量，复用才能零拷贝",
+                        "en": "both requests' ledgers carry <strong>the same token slot numbers</strong>, so attention reads <strong>the same physical K/V</strong> in the <span class='mono'>token_to_kv</span> pool — the shared part costs <strong>zero extra memory</strong>. Eviction (Lesson 32) returns those slot numbers to the allocator; precisely because the tree stores numbers not tensors, reuse is zero-copy",
+                    },
+                    {"zh": "引擎把共享前缀的 K/V 复制一份给每条请求", "en": "the engine copies the shared prefix's K/V once per request"},
+                    {"zh": "两请求各自重算一遍共享前缀的 K/V", "en": "each request recomputes the shared prefix's K/V on its own"},
+                    {"zh": "共享只发生在 CPU 内存，GPU 上仍是各存各的", "en": "sharing only happens in CPU memory; on GPU each keeps its own copy"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "树存的是 indices，所以共享 = 复用指针：两请求账本指向同一批槽位号 → 同一批物理 K/V → 共享部分零额外显存。这正是不复制、不重算的根源。驱逐则把这串槽位号还回分配器（第 32 课）。说复制、重算或仅 CPU 共享都与“索引与存储分离”的设计相悖。",
+                    "en": "The tree stores indices, so sharing = reusing pointers: both ledgers point at the same slot numbers → the same physical K/V → zero extra memory for the shared part. That's the root of no-copy, no-recompute. Eviction returns the run of slot numbers to the allocator (Lesson 32). Claims of copying, recomputing, or CPU-only sharing all contradict the index-vs-storage separation.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“衣帽间 + 储物柜大厅”这个类比，把分页内存池的<strong>两个池与两跳寻址</strong>讲透。请覆盖：①<span class='mono'>ReqToTokenPool</span> 为什么像“取衣牌”——它按 <span class='mono'>req_pool_idx</span> 索引、每行记“这条请求依次拥有哪些 token 槽位号”，<strong>只记编号不装张量</strong>；②<span class='mono'>MHATokenToKVPool</span> 为什么像“那排储物柜”——它为<strong>每一层</strong>各开一个大张量、按槽位号存真正的 K/V；③两跳寻址链路：请求 →（账本取行）→ token 槽位号 →（仓库按号取）→ 物理 K/V；④<span class='mono'>TokenToKVPoolAllocator</span> 为什么像“服务员”——以页（第 6 课）发槽/回收槽，总槽位在开机按 <span class='mono'>mem_fraction_static</span>（第 8 课）钉死 = 并发上限（第 4 课）。",
+                "en": "Using the 'coat-check + locker room' analogy, fully explain the <strong>two pools and two-hop addressing</strong> of paged memory pools. Cover: (1) why <span class='mono'>ReqToTokenPool</span> is like the 'claim ticket' — indexed by <span class='mono'>req_pool_idx</span>, each row recording 'which token slot numbers this request owns, in order,' <strong>numbers only, no tensors</strong>; (2) why <span class='mono'>MHATokenToKVPool</span> is like 'that bank of lockers' — a big tensor <strong>per layer</strong>, storing the real K/V by slot; (3) the two-hop path: request →(ledger row)→ token slot ids →(warehouse by slot)→ physical K/V; (4) why <span class='mono'>TokenToKVPoolAllocator</span> is like the 'attendant' — handing out/reclaiming slots by page (Lesson 6), with total slots nailed at startup by <span class='mono'>mem_fraction_static</span> (Lesson 8) = the concurrency ceiling (Lesson 4).",
+            },
+            {
+                "zh": "把“<strong>树是索引、池是存储</strong>”接回第 29 课，讲清楚共享与驱逐在内存层的真相。请说明：①为什么 <span class='mono'>TreeNode</span> 的 <span class='mono'>value</span> 装的是 token 槽位号（indices）而非 K/V 张量，“树是索引/去重层、池是存储层”如何分工；②“两请求共享前缀”在池子里意味着两份账本写着<strong>同一批槽位号</strong>、指向<strong>同一批物理 K/V</strong>、共享部分<strong>零额外显存</strong>；③为什么要把账本（ReqToTokenPool）和仓库（token_to_kv 池）<strong>拆成两张表</strong>——为支持非连续的分页槽位（第 6 课）与跨请求共享（第 29 课）；④驱逐（第 32 课）如何把 value 里那串槽位号<strong>还给分配器</strong>，让别的 token 来占。",
+                "en": "Tie 'tree is index, pool is storage' back to Lesson 29 and explain the truth of sharing and eviction at the memory layer. Cover: (1) why a <span class='mono'>TreeNode</span>'s <span class='mono'>value</span> holds token slot numbers (indices) not K/V tensors, and how 'tree as index/dedup layer, pool as storage layer' divides labor; (2) why 'two requests sharing a prefix' means both ledgers carry <strong>the same slot numbers</strong>, pointing at <strong>the same physical K/V</strong>, with the shared part costing <strong>zero extra memory</strong>; (3) why the ledger (ReqToTokenPool) and warehouse (token_to_kv pool) are <strong>split into two tables</strong> — to support non-contiguous paged slots (Lesson 6) and cross-request sharing (Lesson 29); (4) how eviction (Lesson 32) <strong>returns</strong> the run of slot numbers in a node's value to the allocator so other tokens can occupy them.",
+            },
+        ],
+    },
 }
 
 

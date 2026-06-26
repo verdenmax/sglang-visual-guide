@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 28 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 32 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -364,6 +364,10 @@ details[open] > summary { list-style: none; }
   <li>Writing a model</li>
   <li>CUDA graph capture & replay</li>
   <li>Sampler & sampling params</li>
+  <li>RadixAttention implementation</li>
+  <li>Paged memory pools</li>
+  <li>HiCache tiering</li>
+  <li>Eviction & hit rate</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -5994,6 +5998,686 @@ and this lesson adds the last link — <strong>how the computed logits actually 
   <ul>
     <li>Using the 'weighted lottery over the vocabulary' analogy, fully explain the sampling pipeline from scratch. Cover: (1) the start — model.forward (Lesson 24) yields logits, one score per vocab token, and why that isn't the answer yet; (2) the pipeline order — penalties (repetition/frequency/presence, anti-parrot) → temperature (÷T: &lt;1 sharp, &gt;1 flat, =0 greedy, and it only changes lopsidedness not ranking) → top-k (caps count) / top-p (caps cumulative prob) / min-p (relative floor) gates → softmax → multinomial sample, explaining why each step sits where it does; (3) greedy vs sampling (deterministic/reproducible vs random/diverse), and what 'truncation governs quality, temperature governs diversity' means.</li>
     <li>Explain why the Sampler is a <strong>hub where many features hook in</strong>, and how it ties back to the main line. Cover: (1) how structured output (Lesson 48) sets violating tokens' logits to −∞ before sampling, guaranteeing grammar validity by mechanism; (2) what other hooks live at the same spot — logit-bias, min_tokens/EOS suppression, deterministic inference (pinning the RNG seed); (3) why 'different requests in one batch can use different params' matters in practice (SamplingBatchInfo packs params into tensors, vectorized); (4) tie sampling back to step 4 of the request loop (Lesson 18) and autoregression (Lesson 4): the sampled token is appended to the Req and fed into the next step.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>RadixAttention implementation</h1>
+
+<p class="lead">
+Lesson 7 covered <strong>why</strong> we share prefixes — one system prompt repeated by thousands of requests makes recomputing its KV pure waste.
+This lesson does not repeat the "why"; it drills into the <strong>code</strong> of <span class="inline">RadixCache</span>:
+exactly what data structures build that tree, how one <span class="mono">match_prefix</span> walks down it,
+the moment a node gets <strong>split</strong>, and what <strong>locks</strong> an in-use prefix so it can't be reclaimed. Grasp this and you can read
+<span class="mono">radix_cache.py</span>, one of the most elegant files in the whole engine.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the radix tree as a <strong>shared folder tree (a trie of file paths)</strong>: each folder (node) is named by a <strong>run of path segments</strong> (a run of tokens),
+  and the folder holds no file itself, just a <strong>sticky note</strong> saying "the KV for this run lives on these shelf numbers in the warehouse." You walk down <strong>matching segment by segment</strong>;
+  when two paths <strong>agree on a front part then diverge</strong>, you <strong>split that folder into two levels</strong> — the common prefix is lifted into a parent, each tail becomes a child folder.
+  As long as someone has a folder <strong>open</strong> (lock_ref&gt;0), it <strong>may not be deleted</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One sentence: <strong>the tree is the index, the pool is the warehouse</strong>. The radix tree itself <strong>stores no KV tensors</strong>; it stores the mapping "token sequence → KV slot numbers (indices) in the pool."
+  The real K/V tensors sit in the <strong>memory pool</strong> (Lesson 30). Two requests sharing a prefix means they <strong>walk the same ancestor nodes</strong> on the tree,
+  get the <strong>same run of indices</strong>, pointing at the <strong>same physical slots</strong> — zero copy, zero recompute. This tree also works with eviction and locks (Lesson 32),
+  HiCache tiering (Lesson 31), and cache-aware scheduling (Lesson 20).
+</div>
+
+<h2>TreeNode: what a node actually holds</h2>
+<p>The whole tree is woven from <span class="mono">TreeNode</span>. Understand its five fields and you understand almost everything.
+<strong>key</strong> is "a run of token ids on the edge into this node" — note it's a <strong>run</strong>, not one token; packing consecutive un-branched tokens onto one edge keeps the tree from degenerating into a long chain.
+<strong>children</strong> is a dict <strong>keyed by the first token of each child's key</strong>, so descending picks the right child in one step.
+<strong>value</strong> is the <strong>KV slot numbers (indices)</strong> for this run — again, a <strong>pointer into the pool</strong> (Lesson 30), <strong>not the KV tensors themselves</strong>.
+<strong>lock_ref</strong> counts "how many running requests are currently using this prefix," the talisman that protects it from eviction (Lesson 32).
+<strong>last_access_time</strong> feeds LRU, deciding who gets evicted first under memory pressure.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>The five key fields of a TreeNode</b>: tokens on the edge (key) + dict of children + indices into the pool + lock count + access time</div>
+  <div class="cells"><span class="lab">key</span><span class="cell">tok</span><span class="cell">of</span><span class="cell">the</span><span class="sep">→</span><span class="cell q">a run of token ids on the edge into this node (a run, not one)</span></div>
+  <div class="cells"><span class="lab">children</span><span class="cell hl">firstTok→kid</span><span class="sep">→</span><span class="cell q">dict keyed by each child's first token; one-step descent</span></div>
+  <div class="cells"><span class="lab">value</span><span class="cell hl">#1024</span><span class="cell hl">#1025</span><span class="sep">→</span><span class="cell q">KV slot numbers (pointers); tensors live in the pool (Lesson 30)</span></div>
+  <div class="cells"><span class="lab">lock_ref</span><span class="cell">2</span><span class="sep">→</span><span class="cell q">running requests using this prefix; &gt;0 means no eviction (Lesson 32)</span></div>
+  <div class="cells"><span class="lab">last_access</span><span class="cell">t₇</span><span class="sep">→</span><span class="cell q">most-recent access time, for LRU (Lesson 32)</span></div>
+</div>
+
+<table class="t">
+  <tr><th>TreeNode field</th><th>Role</th><th>Why it's needed</th></tr>
+  <tr><td class="mono">key</td><td>a run of token ids on the edge</td><td>packs un-branched tokens onto one edge, avoids a long chain</td></tr>
+  <tr><td class="mono">children</td><td>first-token → child dict</td><td>O(1) pick of which child to descend into</td></tr>
+  <tr><td class="mono">value</td><td>KV slot numbers (indices)</td><td>pointer into the pool; reuse = the same physical slots (Lesson 30)</td></tr>
+  <tr><td class="mono">lock_ref</td><td>in-use reference count</td><td>&gt;0 locks it, so in-flight KV can't be evicted (Lesson 32)</td></tr>
+  <tr><td class="mono">last_access_time</td><td>LRU timestamp</td><td>decides who is evicted first under memory pressure (Lesson 32)</td></tr>
+</table>
+
+<h2>match_prefix: walk down, split at the divergence</h2>
+<p>A new request arrives and its token sequence first <strong>asks the tree "how long a run of me has already been computed?"</strong> That's <span class="mono">match_prefix</span>.
+It starts at the root, <strong>uses the current token's first id to find a child in the children dict</strong>, then matches this run of tokens against that <strong>child's edge key, token by token</strong>.
+Two outcomes: one, <strong>the whole edge matches</strong> — take that child's value (a run of indices) into the result, <strong>consume</strong> the matched tokens, and continue with the next token's first id;
+two, <strong>only the front half of the edge matches before diverging</strong> — now we can't reuse the whole edge, so we call <span class="mono">_split_node</span> to <strong>cut that node into two levels at the divergence point</strong>.</p>
+<p>The split is elegant: build a new parent whose <strong>key is the common prefix slice</strong> and whose value is that slice of indices; the original node becomes its child with <strong>key and value trimmed to just the diverging tail</strong>.
+So the "common part" is extracted into an ancestor that many can share, and the "differing tails" become its branches. This step is the soul of the radix tree — <strong>sharing grows on demand at the instant of matching</strong>,
+not planned ahead. <span class="mono">match_prefix</span> ultimately returns two things: the <strong>matched run of KV indices</strong> (reuse, no recompute) and the <strong>deepest matched node</strong> (the foothold for later insert and locking).</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Walk-down match</h4><p>Use the current token's first id to find a child in <span class="mono">children</span>, compare against its edge <span class="mono">key</span> token by token. Whole-edge hit → take its indices, consume tokens, descend further.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Diverge mid-edge → split</h4><p>Only the front half matches → <span class="mono">_split_node</span> cuts into two levels at the divergence: common prefix becomes the parent, original tail becomes the child, and the parent is now shareable.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Attach the diverging suffix → insert</h4><p>The leftover "new tail" after the match point → <span class="mono">insert</span> it as a new child node whose value is the indices obtained from writing this run's K/V into the pool.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Lock to protect</h4><p>From the deepest matched node walk <span class="mono">upward</span>, doing <span class="mono">lock_ref += 1</span> on each, so eviction (Lesson 32) can't touch this in-flight prefix; unlock node by node when the request finishes.</p></div></div>
+</div>
+
+<p>In the real code, the walk-down loop and the split look like this — note the <span class="mono">prefix_len &lt; len(child.key)</span> test, which is exactly the moment "only half the edge matched, must split":</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">walk-down match and on-demand split</span></div>
+  <pre><span class="kw">def</span> _match_prefix_helper(self, node, key):
+    child_key = key.child_key(self.page_size)   <span class="cm"># index by current token's first id</span>
+    value = []
+    <span class="kw">while</span> len(key) &gt; 0 <span class="kw">and</span> child_key <span class="kw">in</span> node.children.keys():
+        child = node.children[child_key]
+        prefix_len = child.key.match(key, page_size=self.page_size)
+        <span class="kw">if</span> prefix_len &lt; len(child.key):       <span class="cm"># only half the edge matched -&gt; must split</span>
+            new_node = self._split_node(child.key, child, prefix_len)
+            value.append(new_node.value)        <span class="cm"># take the common prefix's KV indices</span>
+            node = new_node
+            <span class="kw">break</span>
+        <span class="kw">else</span>:                                  <span class="cm"># whole edge hit -&gt; take it, consume, descend</span>
+            value.append(child.value)
+            node = child
+            key = key[prefix_len:]
+            child_key = key.child_key(self.page_size)
+    <span class="kw">return</span> value, node                        <span class="cm"># matched indices + deepest node</span></pre>
+</div>
+
+<h2>insert and lock_ref: attach the new tail, lock the in-use prefix</h2>
+<p>Matching only answers "how much already exists." What about the <strong>never-seen suffix</strong> left over? That's <span class="mono">insert</span>: it walks the same path to the match point and
+<strong>attaches the diverging new tokens as a new child node</strong> under the deepest matched node, the new node's value being the run of indices from writing this run's K/V into the pool.
+If insert also hits a "half edge" along the way, it likewise <span class="mono">_split_node</span> first then attaches — so match and insert share the same split logic, keeping the tree <strong>always canonical</strong>.</p>
+<p>Finally, the <strong>lock</strong>. When a request starts using a matched prefix, the engine walks <strong>upward from the deepest matched node all the way to the root</strong>, doing <span class="mono">lock_ref += 1</span> on each node (that's <span class="mono">inc_lock_ref</span>).
+Why lock the whole chain upward? Because eviction reclaims from leaves upward (Lesson 32); as long as this prefix is in flight, <strong>none of its ancestors may be treated as an "evictable leaf"</strong>, or a running request would read a swath of reclaimed garbage slots.
+On finish, <span class="mono">dec_lock_ref</span> decrements the counts back; once a node's <span class="mono">lock_ref</span> hits zero it becomes an eviction candidate again. In one line: <strong>lock_ref guards the iron rule that KV in use is never reclaimed</strong>.</p>
+
+<h2>How sharing really happens: tree is index, pool is storage</h2>
+<p>Tie three things together and it clicks. If two requests share a prefix, in <span class="mono">match_prefix</span> they <strong>walk the same ancestor nodes</strong>,
+get the <strong>same run of values (indices)</strong>, so both attention reads hit the <strong>same physical slots</strong> in the pool — that's the whole truth of "sharing": not copying KV, but <strong>reusing pointers</strong>.
+Once each generates a different next token, the paths <strong>diverge</strong> at some node into two distinct leaves, each new KV written to fresh slots in the pool and hung as its own new child node.
+The tree owns "<strong>who shares with whom, up to which token</strong>"; the pool owns "<strong>where the KV actually lives</strong>" — index and storage fully separated, which is exactly why this design is both memory-thrifty and fast.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">root</div><div class="nd">empty prefix</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">shared ancestor</div><div class="nd">"You are an assistant…"<br>both walk it · same indices</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">leaf A</div><div class="nd">request A's own suffix<br>→ fresh slots in pool</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">leaf B</div><div class="nd">request B's own suffix<br>→ other slots in pool</div></div>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① A TreeNode's value is KV slot numbers (indices), not KV tensors</strong> — the tree is the index, the pool is the storage (Lesson 30).
+  <strong>② match_prefix descends via the children dict, matching edge by edge; on a half-edge match, _split_node cuts two levels at the divergence</strong>, lifting the common prefix into a shareable parent.
+  <strong>③ insert attaches the diverging suffix as a new child</strong>, sharing the split logic with match to keep the tree canonical.
+  <strong>④ inc/dec_lock_ref lock the whole chain upward from the matched node</strong>, guarding in-flight KV from eviction (Lesson 32).
+  <strong>⑤ Sharing = two paths walk the same ancestor, take the same indices, point at the same physical slots</strong>, then grow separate leaves after diverging. Concept in Lesson 7, HiCache tiering in Lesson 31, cache-aware scheduling in Lesson 20.
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does a <strong>TreeNode's value</strong> field actually hold?</div>
+  <ol class="opts">
+    <li>It holds the actual K/V tensors for this run</li>
+    <li>It holds the raw text string of this run</li>
+    <li>It holds the list of child nodes</li>
+    <li>It holds the <strong>KV slot numbers (indices)</strong> for this run — i.e. <strong>pointers into the memory pool (Lesson 30)</strong>, <strong>not the KV tensors themselves</strong>. The tree is just the index; the real K/V tensors live in the pool. Two requests sharing a prefix get the same run of indices pointing at the same physical slots</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Tree-is-index, pool-is-storage is the soul of this lesson: value stores indices into the pool, not tensors. Because it's a pointer, prefix reuse is zero-copy — two requests get the same indices pointing at the same physical slots. The tensors live in the Lesson-30 pool; children live in the children field, not value.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. While <span class='mono'>match_prefix</span> descends, <strong>when does it call <span class='mono'>_split_node</span> to cut a node into two levels</strong>?</div>
+  <ol class="opts">
+    <li>When the pool is full and needs eviction</li>
+    <li>It splits once every time a full node is matched</li>
+    <li>When the incoming tokens match only the <strong>front part</strong> of an edge's <span class='mono'>key</span> before diverging (<span class='mono'>prefix_len &lt; len(child.key)</span>): the node must be split at the <strong>divergence point</strong> — the common prefix becomes a shareable parent and the original tail becomes a child, so the old and new paths can share the front part</li>
+    <li>When a node's lock_ref exceeds a threshold</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Splitting happens only at the 'half-edge match' instant: when prefix_len < len(child.key) the code calls _split_node, lifting the common prefix into a parent and trimming the tail into a child. A whole-edge hit doesn't split — it's taken and descent continues. Splitting is unrelated to lock_ref or eviction; it purely grows shared prefixes on demand.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <span class='mono'>inc_lock_ref</span> walks <strong>upward locking every ancestor</strong> from the matched node — what is it actually preventing?</div>
+  <ol class="opts">
+    <li>It prevents a node's key from being modified by other requests</li>
+    <li>It prevents the tree depth from exceeding a maximum</li>
+    <li>It prevents <strong>KV currently in use by a running request from being evicted</strong>: eviction reclaims from leaves upward (Lesson 32), so while this prefix is in flight none of its ancestors may be treated as an evictable leaf, or the request would read reclaimed garbage slots. On finish, <span class='mono'>dec_lock_ref</span> unlocks node by node</li>
+    <li>It prevents two requests from matching the same prefix at once</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. lock_ref guards the rule that in-use KV is never reclaimed. Eviction reclaims leaf-upward, so the whole chain from the matched node to the root is locked; reclaiming any ancestor would let an in-flight request read garbage. Shared prefixes are meant to be hit by many requests at once (not what this prevents); locking is unrelated to editing keys or limiting depth.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'shared folder tree (path trie)' analogy, fully explain <span class='mono'>RadixCache</span>'s data structure and three core operations. Cover: (1) what each of a <span class='mono'>TreeNode</span>'s five fields holds — key (a run of tokens on the edge), children (dict keyed by first token), value (KV indices pointing into the pool, <strong>not tensors</strong>, Lesson 30), lock_ref (in-use count), last_access_time (LRU, Lesson 32); (2) how <span class='mono'>match_prefix</span> descends via children matching edge by edge, and why a half-edge match makes <span class='mono'>_split_node</span> lift the common prefix into a parent at the divergence point; (3) why 'tree is index, pool is storage,' and that sharing reuses pointers rather than copying KV.</li>
+    <li>Trace a request's lifecycle through <span class='mono'>match_prefix</span> → <span class='mono'>insert</span> → <span class='mono'>inc/dec_lock_ref</span>. Cover: (1) the two things match returns (matched KV indices for reuse, deepest matched node as a foothold); (2) how insert attaches the diverging suffix as a new child and shares match's split logic to keep the tree canonical; (3) why starting to use a prefix walks the lock <strong>upward to the root</strong> (eviction is leaf-upward, Lesson 32), and how dec_lock_ref unlocks node by node, with a node becoming evictable again only at zero; (4) tie the tree back up the stack: the concept motivation in Lesson 7, the pool the indices point into in Lesson 30, the HiCache tiering subclass in Lesson 31, and cache-aware scheduling in Lesson 20.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Paged memory pools</h1>
+
+<p class="lead">
+Last lesson we read the radix tree: it keeps the "token sequence → KV slot number" index neat — yet it kept <strong>dodging</strong> one question:
+where do the <span class="inline">K/V tensors</span> that actually eat memory live? A node's <span class="mono">value</span> is just a run of <strong>slot numbers (indices)</strong>,
+not the tensors themselves. This lesson lifts the lid on what those slot numbers point at: <strong>two memory pools</strong>, and a <strong>two-hop indirection</strong>
+mapping a request to its physical K/V. Grasp it and you'll see exactly who hands out GPU memory, at what granularity, and when it's given out and taken back.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture a <strong>coat-check + locker room</strong>: you hand your coat to the attendant and get a <strong>claim ticket</strong> printed with "your stuff is in lockers 12, 37, 58" —
+  that ticket is <span class="mono">ReqToTokenPool</span>; it lists <strong>locker numbers only</strong>, never the coats. The actual coats (K/V tensors) sit in <strong>that bank of lockers</strong>,
+  which is the <span class="mono">token_to_kv</span> pool. The <strong>attendant</strong> handing out and reclaiming lockers is <span class="mono">TokenToKVPoolAllocator</span>.
+  The trick: when two people store <strong>the same shared coat</strong>, the attendant can write <strong>the same locker number</strong> onto both tickets — that's prefix sharing (Lesson 29).
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One line: <strong>the tree is the index, the pools are the storage</strong>. Lesson 29's tree owns "who shares with whom, up to which token"; the real K/V tensors live in <strong>two pools</strong>.
+  Addressing takes <strong>two hops</strong>: request →(<span class="mono">ReqToTokenPool</span>)→ a run of token slot ids →(<span class="mono">token_to_kv</span> pool)→ physical K/V.
+  The pools are pre-allocated once at startup, sized by <span class="mono">mem_fraction_static</span> (Lesson 8); total slots = how many tokens fit = the <strong>concurrency ceiling</strong> (Lesson 4).
+  Paging (Lesson 6), reuse on hit (Lesson 29), and eviction (Lesson 32) all revolve around these two pools.
+</div>
+
+<h2>Two pools, two hops: where K/V actually lives</h2>
+<p>First-timers in the memory subsystem ask: it's "just KV caching," why <strong>two</strong> pools? The answer hides in the tension between a "<strong>per-request private ledger</strong>" and a "<strong>globally shared warehouse</strong>."
+<span class="mono">ReqToTokenPool</span> is the <strong>private ledger</strong>: a fixed-size 2-D table indexed by <span class="mono">req_pool_idx</span>, each row recording "<strong>which token slot numbers this request owns, in order</strong>."
+It holds <strong>no K/V tensors</strong>, only indices — pure <strong>per-request bookkeeping</strong>. <span class="mono">MHATokenToKVPool</span> is the <strong>warehouse</strong>: it opens a giant tensor <strong>per layer</strong>,
+indexed by token slot, holding the <strong>actual K and V</strong>.</p>
+<p>So addressing is necessarily <strong>two hops</strong>. Hop one: take the request's <span class="mono">req_pool_idx</span> into the <span class="mono">ReqToTokenPool</span> row and read "the run of token slot numbers I own."
+Hop two: take that run into the <span class="mono">token_to_kv</span> pool to fetch (or write) the per-layer K/V by index. <strong>Request → slot ids → physical K/V</strong>, with two layers of <strong>indirection</strong> in between.
+This "look up the ledger for numbers, then fetch goods by number" is not redundant — precisely because the numbering layer is split out, slots can be <strong>non-contiguous</strong> (paging, Lesson 6) and <strong>shared across requests</strong> (the radix tree, Lesson 29),
+while each request's ledger only tracks "which numbers are mine," indifferent to whether they're contiguous in the warehouse or also pointed at by others.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Entry</span><span class="name">a running request</span></div><div class="ld">Each request holds a <span class="mono">req_pool_idx</span> — its <strong>row number</strong> in the private ledger.</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">① Ledger</span><span class="name">ReqToTokenPool</span></div><div class="ld">Read the row by <span class="mono">req_pool_idx</span>: <strong>the list of token slot numbers I own, in order</strong>. Numbers only, no tensors.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">② Numbers</span><span class="name">token slot ids (indices)</span></div><div class="ld">A run of <strong>indices</strong> into the warehouse. May be non-contiguous (paging, Lesson 6) and shared by many requests (Lesson 29).</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">③ Warehouse</span><span class="name">MHATokenToKVPool</span></div><div class="ld">Opens a big tensor <strong>per layer</strong>; fetch or write into <span class="mono">k_buffer</span> / <span class="mono">v_buffer</span> by slot.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Real thing</span><span class="name">physical K / V tensors</span></div><div class="ld">What truly eats GPU memory. Pre-allocated once by <span class="mono">mem_fraction_static</span> (Lesson 8).</div></div>
+</div>
+
+<h2>The allocator: pre-reserve, hand out on admit, reclaim on evict</h2>
+<p>Who decides which slots are free and which one to hand out? <span class="mono">TokenToKVPoolAllocator</span> (base <span class="mono">BaseTokenToKVPoolAllocator</span>). It's the coat-check attendant, holding a <strong>free-page list</strong>.
+When a batch of requests is admitted to do a forward, the scheduler <strong>requests</strong> the token slots it needs — the allocator carves them out of the free list <strong>by page</strong> (fixed size, Lesson 6) and hands them over;
+on finish or eviction the slots are <strong>returned</strong> to the list. <span class="mono">available_size</span> returns "free pages × page size," i.e. <strong>how many more tokens can still be admitted</strong> right now.</p>
+<p>The crux: <strong>the total is nailed down at startup</strong>. At launch, the engine computes the GPU memory available for KV cache from <span class="mono">mem_fraction_static</span> (Lesson 8), divides by "K/V bytes per token per layer,"
+and gets <strong>total slots = how many tokens the pool fits</strong>. That number is the <strong>concurrency ceiling</strong> (Lesson 4): the tokens of all running requests can't exceed it. Near the ceiling you either queue or evict (Lesson 32) to free room.
+So the small allocator is the <strong>master valve of the memory budget</strong> — if it can hand out slots you join the batch, if not you wait. Its division of labor with the pool is clean: <strong>the pool is the bank of lockers, the allocator is who holds the keys</strong>.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">admit alloc</div><div class="nd">allocator hands out<br>free token slots by page</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">write</div><div class="nd">forward writes each layer's<br>K/V into those slots</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">reuse on hit</div><div class="nd">Lesson 29's tree points at<br>the same slots · zero copy</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">evict free</div><div class="nd">Lesson 32 returns the slots<br>to the allocator's list</div></div>
+</div>
+
+<h2>Why split into two tables, not merge into one</h2>
+<p>Splitting the private ledger from the shared warehouse is the design's most instructive trade-off. Imagine forcing a single "request stores its own K/V" table — you hit two walls at once.
+Wall one: <strong>paging</strong>. A request's token slots are usually scattered <strong>here and there</strong> in the warehouse (paged allocation, Lesson 6), non-contiguous. The ledger layer is exactly what <strong>threads the scattered numbers into an ordered list</strong>,
+letting the upper layer believe "my KV is one contiguous run" while the lower layer freely places them in any free pages. Wall two: <strong>sharing</strong>. Two requests with the same prefix should point at the <strong>same physical slots</strong> (Lesson 29);
+if K/V grew directly inside a request's private table, sharing would be <strong>impossible</strong> — you can't make two people's private lockers be the same one.</p>
+<p>Split, both dilemmas dissolve: <strong>the ledger (ReqToTokenPool) records "which numbers are mine," the warehouse (token_to_kv pool) is one big arena shared by all requests</strong>.
+Numbers may be non-contiguous and referenced by many ledgers at once, while the warehouse just stores/fetches by number, indifferent to who uses it or how many times. This is "<strong>index vs. storage separation</strong>" appearing again at the memory layer —
+the same philosophy as Lesson 29's "tree is index, pool is storage," only here the "pool" is further split into a <strong>bookkeeping pool</strong> and a <strong>storage pool</strong>. The table below lays both out side by side.</p>
+
+<table class="t">
+  <tr><th>Pool / component</th><th>Maps / holds what</th><th>Indexed by</th></tr>
+  <tr><td class="mono">ReqToTokenPool</td><td>each request → the list of token slot numbers it owns (numbers only)</td><td class="mono">req_pool_idx</td></tr>
+  <tr><td class="mono">MHATokenToKVPool</td><td>per-layer physical K / V tensors (what really eats memory)</td><td class="mono">token slot id</td></tr>
+  <tr><td class="mono">TokenToKVPoolAllocator</td><td>free-page list: hand out / reclaim slots</td><td>page (Lesson 6)</td></tr>
+</table>
+
+<h2>Back to Lesson 29: the tree stores indices, not tensors</h2>
+<p>Now we can fully ground last lesson's sentence. The radix <span class="mono">TreeNode</span>'s <span class="mono">value</span> field holds <strong>exactly the token slot numbers (indices) discussed here</strong> —
+they are <strong>indices into the token_to_kv pool</strong>, <strong>not the K/V tensors themselves</strong>. So the tree is a pure <strong>index/dedup</strong> layer; the pools are the <strong>storage</strong> layer.
+Two requests sharing a prefix get <strong>the same run of indices</strong>, so attention reads the <strong>same physical slots</strong> in the pool — the shared part costs <strong>zero extra memory</strong>.
+When a prefix is evicted (Lesson 32), the act is simply <strong>returning the slot numbers in its <span class="mono">value</span> to the allocator</strong>, freeing them for other tokens.</p>
+<p>Connect the whole chain: a request arrives, <span class="mono">match_prefix</span> hits a prefix on the tree and returns a run of indices (reuse); the unmatched tail <strong>requests fresh slots from the allocator</strong>,
+<span class="mono">write</span>s the computed K/V into the pool, records that new run of indices into its own <span class="mono">ReqToTokenPool</span> row, and <span class="mono">insert</span>s it back into the tree for later reuse.
+Read, write, share, reclaim — all flow as "slot numbers," the common currency among <strong>ledger, warehouse, and tree</strong>. See this and you hold the <strong>central hub</strong> of SGLang memory management. The cells below draw "two requests pointing at a shared slot."</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>Two-hop addressing + prefix sharing</b>: both requests' ledgers write the same slot number (highlighted), pointing at the same physical K/V in the pool</div>
+  <div class="cells"><span class="lab">Request A ledger</span><span class="cell hl">#12</span><span class="cell">#40</span><span class="cell">#41</span><span class="sep">→</span><span class="cell q">slot numbers A owns (read this row by req_pool_idx)</span></div>
+  <div class="cells"><span class="lab">Request B ledger</span><span class="cell hl">#12</span><span class="cell">#88</span><span class="sep">→</span><span class="cell q">B also points at <span class="mono">#12</span> — shared prefix, same number in both ledgers</span></div>
+  <div class="cells"><span class="lab">token_to_kv pool</span><span class="cell hl">K/V of slot#12</span><span class="sep">→</span><span class="cell q">one physical K/V; A and B both read it · zero extra memory (Lesson 29)</span></div>
+  <div class="cells"><span class="lab">allocator</span><span class="cell">free pages…</span><span class="sep">→</span><span class="cell q">hands out new slots like <span class="mono">#40/#41/#88</span>; on evict <span class="mono">#12</span> is returned (Lesson 32)</span></div>
+</div>
+
+<p>In real code, the ledger is just an <span class="mono">int32</span> 2-D table and the warehouse is one big tensor per layer — almost too plain to look "high-tech," yet that plainness is what makes two-hop addressing both fast and thrifty:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">private ledger + per-layer K/V warehouse</span></div>
+  <pre><span class="kw">class</span> ReqToTokenPool:
+    <span class="cm"># each request -&gt; the token slot numbers it owns; numbers only, no tensors</span>
+    <span class="kw">def</span> __init__(self, size, max_context_len, device, ...):
+        self.size = size
+        <span class="cm"># [num_reqs+1, max_context_len] int32 table, rows indexed by req_pool_idx</span>
+        self.req_to_token = torch.zeros(
+            (self._alloc_size, max_context_len), dtype=torch.int32, device=device)
+        self.free_slots = list(range(<span class="st">1</span>, self._alloc_size))
+
+    <span class="kw">def</span> write(self, indices, values):
+        self.req_to_token[indices] = values   <span class="cm"># write this request's run of slot numbers into its row</span>
+
+<span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="kw">def</span> _create_buffers(self):
+        <span class="cm"># one big tensor per layer [num_slots, heads, head_dim] -- the real K / V lives here</span>
+        self.k_buffer = [torch.zeros((self.size + self.page_size,
+                         self.head_num, self.head_dim), ...)
+                         <span class="kw">for</span> _ <span class="kw">in</span> range(self.layer_num)]
+        self.v_buffer = [torch.zeros((self.size + self.page_size,
+                         self.head_num, self.v_head_dim), ...)
+                         <span class="kw">for</span> _ <span class="kw">in</span> range(self.layer_num)]</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① Two pools, two-hop addressing</strong>: request →(ReqToTokenPool)→ token slot ids →(token_to_kv pool)→ physical K/V. The ledger holds numbers, the warehouse holds tensors.
+  <strong>② ReqToTokenPool is the per-request private ledger</strong>, indexed by <span class="mono">req_pool_idx</span>; <strong>MHATokenToKVPool is the per-layer shared warehouse</strong>, indexed by slot number.
+  <strong>③ TokenToKVPoolAllocator hands out / reclaims slots</strong> by page (Lesson 6); total slots are nailed at startup by <span class="mono">mem_fraction_static</span> (Lesson 8) = the concurrency ceiling (Lesson 4).
+  <strong>④ Lesson 29's node value IS these indices, not tensors</strong> — tree is index, pools are storage; two requests sharing a prefix = the same slot numbers = the same physical K/V, zero extra memory.
+  <strong>⑤ Splitting into two tables enables non-contiguity (paging) and cross-request sharing (radix tree)</strong>; eviction (Lesson 32) just returns the slot numbers to the allocator.
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Starting from a request, what is the <strong>two-hop addressing path</strong> to its <strong>physical K/V</strong>?</div>
+  <ol class="opts">
+    <li>request →(<span class='mono'>ReqToTokenPool</span> reads the row by <span class='mono'>req_pool_idx</span>)→ a run of <strong>token slot ids (indices)</strong> →(<span class='mono'>token_to_kv</span> pool by slot)→ <strong>per-layer physical K/V</strong>. The ledger holds only numbers, no tensors; the warehouse holds the K/V that actually eats memory</li>
+    <li>request → radix tree node → K/V tensors stored directly in the node</li>
+    <li>request → allocator → K/V cached inside the allocator</li>
+    <li>the request stores K/V tensors directly in its own table, one hop</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two pools, two hops is the core: ReqToTokenPool is the per-request private ledger (indexed by req_pool_idx) holding only token slot numbers; the token_to_kv pool (MHATokenToKVPool) stores the real per-layer K/V by slot. The request doesn't store tensors; the tree also stores indices not tensors (Lesson 29); the allocator only hands out/reclaims slots, it stores no K/V.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What does <span class='mono'>ReqToTokenPool</span> map vs. the <span class='mono'>token_to_kv</span> pool, and why split into two tables?</div>
+  <ol class="opts">
+    <li>ReqToTokenPool holds K/V tensors and the token_to_kv pool holds the numbers</li>
+    <li><span class='mono'>ReqToTokenPool</span> maps 'each request → the list of token slot numbers it owns' (per-request bookkeeping, indexed by <span class='mono'>req_pool_idx</span>); the <span class='mono'>token_to_kv</span> pool maps 'token slot id → per-layer physical K/V' (one shared warehouse). The split lets slots be <strong>non-contiguous</strong> (paging, Lesson 6) and <strong>shared across requests</strong> (Lesson 29), while the ledger only tracks 'which numbers are mine'</li>
+    <li>the split is purely a historical accident with no real purpose</li>
+    <li>the two tables hold identical content, just for redundant backup</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The ledger (ReqToTokenPool) holds numbers indexed by req_pool_idx; the warehouse (token_to_kv pool) holds the real per-layer K/V by slot. Merging them so a request stores K/V directly would make non-contiguous paged slots inexpressible and cross-request sharing impossible — the split exists for exactly these. The two tables differ in content and role; not redundancy or legacy.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Since a Lesson-29 node's <span class='mono'>value</span> is <strong>indices, not tensors</strong>, what does 'two requests sharing a prefix' actually mean in the pools?</div>
+  <ol class="opts">
+    <li>the engine copies the shared prefix's K/V once per request</li>
+    <li>each request recomputes the shared prefix's K/V on its own</li>
+    <li>both requests' ledgers carry <strong>the same token slot numbers</strong>, so attention reads <strong>the same physical K/V</strong> in the <span class='mono'>token_to_kv</span> pool — the shared part costs <strong>zero extra memory</strong>. Eviction (Lesson 32) returns those slot numbers to the allocator; precisely because the tree stores numbers not tensors, reuse is zero-copy</li>
+    <li>sharing only happens in CPU memory; on GPU each keeps its own copy</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The tree stores indices, so sharing = reusing pointers: both ledgers point at the same slot numbers → the same physical K/V → zero extra memory for the shared part. That's the root of no-copy, no-recompute. Eviction returns the run of slot numbers to the allocator (Lesson 32). Claims of copying, recomputing, or CPU-only sharing all contradict the index-vs-storage separation.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'coat-check + locker room' analogy, fully explain the <strong>two pools and two-hop addressing</strong> of paged memory pools. Cover: (1) why <span class='mono'>ReqToTokenPool</span> is like the 'claim ticket' — indexed by <span class='mono'>req_pool_idx</span>, each row recording 'which token slot numbers this request owns, in order,' <strong>numbers only, no tensors</strong>; (2) why <span class='mono'>MHATokenToKVPool</span> is like 'that bank of lockers' — a big tensor <strong>per layer</strong>, storing the real K/V by slot; (3) the two-hop path: request →(ledger row)→ token slot ids →(warehouse by slot)→ physical K/V; (4) why <span class='mono'>TokenToKVPoolAllocator</span> is like the 'attendant' — handing out/reclaiming slots by page (Lesson 6), with total slots nailed at startup by <span class='mono'>mem_fraction_static</span> (Lesson 8) = the concurrency ceiling (Lesson 4).</li>
+    <li>Tie 'tree is index, pool is storage' back to Lesson 29 and explain the truth of sharing and eviction at the memory layer. Cover: (1) why a <span class='mono'>TreeNode</span>'s <span class='mono'>value</span> holds token slot numbers (indices) not K/V tensors, and how 'tree as index/dedup layer, pool as storage layer' divides labor; (2) why 'two requests sharing a prefix' means both ledgers carry <strong>the same slot numbers</strong>, pointing at <strong>the same physical K/V</strong>, with the shared part costing <strong>zero extra memory</strong>; (3) why the ledger (ReqToTokenPool) and warehouse (token_to_kv pool) are <strong>split into two tables</strong> — to support non-contiguous paged slots (Lesson 6) and cross-request sharing (Lesson 29); (4) how eviction (Lesson 32) <strong>returns</strong> the run of slot numbers in a node's value to the allocator so other tokens can occupy them.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>HiCache tiering</h1>
+
+<p class="lead">
+Lesson 29's radix tree is clever, but it has a ceiling: it lives only in <strong>GPU memory (HBM)</strong>. HBM is small and precious, so even the hottest prefixes eventually won't all fit — and once one is evicted (Lesson 32), that KV is <strong>dropped entirely</strong>, so the next hit must <strong>recompute it from scratch</strong>.
+Yet CPU RAM is 10–100× bigger than HBM, and disk / object storage is effectively unlimited. HiCache's job is to <strong>extend the prefix cache one tier down into CPU memory, then disk</strong>, so KV pushed out of HBM <strong>sinks instead of vanishing</strong>, and is <strong>fetched back up</strong> when needed.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of storage as three tiers: <strong>desk → drawer → off-site warehouse</strong>. The few things you use <strong>constantly</strong> stay on your <strong>desk</strong> (GPU HBM), grabbed instantly; things you used <strong>recently</strong> but set aside go in the <strong>drawer</strong> (CPU RAM), one pull away; rarely-touched <strong>archives</strong> ship to the <strong>warehouse</strong> (disk).
+  The trick is an <strong>assistant</strong> (the controller) quietly shuttling in the background: before you even ask, he fetches the file you're <strong>about to need</strong> up from the drawer or warehouse <strong>onto your desk</strong>; the thing you just finished he files <strong>back down</strong>. So at your desk you <strong>never wait</strong> — whereas without the three tiers and the assistant, a full desk means you must <strong>throw things away</strong> and <strong>remake them</strong> next time.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One sentence: <strong>HiCache gives the prefix cache tiers</strong>. It uses <span class="inline">HiRadixCache</span> (a <strong>subclass</strong> of Lesson 29's <span class="mono">RadixCache</span>) plus a <span class="mono">HiCacheController</span> to spread the cache across <strong>three tiers</strong> — <strong>GPU HBM (hot)</strong> → <strong>CPU host memory (warm)</strong> → <strong>disk / object store (cold)</strong>.
+  On eviction it no longer drops; it <strong>writes the KV back (down)</strong> into a lower tier; when a later request matches a prefix living in a lower tier, it's <strong>prefetched (up)</strong> into HBM before the forward needs it. All the shuttling happens on <strong>background threads / copy streams</strong>, <strong>overlapped</strong> with the GPU compute loop (Lesson 21's spirit), so the scheduler never stalls on a CPU↔GPU copy.
+  It's an <strong>optional</strong> feature, turned on by a flag.
+</div>
+
+<h2>The problem: HBM is tiny, and dropping means recompute</h2>
+<p>Pin the pain first. Lesson 29's tree indexes "token sequence → KV slot numbers" beautifully, but the KV tensors it points at all live in the GPU's <strong>memory pool</strong> (Lesson 30), whose total slots are <strong>nailed at startup</strong> by <span class="mono">mem_fraction_static</span> (Lesson 8).
+Hot prefixes pile up — long system prompts, RAG contexts of tens of thousands of tokens, many-turn chats — all wanting to reside <strong>at once</strong>, but HBM is only so big. So eviction (Lesson 32) must drop the coldest leaf with <span class="mono">lock_ref</span>=0 by LRU to make room.</p>
+<p>The naive tree's eviction is a <strong>clean kill</strong>: pull the node and its slots <strong>go straight back to the allocator</strong>, the KV data <strong>gone</strong>. The catch — the evicted prefix often <strong>comes right back</strong> (the same system prompt reused by the next wave). Now the cache holds <strong>nothing</strong>, so those thousands of tokens' K/V must be <strong>recomputed from scratch</strong>, burning an expensive forward for nothing.
+Meanwhile CPU RAM sits right next door, <strong>10–100×</strong> the capacity of HBM, and one CPU→GPU copy is far cheaper than <strong>recomputing thousands of tokens</strong>. Stashing evicted KV <strong>into CPU (or onto disk)</strong> and <strong>copying it back</strong> when needed clearly beats drop-then-recompute — that's the whole motivation for HiCache.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">Hot</span><span class="name">GPU HBM</span></div><div class="ld">Fastest, priciest, smallest. The forward <strong>reads directly</strong> here; total slots nailed by <span class="mono">mem_fraction_static</span> (Lesson 8). Overflow evicts downward. Latency ≈ ns, capacity ≈ tens of GB.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">Warm</span><span class="name">CPU host memory</span></div><div class="ld">10–100× bigger, far cheaper. KV evicted from HBM is <strong>written back here</strong> to wait; on a hit it's <strong>copied back</strong> to GPU. Needs one CPU→GPU copy before use. Latency ≈ µs, capacity ≈ hundreds of GB.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Cold</span><span class="name">Disk / object store</span></div><div class="ld">Effectively unlimited, slowest. Huge shared prefixes that won't even fit in CPU RAM land here (can be shared across processes/hosts). Latency ≈ ms, capacity ≈ near-infinite. Optional.</div></div>
+</div>
+
+<h2>How HiCache extends the tree: writeback and prefetch</h2>
+<p>HiCache's two protagonists are <span class="mono">HiRadixCache</span> and <span class="mono">HiCacheController</span>. <span class="mono">HiRadixCache</span> directly <strong>inherits</strong> Lesson 29's <span class="mono">RadixCache</span> — same tree, same <span class="mono">match_prefix</span> / <span class="mono">insert</span> / <span class="mono">lock_ref</span> logic, reused wholesale — it just hangs one extra field, <span class="mono">host_value</span>, on each <span class="mono">TreeNode</span>,
+recording "which host slots hold this run's KV copy in the <strong>lower tier</strong>." So every node can now answer a new question: <strong>which tier do I currently live in?</strong> — GPU only (<span class="mono">value</span> valid), host only (evicted, <span class="mono">host_value</span> valid), or <strong>both</strong>.</p>
+<p>Two core actions stitch the tiers together. First, <strong>writeback (down)</strong>: when a node is about to leave HBM, <span class="mono">write_backup</span> doesn't drop it — it first copies its <span class="mono">value</span> (GPU slots) <strong>to host</strong> via the controller, records the host slots in <span class="mono">host_value</span>, and <strong>only then</strong> frees the GPU slots.
+The prefix has <strong>sunk into the warm tier</strong>; the tree structure stays, only the data moved house. Second, <strong>prefetch / load_back (up)</strong>: when a new request's <span class="mono">match_prefix</span> hits a node that's <strong>evicted but backed up on host</strong>, <span class="mono">load_back</span> copies the KV that <span class="mono">host_value</span> points at <strong>back to GPU</strong>, refilling <span class="mono">value</span> so the forward reads it as usual. Along the way the controller <strong>locks the ancestors</strong> (<span class="mono">inc_lock_ref</span>, Lesson 32) so the load-in-progress isn't snatched by another eviction.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>HBM full, eviction triggers</h4><p>Memory is tight; Lesson 32's LRU picks the coldest leaf with <span class="mono">lock_ref=0</span> to evict — but this time it <strong>doesn't just drop</strong>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Writeback down ↓</h4><p><span class="mono">write_backup</span> copies the node's <span class="mono">value</span> (GPU slots) to host, records it in <span class="mono">host_value</span>, then frees the GPU slots. The prefix <strong>sinks to the CPU warm tier</strong>; the tree node remains.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Later request hits a lower tier</h4><p>A new request's <span class="mono">match_prefix</span> reaches this node and finds <span class="mono">value</span> empty but <span class="mono">host_value</span> backed up — a hit on a prefix <strong>living in the warm tier</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Prefetch up ↑</h4><p><span class="mono">load_back</span> copies the <span class="mono">host_value</span> KV back to GPU, refills <span class="mono">value</span>, and <span class="mono">inc_lock_ref</span> locks the ancestors. The forward reads it directly, <strong>skipping a recompute</strong>.</p></div></div>
+</div>
+
+<h2>Comparison and background I/O: trade a copy for a recompute, without stalling the scheduler</h2>
+<p>Put "drop then recompute" next to "writeback then prefetch" and the difference is plain. A naive HBM-only cache <strong>takes the loss</strong> at eviction: the data is gone, and reuse hinges only on it <strong>not having been evicted yet</strong>; once evicted, the next hit is a miss and means a <strong>recompute</strong>.
+HiCache turns "evict" into "<strong>demote</strong>" — the data moves to a cheap lower tier and waits, so the next hit costs just one <strong>cheap CPU→GPU copy</strong> rather than one <strong>expensive forward recompute</strong>. That's HiCache's core trade: <strong>copy bandwidth in exchange for compute</strong>.</p>
+<p>But the copy itself takes time, and making the scheduler <strong>sit and wait</strong> on a CPU↔GPU copy would defeat the purpose. So <span class="mono">HiCacheController</span> runs both writeback and prefetch on <strong>background threads / a separate copy stream</strong>, <strong>overlapped</strong> with the GPU compute loop (exactly Lesson 21's "overlap schedule" spirit): while the current batch runs its forward on the GPU, the controller is <strong>simultaneously</strong> shuttling the last batch's evicted KV down and prefetching the next batch's KV up.
+By the time the forward truly needs that KV, it's <strong>already</strong> sitting in HBM. Inside, the controller tracks each node's <strong>tier state</strong> and a set of <strong>in-flight prefetch / writeback operations</strong>, coordinating between background threads and the main scheduling loop via queues and events, so the scheduler is <strong>almost never blocked on I/O</strong>.</p>
+
+<div class="cols">
+  <div class="col"><h4>Naive HBM-only (Lesson 29)</h4><p>Evict = <strong>drop</strong>. Pull the node and slots return to the allocator instantly; the KV <strong>vanishes</strong>. Same prefix returns → empty cache → thousands of tokens <strong>recomputed from scratch</strong>, burning an expensive forward. Reuse relies on the luck of "not evicted yet."</p></div>
+  <div class="col"><h4>HiCache tiering</h4><p>Evict = <strong>demote</strong>. <span class="mono">write_backup</span> writes KV back to CPU/disk; <span class="mono">load_back</span> copies it back on a hit. Same prefix returns → host hit → one <strong>cheap CPU→GPU copy</strong> replaces the recompute. Background I/O overlaps with compute, so the <strong>scheduler isn't stalled</strong>.</p></div>
+</div>
+
+<table class="t">
+  <tr><th>Tier</th><th>Relative latency</th><th>Capacity</th><th>Role</th></tr>
+  <tr><td class="mono">GPU HBM</td><td>lowest (ns)</td><td>smallest (tens of GB)</td><td>Hot: forward reads directly; overflow evicts down</td></tr>
+  <tr><td class="mono">CPU host memory</td><td>mid (µs)</td><td>10–100× bigger (hundreds of GB)</td><td>Warm: writeback stash + prefetch back to GPU on hit</td></tr>
+  <tr><td class="mono">Disk / object store</td><td>highest (ms)</td><td>near-infinite</td><td>Cold: huge shared prefixes; shareable across processes/hosts (optional)</td></tr>
+</table>
+
+<h2>Cost, payoff, and when to enable it</h2>
+<p>The payoff is real: for <strong>big/long shared prefixes that don't fit in HBM</strong>, HiCache pushes the <strong>effective hit rate</strong> far higher — long system prompts, big RAG contexts, tens of turns of chat history; these prefixes are too big to keep entirely in HBM, so a naive cache can't hold them, but HiCache lets them wait in the warm/cold tier, ready to copy in on a hit.
+This shows up as better <strong>throughput and latency</strong> (Lesson 8): every recompute saved is forward compute and time-to-first-token saved.</p>
+<p>Be honest about the cost too: you pay <strong>extra CPU RAM / disk</strong> as the lower-tier warehouse, <strong>copy bandwidth</strong> to shuttle up and down, and the complexity of <strong>cross-tier consistency</strong> — the same KV may live in both GPU and host at once, so the controller must clearly track which tier each node lives in and which writebacks / prefetches are in flight, lest data be read wrong or freed twice.
+Because of these costs, HiCache is <strong>optional</strong>: turned on by a flag (the <span class="mono">hicache</span>-related <span class="mono">server_args</span>). When request prefixes are small or sharing is low, the naive radix tree suffices; only when your workload is the "<strong>big prefixes, high reuse, but won't fit in HBM</strong>" kind does HiCache truly earn its keep. The next lesson (Lesson 32) continues with eviction and hit rate — HiCache is precisely what rewrites that "evict = drop" into "evict = sink down."</p>
+
+<p>Here is <span class="mono">HiRadixCache</span> in the flesh: it <strong>inherits from Lesson 29's <span class="mono">RadixCache</span></strong>, and <span class="mono">write_backup</span> is exactly the "write back down" step — copying GPU slots to host and recording them in <span class="mono">host_value</span>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/hiradix_cache.py ::HiRadixCache</span><span class="ln">writeback down: GPU → host</span></div>
+  <pre><span class="kw">class</span> HiRadixCache(RadixCache):          <span class="cm"># tiering subclass of Lesson 29's RadixCache</span>
+
+    <span class="kw">def</span> write_backup(self, node, write_back=False) -&gt; int:
+        <span class="cm"># copy an about-to-be-evicted node's KV from GPU back (down) to host memory</span>
+        host_indices = self.cache_controller.write(
+            device_indices=node.value,        <span class="cm"># slot numbers in the GPU pool (Lesson 30)</span>
+            node_id=node.id,
+        )
+        <span class="kw">if</span> host_indices <span class="kw">is</span> None:             <span class="cm"># host is full too -&gt; free host, then write</span>
+            self.evict_host(len(node.value))
+            host_indices = self.cache_controller.write(
+                device_indices=node.value, node_id=node.id,
+            )
+        <span class="kw">if</span> host_indices <span class="kw">is</span> <span class="kw">not</span> None:
+            node.host_value = host_indices.clone()  <span class="cm"># note it now also lives in the host tier</span>
+            <span class="kw">if</span> <span class="kw">not</span> write_back:
+                self.inc_lock_ref(node)        <span class="cm"># lock during writeback so it isn't snatched</span>
+        <span class="kw">return</span> len(host_indices)</pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① HBM is small and precious; the naive radix tree (Lesson 29) drops on eviction and must recompute next time</strong>; CPU RAM is 10–100× bigger and disk near-infinite.
+  <strong>② HiCache = <span class="mono">HiRadixCache</span> (a RadixCache subclass) + <span class="mono">HiCacheController</span></strong>, spreading the prefix cache across three tiers: GPU HBM hot → CPU RAM warm → disk cold.
+  <strong>③ Two directions: on eviction <span class="mono">write_backup</span> writes KV back down; on a hit <span class="mono">load_back</span> prefetches it up</strong>, with <span class="mono">TreeNode.host_value</span> remembering which tier each run lives in.
+  <strong>④ Writeback / prefetch run on background threads / copy streams, overlapped with compute (Lesson 21's spirit)</strong>, so the scheduler isn't blocked on a CPU↔GPU copy.
+  <strong>⑤ Core trade: one cheap CPU→GPU copy in place of one expensive recompute</strong>. It helps most for "big prefixes, high reuse, won't fit in HBM" (long system prompts, big RAG, many-turn chats); the cost is extra RAM/disk, copy bandwidth, and cross-tier consistency, so it's an optional flag. The pool the indices point to is Lesson 30, eviction is Lesson 32, throughput payoff is Lesson 8.
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. HiCache spreads the prefix cache across <strong>three tiers</strong> — from fastest/smallest to slowest/largest, what are they?</div>
+  <ol class="opts">
+    <li><strong>GPU HBM (hot) → CPU host memory (warm) → disk / object store (cold)</strong>: HBM is fastest/priciest/smallest and read directly by the forward; CPU RAM is 10–100× bigger as the writeback stash; disk is near-infinite for huge shared prefixes. Evicted KV sinks down, hits fetch up</li>
+    <li>Disk (hot) → CPU RAM (warm) → GPU HBM (cold), faster going down</li>
+    <li>Three different GPUs' HBM linked by NVLink</li>
+    <li>L1 → L2 → L3 cache, all inside the GPU chip</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The tiers are GPU HBM (hot, fastest/smallest) → CPU RAM (warm, 10–100× bigger) → disk/object store (cold, near-infinite). The direction is: evicted KV writes back down, hits prefetch up. It's not on-chip L1/L2/L3, nor multi-GPU HBM; reversing the order (disk fastest) is wrong.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does <span class='mono'>HiCacheController</span> run <strong>writeback and prefetch on background threads / copy streams</strong> overlapped with GPU compute, instead of doing them synchronously in the main scheduling loop?</div>
+  <ol class="opts">
+    <li>To encrypt the KV before writing to disk</li>
+    <li>Otherwise the scheduler would <strong>stall waiting on a CPU↔GPU copy</strong>, giving back the time it was supposed to save. Run in the background overlapped with compute (Lesson 21's spirit), so while the current batch runs its forward the controller shuttles the last batch's KV down and prefetches the next batch's KV up in parallel — by the time the forward needs it, it's <strong>already</strong> in HBM</li>
+    <li>Because Python's GIL forbids copies on the main thread</li>
+    <li>Background threads make the copy itself faster</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Copies take time; making the scheduler synchronously wait on a CPU↔GPU copy would cancel the recompute HiCache saved. Background + overlap with compute (Lesson 21) runs I/O in parallel with the forward, so the KV is ready when needed and the scheduler is almost never blocked on I/O. Background doesn't speed the copy itself, and it's unrelated to the GIL or encryption.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Compared with Lesson 29's naive HBM-only radix tree, on an evict-then-rehit, what does HiCache fundamentally <strong>trade for what</strong>?</div>
+  <ol class="opts">
+    <li>A longer context window in exchange for shorter outputs</li>
+    <li>Higher precision in exchange for a smaller model</li>
+    <li>A cheap <strong>CPU→GPU copy</strong> in place of an expensive <strong>forward recompute</strong>. The naive cache drops on eviction, so a rehit is a miss and recomputes thousands of tokens; HiCache turns eviction into demotion (writeback to a lower tier), so a rehit just copies the backup back to GPU</li>
+    <li>More GPU memory in exchange for lower CPU usage</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. HiCache's core trade is copy-for-compute: it changes eviction from drop→recompute into demote→copy-back, so a rehit pays one cheap CPU→GPU copy and skips an expensive forward. It's not saving GPU memory at the cost of CPU (it actually spends extra CPU/disk), and it's unrelated to precision or context window.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'desk → drawer → off-site warehouse' three-tier analogy, fully explain HiCache. Cover: (1) what each tier maps to (GPU HBM hot / CPU RAM warm / disk cold) and their <strong>latency vs capacity</strong> trade-offs; (2) why <span class='mono'>HiRadixCache</span> is a <strong>subclass</strong> of Lesson 29's <span class='mono'>RadixCache</span> and what the extra <span class='mono'>host_value</span> field on <span class='mono'>TreeNode</span> records; (3) the two directional actions — <span class='mono'>write_backup</span> <strong>writes KV back down</strong> on eviction, <span class='mono'>load_back</span> <strong>prefetches up</strong> on a lower-tier hit; (4) why this raises the effective hit rate over the naive HBM-only tree of Lesson 29.</li>
+    <li>Explain HiCache's <strong>cost, payoff, and where it fits</strong>, tying it back to neighboring lessons. Cover: (1) the core trade — one cheap CPU→GPU copy replacing one expensive recompute — and why writeback/prefetch run on <strong>background threads overlapped with compute</strong> (Lesson 21's spirit) without stalling the scheduler; (2) the costs (extra CPU RAM/disk, copy bandwidth, cross-tier consistency complexity) and why HiCache is an <strong>optional flag</strong>; (3) which workloads benefit most (big prefixes, high reuse, won't fit in HBM — long system prompts, big RAG, many-turn chats), with the payoff showing up as throughput/latency (Lesson 8); (4) tie it back: the memory pool the indices point into is Lesson 30, and eviction & hit rate is Lesson 32.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Eviction & hit rate</h1>
+
+<p class="lead">
+Lesson 29's radix tree looked elegant: requests plant prefixes when done, newcomers that hit them get a free ride. But it sidestepped one hard problem — <strong>the tree can't grow forever</strong>.
+Every node holds a batch of KV slots from Lesson 30's pool, and the pool is finite. When free slots run low and the allocator can no longer satisfy a new request, <strong>who gets reclaimed</strong> to make room?
+And the reclaim must never touch a prefix that is <strong>currently in use</strong>. This lesson is the <strong>economics</strong> of the prefix cache:
+who <strong>evict</strong> picks, what iron rule keeps a node alive, and the ultimate metric that says whether any of it pays off — the <strong>hit rate</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of the cache as a <strong>librarian weeding the shelves</strong>. The shelves are full, so she must make room: she first removes the books <strong>nobody has opened in ages</strong> (that's LRU — least-recently-used first).
+  But one iron rule — <strong>never the book a patron is currently reading at a desk</strong> (that's <span class="mono">lock_ref&gt;0</span>), however dusty and overdue it looks.
+  And the more readers keep reusing the <strong>same popular books</strong> (shared prefixes), the fewer re-orders (recomputes) she needs. Weeding frees shelf space; keeping saves re-orders — every day she balances on that line.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Keep one line in mind: <strong>eviction is forced on you; hit rate is the payoff it buys</strong>. Eviction isn't idle cleanup — it fires only the moment the <strong>allocator is starved</strong>;
+  it touches only <strong>evictable leaves</strong>, orders them by a strategy (LRU by default), skips locked nodes, and returns the freed KV slots to the pool (Lesson 30).
+  Hit rate measures "<strong>what fraction of prompt tokens were served from the cache without recompute</strong>." High prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) → high hit rate → less recompute → higher throughput (Lesson 8);
+  HiCache (Lesson 31) sinks evicted prefixes to lower tiers, raising the <strong>effective</strong> hit rate further.
+</div>
+
+<h2>Why evict: the tree grows on a finite pool</h2>
+<p>Lesson 29 hammered "tree is the index, pool is the warehouse." The index can be drawn huge, but it points into a <strong>finite warehouse</strong> — each <span class="mono">TreeNode</span>'s value is a batch of real, HBM-occupying KV slots.
+Requests keep <strong>planting</strong> computed prefixes into the tree, nodes pile up, free slots dwindle. Until one moment the allocator faces a new request and <strong>can no longer assemble the slots it needs</strong> — that is the eviction signal.
+Note the trigger is <strong>on-demand and reactive</strong>: not scheduled cleanup, but action taken only when "<strong>you can't run unless you free something</strong>." The scheduler computes "how many tokens short we are" and hands that number to <span class="mono">evict</span>, asking it to reclaim at least that much.</p>
+<p>This also explains why caching is a <strong>bet</strong>, not pure gain. Keep a prefix in the tree and it occupies HBM, squeezing out space that could serve <strong>more concurrency</strong>; evict it and a future hit on the same prefix means <strong>recomputing thousands of tokens from scratch</strong>.
+The whole art of caching is <strong>betting which prefixes will be reused</strong> and deserve to keep their HBM, versus which have gone cold and should yield to new requests. The eviction strategy is the betting rule of this gamble.</p>
+
+<h2>What to evict: EvictionStrategy orders the evictable leaves</h2>
+<p>Who exactly gets cleared? An <span class="mono">EvictionStrategy</span> decides. It does just one thing: compute a <span class="mono">get_priority</span> for every <strong>evictable leaf node</strong>,
+then clear the lowest-priority ones first. The default is <strong>LRU</strong> (<span class="mono">LRUStrategy</span>) — priority is simply <span class="mono">last_access_time</span>, so the <strong>oldest-untouched goes first</strong>.
+Beyond LRU there are other flavors: <strong>LFU</strong> (least-frequently-used, by hit count), <strong>FIFO</strong> (by creation time, first-in-first-out), and <strong>MRU</strong> (most-recently-used goes first, useful for some scan workloads).</p>
+<p>Why default to LRU rather than the seemingly "smarter" LFU? Because LRU's assumption best matches real serving traffic: <strong>temporal locality</strong> — a just-used prefix is very likely to be used again soon (one system prompt hit by a burst of requests), while something untouched for ages is probably stone cold.
+LFU remembers "who was historically hottest," but is easily dragged down by <strong>stale popularity</strong>: a prefix hit thousands of times yesterday but idle today still gets fiercely guarded by its high count, wasting HBM. LRU looks only at "the last touch," so it <strong>reacts faster to shifting hot/cold patterns</strong> and isn't held hostage by history — and it needs only a timestamp, almost free to maintain.
+That's why most caches, including this prefix cache, pick LRU as the safe default and switch strategies only under specific workload profiles.</p>
+<p>A key constraint: <strong>only leaves are evictable</strong>. Why can't you just clear a deep common prefix? Because as long as a <strong>longer path still hangs below it</strong>, that long path <strong>depends</strong> on this prefix's KV —
+you can't pull a prefix out and leave its children dangling. So reclaim always proceeds <strong>from leaves toward the root</strong>: clear a leaf, and only if its parent becomes a new leaf and isn't locked does the parent become the next candidate.
+Clearing a node does two things: <span class="mono">free</span> its KV slots back to the allocator (Lesson 30), and remove it from the tree.</p>
+<p>It's worth clearing up a common worry: eviction <strong>never loses data for any request still generating</strong>. What it reclaims is always the "settled prefixes" <strong>left by past requests and used by no one now</strong>.
+As long as a request is running, its entire prefix chain is locked (<span class="mono">lock_ref&gt;0</span>) and eviction <strong>simply can't see it</strong>. So when eviction happens you lose not correctness but merely "<strong>a possible future reuse</strong>" —
+if that cleared KV is later hit by some request, it must be recomputed; if no one ever needs it again, the eviction was pure profit. Because both gain and loss land in an <strong>uncertain future</strong>, caching is called a gamble, and strategies like LRU just <strong>guess the future from the past</strong>: whatever went longest untouched probably stays untouched.</p>
+
+<table class="t">
+  <tr><th>Strategy</th><th>get_priority returns</th><th>Favors evicting / when</th></tr>
+  <tr><td class="mono">LRUStrategy (default)</td><td>last_access_time</td><td>Oldest-untouched first; general, most robust, matches "cold prefix yields"</td></tr>
+  <tr><td class="mono">LFUStrategy</td><td>(hit_count, last_access)</td><td>Least-hit first; keeps hot prefixes around longer</td></tr>
+  <tr><td class="mono">FIFOStrategy</td><td>creation_time</td><td>Earliest-planted first; by seniority, not temperature</td></tr>
+  <tr><td class="mono">MRUStrategy</td><td>-last_access_time</td><td>Most-recent first; avoids pollution in some sequential scans</td></tr>
+</table>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Free slots run low</h4><p>Allocator can't assemble the slots a new request needs → scheduler computes how many tokens short, fires <span class="mono">evict</span> to reclaim at least that many.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Pick leaves by priority</h4><p>Put all <strong>evictable leaves</strong> into a heap keyed by <span class="mono">get_priority</span> (default LRU = oldest time on top); lowest priority pops first.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Skip the locked</h4><p>A <span class="mono">lock_ref&gt;0</span> node isn't even in the <strong>evictable-leaf</strong> set — in-use prefixes are excluded by construction and can never be picked.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Free slots, float candidates up</h4><p><span class="mono">free</span> the leaf's value back to the pool and remove it; if its parent becomes a new unlocked leaf, push it back into the heap, repeat until enough.</p></div></div>
+</div>
+
+<h2>The iron rule: a lock_ref&gt;0 node is never evicted</h2>
+<p>One <strong>inviolable rule</strong> governs all eviction: a node with <span class="mono">lock_ref &gt; 0</span> — a prefix currently used by a running request (Lesson 29) — is <strong>never evictable</strong>.
+The reason is hard: that KV is being read by an <strong>in-flight forward</strong>; reclaim its slots and the running request reads <strong>overwritten garbage</strong>, corrupting the result.
+So "in use" and "evictable" are <strong>mutually exclusive</strong> states. Lesson 29's <span class="mono">inc_lock_ref</span> / <span class="mono">dec_lock_ref</span> are exactly what move nodes between the two sets:
+when a request starts using a prefix, it walks up from the hit node doing <span class="mono">lock_ref += 1</span>, moving the whole chain from the <strong>evictable set</strong> into the <strong>protected set</strong>; when it ends it decrements back, and a node that hits zero becomes an eviction candidate again.</p>
+<p>Put this rule together with LRU and it clicks: <strong>under pressure, locked (in-use) prefixes survive, while cold unlocked leaves get reclaimed</strong>.
+A node may have a very old <span class="mono">last_access_time</span> and look most disposable, yet if <span class="mono">lock_ref&gt;0</span> you <strong>cannot touch it</strong>; conversely a leaf just planted by some past request but used by nobody now has lock_ref 0 and is the ideal reclaim target.
+This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight references</strong>," not "<strong>how many times used historically</strong>" — what eviction reclaims is exactly what's <strong>left in the tree yet used by no one now</strong>.</p>
+<p>One more practical angle makes the rule concrete: imagine a long shared system prompt being decoded by twenty concurrent requests. Its prefix chain carries <span class="mono">lock_ref=20</span>, so no matter how memory-starved the engine gets, that chain <strong>cannot be touched</strong> — which is exactly what we want, since evicting it would corrupt twenty in-flight forwards at once. As those requests finish one by one, each calls <span class="mono">dec_lock_ref</span>, dropping the count 20→19→…→0; only when the very last one ends does the chain rejoin the evictable set, and even then only if it's a leaf. This is why <strong>hot shared prefixes naturally survive pressure</strong>: the busier a prefix is, the higher its lock count, the more firmly it's pinned — the cache protects exactly what's most worth protecting, for free, as a side effect of correctness.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>How a tree shrinks under memory pressure</b>: highlighted nodes have <span class="mono">lock_ref&gt;0</span>, are in use, and <strong>must survive</strong>; cold unlocked leaves are dropped to free slots</div>
+  <div class="cells"><span class="lab">Protected chain</span><span class="cell hl">root</span><span class="cell hl">"you are a"</span><span class="cell hl">assistant·live</span><span class="sep">‖</span><span class="cell q">lock_ref&gt;0: an in-flight request reads it → eviction can't touch</span></div>
+  <div class="cells"><span class="lab">Cold leaf A</span><span class="cell">old prefix·t₂</span><span class="sep">✂</span><span class="cell q">lock_ref=0 and oldest-untouched → top of LRU heap, cleared first</span></div>
+  <div class="cells"><span class="lab">Cold leaf B</span><span class="cell">old prefix·t₅</span><span class="sep">✂</span><span class="cell q">lock_ref=0, next-oldest → cleared next if still short; slots freed</span></div>
+  <div class="cells"><span class="lab">After clearing</span><span class="cell hl">root</span><span class="cell hl">"you are a"</span><span class="cell hl">assistant·live</span><span class="sep">→</span><span class="cell q">only the in-use chain remains; freed slots return to allocator for new work</span></div>
+</div>
+
+<h2>Hit rate: the payoff, and that one trade</h2>
+<p>After all this — what is eviction for? For the <strong>hit rate</strong> — the fraction measuring "<strong>how many prompt tokens were served straight from the cache, with no recompute</strong>."
+Hit rate is the <strong>payoff metric</strong> that ties every earlier effort together: high prefix sharing (Lessons 7/29) lets more tokens be reused; cache-aware scheduling (Lesson 20) goes further, <strong>reordering the queue</strong> to favor requests whose prefix is already in the tree, so hits actually happen.
+Higher hit rate → less recompute → higher throughput (Lesson 8). And HiCache's (Lesson 31) value is to sink evicted prefixes to CPU/disk so the <strong>effective</strong> hit rate doesn't drop to zero on one eviction — a re-hit just copies it back, skipping a recompute.</p>
+<p>But hit rate isn't free. Behind it sits a <strong>core trade</strong>: <strong>evict-and-recompute-later vs keep-in-HBM</strong>.
+<strong>Keeping</strong> costs HBM — the prefix hogs memory, leaving less room for concurrency, so batches stay small; <strong>evicting</strong> costs a future hit turning into a miss, paying a thousands-token forward recompute.
+Every mechanism in this whole memory part (Lessons 29–32) — radix-tree sharing, paged pools, HiCache tiering, LRU eviction — fundamentally exists <strong>to make this trade well</strong>: keep as much useful as possible, evict the cold as accurately as possible, turning scarce HBM into the highest hit rate and throughput.</p>
+<p>A subtle point ties it all back to scheduling: hit rate isn't only the cache's job — it depends on the <strong>order requests arrive at the cache</strong>. If two requests share a long prefix but the scheduler interleaves a dozen unrelated requests between them, the shared prefix may be evicted before the second one arrives, turning a guaranteed hit into a miss. That's precisely why cache-aware scheduling (Lesson 20) <strong>reorders the queue</strong> to keep prefix-sharing requests close together — it actively manufactures hits that the cache alone would have lost to eviction. Eviction policy and scheduling policy are thus two halves of one optimization: the eviction side decides <strong>what to keep</strong>, the scheduling side decides <strong>when to ask</strong>, and only together do they push the effective hit rate — and therefore throughput (Lesson 8) — as high as the hardware allows.</p>
+
+<div class="cols">
+  <div class="col"><h4>Evict (& recompute later)</h4><p>Immediately return a cold prefix's KV slots to the pool, <strong>freeing HBM</strong> for more concurrency; the cost is that if it's hit again later you must <strong>recompute thousands of tokens</strong> (one expensive forward). Bet "it won't come back."</p></div>
+  <div class="col"><h4>Keep (in HBM)</h4><p>Hold the prefix in memory; a re-hit is <strong>zero recompute</strong>, pure reuse; the cost is it <strong>occupies HBM long-term</strong>, squeezing out space for bigger batches and higher concurrency. Bet "it'll come back."</p></div>
+</div>
+
+<p>The line that actually decides "who to clear" is surprisingly short — a strategy's entire difference is condensed into what <span class="mono">get_priority</span> returns:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/evict_policy.py ::LRUStrategy</span><span class="ln">priority = last access time</span></div>
+  <pre><span class="kw">class</span> <span class="st">EvictionStrategy</span>(ABC):
+    <span class="cm"># Abstract base: every strategy need only answer “whose priority is lowest, clear first”</span>
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> get_priority(self, node: TreeNode) -&gt; Union[float, Tuple]:
+        <span class="kw">pass</span>
+
+<span class="kw">class</span> <span class="st">LRUStrategy</span>(EvictionStrategy):
+    <span class="kw">def</span> get_priority(self, node: TreeNode) -&gt; float:
+        <span class="kw">return</span> node.last_access_time   <span class="cm"># oldest-untouched → smallest → heap top → evicted first</span>
+
+<span class="kw">class</span> <span class="st">LFUStrategy</span>(EvictionStrategy):
+    <span class="kw">def</span> get_priority(self, node: TreeNode) -&gt; Tuple[int, float]:
+        <span class="kw">return</span> (node.hit_count, node.last_access_time)  <span class="cm"># least-hit goes first</span></pre>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① Eviction is forced and on-demand</strong>: nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble new space does the scheduler fire <span class="mono">evict</span> to reclaim some.
+  <strong>② What to clear is ordered by EvictionStrategy</strong>: default LRU (<span class="mono">get_priority = last_access_time</span>, oldest first), plus LFU / FIFO / MRU; <strong>only leaves are evictable</strong>, reclaim goes leaf-to-root.
+  <strong>③ Iron rule: lock_ref&gt;0 is never evicted</strong> — an in-flight forward is reading that KV, reclaiming it corrupts; inc/dec_lock_ref move nodes between the evictable and protected sets (Lesson 29).
+  <strong>④ Hit rate is the payoff metric</strong>: fraction of tokens served from cache, raised by high sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) → less recompute → higher throughput (Lesson 8); HiCache (Lesson 31) raises effective hit rate.
+  <strong>⑤ Core trade: evict-then-recompute vs keep-in-HBM</strong> — keeping costs HBM and concurrency, evicting costs a future recompute; the whole memory part is about making this trade well.
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Under memory pressure with the default LRU strategy, which node does <span class='mono'>evict</span> clear <strong>first</strong>?</div>
+  <ol class="opts">
+    <li>Any node at random — eviction is random</li>
+    <li>The most-hit popular prefix, because it takes the most space</li>
+    <li><strong>The oldest-untouched evictable leaf with lock_ref=0</strong>: LRU's <span class='mono'>get_priority</span> just returns <span class='mono'>last_access_time</span>, so the oldest sits at the heap top and goes first; only leaves are evictable and locked nodes aren't even candidates</li>
+    <li>The deepest node in the tree, whether or not it's a leaf</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Default LRU's priority is last_access_time, so the oldest-untouched pops first; and only lock_ref=0 leaves are in the evictable set. Clearing the hottest is backwards, a non-leaf deep node can't be cleared, and eviction is not random.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why are <strong>only leaves</strong> evictable, and why is a <span class='mono'>lock_ref&gt;0</span> node <strong>never</strong> evictable?</div>
+  <ol class="opts">
+    <li>Because internal nodes have no KV slots to free</li>
+    <li><strong>A non-leaf still has longer paths hanging below that depend on this prefix's KV — pull it and its children dangle</strong>; and lock_ref&gt;0 means a running request is using this prefix — its forward is reading those KV slots, so reclaiming them would read overwritten garbage and corrupt the result. Reclaim must go leaf-to-root and skip the in-use chain</li>
+    <li>Leaves use more memory than internal nodes, so clearing them pays most</li>
+    <li>lock_ref is just a stats field with no real constraint on eviction</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Internal nodes have longer paths depending on their prefix KV; clearing them dangles children, so reclaim is leaf-to-root. A lock_ref>0 node is being read by an in-flight forward, so freeing its slots breaks correctness — an iron rule, not mere stats. Internal nodes also hold KV slots, and leaves aren't bigger.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does <strong>hit rate</strong> measure, and why is it ultimately equivalent to <strong>throughput</strong>?</div>
+  <ol class="opts">
+    <li><strong>It measures the fraction of prompt tokens served straight from the cache with no recompute</strong>. More hits → fewer tokens to recompute in a forward → the same GPU time serves more requests, so throughput rises (Lesson 8). High prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) lift it; HiCache (Lesson 31) raises the effective hit rate</li>
+    <li>It measures network request success rate, unrelated to recompute</li>
+    <li>It measures the model's next-token prediction accuracy</li>
+    <li>It measures GPU memory utilization — fuller means higher throughput</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Hit rate = the fraction of prompt tokens taken free from the cache without recompute. More hits, less recompute, more requests per unit GPU time → higher throughput (Lesson 8). It's not memory utilization, not prediction accuracy, and not network success rate.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'librarian weeding the shelves' analogy, fully explain eviction. Cover: (1) <strong>when</strong> it triggers (nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble the slots a new request needs does the scheduler fire <span class='mono'>evict</span> to reclaim some), and why it's reactive/on-demand rather than scheduled cleanup; (2) <strong>who</strong> gets cleared, ordered by <span class='mono'>EvictionStrategy</span>'s <span class='mono'>get_priority</span>, default LRU=<span class='mono'>last_access_time</span> (oldest-untouched first), and briefly LFU / FIFO / MRU; (3) why <strong>only leaves</strong> are evictable and reclaim goes leaf-to-root; (4) the iron rule: a <span class='mono'>lock_ref&gt;0</span> node (in use by a running request, Lesson 29) is never evicted, and how <span class='mono'>inc/dec_lock_ref</span> move nodes between the evictable and protected sets.</li>
+    <li>Explain the <strong>economics</strong> of the prefix cache, tying it back to neighboring lessons. Cover: (1) what <strong>hit rate</strong> measures (fraction of prompt tokens taken from cache without recompute), how it's raised by high prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20, which reorders the queue to favor cache hits), and how it converts into higher throughput (Lesson 8); (2) the core <strong>trade</strong>: evict-and-recompute-later vs keep-in-HBM — keeping costs HBM and squeezes out concurrency, evicting costs a future thousands-token recompute, and why the whole memory part (Lessons 29–32) is about making this trade well; (3) how HiCache (Lesson 31) raises the <strong>effective</strong> hit rate by sinking evicted prefixes to lower tiers.</li>
   </ul>
 </div>
 </div>

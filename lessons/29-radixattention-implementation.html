@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>29 · RadixAttention 实现 / RadixAttention implementation - SGLang 图解教程</title>
+<meta name="description" content="第七部分 · KV 缓存与内存｜RadixAttention 实现 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="29 · RadixAttention 实现 / RadixAttention implementation - SGLang 图解教程">
+<meta property="og:description" content="第七部分 · KV 缓存与内存｜RadixAttention 实现 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="29 · RadixAttention 实现 / RadixAttention implementation - SGLang 图解教程">
+<meta name="twitter:description" content="第七部分 · KV 缓存与内存｜RadixAttention 实现 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第七部分 · KV 缓存与内存</span><span class="lang-en">Part 7 · KV cache &amp; memory</span></span>
+    <span class="pill">29 / 32</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:90%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第七部分 · KV 缓存与内存</span><span class="lang-en">Part 7 · KV cache &amp; memory</span></div>
+    <h1><span class="lang-zh">RadixAttention 实现</span><span class="lang-en">RadixAttention implementation</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+第 7 课讲过<strong>为什么</strong>要共享前缀——同一段系统提示被上千条请求重复，重算它的 KV 是纯浪费。
+这一课不再重复"为什么"，而是钻进 <span class="inline">RadixCache</span> 的<strong>代码内部</strong>：
+那棵树到底由什么数据结构搭成、一次 <span class="mono">match_prefix</span> 怎样沿树下行、
+节点在哪一刻被<strong>分裂</strong>、又靠什么<strong>锁</strong>住正在用的前缀不被回收。把这些看懂，
+你就能读懂 <span class="mono">radix_cache.py</span> 这个全引擎最精巧的文件之一。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把基数树想成一棵<strong>共享文件夹树（路径 trie）</strong>：每个文件夹（节点）的"名字"是<strong>一连串路径片段</strong>（一段 token），
+  文件夹里不放文件本体，只放一张<strong>便签</strong>，写着"这段内容的 KV 存在仓库的哪些货架号"。你顺着路径<strong>逐段匹配</strong>往下走；
+  当两条路径<strong>前半段相同、后半段分叉</strong>时，就把那个文件夹<strong>从分叉点剪成两层</strong>——公共前缀提到父文件夹，各自的尾巴变成两个子文件夹。
+  只要还有人正<strong>打开着</strong>某个文件夹（lock_ref&gt;0），它就<strong>不许被删</strong>。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  记住一句话：<strong>树是索引，池是仓库</strong>。基数树本身<strong>不存 KV 张量</strong>，它存的是"token 序列 → KV 在池里的槽位号（indices）"这张映射；
+  真正的 K/V 张量躺在<strong>显存池</strong>里（第 30 课）。两条请求共享前缀，本质是它们在树上<strong>走过同一批祖先节点</strong>，
+  于是拿到<strong>同一串 indices</strong>、指向<strong>同一批物理槽位</strong>——零拷贝、零重算。这棵树还要配合驱逐与锁（第 32 课）、
+  HiCache 分层（第 31 课）和缓存感知调度（第 20 课）一起工作。
+</div>
+
+<h2>TreeNode：一个节点到底装了什么</h2>
+<p>整棵树由 <span class="mono">TreeNode</span> 串成。理解这个类的五个字段，几乎就理解了一切。
+<strong>key</strong> 是"进入本节点这条边上的一段 token id"——注意它是<strong>一段</strong>而非一个，把连续无分叉的 token 压在同一条边上，树才不会退化成一条长链。
+<strong>children</strong> 是个字典，<strong>用每个子节点 key 的第一个 token 作索引</strong>，这样下行时一步就能定位该走哪个孩子。
+<strong>value</strong> 是这段 token 对应的 <strong>KV 槽位号（indices）</strong>——再强调一次，它是<strong>指向池子的指针</strong>（第 30 课），<strong>不是 KV 张量本身</strong>。
+<strong>lock_ref</strong> 记录"当前有几条在跑的请求正用着这段前缀"，是保护它不被驱逐（第 32 课）的护身符。
+<strong>last_access_time</strong> 给 LRU 用，决定显存吃紧时谁先被赶走。</p>
+<p>为什么 <strong>key 要是一段而不是单个 token</strong>？这是基数树（radix tree，又叫压缩前缀树）相对普通前缀树的关键优化。普通 trie 每个节点只放一个字符，
+一段没有分叉的长前缀会拉成一条又细又长的链，遍历慢、指针多、内存碎。基数树把"<strong>中间没有任何分叉的连续 token</strong>"压进同一条边、同一个节点，
+只有在<strong>真正发生分叉的地方</strong>才设节点。于是一条几千 token 的系统提示，只要没有别的请求在中途岔开，就只占<strong>一个节点</strong>，
+匹配它也只是一次 <span class="mono">key.match</span> 的逐位比较。这也解释了 <span class="mono">_split_node</span> 的存在意义：当新请求<strong>恰好在这条长边的中间岔开</strong>，
+我们才被迫把这个"压缩节点"在岔口切开——平时能不切就不切，保持树尽量扁、尽量省。</p>
+<p>还要留意 <span class="mono">children</span> 用"<strong>子节点 key 的第一个 token</strong>"作字典键这个设计。下行到某节点时，我们手里剩着一串待匹配的 token，
+只需取<strong>它的第一个 id</strong>，去 <span class="mono">children</span> 里做一次 O(1) 的哈希查找，就知道"该不该往下走、走哪个孩子"。
+正因为任意两个孩子的 key 首 token 必然不同（否则它们就该被合并或分裂），用首 token 作键既无歧义又极快——这是整棵树查询性能的根基。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>一个 TreeNode 的五个关键字段</b>：边上的 token（key）+ 指向孩子的字典 + 指向池子的 indices + 锁计数 + 访问时间</div>
+  <div class="cells"><span class="lab">key</span><span class="cell">tok</span><span class="cell">国</span><span class="cell">的</span><span class="sep">→</span><span class="cell q">进入本节点这条边上的一段 token id（一段，非一个）</span></div>
+  <div class="cells"><span class="lab">children</span><span class="cell hl">首token→子</span><span class="sep">→</span><span class="cell q">字典，用每个孩子 key 的首 token 作键，一步定位下行方向</span></div>
+  <div class="cells"><span class="lab">value</span><span class="cell hl">#1024</span><span class="cell hl">#1025</span><span class="sep">→</span><span class="cell q">这段 token 的 KV 槽位号（指针），张量在池里（第 30 课）</span></div>
+  <div class="cells"><span class="lab">lock_ref</span><span class="cell">2</span><span class="sep">→</span><span class="cell q">几条在跑的请求正用这段前缀；&gt;0 则不许驱逐（第 32 课）</span></div>
+  <div class="cells"><span class="lab">last_access</span><span class="cell">t₇</span><span class="sep">→</span><span class="cell q">最近访问时间，给 LRU 用（第 32 课）</span></div>
+</div>
+
+<table class="t">
+  <tr><th>TreeNode 字段</th><th>角色</th><th>为什么需要它</th></tr>
+  <tr><td class="mono">key</td><td>边上的一段 token id</td><td>把无分叉的连续 token 压成一条边，避免退化成长链</td></tr>
+  <tr><td class="mono">children</td><td>首 token → 子节点的字典</td><td>下行时 O(1) 定位该走哪个孩子</td></tr>
+  <tr><td class="mono">value</td><td>KV 槽位号（indices）</td><td>指向池子的指针，复用即复用同一批物理槽位（第 30 课）</td></tr>
+  <tr><td class="mono">lock_ref</td><td>在用引用计数</td><td>&gt;0 时锁住，防止在飞的 KV 被驱逐（第 32 课）</td></tr>
+  <tr><td class="mono">last_access_time</td><td>LRU 时间戳</td><td>显存吃紧时决定谁先被赶走（第 32 课）</td></tr>
+</table>
+
+<h2>match_prefix：沿树下行，在分叉处分裂</h2>
+<p>来了一条新请求，它的 token 序列要先去树上<strong>问一句"我有多长一段已经被算过了"</strong>。这就是 <span class="mono">match_prefix</span>。
+它从根节点出发，<strong>用当前 token 的第一个 id 去 children 字典里找孩子</strong>；找到后，拿这段 token 和<strong>孩子边上的 key 逐位匹配</strong>。
+有两种结果：其一，<strong>整条边都匹配上</strong>——把这个孩子的 value（一串 indices）收进结果，<strong>消费掉</strong>已匹配的 token，再用剩下 token 的首 id 继续往下找；
+其二，<strong>只匹配了边的前一半就分叉了</strong>——这时不能整边复用，必须调 <span class="mono">_split_node</span> 在<strong>分歧点把这个节点切成两层</strong>。</p>
+<p>分裂做的事很优雅：新建一个父节点，<strong>key 取公共前缀那一截</strong>、value 取对应那段 indices；原节点降为它的孩子，<strong>key 与 value 都只留分歧之后的尾巴</strong>。
+于是"公共部分"被提取成一个可被多方共享的祖先，"各自不同的尾巴"成了它的分支。这一步是基数树的灵魂——<strong>共享是在匹配的瞬间、按需地长出来的</strong>，
+而不是预先规划好的。<span class="mono">match_prefix</span> 最终返回两样东西：<strong>命中的那串 KV indices</strong>（直接复用，免重算）和<strong>匹配到的最深节点</strong>（后续 insert 与加锁的落脚点）。</p>
+<p>举个具体例子把分裂讲实。假设树上已有一个节点，边上的 key 是 token 串 <span class="mono">[你, 是, 一, 个, 助, 手]</span>，它的 value 是这 6 个 token 在池里的 6 个槽位号。
+现在来了条请求，前缀是 <span class="mono">[你, 是, 一, 个, 专, 家]</span>——前 4 个 token 一致，第 5 个开始岔开。<span class="mono">key.match</span> 算出 <span class="mono">prefix_len = 4</span>，
+小于原边长度 6，于是触发 <span class="mono">_split_node</span>：新建父节点，key 取 <span class="mono">[你, 是, 一, 个]</span>、value 取前 4 个槽位号；原节点降为孩子，key 只剩 <span class="mono">[助, 手]</span>、value 只剩后 2 个槽位号。
+这样老请求（…助手）和新请求（…专家）就<strong>共享了"你是一个"这 4 个 token 的 KV</strong>，各自的尾巴成了父节点下的两个分支。注意分裂<strong>不搬动也不重算任何 KV 张量</strong>——
+它只是把 key 和 value 这两个轻量数组<strong>切片重挂</strong>，是一次纯指针操作，极快。</p>
+<p>再补一个边界细节：当 <span class="mono">page_size &gt; 1</span> 时，匹配与分裂都以<strong>页为粒度</strong>对齐，传入的 token 长度会先被截到页的整数倍再比较。
+这是为了和分页内存池（第 30 课）对齐——KV 在池里是<strong>按页分配</strong>的，所以树上的复用边界也必须落在页边界上，否则半页复用会造成槽位错位。
+你在代码里看到的 <span class="mono">key.page_aligned(self.page_size)</span> 和 <span class="mono">child_key(self.page_size)</span> 就是在做这件事。这也呼应了那条主线：<strong>树的索引必须时刻和池的物理布局对齐</strong>，两者步调一致，复用才安全。理解了这层对齐约束，你就明白为什么基数树的代码里到处都在和 <span class="mono">page_size</span> 打交道，而不是简单地按单个 token 处理。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>下行匹配 match</h4><p>用当前 token 首 id 在 <span class="mono">children</span> 找孩子，拿边上的 <span class="mono">key</span> 逐位比。整边命中就收下它的 indices、消费 token、继续下探。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>半路分叉就分裂 split</h4><p>只匹配到边的前一半 → <span class="mono">_split_node</span> 在分歧点切成两层：公共前缀升为父、原尾巴降为子，父节点从此可被多方共享。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>挂上分叉后缀 insert</h4><p>匹配点之后剩下的"新尾巴" → 作为一个新子节点 <span class="mono">insert</span> 进去，它的 value 是这段新 token 写入池子拿到的 indices。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>加锁保护 lock</h4><p>从命中的最深节点<span class="mono">向上</span>逐节点 <span class="mono">lock_ref += 1</span>，让驱逐（第 32 课）碰不到这段正在飞的前缀；请求结束再逐节点解锁。</p></div></div>
+</div>
+
+<p>真实代码里，下行循环与分裂就长这样——注意 <span class="mono">prefix_len &lt; len(child.key)</span> 这个判断，正是"只匹配了半条边、必须分裂"的那一刻：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">下行匹配与按需分裂</span></div>
+  <pre><span class="kw">def</span> _match_prefix_helper(self, node, key):
+    child_key = key.child_key(self.page_size)   <span class="cm"># 用当前 token 首 id 作索引</span>
+    value = []
+    <span class="kw">while</span> len(key) &gt; 0 <span class="kw">and</span> child_key <span class="kw">in</span> node.children.keys():
+        child = node.children[child_key]
+        prefix_len = child.key.match(key, page_size=self.page_size)
+        <span class="kw">if</span> prefix_len &lt; len(child.key):       <span class="cm"># 只匹配了半条边 → 必须分裂</span>
+            new_node = self._split_node(child.key, child, prefix_len)
+            value.append(new_node.value)        <span class="cm"># 收下公共前缀的 KV indices</span>
+            node = new_node
+            <span class="kw">break</span>
+        <span class="kw">else</span>:                                  <span class="cm"># 整条边命中 → 收下、消费 token、继续下探</span>
+            value.append(child.value)
+            node = child
+            key = key[prefix_len:]
+            child_key = key.child_key(self.page_size)
+    <span class="kw">return</span> value, node                        <span class="cm"># 命中的 indices + 最深节点</span></pre>
+</div>
+
+<h2>insert 与 lock_ref：挂上新尾巴、锁住在用前缀</h2>
+<p>匹配只解决了"已有多少"。剩下那段<strong>从未见过的后缀</strong>怎么办？交给 <span class="mono">insert</span>：它沿着和 match 一样的路径走到匹配点，
+把<strong>分叉出来的新 token 作为一个新子节点</strong>挂在最深匹配节点下，新节点的 value 就是这段 token 把 K/V 写进池子后拿到的那串 indices。
+若插入途中也遇到"半条边"，同样会先 <span class="mono">_split_node</span> 再挂——所以 match 和 insert 共用同一套分裂逻辑，保证树<strong>永远是规范的</strong>。</p>
+<p>最后是<strong>锁</strong>。一条请求开始使用某段命中前缀时，引擎从最深匹配节点<strong>一路向上 walk 到根</strong>，途中每个节点 <span class="mono">lock_ref += 1</span>（这就是 <span class="mono">inc_lock_ref</span>）。
+为什么要向上锁整条链？因为驱逐是从叶子往上回收的（第 32 课），只要这段前缀在飞，<strong>它的每一个祖先都不能被当成"可驱逐叶子"清掉</strong>，否则正在算的请求会读到一片被回收的垃圾槽位。
+请求结束时调 <span class="mono">dec_lock_ref</span> 反向把计数减回去；当某节点 <span class="mono">lock_ref</span> 归零，它才重新变成"可驱逐"的候选。一句话：<strong>lock_ref 守护的是"正在被使用的 KV 不被回收"这条铁律</strong>。</p>
+<p>这里有个容易混淆的点值得点破：<strong>lock_ref 和"被多少请求共享"不是一回事</strong>。一个节点可能被树结构上挂着很多历史请求留下的分支，但只有<strong>此刻真正在跑、真正在读这段 KV</strong> 的请求才会给它加锁。
+换句话说，lock_ref 计的是"<strong>正在飞的引用</strong>"，不是"<strong>历史上用过的次数</strong>"。这区分至关重要：驱逐策略要回收的恰恰是那些<strong>留在树上、但当下没人在用</strong>的前缀——它们 lock_ref 为 0、可被安全清掉以腾显存；
+而 lock_ref 为正的节点，哪怕 last_access_time 很老、看着像该淘汰，也<strong>绝对不能动</strong>。inc/dec 这一对就是在"尽量长期缓存以提升命中率"和"绝不回收在用数据以保证正确性"之间划出的那条硬边界。</p>
+
+<h2>共享如何真正发生：树是索引，池是存储</h2>
+<p>把三件事接起来你就通透了。两条请求若前缀相同，它们在 <span class="mono">match_prefix</span> 里会<strong>走过同一批祖先节点</strong>、
+拿到<strong>同一串 value（indices）</strong>，于是它们的注意力都去读池子里<strong>同一批物理槽位</strong>——这就是"共享"的全部真相：不是复制 KV，而是<strong>复用指针</strong>。
+等到各自生成出不同的下一个 token，路径才在某个节点<strong>分叉</strong>成两片不同的叶子，各自的新 KV 写进池子的新槽位、挂成各自的新子节点。
+树负责"<strong>谁和谁共享、共享到第几个 token</strong>"，池负责"<strong>KV 到底存在哪</strong>"——索引与存储彻底分离，正是这套设计能既省显存又跑得快的根本。</p>
+<p>把视角拉远一点，你会看到这套数据结构如何向上托起整个引擎。缓存感知调度（第 20 课）之所以能"<strong>优先放那些前缀已在树上的请求进批</strong>"，靠的就是 <span class="mono">match_prefix</span> 能在调度前快速算出每条候选请求<strong>能复用多长</strong>；
+HiCache（第 31 课）则是 <span class="mono">RadixCache</span> 的<strong>分层子类</strong>——当 GPU 显存里的节点被驱逐，它不直接丢，而是把 value 指向的 KV 先<strong>下沉到 CPU 内存甚至磁盘</strong>，需要时再拉回，靠的正是 TreeNode 里那几个 host 相关字段。
+可以说，这一课讲的 <span class="mono">TreeNode</span> 五字段、<span class="mono">match_prefix</span> 的下行与分裂、<span class="mono">insert</span> 的挂接、<span class="mono">lock_ref</span> 的加解锁，是后面好几课的<strong>共同地基</strong>。把这棵树读透，
+你再看驱逐（第 32 课）、分层（第 31 课）、调度（第 20 课）时就不会迷路——它们都只是在这棵"token 序列 → KV 槽位"的索引树上，添加各自的策略而已。</p>
+<p>最后留一个常被问到的细节作收尾：<strong>这棵树是怎么"长大"的</strong>？答案是请求<strong>用完即种</strong>。一条请求在解码过程中或彻底结束时，引擎会把它<strong>实际算出来的那段 token 及其 KV indices</strong> 通过 <span class="mono">insert</span> 写回树里
+（对应代码里的 <span class="mono">cache_unfinished_req</span> 与 <span class="mono">cache_finished_req</span>）。于是<strong>每一条请求都在为后来者铺路</strong>：它算过的前缀沉淀成树上的节点，下一条撞上同样前缀的请求一 <span class="mono">match_prefix</span> 就能白捡。
+这就形成一个良性循环——越热门的前缀（系统提示、few-shot 例子、公共文档）被越多请求种进树、又被越多请求命中复用，命中率随流量自然爬升。而当显存装不下时，<strong>驱逐</strong>（第 32 课）再按 LRU 把最冷、且 lock_ref 为 0 的叶子摘掉，腾出槽位。
+种树、查树、锁树、剪树，这四个动作循环往复，就是 <span class="mono">RadixCache</span> 在一台 GPU 上日夜运转的全部故事。</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">root</div><div class="nd">空前缀</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">共享祖先</div><div class="nd">"你是一个助手…"<br>两请求都走它 · 同一串 indices</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">叶 A</div><div class="nd">请求 A 的独有后缀<br>→ 池里新槽位</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">叶 B</div><div class="nd">请求 B 的独有后缀<br>→ 池里另一批槽位</div></div>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <strong>① TreeNode 的 value 是 KV 槽位号（indices），不是 KV 张量</strong>——树是索引，池才是存储（第 30 课）。
+  <strong>② match_prefix 沿 children 字典下行、逐边匹配；半条边匹配时 _split_node 在分歧点切两层</strong>，公共前缀升为可共享的父。
+  <strong>③ insert 把分叉后缀挂成新子节点</strong>，与 match 共用分裂逻辑保持树规范。
+  <strong>④ inc/dec_lock_ref 从命中节点向上锁整条链</strong>，守护"在飞的 KV 不被驱逐"（第 32 课）。
+  <strong>⑤ 共享 = 两条路径走过同一祖先、拿同一串 indices、指同一批物理槽位</strong>，分叉后各长各的叶子。概念见第 7 课，HiCache 分层见第 31 课，缓存感知调度见第 20 课。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 一个 <strong>TreeNode 的 value</strong> 字段到底装的是什么？</div>
+  <ol class="opts">
+    <li>装的是这段 token 的 K/V 张量本体</li>
+    <li>装的是这段 token 的原始文本字符串</li>
+    <li>装的是子节点的列表</li>
+    <li>装的是这段 token 对应的 <strong>KV 槽位号（indices）</strong>——也就是<strong>指向显存池（第 30 课）的指针</strong>，而<strong>不是 KV 张量本身</strong>。树只当索引，真正的 K/V 张量躺在池里；两条请求共享前缀，就是它们拿到同一串 indices、指向同一批物理槽位</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。树是索引、池是存储是本课的灵魂：value 存的是指向池子的 indices，不是张量。正因为存的是指针，复用前缀才能零拷贝——两请求拿到同一串 indices 就指向同一批物理槽位。张量本体在第 30 课的池里；子节点在 children 字段，不在 value。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <span class='mono'>match_prefix</span> 下行时，<strong>什么情况下会调用 <span class='mono'>_split_node</span> 把一个节点切成两层</strong>？</div>
+  <ol class="opts">
+    <li>当显存池满了需要驱逐时</li>
+    <li>每次匹配到一个完整节点时都会分裂一次</li>
+    <li>当传入 token 只匹配了某条边 <span class='mono'>key</span> 的<strong>前一部分</strong>就分叉时（<span class='mono'>prefix_len &lt; len(child.key)</span>）：必须在<strong>分歧点</strong>把节点切开，公共前缀升为可共享的父节点、原来的尾巴降为子节点，这样新旧两条路径才能共享前半段</li>
+    <li>当某个节点的 lock_ref 超过阈值时</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。分裂只发生在“半条边匹配”这一刻：代码里 prefix_len < len(child.key) 为真就调 _split_node，在分歧点把公共前缀提为父、尾巴降为子。整边命中不分裂，直接收下继续下探。分裂与 lock_ref、驱逐无关——它纯粹是为了让共享前缀按需长出来。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <span class='mono'>inc_lock_ref</span> 从命中节点<strong>一路向上给每个祖先加锁</strong>，它到底在防什么？</div>
+  <ol class="opts">
+    <li>防止节点的 key 被其它请求修改</li>
+    <li>防止树的深度超过最大限制</li>
+    <li>防止<strong>正在被在跑请求使用的 KV 被驱逐回收</strong>：驱逐是从叶子往上回收的（第 32 课），只要这段前缀在飞，它的每个祖先都不能被当成可驱逐叶子清掉，否则请求会读到一片被回收的垃圾槽位。请求结束再 <span class='mono'>dec_lock_ref</span> 逐节点解锁</li>
+    <li>防止两条请求同时匹配到同一个前缀</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。lock_ref 守护“在用的 KV 不被回收”这条铁律。驱逐自叶向上回收，所以要把命中节点到根的整条链都加锁，任一祖先被清都会让在飞请求读到垃圾。共享前缀本就允许多请求同时命中（不是要防这个）；锁与改 key、限深度无关。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“共享文件夹树（路径 trie）”这个类比，把 <span class='mono'>RadixCache</span> 的数据结构与三大操作讲透。请覆盖：①一个 <span class='mono'>TreeNode</span> 的五个字段各装什么——key（边上一段 token）、children（首 token 索引的字典）、value（指向池子的 KV indices，<strong>不是张量</strong>，第 30 课）、lock_ref（在用计数）、last_access_time（LRU，第 32 课）；②<span class='mono'>match_prefix</span> 如何沿 children 下行、逐边匹配，以及“半条边匹配”时 <span class='mono'>_split_node</span> 为什么要在分歧点把公共前缀提为父节点；③为什么说“树是索引、池是存储”，以及共享的本质是复用指针而非复制 KV。</li>
+    <li>把 <span class='mono'>match_prefix</span> → <span class='mono'>insert</span> → <span class='mono'>inc/dec_lock_ref</span> 串成一条请求生命周期讲清楚。请说明：①match 返回的两样东西（命中的 KV indices 用于复用、最深匹配节点用作落脚点）；②insert 如何把分叉后缀挂成新子节点、并与 match 共用同一套分裂逻辑保持树规范；③请求开始用某段前缀时为什么要从命中节点<strong>向上锁到根</strong>（驱逐自叶向上，第 32 课），结束时 dec_lock_ref 如何逐节点解锁、归零后才重新可驱逐；④把这棵树接回上层：概念动机在第 7 课、indices 指向的池在第 30 课、HiCache 分层子类在第 31 课、缓存感知调度在第 20 课。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Lesson 7 covered <strong>why</strong> we share prefixes — one system prompt repeated by thousands of requests makes recomputing its KV pure waste.
+This lesson does not repeat the "why"; it drills into the <strong>code</strong> of <span class="inline">RadixCache</span>:
+exactly what data structures build that tree, how one <span class="mono">match_prefix</span> walks down it,
+the moment a node gets <strong>split</strong>, and what <strong>locks</strong> an in-use prefix so it can't be reclaimed. Grasp this and you can read
+<span class="mono">radix_cache.py</span>, one of the most elegant files in the whole engine.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the radix tree as a <strong>shared folder tree (a trie of file paths)</strong>: each folder (node) is named by a <strong>run of path segments</strong> (a run of tokens),
+  and the folder holds no file itself, just a <strong>sticky note</strong> saying "the KV for this run lives on these shelf numbers in the warehouse." You walk down <strong>matching segment by segment</strong>;
+  when two paths <strong>agree on a front part then diverge</strong>, you <strong>split that folder into two levels</strong> — the common prefix is lifted into a parent, each tail becomes a child folder.
+  As long as someone has a folder <strong>open</strong> (lock_ref&gt;0), it <strong>may not be deleted</strong>.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One sentence: <strong>the tree is the index, the pool is the warehouse</strong>. The radix tree itself <strong>stores no KV tensors</strong>; it stores the mapping "token sequence → KV slot numbers (indices) in the pool."
+  The real K/V tensors sit in the <strong>memory pool</strong> (Lesson 30). Two requests sharing a prefix means they <strong>walk the same ancestor nodes</strong> on the tree,
+  get the <strong>same run of indices</strong>, pointing at the <strong>same physical slots</strong> — zero copy, zero recompute. This tree also works with eviction and locks (Lesson 32),
+  HiCache tiering (Lesson 31), and cache-aware scheduling (Lesson 20).
+</div>
+
+<h2>TreeNode: what a node actually holds</h2>
+<p>The whole tree is woven from <span class="mono">TreeNode</span>. Understand its five fields and you understand almost everything.
+<strong>key</strong> is "a run of token ids on the edge into this node" — note it's a <strong>run</strong>, not one token; packing consecutive un-branched tokens onto one edge keeps the tree from degenerating into a long chain.
+<strong>children</strong> is a dict <strong>keyed by the first token of each child's key</strong>, so descending picks the right child in one step.
+<strong>value</strong> is the <strong>KV slot numbers (indices)</strong> for this run — again, a <strong>pointer into the pool</strong> (Lesson 30), <strong>not the KV tensors themselves</strong>.
+<strong>lock_ref</strong> counts "how many running requests are currently using this prefix," the talisman that protects it from eviction (Lesson 32).
+<strong>last_access_time</strong> feeds LRU, deciding who gets evicted first under memory pressure.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>The five key fields of a TreeNode</b>: tokens on the edge (key) + dict of children + indices into the pool + lock count + access time</div>
+  <div class="cells"><span class="lab">key</span><span class="cell">tok</span><span class="cell">of</span><span class="cell">the</span><span class="sep">→</span><span class="cell q">a run of token ids on the edge into this node (a run, not one)</span></div>
+  <div class="cells"><span class="lab">children</span><span class="cell hl">firstTok→kid</span><span class="sep">→</span><span class="cell q">dict keyed by each child's first token; one-step descent</span></div>
+  <div class="cells"><span class="lab">value</span><span class="cell hl">#1024</span><span class="cell hl">#1025</span><span class="sep">→</span><span class="cell q">KV slot numbers (pointers); tensors live in the pool (Lesson 30)</span></div>
+  <div class="cells"><span class="lab">lock_ref</span><span class="cell">2</span><span class="sep">→</span><span class="cell q">running requests using this prefix; &gt;0 means no eviction (Lesson 32)</span></div>
+  <div class="cells"><span class="lab">last_access</span><span class="cell">t₇</span><span class="sep">→</span><span class="cell q">most-recent access time, for LRU (Lesson 32)</span></div>
+</div>
+
+<table class="t">
+  <tr><th>TreeNode field</th><th>Role</th><th>Why it's needed</th></tr>
+  <tr><td class="mono">key</td><td>a run of token ids on the edge</td><td>packs un-branched tokens onto one edge, avoids a long chain</td></tr>
+  <tr><td class="mono">children</td><td>first-token → child dict</td><td>O(1) pick of which child to descend into</td></tr>
+  <tr><td class="mono">value</td><td>KV slot numbers (indices)</td><td>pointer into the pool; reuse = the same physical slots (Lesson 30)</td></tr>
+  <tr><td class="mono">lock_ref</td><td>in-use reference count</td><td>&gt;0 locks it, so in-flight KV can't be evicted (Lesson 32)</td></tr>
+  <tr><td class="mono">last_access_time</td><td>LRU timestamp</td><td>decides who is evicted first under memory pressure (Lesson 32)</td></tr>
+</table>
+
+<h2>match_prefix: walk down, split at the divergence</h2>
+<p>A new request arrives and its token sequence first <strong>asks the tree "how long a run of me has already been computed?"</strong> That's <span class="mono">match_prefix</span>.
+It starts at the root, <strong>uses the current token's first id to find a child in the children dict</strong>, then matches this run of tokens against that <strong>child's edge key, token by token</strong>.
+Two outcomes: one, <strong>the whole edge matches</strong> — take that child's value (a run of indices) into the result, <strong>consume</strong> the matched tokens, and continue with the next token's first id;
+two, <strong>only the front half of the edge matches before diverging</strong> — now we can't reuse the whole edge, so we call <span class="mono">_split_node</span> to <strong>cut that node into two levels at the divergence point</strong>.</p>
+<p>The split is elegant: build a new parent whose <strong>key is the common prefix slice</strong> and whose value is that slice of indices; the original node becomes its child with <strong>key and value trimmed to just the diverging tail</strong>.
+So the "common part" is extracted into an ancestor that many can share, and the "differing tails" become its branches. This step is the soul of the radix tree — <strong>sharing grows on demand at the instant of matching</strong>,
+not planned ahead. <span class="mono">match_prefix</span> ultimately returns two things: the <strong>matched run of KV indices</strong> (reuse, no recompute) and the <strong>deepest matched node</strong> (the foothold for later insert and locking).</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Walk-down match</h4><p>Use the current token's first id to find a child in <span class="mono">children</span>, compare against its edge <span class="mono">key</span> token by token. Whole-edge hit → take its indices, consume tokens, descend further.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Diverge mid-edge → split</h4><p>Only the front half matches → <span class="mono">_split_node</span> cuts into two levels at the divergence: common prefix becomes the parent, original tail becomes the child, and the parent is now shareable.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Attach the diverging suffix → insert</h4><p>The leftover "new tail" after the match point → <span class="mono">insert</span> it as a new child node whose value is the indices obtained from writing this run's K/V into the pool.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Lock to protect</h4><p>From the deepest matched node walk <span class="mono">upward</span>, doing <span class="mono">lock_ref += 1</span> on each, so eviction (Lesson 32) can't touch this in-flight prefix; unlock node by node when the request finishes.</p></div></div>
+</div>
+
+<p>In the real code, the walk-down loop and the split look like this — note the <span class="mono">prefix_len &lt; len(child.key)</span> test, which is exactly the moment "only half the edge matched, must split":</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">walk-down match and on-demand split</span></div>
+  <pre><span class="kw">def</span> _match_prefix_helper(self, node, key):
+    child_key = key.child_key(self.page_size)   <span class="cm"># index by current token's first id</span>
+    value = []
+    <span class="kw">while</span> len(key) &gt; 0 <span class="kw">and</span> child_key <span class="kw">in</span> node.children.keys():
+        child = node.children[child_key]
+        prefix_len = child.key.match(key, page_size=self.page_size)
+        <span class="kw">if</span> prefix_len &lt; len(child.key):       <span class="cm"># only half the edge matched -&gt; must split</span>
+            new_node = self._split_node(child.key, child, prefix_len)
+            value.append(new_node.value)        <span class="cm"># take the common prefix's KV indices</span>
+            node = new_node
+            <span class="kw">break</span>
+        <span class="kw">else</span>:                                  <span class="cm"># whole edge hit -&gt; take it, consume, descend</span>
+            value.append(child.value)
+            node = child
+            key = key[prefix_len:]
+            child_key = key.child_key(self.page_size)
+    <span class="kw">return</span> value, node                        <span class="cm"># matched indices + deepest node</span></pre>
+</div>
+
+<h2>insert and lock_ref: attach the new tail, lock the in-use prefix</h2>
+<p>Matching only answers "how much already exists." What about the <strong>never-seen suffix</strong> left over? That's <span class="mono">insert</span>: it walks the same path to the match point and
+<strong>attaches the diverging new tokens as a new child node</strong> under the deepest matched node, the new node's value being the run of indices from writing this run's K/V into the pool.
+If insert also hits a "half edge" along the way, it likewise <span class="mono">_split_node</span> first then attaches — so match and insert share the same split logic, keeping the tree <strong>always canonical</strong>.</p>
+<p>Finally, the <strong>lock</strong>. When a request starts using a matched prefix, the engine walks <strong>upward from the deepest matched node all the way to the root</strong>, doing <span class="mono">lock_ref += 1</span> on each node (that's <span class="mono">inc_lock_ref</span>).
+Why lock the whole chain upward? Because eviction reclaims from leaves upward (Lesson 32); as long as this prefix is in flight, <strong>none of its ancestors may be treated as an "evictable leaf"</strong>, or a running request would read a swath of reclaimed garbage slots.
+On finish, <span class="mono">dec_lock_ref</span> decrements the counts back; once a node's <span class="mono">lock_ref</span> hits zero it becomes an eviction candidate again. In one line: <strong>lock_ref guards the iron rule that KV in use is never reclaimed</strong>.</p>
+
+<h2>How sharing really happens: tree is index, pool is storage</h2>
+<p>Tie three things together and it clicks. If two requests share a prefix, in <span class="mono">match_prefix</span> they <strong>walk the same ancestor nodes</strong>,
+get the <strong>same run of values (indices)</strong>, so both attention reads hit the <strong>same physical slots</strong> in the pool — that's the whole truth of "sharing": not copying KV, but <strong>reusing pointers</strong>.
+Once each generates a different next token, the paths <strong>diverge</strong> at some node into two distinct leaves, each new KV written to fresh slots in the pool and hung as its own new child node.
+The tree owns "<strong>who shares with whom, up to which token</strong>"; the pool owns "<strong>where the KV actually lives</strong>" — index and storage fully separated, which is exactly why this design is both memory-thrifty and fast.</p>
+
+<div class="flow">
+  <div class="node hl"><div class="nt">root</div><div class="nd">empty prefix</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">shared ancestor</div><div class="nd">"You are an assistant…"<br>both walk it · same indices</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">leaf A</div><div class="nd">request A's own suffix<br>→ fresh slots in pool</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">leaf B</div><div class="nd">request B's own suffix<br>→ other slots in pool</div></div>
+</div>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① A TreeNode's value is KV slot numbers (indices), not KV tensors</strong> — the tree is the index, the pool is the storage (Lesson 30).
+  <strong>② match_prefix descends via the children dict, matching edge by edge; on a half-edge match, _split_node cuts two levels at the divergence</strong>, lifting the common prefix into a shareable parent.
+  <strong>③ insert attaches the diverging suffix as a new child</strong>, sharing the split logic with match to keep the tree canonical.
+  <strong>④ inc/dec_lock_ref lock the whole chain upward from the matched node</strong>, guarding in-flight KV from eviction (Lesson 32).
+  <strong>⑤ Sharing = two paths walk the same ancestor, take the same indices, point at the same physical slots</strong>, then grow separate leaves after diverging. Concept in Lesson 7, HiCache tiering in Lesson 31, cache-aware scheduling in Lesson 20.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does a <strong>TreeNode's value</strong> field actually hold?</div>
+  <ol class="opts">
+    <li>It holds the actual K/V tensors for this run</li>
+    <li>It holds the raw text string of this run</li>
+    <li>It holds the list of child nodes</li>
+    <li>It holds the <strong>KV slot numbers (indices)</strong> for this run — i.e. <strong>pointers into the memory pool (Lesson 30)</strong>, <strong>not the KV tensors themselves</strong>. The tree is just the index; the real K/V tensors live in the pool. Two requests sharing a prefix get the same run of indices pointing at the same physical slots</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Tree-is-index, pool-is-storage is the soul of this lesson: value stores indices into the pool, not tensors. Because it's a pointer, prefix reuse is zero-copy — two requests get the same indices pointing at the same physical slots. The tensors live in the Lesson-30 pool; children live in the children field, not value.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. While <span class='mono'>match_prefix</span> descends, <strong>when does it call <span class='mono'>_split_node</span> to cut a node into two levels</strong>?</div>
+  <ol class="opts">
+    <li>When the pool is full and needs eviction</li>
+    <li>It splits once every time a full node is matched</li>
+    <li>When the incoming tokens match only the <strong>front part</strong> of an edge's <span class='mono'>key</span> before diverging (<span class='mono'>prefix_len &lt; len(child.key)</span>): the node must be split at the <strong>divergence point</strong> — the common prefix becomes a shareable parent and the original tail becomes a child, so the old and new paths can share the front part</li>
+    <li>When a node's lock_ref exceeds a threshold</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Splitting happens only at the 'half-edge match' instant: when prefix_len < len(child.key) the code calls _split_node, lifting the common prefix into a parent and trimming the tail into a child. A whole-edge hit doesn't split — it's taken and descent continues. Splitting is unrelated to lock_ref or eviction; it purely grows shared prefixes on demand.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <span class='mono'>inc_lock_ref</span> walks <strong>upward locking every ancestor</strong> from the matched node — what is it actually preventing?</div>
+  <ol class="opts">
+    <li>It prevents a node's key from being modified by other requests</li>
+    <li>It prevents the tree depth from exceeding a maximum</li>
+    <li>It prevents <strong>KV currently in use by a running request from being evicted</strong>: eviction reclaims from leaves upward (Lesson 32), so while this prefix is in flight none of its ancestors may be treated as an evictable leaf, or the request would read reclaimed garbage slots. On finish, <span class='mono'>dec_lock_ref</span> unlocks node by node</li>
+    <li>It prevents two requests from matching the same prefix at once</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. lock_ref guards the rule that in-use KV is never reclaimed. Eviction reclaims leaf-upward, so the whole chain from the matched node to the root is locked; reclaiming any ancestor would let an in-flight request read garbage. Shared prefixes are meant to be hit by many requests at once (not what this prevents); locking is unrelated to editing keys or limiting depth.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'shared folder tree (path trie)' analogy, fully explain <span class='mono'>RadixCache</span>'s data structure and three core operations. Cover: (1) what each of a <span class='mono'>TreeNode</span>'s five fields holds — key (a run of tokens on the edge), children (dict keyed by first token), value (KV indices pointing into the pool, <strong>not tensors</strong>, Lesson 30), lock_ref (in-use count), last_access_time (LRU, Lesson 32); (2) how <span class='mono'>match_prefix</span> descends via children matching edge by edge, and why a half-edge match makes <span class='mono'>_split_node</span> lift the common prefix into a parent at the divergence point; (3) why 'tree is index, pool is storage,' and that sharing reuses pointers rather than copying KV.</li>
+    <li>Trace a request's lifecycle through <span class='mono'>match_prefix</span> → <span class='mono'>insert</span> → <span class='mono'>inc/dec_lock_ref</span>. Cover: (1) the two things match returns (matched KV indices for reuse, deepest matched node as a foothold); (2) how insert attaches the diverging suffix as a new child and shares match's split logic to keep the tree canonical; (3) why starting to use a prefix walks the lock <strong>upward to the root</strong> (eviction is leaf-upward, Lesson 32), and how dec_lock_ref unlocks node by node, with a node becoming evictable again only at zero; (4) tie the tree back up the stack: the concept motivation in Lesson 7, the pool the indices point into in Lesson 30, the HiCache tiering subclass in Lesson 31, and cache-aware scheduling in Lesson 20.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="28-sampler-and-sampling-params.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">采样器与采样参数</span><span class="lang-en">Sampler &amp; sampling params</span></div></a><a class="next" href="30-paged-memory-pools.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">分页内存池</span><span class="lang-en">Paged memory pools</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

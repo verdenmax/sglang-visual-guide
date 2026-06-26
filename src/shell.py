@@ -103,6 +103,14 @@ PAGES = [
      "第六部分 · 模型执行", "Part 6 · Model execution"),
     ("28-sampler-and-sampling-params.html", "采样器与采样参数", "Sampler & sampling params",
      "第六部分 · 模型执行", "Part 6 · Model execution"),
+    ("29-radixattention-implementation.html", "RadixAttention 实现", "RadixAttention implementation",
+     "第七部分 · KV 缓存与内存", "Part 7 · KV cache & memory"),
+    ("30-paged-memory-pools.html", "分页内存池", "Paged memory pools",
+     "第七部分 · KV 缓存与内存", "Part 7 · KV cache & memory"),
+    ("31-hicache-tiering.html", "HiCache 分层缓存", "HiCache tiering",
+     "第七部分 · KV 缓存与内存", "Part 7 · KV cache & memory"),
+    ("32-eviction-and-hit-rate.html", "缓存淘汰与命中", "Eviction & hit rate",
+     "第七部分 · KV 缓存与内存", "Part 7 · KV cache & memory"),
 ]
 
 
@@ -608,6 +616,14 @@ SUBTITLES = {
                                               "capture the forward's kernel sequence and replay it · kill per-kernel launch overhead"),
     "28-sampler-and-sampling-params.html": ("logits→下一个 token · 温度/top-k/p/惩罚 · SamplingParams",
                                             "logits→next token · temperature/top-k/p/penalties · SamplingParams"),
+    "29-radixattention-implementation.html": ("radix 树实现 · TreeNode/match/split/lock · L07 概念落成代码",
+                                              "the radix tree in code · TreeNode/match/split/lock · L07's concept as data structures"),
+    "30-paged-memory-pools.html": ("KV 物理存储 · req_to_token + token_to_kv 两池 · 分配器",
+                                   "where KV physically lives · req_to_token + token_to_kv pools · the allocator"),
+    "31-hicache-tiering.html": ("缓存跨 GPU/CPU/磁盘三级 · 后台预取与回写",
+                                "cache across GPU/CPU/disk tiers · background prefetch & writeback"),
+    "32-eviction-and-hit-rate.html": ("LRU 淘汰可淘汰叶子 · 锁定的在用节点不淘汰 · 命中率即吞吐",
+                                      "LRU evicts evictable leaves · locked in-use nodes survive · hit rate is throughput"),
 }
 
 
