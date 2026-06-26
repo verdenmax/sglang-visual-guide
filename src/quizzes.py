@@ -4128,6 +4128,450 @@ QUIZZES = {
             },
         ],
     },
+    "58-radixattention-as-a-first-class-idea.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "本课说 RadixAttention 是 SGLang 的「一等公民」而不是「贴上去的优化」。这句话最准确的含义是？",
+                    "en": "This lesson says RadixAttention is a 'first-class idea' in SGLang, not a 'bolt-on optimization'. What does that most accurately mean?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>「KV 缓存就是一棵共享前缀的基数树」被当作核心数据结构，整个引擎围着它设计，而不是事后在旁边贴一个独立的 LRU 字典</strong>",
+                        "en": "<strong>'The KV cache is a radix tree of shared prefixes' is treated as the core data structure the whole engine is designed around, not a separate LRU dictionary glued on afterward</strong>",
+                    },
+                    {"zh": "它是一个运行最快的注意力 CUDA kernel，和缓存结构无关", "en": "It is just the fastest attention CUDA kernel, unrelated to cache structure"},
+                    {"zh": "它只是 DSL 层一个可选的语法糖，底层并不依赖它", "en": "It is merely optional syntactic sugar at the DSL layer that the engine does not rely on"},
+                    {"zh": "它是一个独立微服务，需要单独部署", "en": "It is a standalone microservice that must be deployed separately"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "一等公民意味着这个念头被刻意、反复地写进系统多个层次：缓存本身的形状就是基数树。调度、显存、分层都围着它协同，所以改它会牵动全局——这正是「结构」而非「外挂」的标志。",
+                    "en": "First-class means the idea is written, on purpose and repeatedly, into many layers: the cache's very shape is a radix tree. Scheduling, memory, and tiering all coordinate around it, so changing it ripples across the whole system — the hallmark of a structure, not a bolt-on.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "下列哪一组课程讲的「其实是同一件事」——共享前缀这一个念头在不同层换了张面孔？",
+                    "en": "Which group of lessons are 'really about the same thing' — the single idea of shared prefixes wearing a different face at each layer?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>DSL fork/join（第11课）、前缀缓存概念（第7课）、基数树实现（第29课）、分页 KV（第30课，承第6课）、缓存感知调度（第20课）、HiCache 分层（第31课）</strong>",
+                        "en": "<strong>DSL fork/join (Lesson 11), prefix-cache concept (Lesson 7), radix-tree implementation (Lesson 29), paged KV (Lesson 30, on Lesson 6), cache-aware scheduling (Lesson 20), HiCache tiering (Lesson 31)</strong>",
+                    },
+                    {"zh": "量化、张量并行、投机解码、采样温度", "en": "Quantization, tensor parallelism, speculative decoding, sampling temperature"},
+                    {"zh": "日志格式、CI 流水线、PR 规范、文档目录", "en": "Log format, CI pipeline, PR conventions, docs directory"},
+                    {"zh": "REST 路由、鉴权、限流、监控面板", "en": "REST routing, auth, rate limiting, monitoring dashboard"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这六课分别在语言层、概念层、实现层、物理层、调度层、分层存储层描述同一个共享前缀世界观：故意制造共享、承诺只算一次、落地成基数树、指向分页、优先命中、按冷热分层。把它们叠在一起才看见贯穿的主轴。",
+                    "en": "These six lessons describe the same shared-prefix worldview at the language, concept, implementation, physical, scheduling, and tiering layers: deliberately create sharing, promise to compute once, land as a radix tree, point at pages, favor hits, and tier by temperature. Stack them and the spine appears.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把一次请求放到这棵树上，它的「生命周期」按正确顺序是？",
+                    "en": "Placed on this tree, what is a request's 'lifecycle' in the correct order?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>match_prefix 匹配最长已缓存前缀 → 复用该前缀的 KV（inc_lock_ref 钉住）→ 只对新后缀做前向计算 → insert 写回树并在分叉处劈开节点</strong>",
+                        "en": "<strong>match_prefix finds the longest cached prefix → reuse that prefix's KV (inc_lock_ref pins it) → forward-compute only the new suffix → insert writes back, splitting the node at divergence</strong>",
+                    },
+                    {"zh": "重新计算整条序列的 KV → 写满整棵树 → 再删掉重复", "en": "Recompute the whole sequence's KV → fill the entire tree → then delete duplicates"},
+                    {"zh": "先 evict 所有叶子 → 再匹配前缀 → 最后才计算", "en": "Evict all leaves first → then match prefix → compute last"},
+                    {"zh": "只算前缀、丢弃新后缀，以节省显存", "en": "Compute only the prefix and discard the new suffix to save memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "精髓是「匹配最长前缀 → 复用 KV → 只算新后缀 → 写回树」。复用的前缀要 inc_lock_ref 钉住防止半路被回收，新后缀算完后 insert 挂回树、在分叉处劈开节点，让未来请求也能共享。整个过程避免了对相同开头的重复计算。",
+                    "en": "The essence is 'match the longest prefix → reuse KV → compute only the new suffix → write back to the tree'. The reused prefix is pinned by inc_lock_ref so it isn't evicted mid-flight, and after the new suffix is computed, insert hangs it back and splits the node at divergence so future requests can share it. This avoids recomputing identical openings.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释：为什么把「共享前缀」当作一等公民数据结构（基数树），而不是引擎旁边一个贴上去的 LRU 缓存，会让调度（第20课）、显存分页（第30课）和分层（第31课）都能围着它协同？对比这两种做法的根本差别。",
+                "en": "In your own words, explain why treating 'shared prefixes' as a first-class data structure (a radix tree) rather than an LRU cache bolted beside the engine lets scheduling (Lesson 20), paged memory (Lesson 30), and tiering (Lesson 31) all coordinate around it. Contrast the fundamental difference between the two approaches.",
+            },
+            {
+                "zh": "挑出本课提到的至少三处「共享前缀的不同面孔」（如 DSL fork/join 第11课、前缀缓存概念第7课、基数树实现第29课），说明它们骨子里是同一件事；再用「匹配最长前缀 → 复用 KV → 只算新后缀」串起一次请求在 RadixCache 里走完的全过程。",
+                "en": "Pick at least three of the 'different faces of shared prefixes' from this lesson (e.g., DSL fork/join Lesson 11, the prefix-cache concept Lesson 7, the radix-tree implementation Lesson 29), explain why they are the same thing underneath, then use 'match the longest prefix → reuse KV → compute only the new suffix' to trace a request's full path through RadixCache.",
+            },
+        ],
+    },
+    "59-zero-overhead-scheduling.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "本课说零开销调度的「一条主线」是什么？",
+                    "en": "What is the 'single thread' running through zero-overhead scheduling in this lesson?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>CPU 绝不能让 GPU 等：任何在前向之前或之后的 CPU 工作都是潜在「气泡」，要把它藏到 GPU 计算背后</strong>",
+                        "en": "<strong>The CPU must never make the GPU wait: any CPU work before or after the forward is a potential 'bubble' to be hidden behind GPU compute</strong>",
+                    },
+                    {"zh": "让 CPU 完全不做任何工作，所有逻辑都搬到 GPU 上", "en": "Make the CPU do no work at all and move every bit of logic onto the GPU"},
+                    {"zh": "通过提高 CPU 主频来追上 GPU 的速度", "en": "Raise the CPU clock speed to catch up with the GPU"},
+                    {"zh": "把每一步都串行执行以保证结果正确", "en": "Run every step serially to guarantee correctness"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "零开销不是 CPU 不干活，而是 CPU 的活不占额外墙钟时间——它们被重叠进 GPU 前向里。现代 GPU 极快，前向前后那点 CPU 工作就成了 GPU 干等的气泡，整个调度子系统的目标就是消灭这些气泡。",
+                    "en": "Zero-overhead doesn't mean the CPU is idle; it means the CPU's work costs no extra wall-clock time because it is overlapped into the GPU forward. A modern GPU is so fast that the CPU work around the forward becomes an idle bubble, and the whole scheduling subsystem aims to kill those bubbles.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "重叠调度（第21课）打开 enable_overlap 后，GPU 在跑 forward(批 N) 的同时，CPU 在做什么？",
+                    "en": "With overlap scheduling (Lesson 21) and enable_overlap on, what is the CPU doing while the GPU runs forward(batch N)?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>已经在组装批 N+1，并且并行处理批 N-1 的结果，让 GPU 一刻不停</strong>",
+                        "en": "<strong>Already assembling batch N+1 and processing batch N-1's results in parallel, so the GPU never idles</strong>",
+                    },
+                    {"zh": "空等 GPU 返回，什么也不做", "en": "Idly waiting for the GPU to return, doing nothing"},
+                    {"zh": "重新计算批 N 的 KV 缓存以校验结果", "en": "Recomputing batch N's KV cache to verify the result"},
+                    {"zh": "把 GPU 暂停下来等 CPU 把队列清空", "en": "Pausing the GPU until the CPU drains the queue"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "朴素事件循环是串行的：组批→前向→处理结果，GPU 在两段 CPU 时间里都闲着。重叠调度把循环改成流水线：GPU 跑 forward(N) 时 CPU 同时组装 N+1、处理 N-1，CPU 开销被塞进 GPU 前向的影子里，墙钟上几乎看不见。",
+                    "en": "A naive event loop is serial: form batch → forward → process results, leaving the GPU idle during both CPU segments. Overlap scheduling turns it into a pipeline: while the GPU runs forward(N), the CPU assembles N+1 and processes N-1, so the CPU overhead is tucked into the GPU forward's shadow and is nearly invisible in wall-clock time.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "下列「CPU 气泡 → SGLang 如何藏它」的配对，哪一组完全正确？",
+                    "en": "Which group of 'CPU bubble → how SGLang hides it' pairings is entirely correct?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>调度/结果处理→重叠调度(第18/21课)；长 prefill 堵塞→分块预填充(第22课)；内核启动开销→CUDA 图(第27课)；分词解码→进程拆分+IPC(第14/16课)</strong>",
+                        "en": "<strong>schedule/result processing→overlap scheduler (L18/21); long-prefill stall→chunked prefill (L22); kernel-launch overhead→CUDA graphs (L27); tokenize/detokenize→process split+IPC (L14/16)</strong>",
+                    },
+                    {"zh": "调度→量化；长 prefill→张量并行；内核启动→温度采样；分词→负载均衡", "en": "schedule→quantization; long prefill→tensor parallelism; kernel launch→temperature sampling; tokenize→load balancing"},
+                    {"zh": "所有气泡都只能靠加 GPU 显存解决", "en": "Every bubble can only be solved by adding GPU memory"},
+                    {"zh": "气泡只存在于 prefill，decode 阶段没有气泡", "en": "Bubbles exist only in prefill; decode has no bubbles"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "六课六机制其实是同一哲学的不同侧面：事件循环+重叠调度藏掉调度与结果处理，分块预填充防止长 prefill 堵死流水线，CUDA 图消除逐个内核启动的开销，进程拆分+IPC 让分词解码离开前向关键路径。",
+                    "en": "Six lessons, six mechanisms, all sides of one philosophy: the event loop + overlap scheduler hide scheduling and result processing, chunked prefill stops a long prefill from clogging the pipeline, CUDA graphs erase per-kernel launch overhead, and the process split + IPC move tokenize/detokenize off the forward's critical path.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释：为什么「GPU 越快，CPU 气泡越致命」？结合一次 decode 前向只要几毫秒、而调度+采样+拼 token 也是毫秒级这个事实，说明为什么消灭气泡从锦上添花升级成了决定吞吐的头等大事。",
+                "en": "In your own words, explain why 'the faster the GPU, the deadlier the CPU bubble'. Using the fact that a decode forward may take only a few milliseconds while scheduling + sampling + appending tokens is also milliseconds, argue why killing bubbles graduates from a nice-to-have into the top factor deciding throughput.",
+            },
+            {
+                "zh": "挑出本课提到的至少三处「零开销主线的不同面孔」（如事件循环第18课、重叠调度第21课、分块预填充第22课、CUDA 图第27课、进程拆分第14/16课），说明它们骨子里都是同一句话：找到每个 CPU 气泡，把它藏到 GPU 计算背后或挪到别的进程。",
+                "en": "Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop Lesson 18, overlap scheduling Lesson 21, chunked prefill Lesson 22, CUDA graphs Lesson 27, the process split Lesson 14/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.",
+            },
+        ],
+    },
+    "60-two-workloads-one-engine.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "本课的「一条根本对立」指的是什么？",
+                    "en": "What is the 'one root tension' this lesson is about?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>prefill 是算力受限（compute-bound）的一次大并行，decode 是带宽受限（bandwidth-bound）的逐字生成，两者性质相反却要共用一台引擎</strong>",
+                        "en": "<strong>prefill is a compute-bound big parallel pass while decode is bandwidth-bound token-by-token generation; opposite in nature yet sharing one engine</strong>",
+                    },
+                    {"zh": "prefill 和 decode 其实是同一种负载，只是名字不同", "en": "prefill and decode are really the same workload under different names"},
+                    {"zh": "对立只存在于多卡之间，单卡上没有矛盾", "en": "The tension exists only across multiple GPUs, never on a single one"},
+                    {"zh": "decode 才是算力受限，prefill 是带宽受限", "en": "decode is the compute-bound one and prefill is bandwidth-bound"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "prefill 一次处理整段 prompt，权重读一次被成百上千 token 复用，算术强度高、吃满乘加单元，是 compute-bound；decode 每步只出一个 token 却要重读整套权重+全部 KV，算术强度低、乘加大半空转，是 bandwidth-bound。一台引擎要同时服务两者，这是第4课埋下的根本对立。",
+                    "en": "Prefill processes the whole prompt at once—weights read once, reused by hundreds of tokens—so its arithmetic intensity is high and it saturates the math units: compute-bound. Decode emits one token per step yet re-reads the full weights + all KV, low arithmetic intensity, math units mostly idle: bandwidth-bound. One engine must serve both—the root tension seeded in Lesson 4.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么在同一台 GPU 上 prefill 和 decode 会「互相打架」？",
+                    "en": "Why do prefill and decode 'fight each other' on the same GPU?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>一个超长 prompt 的 prefill 是一大块算力密集的活，串行排队时会堵住所有正在解码的请求，让大家的 ITL 飙高、TTFT 与 ITL 互相拉扯</strong>",
+                        "en": "<strong>A very long prompt's prefill is a big compute-heavy chunk; queued serially it blocks every decoding request, spiking everyone's ITL and pitting TTFT against ITL</strong>",
+                    },
+                    {"zh": "因为它们使用不同的注意力算法，互相不兼容", "en": "Because they use different attention algorithms that are incompatible"},
+                    {"zh": "因为 GPU 显存不够大，无法同时放下两份权重", "en": "Because GPU memory is too small to hold two copies of the weights"},
+                    {"zh": "其实并不打架，先来先做就能两全其美", "en": "They don't actually fight; first-come-first-served satisfies both"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "prefill 想要大块、独占、算力拉满；decode 想要频繁、低延迟、雨露均沾。把两种负载塞进一个串行队列，长 prefill 一上 GPU 就把正在解码的请求全堵住，ITL 瞬间飙高（第8课的吞吐 vs 延迟）。一台 GPU 无法同时满足两种诉求，所以必须在调度层动脑筋。",
+                    "en": "Prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared. Stuff both into one serial queue and a long prefill, once on the GPU, blocks every decoding request and spikes ITL (Lesson 8's throughput vs latency). One GPU can't satisfy both, so the scheduler must get clever.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "「同卡分时（chunked prefill）」与「分机分离（PD 分离）」这两条路线的区别是什么？",
+                    "en": "What distinguishes the 'co-located (chunked prefill)' path from the 'separated (PD disaggregation)' path?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>chunked prefill 把 prefill 切片插进 decode 缝隙，让一块 GPU 时间分片地服务两者（第22课）；PD 分离给两种负载各一池 GPU 再搬 KV，让各自饱和各自瓶颈、互不干扰（第45课）</strong>",
+                        "en": "<strong>chunked prefill slices prefill into decode's gaps so one GPU time-shares both (L22); PD disaggregation gives each workload its own GPU pool and transfers the KV, so each saturates its own bottleneck without interference (L45)</strong>",
+                    },
+                    {"zh": "两者完全相同，只是叫法不一样", "en": "They are identical, just named differently"},
+                    {"zh": "chunked prefill 需要两池 GPU，PD 分离只需要一块 GPU", "en": "chunked prefill needs two GPU pools while PD needs only one GPU"},
+                    {"zh": "PD 分离不需要传输 KV，chunked prefill 才需要", "en": "PD disaggregation needs no KV transfer; only chunked prefill does"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "两条路在解同一道题：chunked prefill 是共置方案，用聪明调度把 prefill 切片、和 decode 拼进同一 batch，时间分片地共用一块 GPU；PD 分离是分离方案，物理上拆成 prefill 池和 decode 池，靠 BaseKVManager 这层接缝把 KV 从 prefill 侧搬到 decode 侧。一个靠调度，一个靠物理分开。",
+                    "en": "Both solve the same problem: chunked prefill is the co-located answer—smart scheduling slices prefill and packs it into the same batch as decode, time-sharing one GPU; PD disaggregation is the separated answer—physically split into prefill and decode pools, with the BaseKVManager seam moving KV from the prefill side to the decode side. One via scheduling, one via physical separation.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释：为什么单纯给 decode 阶段堆更多算力几乎没用，而把 batch 做大才是真正的解药？请结合「decode 每步要重读整套权重+全部 KV」这一事实，说明它为何是 bandwidth-bound 而非 compute-bound。",
+                "en": "In your own words, explain why simply piling more compute onto the decode phase barely helps, while growing the batch is the real cure. Using the fact that 'each decode step re-reads the full weights + all KV', argue why decode is bandwidth-bound rather than compute-bound.",
+            },
+            {
+                "zh": "本课说「一个轴看懂全局」。请从第4、8、22、45课中至少挑三处，说明 prefill-vs-decode 这一条根本对立如何解释了这些看似无关的设计——它们要么靠聪明调度（共置），要么靠物理分开（分离）。",
+                "en": "The lesson claims 'one axis explains the whole'. Pick at least three of Lessons 4, 8, 22, 45 and show how the prefill-vs-decode root tension explains these seemingly unrelated designs—each reconciling it either by smart scheduling (co-located) or by physical separation (disaggregated).",
+            },
+        ],
+    },
+    "61-draft-for-parallel-verify.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "本课提炼出的「通用设计思路」是什么？",
+                    "en": "What 'general design move' does this lesson distill?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>花便宜的、可并行的工作，去绕开一个串行瓶颈——把延迟受限的串行步骤变成吞吐受限的并行步骤</strong>",
+                        "en": "<strong>Spend cheap, parallelizable work to dodge a sequential bottleneck—turn latency-bound serial steps into throughput-bound parallel ones</strong>",
+                    },
+                    {"zh": "用更大的模型一次性生成所有 token", "en": "Use a bigger model to generate all tokens at once"},
+                    {"zh": "把 decode 改成训练那样的一次性并行前向，从而改变输出", "en": "Rewrite decode as a one-shot parallel forward like training, changing the output"},
+                    {"zh": "只在多卡场景才有效，单卡无法应用", "en": "It only works across multiple GPUs, never on a single one"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "投机解码背后真正深刻的不是某个新机制，而是一种贯穿 SGLang 的通用思路：decode 天生串行、带宽受限（第4课），就花一份便宜草稿把「k 个串行 forward」换成「一次并行验证」（第43课）。本质是拿闲置算力换被省下的串行时间。",
+                    "en": "What's deep about speculative decoding isn't a new mechanism but a general move across SGLang: decode is inherently serial and bandwidth-bound (Lesson 4), so spend a cheap draft to swap 'k serial forwards' for 'one parallel verify' (Lesson 43). The essence is trading spare compute for saved sequential time.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "草稿模型猜出 k 个 token 后，目标模型如何处理它们？输出会和普通 decode 不同吗？",
+                    "en": "After the draft proposes k tokens, how does the target model handle them, and does the output differ from plain decode?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>目标模型一次并行 forward 验证全部 k 个，accept 最长正确前缀并在第一处分歧收下 bonus token；验证是无损的，输出与逐字 decode 完全一致</strong>",
+                        "en": "<strong>The target verifies all k in one parallel forward, accepts the longest correct prefix and takes a bonus token at the first disagreement; verification is lossless, output identical to plain decode</strong>",
+                    },
+                    {"zh": "目标模型直接信任草稿，不做验证，所以更快但会改变输出", "en": "The target trusts the draft without verifying, so it's faster but changes the output"},
+                    {"zh": "目标模型逐个重新生成这 k 个 token，没有任何并行", "en": "The target regenerates the k tokens one-by-one with no parallelism"},
+                    {"zh": "只有草稿和目标完全一致时才能用，否则结果出错", "en": "It only works when draft and target fully agree, otherwise results are wrong"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "验证比生成便宜且可并行：把 k 个候选拼成一个序列做一次 forward，目标模型同时算出每个位置自己会选什么。一致的最长正确前缀全部 accept，第一处分歧处目标这次顺带算出的正确 token 就是 bonus token。因为最终都以目标模型为准，输出与普通 decode 完全一致——无损。",
+                    "en": "Verifying is cheaper than generating and parallelizes: stitch the k candidates into one sequence for a single forward, and the target computes what it would pick at each position. The matching longest correct prefix is all accepted; at the first disagreement the correct token the target computed is the bonus token. Since the target always has final say, output is identical to plain decode—lossless.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "下列哪些 SGLang 技巧和投机解码是「同一个形状」？",
+                    "en": "Which SGLang tricks share the 'same shape' as speculative decoding?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>CUDA Graph 录制固定序列让 GPU 重放、省掉每步 CPU 停顿（第27课），以及重叠调度让 CPU 工作与 GPU forward 并行（第59课）——都是把串行步骤变并行</strong>",
+                        "en": "<strong>CUDA Graph records a fixed sequence so the GPU replays it without per-step CPU stalls (Lesson 27), and the overlap scheduler runs CPU work parallel with the GPU forward (Lesson 59)—both turn serial steps into parallel ones</strong>",
+                    },
+                    {"zh": "量化和剪枝，因为它们都让模型变小", "en": "Quantization and pruning, because both shrink the model"},
+                    {"zh": "只有 EAGLE 的 token 树算同一形状，其余都无关", "en": "Only EAGLE's token tree counts; the rest are unrelated"},
+                    {"zh": "没有任何其他技巧是同一形状，投机解码是孤立的", "en": "No other trick shares the shape; speculative decoding is isolated"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "认得「把串行变并行」这个形状后就会到处看到它：CUDA Graph 把本该一步步发指令的串行过程压成一次性重放（第27课）；重叠调度让 CPU 与 GPU 并行而非互相等待（第59课）；EAGLE 用 token 树一次验证多条路径（第44课）。它们都是同一条主线的不同切面。",
+                    "en": "Once you recognize 'turn serial into parallel', you see it everywhere: CUDA Graph compresses a step-by-step serial dispatch into a one-shot replay (Lesson 27); the overlap scheduler runs CPU and GPU in parallel instead of waiting (Lesson 59); EAGLE verifies many paths at once with a token tree (Lesson 44). All facets of one through-line.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释这笔「交易」：投机解码花了什么、换回了什么？请结合「decode 是串行且带宽受限、每步算力闲置」这一事实（第4课），说明为什么那次并行验证几乎是「免费」的。",
+                "en": "In your own words, explain the 'trade': what does speculative decoding spend and what does it get back? Using the fact that decode is serial and bandwidth-bound with idle compute per step (Lesson 4), argue why that parallel verify is nearly 'free'.",
+            },
+            {
+                "zh": "本课说看懂这个形状后，你会自动问「哪里还能草稿一把、再并行验证？」。请从第27、43、44、59课中至少挑三处，说明「把串行步骤变成并行步骤」这条统一原则如何解释这些看似无关的设计，并说明为何投机解码的验证必须保持无损。",
+                "en": "The lesson says that once you see the shape you'll ask 'where else could we draft-and-verify?'. Pick at least three of Lessons 27, 43, 44, 59 and show how the unifying principle 'turn serial steps into parallel ones' explains these seemingly unrelated designs, and explain why speculative decoding's verification must stay lossless.",
+            },
+        ],
+    },
+    "62-everything-is-pluggable.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "本课提炼出的「反复出现的设计范型」是什么？",
+                    "en": "What 'recurring design archetype' does this lesson distill?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>面向接口（抽象基类）编程，把每条会变化的轴推到接口背后，具体实现在部署时选定——核心保持稳定</strong>",
+                        "en": "<strong>Program to an interface (an ABC), push every variable axis behind it, and select the concrete implementation at deploy time—keeping the core stable</strong>",
+                    },
+                    {"zh": "把所有功能都硬编码进调度器以追求最高性能", "en": "Hard-code every feature into the scheduler for maximum performance"},
+                    {"zh": "每加一种硬件就重写一遍模型执行循环", "en": "Rewrite the model-execution loop for each new piece of hardware"},
+                    {"zh": "在运行时随机选择实现以提升鲁棒性", "en": "Pick implementations randomly at runtime to improve robustness"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是一节综合课：它点亮贯穿全书的暗线——一个接口 + 多个实现 + 部署时选一个。引擎核心（调度器、模型执行循环、内存池）保持稳定，变化被关在可插拔的边缘。",
+                    "en": "This is a synthesis lesson: it lights up the book's through-line—one interface + many implementations + pick one at deploy time. The engine core (scheduler, model-execution loop, memory pools) stays stable while variation is fenced behind pluggable edges.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "下列哪一项最准确地描述了 SGLang 里「稳定核心」与「可插拔边缘」的关系？",
+                    "en": "Which best describes the relation between SGLang's 'stable core' and its 'pluggable edges'?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>核心（Scheduler、模型执行循环、内存池）只认抽象接口；注意力后端、平台、量化、投机、并行、语法、KV 传输等都是满足接口的可替换实现</strong>",
+                        "en": "<strong>The core (Scheduler, model loop, memory pools) knows only abstract interfaces; the attention backend, platform, quantization, speculation, parallelism, grammar, KV transfer are swappable implementations satisfying those interfaces</strong>",
+                    },
+                    {"zh": "核心每次部署都要重新编译以适配具体实现", "en": "The core must be recompiled per deploy to fit each implementation"},
+                    {"zh": "边缘组件必须直接修改内存池才能工作", "en": "Edge components must edit the memory pools directly to work"},
+                    {"zh": "只有注意力后端是可插拔的，其余都焊死在核心里", "en": "Only the attention backend is pluggable; everything else is welded into the core"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "核心稳定，是其他一切能自由替换的前提。注意力后端（第33课）、平台（第42课）、量化（第35课）、投机（第43课）、并行（第46课）、语法（第48课）、KV 传输（第45课）都是同一条缝的化身：核心只认接口，不认实现。",
+                    "en": "The core's stability is the precondition for everything else being swappable. The attention backend (L33), platform (L42), quantization (L35), speculation (L43), parallelism (L46), grammar (L48), and KV transfer (L45) are all incarnations of the same seam: the core knows only the interface, never the implementation.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么这种「面向接口」的结构让 SGLang 易于贡献？",
+                    "en": "Why does this 'program-to-an-interface' structure make SGLang easy to contribute to?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>因为加入新硬件或新算法通常只需实现一个已存在的接口，再在部署时选上，核心代码一行不改、风险被圈在新实现内</strong>",
+                        "en": "<strong>Because adding new hardware or an algorithm usually only requires implementing an existing interface and selecting it at deploy time—no core code changes and risk is contained inside the new impl</strong>",
+                    },
+                    {"zh": "因为贡献者每次都要重写调度器与内存池", "en": "Because contributors must rewrite the scheduler and memory pools each time"},
+                    {"zh": "因为所有实现共享同一份全局可变状态", "en": "Because all implementations share one global mutable state"},
+                    {"zh": "因为接口允许跳过验证以加快合并", "en": "Because interfaces let you skip verification to merge faster"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "接口是契约，核心是稳定的舞台，社区在边缘并行扩张。贡献通常不是重写引擎，而是沿着已有的缝补上一个新实现——这正是「写一个模型」（第26课）也只是面向稳定层 API 编程的原因。",
+                    "en": "The interface is the contract, the core is the stable stage, and the community expands in parallel at the edge. Contributing usually isn't rewriting the engine but filling a new implementation along an existing seam—which is why 'writing a model' (L26) is also just programming against stable layer APIs.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释「面向接口编程，部署时选实现」这个范型：以注意力后端（第33课）为例，说明模型代码为什么只调用 self.attn(...) 而不在意背后是 FlashInfer、Triton 还是 FA，以及这种解耦带来了什么好处。",
+                "en": "In your own words, explain the 'program to an interface, choose at deploy time' archetype: using the attention backend (Lesson 33) as an example, explain why model code only calls self.attn(...) without caring whether FlashInfer, Triton, or FA sits behind it, and what this decoupling buys you.",
+            },
+            {
+                "zh": "本课说看懂这个形状后，看任何一课都会先问「缝在哪、接口是什么、实现有几个、部署时怎么选」。请从第35、42、43、45、46、48 课中至少挑三处，说明它们如何共享同一形状，并解释为什么把变化关在可插拔边缘能让引擎核心保持简洁可靠。",
+                "en": "The lesson says that once you see the shape, you read any lesson by asking 'where is the seam, what is the interface, how many implementations, how is one chosen at deploy time'. Pick at least three of Lessons 35, 42, 43, 45, 46, 48 and show how they share the same shape, then explain why fencing variation behind pluggable edges keeps the engine core simple and reliable.",
+            },
+        ],
+    },
+    "63-built-for-throughput.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "本课提炼出贯穿全书的「唯一北极星」是什么？",
+                    "en": "What is the single 'north star' this lesson distills as running through the whole guide?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>让 GPU 一直忙着做有用的 token 工作——最大化每秒真正花在有用计算上的 FLOPs 与显存带宽（即吞吐）</strong>",
+                        "en": "<strong>Keep the GPU busy doing useful token work—maximize the FLOPs and memory bandwidth actually spent on useful compute per second (i.e. throughput)</strong>",
+                    },
+                    {"zh": "在任何代价下把单个请求的延迟压到最低", "en": "Minimize a single request's latency at any cost"},
+                    {"zh": "尽可能减少代码行数以方便维护", "en": "Reduce lines of code as much as possible for maintainability"},
+                    {"zh": "让每个组件都能独立部署在不同机器上", "en": "Let every component deploy independently on separate machines"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是收尾的综合课：SGLang 几乎每个设计都在为同一目标服务——让 GPU 一刻不空，且每一秒都在做真正要交付的有用计算。批处理、分页、前缀缓存、重叠调度、CUDA Graph、内核融合、量化并行都是这颗北极星的不同切面。",
+                    "en": "This is the closing synthesis lesson: almost every SGLang design serves one goal—never let the GPU idle, and make every second do useful compute that will actually be delivered. Batching, paging, prefix caching, overlap scheduling, CUDA graphs, kernel fusion, quantization, and parallelism are all facets of that north star.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么说「批处理」（第5课）是吞吐的地基？",
+                    "en": "Why is 'batching' (Lesson 5) called the bedrock of throughput?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>因为一次解码里最贵的动作是把整套模型权重从显存读入计算单元，其成本几乎与服务的请求数无关；攒大批能把这次昂贵的读取摊薄到许多请求头上</strong>",
+                        "en": "<strong>Because the most expensive act in a decode step is reading the whole model weights from memory into the compute units, a cost nearly independent of how many requests are served; a big batch amortizes that one read across many requests</strong>",
+                    },
+                    {"zh": "因为批处理能让每个请求都用上独立的 GPU", "en": "Because batching gives each request its own dedicated GPU"},
+                    {"zh": "因为批处理避免了对显存的任何访问", "en": "Because batching avoids any memory access at all"},
+                    {"zh": "因为批处理把模型权重永久缓存在 CPU 里", "en": "Because batching permanently caches the weights in CPU memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "权重读取成本固定，与批内请求数几乎无关。让同一次读取服务 64 个请求而非 1 个，有效吞吐就接近翻 64 倍。这也是为什么分页（第6、30课）、量化与并行（第35、46课）都在为「更大的批」腾空间。",
+                    "en": "The weight-read cost is fixed and nearly independent of batch size. Making one read serve 64 requests instead of 1 lifts effective throughput nearly 64×. That is also why paging (Lessons 6, 30) and quantization/parallelism (Lessons 35, 46) all free room for a bigger batch.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "下列哪一组属于「延迟护栏」——即在最大化系统吞吐的同时，避免牺牲单个用户？",
+                    "en": "Which pair are the 'latency safeguards'—features that avoid sacrificing the individual user while the system is maximized?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>分块预填充（第22课）与投机解码（第43课）</strong>",
+                        "en": "<strong>Chunked prefill (Lesson 22) and speculative decoding (Lesson 43)</strong>",
+                    },
+                    {"zh": "前缀缓存（第7课）与重叠调度（第21课）", "en": "Prefix caching (Lesson 7) and overlap scheduling (Lesson 21)"},
+                    {"zh": "CUDA Graph（第27课）与内核融合（第41课）", "en": "CUDA Graphs (Lesson 27) and kernel fusion (Lesson 41)"},
+                    {"zh": "分页（第6课）与量化（第35课）", "en": "Paging (Lesson 6) and quantization (Lesson 35)"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "分块预填充把长 prompt 切块、与解码交错，避免一个大请求霸占整步；投机解码用小模型猜、大模型验，一步多吐 token 而不增加权重读取。两者的精神都是「在最大化系统的同时不牺牲那个具体的人」，而非牺牲吞吐换延迟。其余各项都是纯粹的吞吐杠杆。",
+                    "en": "Chunked prefill slices a long prompt and interleaves it with decode so one big request can't hog a whole step; speculative decoding guesses with a small model and verifies with the big one, emitting several tokens per step without extra weight reads. Both are about maximizing the system without sacrificing the specific human, not trading throughput for latency. The other options are pure throughput levers.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用「吞吐眼镜」重读 SGLang：任选三个机制（如批处理第5课、前缀缓存第7/29课、重叠调度第21/59课、CUDA Graph 第27课、内核融合第38/41课），分别说明它消灭的是「空转」「重复劳动」还是「装不下」这三种 GPU 时间浪费中的哪一种，以及它如何最终服务于「每秒有用 token 工作」这颗北极星。",
+                "en": "Re-read SGLang through the 'throughput glasses': pick any three mechanisms (e.g. batching L5, prefix caching L7/L29, overlap scheduling L21/L59, CUDA graphs L27, kernel fusion L38/L41) and, for each, say which of the three GPU-time wastes—idling, redundant work, or not-fitting—it eliminates, and how it ultimately serves the north star of 'useful token work per second'.",
+            },
+            {
+                "zh": "本课说调度（SchedulePolicy / CacheAwarePolicy）同时追求「大批」与「高前缀命中」，并称二者都服务吞吐而非互相打架。请解释为什么这两个目标是同一颗北极星的两个分量，并以 LPM（最长前缀匹配）为例说明它如何同时帮助组成大批与集中缓存命中。",
+                "en": "The lesson says scheduling (SchedulePolicy / CacheAwarePolicy) pursues both 'big batch' and 'high prefix-hit', calling them both servants of throughput rather than rivals. Explain why these two goals are two components of the same north star, and use LPM (longest-prefix-match) as an example to show how it simultaneously helps form a big batch and concentrate cache hits.",
+            },
+        ],
+    },
 }
 
 

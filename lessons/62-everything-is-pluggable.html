@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>62 · 一切皆可插拔 / Everything is pluggable - SGLang 图解教程</title>
+<meta name="description" content="第十三部分 · 设计专题综合｜一切皆可插拔 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="62 · 一切皆可插拔 / Everything is pluggable - SGLang 图解教程">
+<meta property="og:description" content="第十三部分 · 设计专题综合｜一切皆可插拔 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="62 · 一切皆可插拔 / Everything is pluggable - SGLang 图解教程">
+<meta name="twitter:description" content="第十三部分 · 设计专题综合｜一切皆可插拔 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></span>
+    <span class="pill">62 / 63</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:98%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></div>
+    <h1><span class="lang-zh">一切皆可插拔</span><span class="lang-en">Everything is pluggable</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">如果你把前面几十课串起来看，会发现 SGLang 反复在做同一件事：把<strong>引擎核心</strong>（调度器、模型执行循环、内存池）保持稳定，而把<strong>每一条会变化的轴</strong>都推到一个<span class="mono">可插拔接口</span>背后——你面向一个抽象基类（ABC）编程，具体实现在<strong>部署时选定</strong>。这一课不讲新机制，而是把这条贯穿全书的暗线明明白白地挑明：<strong>一切皆可插拔</strong>。它是一节<strong>综合课</strong>，目标是把你已经学过的零散知识，收拢成一条可以反复套用的主线。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想想家里墙上的<strong>插座</strong>。墙后的电路（核心）是固定的，可墙上那个孔是一套<strong>标准接口</strong>。台灯、充电器、电饭煲——任何电器只要长着符合规范的插头，就能接进去工作，而你<strong>从不需要拆开墙、改动电路</strong>。SGLang 的引擎核心就是墙后电路，注意力后端、硬件平台、量化方法、投机算法……都是「电器」：它们各自实现同一套插头规范，<span class="mono">部署时</span>把谁插上，引擎就用谁。新硬件、新算法想加入，做法不是改电路，而是<strong>造一个符合规范的插头</strong>。正因为插座是标准的，电器厂商才能各自独立创新，而不必征得电网公司同意；同理，SGLang 的贡献者也能各自独立扩展，而不必触碰核心。</p></div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>这是一个<strong>综合课</strong>：不是介绍某个零件，而是把零件之间的<strong>共同形状</strong>提炼出来。前面每一课其实都是同一个模式的不同切面——<span class="mono">面向接口编程，部署时选实现</span>。一旦你看懂了这个形状，整个引擎就从「一大堆特性」坍缩成「一个反复出现的范型」，而你也立刻知道：<strong>为别处贡献代码</strong>，通常意味着「实现一个已存在的接口」，而非「重写核心」。这种「先认形状、再看细节」的视角，能让你在面对庞大代码库时不至于迷失：你总能先定位「这是哪一条缝」，再决定要不要深入它的具体实现。</p></div>
+
+<h2>稳定的核心，可变的边缘</h2>
+<p>把 SGLang 想象成一个同心圆。最里面是<strong>不轻易改动的核心</strong>：<span class="mono">Scheduler</span> 决定每一步处理哪些请求、<span class="mono">ModelRunner</span> 驱动模型前向的执行循环、<span class="mono">内存池</span>（KV 缓存与 token 槽位）管理显存。这三样是引擎的「重心」，它们的稳定，正是其他一切能自由替换的前提。如果核心本身也跟着场景频繁变动，那么任何一处替换都可能牵动全局，整台引擎就会失去可维护性。核心越稳定，边缘就越自由——这是一种看似矛盾、实则互相成全的关系。</p>
+<p>而<strong>每一条会随场景变化的轴</strong>——你用哪种注意力内核、跑在什么芯片上、用什么量化、要不要投机解码、怎么切并行、输出要不要受语法约束、KV 怎么跨机传输——都不被硬编码进核心，而是被定义成一个<span class="mono">抽象基类</span>，由若干<strong>并列的具体实现</strong>去满足。核心只认接口，不认实现。这样，变化被关在边缘，核心得以保持简洁与可靠。换句话说，核心面对的永远是一组<strong>稳定的方法签名</strong>，至于这些方法在底层究竟调用了哪种内核、哪块芯片、哪套算法，对核心而言是<strong>透明的</strong>。核心不需要、也不应该知道这些细节。</p>
+<p>这种「稳定核心 + 可变边缘」的分层，并非为了好看，而是有深刻的工程理由：它把<strong>正确性</strong>与<strong>多样性</strong>分开管理。核心负责保证调度、执行、显存这些「无论如何都不能错」的逻辑；边缘负责吸纳硬件、算法、格式上的种种差异。两者通过接口这道<strong>窄腰</strong>相连，差异不会渗进核心，核心的稳定也不会限制边缘的繁荣。这正是大型系统能同时做到「可靠」与「灵活」的经典手法——把不变的东西收紧，把善变的东西放开，让两者只在一条清晰的边界上交谈。</p>
+<p>值得强调的是，「部署时选定」这四个字本身也很关键。实现的选择既不发生在编译期（那样就太死），也不发生在每一步推理的运行期（那样就太碎、太慢），而恰好落在<strong>部署这一刻</strong>：你启动服务时，根据手上的硬件、模型、负载，把每条缝各选一个实现，之后整个服务周期就稳定地用这套组合。这让选择既足够灵活（换一组参数就换一套实现），又足够稳定（一旦选定，热路径上不再有分支开销）。这正是「接口」与「部署时绑定」搭配使用的精髓。</p>
+
+<h2>同一个模式，遍布整台引擎</h2>
+<p>这个「面向接口编程、部署时选实现」的模式，不是某一处的巧合，而是<strong>反复出现的设计主题</strong>。我们在前面的课里逐一见过它的化身，现在把它们摆在一起，那条暗线就清晰可见了：</p>
+<p>注意力后端（<strong>第33课</strong>）是最典型的一缝：模型代码只调用 <span class="mono">self.attn(...)</span>，至于背后是 FlashInfer、Triton 还是 FlashAttention，由后端实现去满足同一组方法；模型作者完全不必知道内核细节。硬件平台抽象（<strong>第42课</strong>）让<strong>一套引擎、多种芯片</strong>，平台差异被收进 Platform 接口，换芯片不是换引擎。量化方法（<strong>第35课</strong>）可按模型逐个替换，FP8、INT4 等只是同一接口的不同实现。投机算法家族 EAGLE/NGRAM/…（<strong>第43课</strong>）藏在一个枚举背后，调度路径只认「投机」这件事而不在意具体算法。四条并行轴 TP/PP/DP/EP（<strong>第46课</strong>）被同一个 <span class="mono">GroupCoordinator</span> 统一表达，通信细节被收进一个协调器。语法后端 xgrammar/outlines/llguidance（<strong>第48课</strong>）为结构化输出提供可换的实现，约束引擎与解码循环解耦。KV 传输连接器 Mooncake/NIXL（<strong>第45课</strong>）支撑 PD 分离，跨机搬运 KV 的方式可换而调度不变。甚至「写一个模型」（<strong>第26课</strong>）本身，也是面向稳定的层 API 编程，而非改动引擎——你拼装的是层，而层背后是哪种注意力、哪种量化，又是另一层可插拔。</p>
+<p>把它们排在一起，你会看到惊人的一致：每一处都是「一个接口 + 多个实现 + 部署时选一个」。这就是综合课要点亮的那张<strong>跨课之网</strong>。它们看似各管各的领域——硬件、算法、格式、通信——但<strong>骨架是同一副</strong>。一旦你认得这副骨架，先前那些孤立的知识点就会彼此勾连，形成一张可以互相印证的网，而不再是一堆需要死记的特性。更妙的是，当你日后遇到一个全新的领域（比如一种尚未出现的加速器或解码策略），你几乎可以预判 SGLang 会怎么接纳它：定义一个新接口，提供若干实现，部署时选一个。范型本身就是预测力。</p>
+<p>这也解释了为什么本课不引入任何新机制，却被放在全书接近收尾的位置。你必须先一课课见过这些缝的具体样子——见过注意力后端怎么调、见过平台怎么抽象、见过并行怎么协调——才能在此刻把它们抽象成同一个形状。综合课的价值不在于新增知识，而在于<strong>重组已有知识</strong>：把散落各处的点收成一条线，让你从「知道很多事」升级为「看懂一件事」。</p>
+
+<h2>为什么这让 SGLang 可扩展</h2>
+<p>这种结构带来的最大红利是<strong>可扩展性</strong>。当一块新硬件、一种新量化、一套新注意力内核出现时，你不需要理解、更不需要改动调度器与内存池——你只要<strong>实现那个已经存在的接口</strong>，再在部署时把它选上。核心代码一行不动，风险被牢牢圈在新实现内部。这意味着评审者只需检查「这个新实现是否正确满足接口」，而不必担心它会破坏调度或显存管理这些核心逻辑，评审的范围因此被大幅收窄。</p>
+<p>这也重塑了「贡献」的含义：贡献通常不是重写引擎，而是<strong>沿着已有的缝</strong>补上一个新实现。接口是契约，核心是稳定的舞台，社区在边缘并行扩张。多个团队可以同时分别为不同的芯片、不同的量化、不同的投机算法贡献实现，彼此之间几乎不冲突，因为它们都只在自己的实现内部活动，碰不到共享的核心。这正是开源项目能高速演进、却不至于失控的关键：边界清晰，责任明确，改动局部化。</p>
+<p>理解了这一点，你再回头看任何一课，都会自然地问：「这一处的缝在哪？接口是什么？实现有几个？部署时怎么选？」——这正是读懂 SGLang 的钥匙。它把一部看似庞杂的引擎，化简为<strong>一个反复使用的范型</strong>；学会这个范型，你不仅读懂了已有的代码，也获得了为它添砖加瓦的最短路径。从今往后，每当你打开一个陌生的模块，先别急着读实现，先找它的抽象基类——那就是这道缝的契约，也是你理解一切的起点。</p>
+
+<h2>一道缝的契约长什么样</h2>
+<p>把目光落到最典型的那道缝——注意力后端——你就能看清「接口即契约」到底意味着什么。本课要看的代码文件是 <span class="mono">base_attn_backend.py</span> 里的 <span class="mono">AttentionBackend</span>：它是一个抽象基类，只规定了几个<strong>必须被实现的方法</strong>，却不写任何具体的内核逻辑。<span class="mono">init_forward_metadata</span> 负责为这一批请求做好规划，<span class="mono">forward_extend</span> 负责 prefill 阶段的注意力，<span class="mono">forward_decode</span> 负责 decode 阶段的注意力。模型代码只认这三件事，从不直接触碰任何原始内核。</p>
+<p>这份契约的妙处在于它的<strong>克制</strong>：它只声明「你必须能做什么」，而对「你具体怎么做」一字不提。于是 FlashInfer 可以用它高度优化的内核去实现这三个方法，Triton 可以用它的模板去实现，FlashAttention 也可以用自己的方式实现——三者对模型而言<strong>完全等价</strong>，因为它们满足的是同一份契约。部署时你通过一个开关选定其一，模型代码丝毫不变。这就是「程序面向接口，而非面向实现」最朴素也最有力的体现。你甚至可以在不同后端之间来回切换做对比测试，而无需改动哪怕一行模型代码——这种自由，正是接口赋予的。</p>
+<p>反过来想，如果没有这道缝会怎样？模型代码里就得到处写「如果是 FlashInfer 就这样、如果是 Triton 就那样」的分支，每加一个后端，整片模型代码都要被翻一遍——这正是<strong>硬编码</strong>的噩梦。接口把这种「按实现分叉」的复杂度<strong>一次性收拢</strong>到一个抽象基类里，让核心和模型代码永远只面对一张干净的方法表。SGLang 之所以能在不同硬件、不同算法上保持同一套模型代码，靠的就是这种克制而稳定的契约。</p>
+
+<p class="lead">所以「一切皆可插拔」不是一句口号，而是 SGLang 反复采用的<strong>工程纪律</strong>：凡是会变的，都先抽象成接口；凡是核心要依赖的，都只依赖接口而非实现。读完这一课，希望你以后翻开任何一个模块，第一反应都是去找它的抽象基类——找到了它，你就找到了这道缝的契约，也就找到了理解与扩展它的起点。</p>
+
+<table class="t"><tr><th>可插拔的缝</th><th>接口 / 抽象</th><th>例子（实现）</th><th>课次</th></tr>
+<tr><td>注意力后端</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td>第33课</td></tr>
+<tr><td>硬件平台</td><td><span class="mono">Platform</span></td><td>多种芯片，一套引擎</td><td>第42课</td></tr>
+<tr><td>量化方法</td><td><span class="mono">QuantizeMethod</span></td><td>按模型逐个替换</td><td>第35课</td></tr>
+<tr><td>投机算法</td><td>算法枚举</td><td>EAGLE / NGRAM / …</td><td>第43课</td></tr>
+<tr><td>并行轴</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td>第46课</td></tr>
+<tr><td>语法后端</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td>第48课</td></tr>
+<tr><td>KV 传输</td><td>KV connector</td><td>Mooncake / NIXL</td><td>第45课</td></tr>
+<tr><td>写模型</td><td>稳定层 API</td><td>面向层 API 实现模型</td><td>第26课</td></tr></table>
+
+<div class="layers"><div class="layer">🔌 注意力后端（第33课）</div><div class="layer">🔌 硬件平台（第42课）</div><div class="layer"><strong>稳定核心：Scheduler · 模型执行循环 · 内存池</strong></div><div class="layer">🔌 量化 / 投机 / 并行（第35/43/46课）</div><div class="layer">🔌 语法 / KV 传输 / 写模型（第48/45/26课）</div></div>
+
+<div class="cols"><div class="col"><strong>硬编码（一个实现焊死在核心里）</strong><br>新硬件 = 改调度器；新算法 = 改执行循环；任何变化都要动核心，风险扩散、难以协作。</div><div class="col"><strong>面向接口编程（部署时替换）</strong><br>核心只认抽象基类；新实现满足接口即可接入；部署时选定具体实现，核心一行不改。</div></div>
+
+<div class="flow"><div class="node">请求</div><div class="arrow">→</div><div class="node">稳定核心</div><div class="arrow">→</div><div class="node">缝处选中的实现</div><div class="arrow">→</div><div class="node">结果</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">面向接口编程的范型：实现它就能接入，不碰引擎核心</span></div><pre>class AttentionBackend(ABC):
+    # the archetypal pluggable seam: model code calls THIS, never a raw kernel
+    @abstractmethod
+    def init_forward_metadata(self, forward_batch):
+        ...   # plan whatever this backend needs for the batch
+    @abstractmethod
+    def forward_extend(self, q, k, v, layer, forward_batch):
+        ...   # prefill attention
+    @abstractmethod
+    def forward_decode(self, q, k, v, layer, forward_batch):
+        ...   # decode attention
+    # FlashInfer / Triton / FA each implement these; chosen at deploy time,
+    # the model code never changes</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>一个模式，处处复现</strong>：面向接口（抽象基类）编程，具体实现在<span class="mono">部署时</span>选定；这是贯穿全书的同一副骨架。</li>
+<li><strong>稳定核心</strong>：Scheduler、模型执行循环、内存池保持不变，是一切可替换的前提；核心越稳定，边缘就越自由。</li>
+<li><strong>可变边缘</strong>：注意力后端（第33课）、平台（第42课）、量化（第35课）、投机（第43课）、并行（第46课）、语法（第48课）、KV 传输（第45课）、写模型（第26课）都是同一缝的化身。</li>
+<li><strong>接口即契约</strong>：抽象基类只规定「必须能做什么」，不规定「怎么做」；多个实现因此对核心完全等价，可自由替换与对比。</li>
+<li><strong>可扩展性的来源</strong>：贡献 = 实现一个已存在的接口，而非重写核心；改动局部化，评审范围收窄，多团队可并行推进而互不冲突。</li>
+<li><strong>读懂全书的钥匙</strong>：看任何一课都先问「缝在哪、接口是什么、实现有几个、部署时怎么选」，打开陌生模块先找它的抽象基类，找到契约就找到了一切的起点。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 本课提炼出的「反复出现的设计范型」是什么？</div>
+  <ol class="opts">
+    <li><strong>面向接口（抽象基类）编程，把每条会变化的轴推到接口背后，具体实现在部署时选定——核心保持稳定</strong></li>
+    <li>把所有功能都硬编码进调度器以追求最高性能</li>
+    <li>在运行时随机选择实现以提升鲁棒性</li>
+    <li>每加一种硬件就重写一遍模型执行循环</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。这是一节综合课：它点亮贯穿全书的暗线——一个接口 + 多个实现 + 部署时选一个。引擎核心（调度器、模型执行循环、内存池）保持稳定，变化被关在可插拔的边缘。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 下列哪一项最准确地描述了 SGLang 里「稳定核心」与「可插拔边缘」的关系？</div>
+  <ol class="opts">
+    <li>边缘组件必须直接修改内存池才能工作</li>
+    <li>核心每次部署都要重新编译以适配具体实现</li>
+    <li>只有注意力后端是可插拔的，其余都焊死在核心里</li>
+    <li><strong>核心（Scheduler、模型执行循环、内存池）只认抽象接口；注意力后端、平台、量化、投机、并行、语法、KV 传输等都是满足接口的可替换实现</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。核心稳定，是其他一切能自由替换的前提。注意力后端（第33课）、平台（第42课）、量化（第35课）、投机（第43课）、并行（第46课）、语法（第48课）、KV 传输（第45课）都是同一条缝的化身：核心只认接口，不认实现。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么这种「面向接口」的结构让 SGLang 易于贡献？</div>
+  <ol class="opts">
+    <li><strong>因为加入新硬件或新算法通常只需实现一个已存在的接口，再在部署时选上，核心代码一行不改、风险被圈在新实现内</strong></li>
+    <li>因为贡献者每次都要重写调度器与内存池</li>
+    <li>因为所有实现共享同一份全局可变状态</li>
+    <li>因为接口允许跳过验证以加快合并</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。接口是契约，核心是稳定的舞台，社区在边缘并行扩张。贡献通常不是重写引擎，而是沿着已有的缝补上一个新实现——这正是「写一个模型」（第26课）也只是面向稳定层 API 编程的原因。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释「面向接口编程，部署时选实现」这个范型：以注意力后端（第33课）为例，说明模型代码为什么只调用 self.attn(...) 而不在意背后是 FlashInfer、Triton 还是 FA，以及这种解耦带来了什么好处。</li>
+    <li>本课说看懂这个形状后，看任何一课都会先问「缝在哪、接口是什么、实现有几个、部署时怎么选」。请从第35、42、43、45、46、48 课中至少挑三处，说明它们如何共享同一形状，并解释为什么把变化关在可插拔边缘能让引擎核心保持简洁可靠。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">String the past few dozen lessons together and you notice SGLang doing the same thing over and over: it keeps the <strong>engine core</strong> stable (the scheduler, the model-execution loop, the memory pools) and pushes <strong>every axis that can vary</strong> behind a <span class="mono">pluggable interface</span>—you program against an abstract base class (ABC), and a concrete implementation is <strong>selected at deploy time</strong>. This lesson introduces no new mechanism; it makes the book's hidden through-line explicit: <strong>everything is pluggable</strong>.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Think of a wall <strong>socket</strong>. The wiring behind the wall (the core) is fixed, but the hole on the wall is a <strong>standard interface</strong>. A lamp, a charger, a rice cooker—any appliance with a conforming plug can be connected and just works, and you <strong>never have to open the wall or rewire it</strong>. SGLang's engine core is the wiring; the attention backend, the hardware platform, quantization, speculative algorithms… are the "appliances": each implements the same plug spec, and <span class="mono">at deploy time</span> whichever you plug in is the one the engine uses. New hardware or a new algorithm joins not by rewiring, but by <strong>building a conforming plug</strong>.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>This is a <strong>synthesis lesson</strong>: instead of introducing a part, it distills the <strong>shared shape</strong> across parts. Every earlier lesson is a different facet of one pattern—<span class="mono">program to an interface, choose an implementation at deploy time</span>. Once you see the shape, the engine collapses from "a pile of features" into "one recurring archetype," and you immediately know that <strong>contributing elsewhere</strong> usually means "implement an existing interface," not "rewrite the core."</p></div>
+
+<h2>A stable core, a variable edge</h2>
+<p>Picture SGLang as concentric circles. At the center sits the <strong>core that rarely changes</strong>: the <span class="mono">Scheduler</span> decides which requests run each step, the <span class="mono">ModelRunner</span> drives the model's forward execution loop, and the <span class="mono">memory pools</span> (KV cache and token slots) manage device memory. These three are the engine's center of gravity, and their stability is precisely what lets everything else be swapped freely. If the core itself churned with every scenario, any single swap could ripple across the whole engine and maintainability would collapse.</p>
+<p>Meanwhile <strong>every axis that varies with the scenario</strong>—which attention kernel you use, what chip you run on, what quantization, whether to speculate, how to split parallelism, whether output is grammar-constrained, how KV moves across machines—is not hard-coded into the core, but defined as an <span class="mono">abstract base class</span> satisfied by several <strong>parallel concrete implementations</strong>. The core knows only the interface, never the implementation. Variation is fenced into the edge, and the core stays simple and reliable. In other words, the core always faces a set of <strong>stable method signatures</strong>; which kernel, chip, or algorithm those methods ultimately invoke is <strong>transparent</strong> to it.</p>
+<p>This "stable core + variable edge" layering isn't cosmetic; it has a deep engineering rationale: it manages <strong>correctness</strong> and <strong>diversity</strong> separately. The core guarantees the scheduling, execution, and memory logic that "must never be wrong"; the edge absorbs every difference in hardware, algorithm, and format. The two meet at a <strong>narrow waist</strong> of interfaces—differences never seep into the core, and the core's stability never caps the edge's flourishing.</p>
+<p>It is worth stressing that "at deploy time" matters too. The choice of implementation happens neither at compile time (too rigid) nor on every inference step at runtime (too fragmented and slow), but precisely at <strong>the moment of deployment</strong>: when you launch the service, you pick one implementation per seam based on the hardware, model, and load at hand, and the whole service lifetime then uses that fixed combination. This makes the choice flexible enough (change a set of flags, change the implementations) yet stable enough (once chosen, no branch overhead remains on the hot path). That is the essence of pairing "interfaces" with "deploy-time binding."</p>
+
+<h2>One pattern, all over the engine</h2>
+<p>This "program to an interface, choose an implementation at deploy time" pattern is not a one-off coincidence but a <strong>recurring design theme</strong>. We met its incarnations across earlier lessons; line them up and the hidden through-line becomes clear:</p>
+<p>The attention backend (<strong>Lesson 33</strong>) is the archetypal seam: model code only calls <span class="mono">self.attn(...)</span>, and whether FlashInfer, Triton, or FlashAttention sits behind it, the backend satisfies the same set of methods—the model author need not know any kernel detail. The hardware platform abstraction (<strong>Lesson 42</strong>) gives you <strong>one engine, many chips</strong>, with chip differences tucked into the Platform interface, so swapping chips is not swapping engines. Quantization methods (<strong>Lesson 35</strong>) are swappable per model; FP8, INT4 and the rest are just different implementations of one interface. The speculative-algorithm family EAGLE/NGRAM/… (<strong>Lesson 43</strong>) hides behind one enum, so the scheduling path only knows "speculation," not the specific algorithm. The four parallelism axes TP/PP/DP/EP (<strong>Lesson 46</strong>) are expressed uniformly by one <span class="mono">GroupCoordinator</span>, with communication detail folded into a single coordinator. The grammar backends xgrammar/outlines/llguidance (<strong>Lesson 48</strong>) provide swappable implementations for structured output, decoupling the constraint engine from the decode loop. The KV-transfer connectors Mooncake/NIXL (<strong>Lesson 45</strong>) power PD disaggregation, with the way KV moves across machines swappable while scheduling stays put. And even "writing a model" (<strong>Lesson 26</strong>) is itself programming against stable layer APIs rather than editing the engine—you assemble layers, and which attention or quantization those layers use is yet another pluggable layer.</p>
+<p>Line them up and the consistency is striking: every one is "one interface + many implementations + pick one at deploy time." This is the <strong>cross-lesson web</strong> the synthesis lesson exists to light up. They seem to mind their own domains—hardware, algorithm, format, communication—but the <strong>skeleton is the same</strong>. Once you recognize that skeleton, formerly isolated facts hook into one another, forming a web that cross-validates itself rather than a pile of features to memorize. Better still, when you later meet a brand-new domain (say an accelerator or decoding strategy that does not yet exist), you can almost predict how SGLang will absorb it: define a new interface, supply a few implementations, pick one at deploy time. The archetype itself is predictive power.</p>
+<p>This also explains why this lesson introduces no new mechanism yet sits near the book's end. You must first have seen each seam concretely, lesson by lesson—seen how the attention backend is called, how the platform is abstracted, how parallelism is coordinated—before you can abstract them here into one shape. A synthesis lesson's value is not in adding knowledge but in <strong>reorganizing existing knowledge</strong>: gathering scattered dots into one line, upgrading you from "knowing many things" to "understanding one thing."</p>
+
+<h2>Why this makes SGLang extensible</h2>
+<p>The biggest dividend of this structure is <strong>extensibility</strong>. When a new chip, a new quantization, or a new attention kernel appears, you need not understand—let alone modify—the scheduler and the memory pools; you simply <strong>implement the interface that already exists</strong> and select it at deploy time. Not a line of core code changes, and the risk is firmly contained inside the new implementation. Reviewers then only need to check "does this new impl correctly satisfy the interface," not worry that it breaks scheduling or memory management.</p>
+<p>This also reshapes what "contributing" means: it usually is not rewriting the engine but <strong>filling a new implementation along an existing seam</strong>. The interface is the contract, the core is the stable stage, and the community expands in parallel at the edge. Many teams can contribute implementations for different chips, quantizations, and speculative algorithms at once with almost no conflict, because each operates only inside its own implementation and never touches the shared core. That is exactly what lets an open-source project evolve fast without spinning out of control.</p>
+<p>Once you grasp this, you will read any lesson by asking: "Where is the seam here? What is the interface? How many implementations? How is one chosen at deploy time?"—which is exactly the key to reading SGLang. It reduces a seemingly sprawling engine to <strong>one repeatedly reused archetype</strong>; learn that archetype and you not only understand the existing code but also gain the shortest path to adding to it.</p>
+
+<h2>What a seam's contract looks like</h2>
+<p>Zoom into the archetypal seam—the attention backend—and you see exactly what "the interface is the contract" means. The code file this lesson examines is <span class="mono">AttentionBackend</span> in <span class="mono">base_attn_backend.py</span>: an abstract base class that prescribes only a few <strong>methods that must be implemented</strong>, while writing no concrete kernel logic at all. <span class="mono">init_forward_metadata</span> plans whatever the batch needs, <span class="mono">forward_extend</span> handles prefill attention, and <span class="mono">forward_decode</span> handles decode attention. Model code knows only these three things and never touches a raw kernel directly.</p>
+<p>The beauty of this contract is its <strong>restraint</strong>: it declares only "what you must be able to do," and says nothing about "how you do it." So FlashInfer can implement the three methods with its highly optimized kernels, Triton with its templates, FlashAttention in its own way—and to the model the three are <strong>completely equivalent</strong>, because they satisfy the same contract. At deploy time you pick one via a switch, and the model code does not change in the slightest. This is the plainest and most powerful expression of "program to an interface, not an implementation." You can even flip back and forth between backends for comparison testing without changing a single line of model code—that freedom is exactly what the interface grants.</p>
+<p>Imagine the opposite: without this seam, model code would be littered with "if FlashInfer do this, if Triton do that" branches, and every new backend would force a sweep through the whole model code—the very nightmare of <strong>hard-coding</strong>. The interface <strong>collapses</strong> that "fork by implementation" complexity once, into one abstract base class, so the core and model code forever face a single clean table of methods. The reason SGLang keeps one model codebase across different hardware and algorithms is exactly this restrained, stable contract.</p>
+
+<p class="lead">So "everything is pluggable" is not a slogan but an <strong>engineering discipline</strong> SGLang applies again and again: whatever varies is abstracted into an interface first; whatever the core depends on depends only on the interface, never the implementation. After this lesson, may your first instinct on opening any module be to hunt for its abstract base class—find it and you have found the contract of the seam, and with it the starting point for understanding and extending it.</p>
+
+<table class="t"><tr><th>Pluggable seam</th><th>Interface / abstraction</th><th>Example (implementations)</th><th>Lesson</th></tr>
+<tr><td>Attention backend</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td>Lesson 33</td></tr>
+<tr><td>Hardware platform</td><td><span class="mono">Platform</span></td><td>Many chips, one engine</td><td>Lesson 42</td></tr>
+<tr><td>Quantization method</td><td><span class="mono">QuantizeMethod</span></td><td>Swappable per model</td><td>Lesson 35</td></tr>
+<tr><td>Speculative algorithm</td><td>Algorithm enum</td><td>EAGLE / NGRAM / …</td><td>Lesson 43</td></tr>
+<tr><td>Parallelism axes</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td>Lesson 46</td></tr>
+<tr><td>Grammar backend</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td>Lesson 48</td></tr>
+<tr><td>KV transfer</td><td>KV connector</td><td>Mooncake / NIXL</td><td>Lesson 45</td></tr>
+<tr><td>Write a model</td><td>Stable layer APIs</td><td>Implement a model on layer APIs</td><td>Lesson 26</td></tr></table>
+
+<div class="layers"><div class="layer">🔌 Attention backend (L33)</div><div class="layer">🔌 Hardware platform (L42)</div><div class="layer"><strong>Stable core: Scheduler · model loop · memory pools</strong></div><div class="layer">🔌 Quant / speculation / parallelism (L35/43/46)</div><div class="layer">🔌 Grammar / KV transfer / write a model (L48/45/26)</div></div>
+
+<div class="cols"><div class="col"><strong>Hard-coded (one impl welded into the core)</strong><br>New hardware = edit the scheduler; new algorithm = edit the loop; any change touches the core, risk spreads, collaboration is hard.</div><div class="col"><strong>Program to an interface (swap at deploy)</strong><br>The core knows only the ABC; a new impl plugs in by satisfying the interface; the concrete impl is selected at deploy time, core unchanged.</div></div>
+
+<div class="flow"><div class="node">request</div><div class="arrow">→</div><div class="node">stable core</div><div class="arrow">→</div><div class="node">selected impl at the seam</div><div class="arrow">→</div><div class="node">result</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">the program-to-an-interface archetype: implement it to plug in, never touch the core</span></div><pre>class AttentionBackend(ABC):
+    # the archetypal pluggable seam: model code calls THIS, never a raw kernel
+    @abstractmethod
+    def init_forward_metadata(self, forward_batch):
+        ...   # plan whatever this backend needs for the batch
+    @abstractmethod
+    def forward_extend(self, q, k, v, layer, forward_batch):
+        ...   # prefill attention
+    @abstractmethod
+    def forward_decode(self, q, k, v, layer, forward_batch):
+        ...   # decode attention
+    # FlashInfer / Triton / FA each implement these; chosen at deploy time,
+    # the model code never changes</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>One pattern, everywhere</strong>: program to an interface (an ABC); the concrete implementation is selected <span class="mono">at deploy time</span>—the same skeleton runs through the whole book.</li>
+<li><strong>Stable core</strong>: the Scheduler, the model-execution loop, and the memory pools stay fixed—the precondition for everything else being swappable; the steadier the core, the freer the edge.</li>
+<li><strong>Variable edge</strong>: attention backend (L33), platform (L42), quantization (L35), speculation (L43), parallelism (L46), grammar (L48), KV transfer (L45), writing a model (L26) are all incarnations of the same seam.</li>
+<li><strong>The interface is the contract</strong>: an ABC prescribes only "what you must be able to do," not "how"; multiple implementations are therefore equivalent to the core.</li>
+<li><strong>Source of extensibility</strong>: contributing = implementing an existing interface, not rewriting the core; changes stay local, review narrows, and teams work in parallel.</li>
+<li><strong>The key to reading the whole book</strong>: for any lesson, first ask "where is the seam, what is the interface, how many implementations, how is one chosen at deploy time," and on opening any module, hunt for its abstract base class first.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What 'recurring design archetype' does this lesson distill?</div>
+  <ol class="opts">
+    <li><strong>Program to an interface (an ABC), push every variable axis behind it, and select the concrete implementation at deploy time—keeping the core stable</strong></li>
+    <li>Hard-code every feature into the scheduler for maximum performance</li>
+    <li>Pick implementations randomly at runtime to improve robustness</li>
+    <li>Rewrite the model-execution loop for each new piece of hardware</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. This is a synthesis lesson: it lights up the book's through-line—one interface + many implementations + pick one at deploy time. The engine core (scheduler, model-execution loop, memory pools) stays stable while variation is fenced behind pluggable edges.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which best describes the relation between SGLang's 'stable core' and its 'pluggable edges'?</div>
+  <ol class="opts">
+    <li>Edge components must edit the memory pools directly to work</li>
+    <li>The core must be recompiled per deploy to fit each implementation</li>
+    <li>Only the attention backend is pluggable; everything else is welded into the core</li>
+    <li><strong>The core (Scheduler, model loop, memory pools) knows only abstract interfaces; the attention backend, platform, quantization, speculation, parallelism, grammar, KV transfer are swappable implementations satisfying those interfaces</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The core's stability is the precondition for everything else being swappable. The attention backend (L33), platform (L42), quantization (L35), speculation (L43), parallelism (L46), grammar (L48), and KV transfer (L45) are all incarnations of the same seam: the core knows only the interface, never the implementation.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does this 'program-to-an-interface' structure make SGLang easy to contribute to?</div>
+  <ol class="opts">
+    <li><strong>Because adding new hardware or an algorithm usually only requires implementing an existing interface and selecting it at deploy time—no core code changes and risk is contained inside the new impl</strong></li>
+    <li>Because contributors must rewrite the scheduler and memory pools each time</li>
+    <li>Because all implementations share one global mutable state</li>
+    <li>Because interfaces let you skip verification to merge faster</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The interface is the contract, the core is the stable stage, and the community expands in parallel at the edge. Contributing usually isn't rewriting the engine but filling a new implementation along an existing seam—which is why 'writing a model' (L26) is also just programming against stable layer APIs.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain the 'program to an interface, choose at deploy time' archetype: using the attention backend (Lesson 33) as an example, explain why model code only calls self.attn(...) without caring whether FlashInfer, Triton, or FA sits behind it, and what this decoupling buys you.</li>
+    <li>The lesson says that once you see the shape, you read any lesson by asking 'where is the seam, what is the interface, how many implementations, how is one chosen at deploy time'. Pick at least three of Lessons 35, 42, 43, 45, 46, 48 and show how they share the same shape, then explain why fencing variation behind pluggable edges keeps the engine core simple and reliable.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="61-draft-for-parallel-verify.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">用草稿换并行验证</span><span class="lang-en">Draft for parallel verify</span></div></a><a class="next" href="63-built-for-throughput.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">为吞吐而生</span><span class="lang-en">Built for throughput</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

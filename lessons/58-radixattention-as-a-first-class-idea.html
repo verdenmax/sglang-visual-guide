@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>58 · RadixAttention 作为一等公民 / RadixAttention as a first-class idea - SGLang 图解教程</title>
+<meta name="description" content="第十三部分 · 设计专题综合｜RadixAttention 作为一等公民 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="58 · RadixAttention 作为一等公民 / RadixAttention as a first-class idea - SGLang 图解教程">
+<meta property="og:description" content="第十三部分 · 设计专题综合｜RadixAttention 作为一等公民 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="58 · RadixAttention 作为一等公民 / RadixAttention as a first-class idea - SGLang 图解教程">
+<meta name="twitter:description" content="第十三部分 · 设计专题综合｜RadixAttention 作为一等公民 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></span>
+    <span class="pill">58 / 63</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:92%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></div>
+    <h1><span class="lang-zh">RadixAttention 作为一等公民</span><span class="lang-en">RadixAttention as a first-class idea</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">如果你把前面三十多课像拼图一样摊开，会发现有一块图案反复出现——<strong>共享前缀</strong>。它不是某一处的小聪明，而是 SGLang 从语言层一路贯穿到显存层的<strong>一等公民（first-class idea）</strong>：把所有请求看成一棵<span class="mono">共享前缀的基数树</span>，匹配最长的已缓存前缀、复用它的 KV、只为新出现的后缀做计算。看懂这一个念头，等于一次性串起本指南三分之一的内容。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象一座<strong>家族图书馆</strong>。每本新书并不是从第一页重新印刷，而是先去书架上找：是否已经有一本书，前面几百页和我完全一样？如果有，就直接把那叠相同的纸张<strong>借过来共用</strong>，只单独印刷从分叉处开始的新章节。书架本身被组织成一棵<strong>树</strong>：树根是所有书共同的开头，越往下走分叉越多，每个分叉点保存着「从这里开始大家就不一样了」的位置。</p>
+<p>更妙的是，这套「共享开头」的规矩不只是图书管理员一个人的私房技巧。写书的人（DSL）会<strong>故意</strong>让几个版本共用同一段开头；图书馆的扩建蓝图（缓存概念）一开始就写明要这么做；书架的物理格子（分页显存）按这套规矩摆放；连排队借书的顺序（调度）都优先照顾「开头能对上库存」的人；甚至当架子放不下时，旧书会被<strong>分层</strong>挪到地下室、再挪到外仓——但树形结构始终不变。这就是「一等公民」的意思：同一个念头被反复、刻意地写进系统的每一层，而不是临时想起来才补一笔。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>很多系统会把「前缀缓存」当成事后补丁：先把推理引擎写完，再在旁边贴一个 LRU 字典缓一缓。SGLang 走的是相反的路——它把<strong>「KV 缓存本身就是一棵共享前缀的基数树」</strong>当作核心数据结构，整个引擎围着它转。<span class="mono">RadixAttention</span> 不是一个孤立的算子，而是一种<strong>组织全局的视角</strong>：DSL 的 <span class="mono">fork/join</span>（<strong>第11课</strong>）在语言层制造共享前缀；前缀缓存的概念（<strong>第7课</strong>）在早期就被立起来；基数树的实现（<strong>第29课</strong>）让缓存真正变成 <span class="mono">RadixCache</span> 与 <span class="mono">TreeNode</span>；分页 KV（<strong>第30课</strong>，承接 <strong>第6课</strong>）是这些节点指向的物理页；缓存感知调度（<strong>第20课</strong>）让命中率高的请求优先跑、好让缓存真正赚回成本；HiCache（<strong>第31课</strong>）则把同一棵前缀树分层铺到 GPU/CPU/磁盘。把它们连起来看，是一张网，而不是一串孤点；少了任何一根线，这整张网都会松垮、不再成形。</p>
+</div>
+
+<h2>一、为什么「共享前缀」配得上「一等公民」这个称号</h2>
+<p>判断一个想法是不是系统的一等公民，标准很简单：它有没有被<strong>刻意、反复</strong>地写进多个互不相邻的层次，并且改动它会牵动全局。共享前缀完全符合。它最早只是一个朴素的观察：在真实负载里，大量请求的开头是<strong>重复</strong>的——同一段系统提示词、同一份少样本示例、同一棵对话历史、同一次 <span class="mono">fork</span> 出来的多个分支。既然开头一样，它们在注意力计算中产生的 KV 也<strong>逐字节相同</strong>。重复计算这些 KV，是在白白烧显存和算力。</p>
+<p>SGLang 没有把这件事降级成「可有可无的优化」，而是把它升格成<strong>数据结构的形状</strong>。一旦你接受「缓存是一棵树」，许多设计就不再是巧合：<span class="mono">match_prefix</span> 自然就是「沿树走到最深的已知节点」；<span class="mono">insert</span> 自然就是「在前缀分叉处把节点劈开」；<span class="mono">evict</span> 自然就是「从叶子往回收，因为叶子才是没人共享的尾巴」；而 <span class="mono">inc_lock_ref</span> 自然就是「正在用的节点要钉住，别被回收」。树这个形状一旦确立，算法是被它「逼」出来的，而不是临时拼凑、东拼西凑硬搭出来的。</p>
+<p>反过来想也成立：如果当初没把它当一等公民，会发生什么？你大概会先写一个朴素的逐请求计算引擎，然后在某天发现「系统提示词被重复算了上千遍」，于是匆忙加一个哈希表缓存整段提示的 KV。但很快你就会撞墙——用户的提示只有<strong>前缀</strong>相同、后面各不一样，整段哈希根本命中不了；于是你被迫去做<strong>最长公共前缀</strong>匹配，而高效地对海量序列做前缀匹配，最自然的数据结构恰恰就是<strong>基数树</strong>。也就是说，只要你认真对待「前缀复用」这件事，几乎必然会被推向同一个终点。SGLang 的聪明之处，是<strong>从一开始</strong>就承认这个终点、直接把引擎建在它上面，省去了所有「先做错、再补救」的弯路。这就是把正确的念头提前升格为结构的价值。</p>
+
+<p>这也回答了一个常被忽略的问题：为什么 SGLang 敢在如此多的地方依赖前缀共享，而不担心它「偶尔不命中就白忙一场」？因为当它是结构而非外挂时，不命中只是退化成「整段都是新后缀」的普通情形——树照样能容纳、插入、回收，没有任何特殊路径需要兜底。一个被升格为数据结构的念头，天然具备<strong>优雅降级</strong>的能力：命中多就省得多，命中少也不会更糟，绝不会因为「缓存没准备好」而崩。这种「最坏情况也不变坏」的鲁棒性，正是把它做成一等公民才换来的、最容易被忽视却最珍贵的红利。</p>
+
+<h2>二、同一个念头，在每一层换了张面孔</h2>
+<p>真正让人拍案的是：<strong>共享前缀</strong>在不同层次会<strong>换装登场</strong>，但骨子里是同一件事。在 DSL 层（<strong>第11课</strong>），你写 <span class="mono">fork</span> 让一个提示分裂成几条推理分支，<span class="mono">join</span> 再把它们汇合——你是在<strong>语言层显式制造</strong>一个共享前缀，期待底层别重复算。在概念层（<strong>第7课</strong>），「前缀缓存」作为一个承诺被提出：相同开头只算一次。在实现层（<strong>第29课</strong>），这个承诺落地成 <span class="mono">RadixCache</span>，每个 <span class="mono">TreeNode</span> 的边上挂着一段 token-id 跨度（<span class="mono">key</span>）和对应的 KV 索引（<span class="mono">value</span>）。在物理层（<strong>第30课</strong>，建立在 <strong>第6课</strong> 的分页之上），节点的 <span class="mono">value</span> 指向的是一页页 paged-KV。在调度层（<strong>第20课</strong>），调度器会偏向那些<strong>前缀命中率高</strong>的请求，因为让缓存被复用，它才算没白存。在分层存储层（<strong>第31课</strong>），HiCache 把这棵树按冷热分层，热的留在 GPU、温的下放 CPU、冷的写到磁盘。</p>
+<p>六张面孔，一个灵魂。它们之所以能严丝合缝地咬合，正是因为大家都默认了同一个共享前缀的世界观。你若只学某一课，会觉得它是个局部技巧；你若把第7、11、20、29、30、31课叠在一起看，才会看见那条贯穿始终的主轴。</p>
+<p>不妨顺着一条具体的链路把它走一遍。一个多轮对话应用，开发者在 DSL 里用 <span class="mono">fork</span>（第11课）把同一段历史分裂成三条候选回复；这三条在概念上（第7课）共享同一个开头，所以引擎只应算一次。落到实现（第29课），这段历史变成 <span class="mono">RadixCache</span> 里一个被三条请求共享的 <span class="mono">TreeNode</span>，它的 <span class="mono">value</span> 指向若干物理页（第30课，承第6课）。调度器（第20课）看到这三条请求前缀高度重合，便把它们排在一起、几乎同时跑，让那段共享 KV 在显存里「热」着被反复命中。等对话变长、显存吃紧，HiCache（第31课）再把这段已经不那么热的历史整段下放到 CPU 甚至磁盘，需要时再整段调回。你看，从开发者敲下 <span class="mono">fork</span> 的那一刻，到这段 KV 在三级存储间迁徙，<strong>自始至终是同一棵树上的同一个节点</strong>在被不同层次以不同方式照料。这就是「一个念头贯穿全栈」最具体的样子。</p>
+
+<h2>三、从「贴上去的优化」到「长在骨架里的结构」</h2>
+<p>差别不只是审美。把前缀共享当外挂，意味着缓存和引擎是两套各自为政的逻辑，缓存对调度一无所知，调度也不会为缓存让路，命中纯靠运气。把它当一等公民，意味着调度器知道树的形状、能预估命中、能主动把相似请求排在一起；意味着显存管理器知道哪些页被多少请求共享、不能随便回收；意味着分层存储能沿着树的边界整段搬运而不是零散拷贝。一个念头被升格为结构后，全系统才能围绕它协同。</p>
+<p>这也解释了为什么 <span class="mono">RadixAttention</span> 这个名字里同时含着「Radix（基数树）」和「Attention（注意力）」：注意力计算消费 KV，而 KV 被组织成一棵基数树。算子和数据结构在这里是<strong>同一枚硬币的两面</strong>，不是先后关系。</p>
+<p>还有一个容易被低估的好处：当缓存是全系统共享的一棵树，<strong>跨请求</strong>的复用就成了默认行为，而不是额外功能。两个毫不相干的用户，只要碰巧用了同一段系统提示词，就会自动落在同一个共享前缀节点上，第二个人省下的计算是「免费」的。把这个能力换成外挂式缓存，你得额外设计一套跨请求的查找与去重逻辑；而在树形结构里，它只是 <span class="mono">match_prefix</span> 自然走到了同一个节点而已。换句话说，一等公民的设计让「最值钱的那部分复用」变成了零成本的副产品——这正是它在真实高并发负载下能省下大量算力的根本原因。</p>
+
+<h2>四、一次请求，是怎么在这棵树上走完一生的</h2>
+<p>把视角拉回单个请求：它带着一串 token 进来，先做 <span class="mono">match_prefix</span>，沿树往下走，找到与库存重合的<strong>最长前缀</strong>；这段前缀的 KV 被原样<strong>复用</strong>（并 <span class="mono">inc_lock_ref</span> 钉住，防止半路被回收）；引擎只对<strong>新出现的后缀</strong>真正做前向计算；算完后通过 <span class="mono">insert</span> 把这段新后缀挂回树上，在分叉处把节点劈开，让未来的请求又能共享到它。这条「匹配最长前缀 → 复用 KV → 只算新后缀 → 写回树」的生命周期，就是 <span class="mono">RadixAttention</span> 的全部精髓，下面四张图把它从不同侧面拆开看。</p>
+<p>这里有两个细节值得停下来体会。其一，<span class="mono">inc_lock_ref</span> 的「钉住」之所以必要，是因为复用和回收在同一棵树上并存：当请求 A 正靠着某段共享前缀往下算时，回收逻辑（<span class="mono">evict</span>）绝不能把这段前缀的页抢走，否则 A 算到一半就「踩空」了。引用计数让「谁在用」变得可见，回收只敢从无人引用的叶子下手。其二，<span class="mono">insert</span> 的「劈开节点」是树能持续长出共享的关键：当新后缀与某个已有节点只共享前半段时，系统会在分叉处把老节点一分为二——公共的上半段继续被双方共享，各自不同的下半段成为两个孩子。正是这个「按需劈开」的动作，让基数树始终保持「能共享的尽量共享、该分叉的精确分叉」的紧凑形态，而不会退化成一堆互不相干的整串。理解了钉住与劈开，你就理解了这棵树<strong>为什么既安全又高效</strong>。</p>
+
+<table class="t">
+<tr><th>共享前缀出现的地方</th><th>它在这里扮演的角色</th></tr>
+<tr><td>DSL 的 fork/join（<strong>第11课</strong>）</td><td>语言层<strong>故意</strong>让多个分支共用同一段开头，是「共享前缀」的源头</td></tr>
+<tr><td>前缀缓存概念（<strong>第7课</strong>）</td><td>早期立下的承诺：相同开头只算一次，为后续实现定调</td></tr>
+<tr><td>基数树实现（<strong>第29课</strong>）</td><td>承诺落地：<span class="mono">RadixCache</span> 由 <span class="mono">TreeNode</span> 组成，缓存就是这棵树</td></tr>
+<tr><td>分页 KV（<strong>第30课</strong>，承 <strong>第6课</strong>）</td><td>树节点的 <span class="mono">value</span> 指向的物理页，是前缀真正存放的地方</td></tr>
+<tr><td>缓存感知调度（<strong>第20课</strong>）</td><td>优先放行前缀命中率高的请求，让缓存的投入真正被赚回</td></tr>
+<tr><td>HiCache 分层（<strong>第31课</strong>）</td><td>把同一棵前缀树按冷热分层铺到 GPU/CPU/磁盘</td></tr>
+</table>
+
+<div class="layers">
+<div class="layer">根 root：所有请求共同的起点（空前缀）</div>
+<div class="layer">共享前缀节点：<span class="mono">"你是一个有用的助手……"</span> 的 token 跨度 + KV 索引，被许多请求共用</div>
+<div class="layer">分叉点：从这里 token 开始不同，节点被劈开成多个孩子</div>
+<div class="layer">分支 A 叶子：用户问题甲的独有后缀</div>
+<div class="layer">分支 B 叶子：用户问题乙的独有后缀（与 A 共享上面整段前缀）</div>
+</div>
+
+<div class="cols">
+<div class="col"><strong>贴上去的优化（bolt-on）</strong><br/>缓存是引擎旁的一个 LRU 字典；调度对它一无所知；命中靠运气；分层只能整块零散拷贝；改缓存不牵动全局。</div>
+<div class="col"><strong>一等公民数据结构（first-class）</strong><br/>缓存就是一棵基数树；调度能预估命中并主动聚类；显存按共享关系钉住/回收；分层沿树边界整段搬运；一个念头统一全系统。</div>
+</div>
+
+<div class="flow">
+<div class="node">请求带 token 进来</div>
+<div class="arrow">→</div>
+<div class="node">match_prefix 匹配最长已缓存前缀</div>
+<div class="arrow">→</div>
+<div class="node">复用该前缀的 KV（inc_lock_ref 钉住）</div>
+<div class="arrow">→</div>
+<div class="node">只对新后缀做前向计算</div>
+<div class="arrow">→</div>
+<div class="node">insert 写回树，分叉处劈开节点</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache</span><span class="ln">KV 缓存就是一棵共享前缀的基数树</span></div><pre>class TreeNode:
+    def __init__(self):
+        self.children = defaultdict(TreeNode)  # edge -&gt; child: the radix tree itself
+        self.key = None                        # the token-id span on the edge into this node
+        self.value = None                      # the KV cache indices for that span
+
+class RadixCache(BasePrefixCache):
+    # the prefix cache IS a radix tree of shared-prefix nodes
+    def match_prefix(self, params):   # walk the tree; return the longest already-cached prefix
+        ...
+    def insert(self, params):         # add a sequence's KV, splitting nodes where prefixes diverge
+        ...
+    def evict(self, params):          # LRU-evict evictable leaves to reclaim pages
+        ...
+    def inc_lock_ref(self, node):     # pin in-use nodes so eviction can't take them
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>一等公民，而非外挂：</strong>SGLang 把「KV 缓存是一棵<span class="mono">共享前缀的基数树</span>」当作核心数据结构，整个引擎围着它转，而不是事后贴一个 LRU 缓存。</li>
+<li><strong>同一念头的六张面孔：</strong>DSL fork/join（<strong>第11课</strong>）、前缀缓存概念（<strong>第7课</strong>）、基数树实现（<strong>第29课</strong>）、分页 KV（<strong>第30课</strong>，承 <strong>第6课</strong>）、缓存感知调度（<strong>第20课</strong>）、HiCache 分层（<strong>第31课</strong>）讲的都是同一件事。</li>
+<li><strong>生命周期：</strong>匹配最长前缀 → 复用 KV → 只算新后缀 → 写回树，是 <span class="mono">RadixAttention</span> 的全部精髓。</li>
+<li><strong>结构逼出算法：</strong>一旦缓存是树，<span class="mono">match_prefix/insert/evict/inc_lock_ref</span> 就是树形状的自然推论。</li>
+<li><strong>看懂它即串起三分之一指南：</strong>识别这一个组织性念头，前面许多看似独立的课会突然连成一张网。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 本课说 RadixAttention 是 SGLang 的「一等公民」而不是「贴上去的优化」。这句话最准确的含义是？</div>
+  <ol class="opts">
+    <li>它是一个运行最快的注意力 CUDA kernel，和缓存结构无关</li>
+    <li>它是一个独立微服务，需要单独部署</li>
+    <li>它只是 DSL 层一个可选的语法糖，底层并不依赖它</li>
+    <li><strong>「KV 缓存就是一棵共享前缀的基数树」被当作核心数据结构，整个引擎围着它设计，而不是事后在旁边贴一个独立的 LRU 字典</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。一等公民意味着这个念头被刻意、反复地写进系统多个层次：缓存本身的形状就是基数树。调度、显存、分层都围着它协同，所以改它会牵动全局——这正是「结构」而非「外挂」的标志。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 下列哪一组课程讲的「其实是同一件事」——共享前缀这一个念头在不同层换了张面孔？</div>
+  <ol class="opts">
+    <li>日志格式、CI 流水线、PR 规范、文档目录</li>
+    <li><strong>DSL fork/join（第11课）、前缀缓存概念（第7课）、基数树实现（第29课）、分页 KV（第30课，承第6课）、缓存感知调度（第20课）、HiCache 分层（第31课）</strong></li>
+    <li>量化、张量并行、投机解码、采样温度</li>
+    <li>REST 路由、鉴权、限流、监控面板</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。这六课分别在语言层、概念层、实现层、物理层、调度层、分层存储层描述同一个共享前缀世界观：故意制造共享、承诺只算一次、落地成基数树、指向分页、优先命中、按冷热分层。把它们叠在一起才看见贯穿的主轴。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 把一次请求放到这棵树上，它的「生命周期」按正确顺序是？</div>
+  <ol class="opts">
+    <li><strong>match_prefix 匹配最长已缓存前缀 → 复用该前缀的 KV（inc_lock_ref 钉住）→ 只对新后缀做前向计算 → insert 写回树并在分叉处劈开节点</strong></li>
+    <li>先 evict 所有叶子 → 再匹配前缀 → 最后才计算</li>
+    <li>重新计算整条序列的 KV → 写满整棵树 → 再删掉重复</li>
+    <li>只算前缀、丢弃新后缀，以节省显存</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。精髓是「匹配最长前缀 → 复用 KV → 只算新后缀 → 写回树」。复用的前缀要 inc_lock_ref 钉住防止半路被回收，新后缀算完后 insert 挂回树、在分叉处劈开节点，让未来请求也能共享。整个过程避免了对相同开头的重复计算。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释：为什么把「共享前缀」当作一等公民数据结构（基数树），而不是引擎旁边一个贴上去的 LRU 缓存，会让调度（第20课）、显存分页（第30课）和分层（第31课）都能围着它协同？对比这两种做法的根本差别。</li>
+    <li>挑出本课提到的至少三处「共享前缀的不同面孔」（如 DSL fork/join 第11课、前缀缓存概念第7课、基数树实现第29课），说明它们骨子里是同一件事；再用「匹配最长前缀 → 复用 KV → 只算新后缀」串起一次请求在 RadixCache 里走完的全过程。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">If you spread out the first thirty-odd lessons like puzzle pieces, one pattern keeps reappearing—<strong>shared prefixes</strong>. It is not a local trick tucked in one corner; it is a <strong>first-class idea</strong> that runs from SGLang's language layer all the way down to its memory layer: treat every request as a node in one <span class="mono">radix tree of shared prefixes</span>, match the longest already-cached prefix, reuse its KV, and compute only the newly-appeared suffix. Grasp this single idea and you stitch together a third of the whole guide at once.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a <strong>family library</strong>. A new book is not reprinted from page one; it first checks the shelves: is there already a book whose first few hundred pages are identical to mine? If so, it simply <strong>borrows and shares</strong> that identical stack of paper and only prints the new chapters that begin at the point of divergence. The shelf itself is organized as a <strong>tree</strong>: the root is the opening common to all books, branching grows as you descend, and each fork records the position where "from here on we differ."</p>
+<p>Even better, this "share the opening" rule is not one librarian's private habit. The authors (the DSL) <strong>deliberately</strong> make several versions share the same opening; the library's expansion blueprint (the cache concept) states this intent from the start; the physical shelf slots (paged memory) are laid out by this rule; even the borrowing queue (scheduling) favors readers whose opening matches the stock; and when shelves overflow, old books are <strong>tiered</strong> down to the basement, then to off-site storage—yet the tree shape never changes. That is what "first-class" means: the same idea written, on purpose and repeatedly, into every layer of the system, rather than patched in as an afterthought.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Many systems treat the "prefix cache" as an afterthought patch: finish the inference engine, then bolt an LRU dictionary onto the side. SGLang takes the opposite path—it makes <strong>"the KV cache itself is a radix tree of shared prefixes"</strong> the core data structure, and the entire engine revolves around it. <span class="mono">RadixAttention</span> is not an isolated operator but a <strong>way of organizing everything</strong>: the DSL's <span class="mono">fork/join</span> (<strong>Lesson 11</strong>) manufactures shared prefixes at the language layer; the prefix-cache concept (<strong>Lesson 7</strong>) is raised early on; the radix-tree implementation (<strong>Lesson 29</strong>) makes the cache literally a <span class="mono">RadixCache</span> of <span class="mono">TreeNode</span>s; paged KV (<strong>Lesson 30</strong>, building on <strong>Lesson 6</strong>) is the physical pages those nodes point at; cache-aware scheduling (<strong>Lesson 20</strong>) lets high-hit requests run first so the cache pays off; and HiCache (<strong>Lesson 31</strong>) tiers that same prefix tree across GPU/CPU/disk. Connected, they form a web, not a string of isolated dots; remove any one thread and the web sags.</p>
+</div>
+
+<h2>1. Why "shared prefixes" earns the title "first-class"</h2>
+<p>The test for whether an idea is a system's first-class citizen is simple: is it written, <strong>on purpose and repeatedly</strong>, into multiple non-adjacent layers, and does changing it ripple across the whole system? Shared prefixes pass cleanly. It started as a plain observation: in real workloads, many requests begin <strong>identically</strong>—the same system prompt, the same few-shot examples, the same conversation history, the same several branches <span class="mono">fork</span>ed from one prompt. Since the openings match, the KV they produce in attention is <strong>byte-for-byte identical</strong>. Recomputing that KV burns memory and compute for nothing.</p>
+<p>SGLang did not demote this to an "optional optimization"; it promoted it to <strong>the shape of a data structure</strong>. Once you accept "the cache is a tree," many designs stop being coincidences: <span class="mono">match_prefix</span> is naturally "walk to the deepest known node," <span class="mono">insert</span> is naturally "split a node where prefixes diverge," <span class="mono">evict</span> is naturally "reclaim from the leaves, because leaves are the tails no one shares," and <span class="mono">inc_lock_ref</span> is naturally "pin nodes in use so eviction can't take them." Once the tree shape is fixed, the algorithms are <strong>forced out</strong> by it rather than cobbled together.</p>
+<p>The reverse thought confirms it: what if it had not been treated as first-class from the start? You would likely first write a naive per-request engine, then one day discover "the system prompt was recomputed a thousand times," and hastily add a hash-table cache of the whole prompt's KV. But you would soon hit a wall—users' prompts share only the <strong>prefix</strong> while the rest differs, so whole-string hashing never hits; you would be forced into <strong>longest-common-prefix</strong> matching, and the most natural data structure for efficiently prefix-matching a flood of sequences is precisely a <strong>radix tree</strong>. In other words, take "prefix reuse" seriously and you are almost inevitably pushed to the same destination. SGLang's cleverness is to acknowledge that destination <strong>from the outset</strong> and build the engine directly on it, skipping all the "do it wrong, then patch" detours. That is the value of promoting the right idea to a structure early.</p>
+
+<p>This also answers an often-overlooked question: why does SGLang dare to depend on prefix sharing in so many places without worrying that "an occasional miss wastes all the effort"? Because when it is a structure rather than a bolt-on, a miss merely degrades to the ordinary case of "the whole thing is a new suffix"—the tree can still hold, insert, and reclaim it, with no special fallback path needed. An idea promoted to a data structure naturally has <strong>graceful degradation</strong>: more hits save more, fewer hits are no worse, and it never crashes because "the cache wasn't ready." This "the worst case never gets worse" robustness is precisely the most overlooked yet most precious dividend of making it first-class.</p>
+
+<h2>2. One idea, a different face at every layer</h2>
+<p>What is truly striking is that <strong>shared prefixes</strong> appear <strong>in costume</strong> at different layers while staying the same thing underneath. At the DSL layer (<strong>Lesson 11</strong>), you write <span class="mono">fork</span> to split one prompt into branches and <span class="mono">join</span> to merge them—you are <strong>explicitly manufacturing</strong> a shared prefix at the language layer, expecting the engine not to recompute it. At the conceptual layer (<strong>Lesson 7</strong>), the "prefix cache" is offered as a promise: identical openings are computed once. At the implementation layer (<strong>Lesson 29</strong>), that promise becomes <span class="mono">RadixCache</span>, where each <span class="mono">TreeNode</span> carries a token-id span on its edge (<span class="mono">key</span>) and the matching KV indices (<span class="mono">value</span>). At the physical layer (<strong>Lesson 30</strong>, built on the paging of <strong>Lesson 6</strong>), a node's <span class="mono">value</span> points at pages of paged-KV. At the scheduling layer (<strong>Lesson 20</strong>), the scheduler favors requests with <strong>high prefix hit rate</strong>, because reuse is what makes the stored KV worthwhile. At the tiered-storage layer (<strong>Lesson 31</strong>), HiCache tiers that tree by temperature—hot on GPU, warm on CPU, cold on disk.</p>
+<p>Six faces, one soul. They mesh so tightly precisely because they all assume the same shared-prefix worldview. Study any single lesson and it looks like a local trick; stack Lessons 7, 11, 20, 29, 30, and 31 together and you finally see the spine running through them all.</p>
+<p>It helps to walk one concrete chain end to end. In a multi-turn chat app, the developer uses <span class="mono">fork</span> in the DSL (Lesson 11) to split the same history into three candidate replies; conceptually (Lesson 7) the three share one opening, so the engine should compute it once. In implementation (Lesson 29), that history becomes one <span class="mono">TreeNode</span> in <span class="mono">RadixCache</span> shared by three requests, whose <span class="mono">value</span> points at several physical pages (Lesson 30, on Lesson 6). The scheduler (Lesson 20), seeing the three requests' prefixes overlap heavily, places them together and runs them almost simultaneously, keeping that shared KV "hot" in memory for repeated hits. As the conversation grows and memory tightens, HiCache (Lesson 31) tiers that now-cooler history down to CPU or even disk, recalling it as a whole segment when needed. From the moment the developer types <span class="mono">fork</span> to the migration of that KV across three storage tiers, it is <strong>the same node on the same tree</strong> being tended by different layers in different ways. That is the most concrete picture of "one idea running through the full stack."</p>
+
+<h2>3. From "an optimization glued on" to "a structure grown into the skeleton"</h2>
+<p>The difference is not merely aesthetic. Treating prefix sharing as a bolt-on means the cache and the engine are two separate logics: the cache knows nothing about scheduling, scheduling never yields for the cache, and hits are pure luck. Treating it as first-class means the scheduler knows the tree's shape, can estimate hits, and can actively cluster similar requests; it means the memory manager knows how many requests share which pages and must not reclaim them carelessly; it means tiered storage can move whole segments along tree boundaries instead of scattered copies. Only after an idea is promoted to a structure can the whole system coordinate around it.</p>
+<p>This also explains why the name <span class="mono">RadixAttention</span> holds both "Radix (radix tree)" and "Attention": attention consumes KV, and KV is organized as a radix tree. The operator and the data structure here are <strong>two sides of one coin</strong>, not a before-and-after.</p>
+<p>There is another easily-underestimated benefit: when the cache is one tree shared across the whole system, <strong>cross-request</strong> reuse becomes the default behavior rather than an extra feature. Two completely unrelated users, as long as they happen to use the same system prompt, automatically land on the same shared-prefix node, and the compute the second one saves is "free." Replace this with a bolt-on cache and you must design a separate cross-request lookup-and-dedup logic; in the tree structure it is just <span class="mono">match_prefix</span> naturally walking to the same node. In other words, the first-class design turns "the most valuable reuse" into a zero-cost by-product—which is exactly why it saves enormous compute under real high-concurrency workloads.</p>
+
+<h2>4. How a single request lives out its life on this tree</h2>
+<p>Zoom back to one request: it arrives with a token sequence, first runs <span class="mono">match_prefix</span>, walks down the tree, and finds the <strong>longest prefix</strong> overlapping with the stock; that prefix's KV is <strong>reused</strong> as-is (and <span class="mono">inc_lock_ref</span> pins it so it won't be evicted mid-flight); the engine truly forward-computes only the <strong>newly-appeared suffix</strong>; afterward <span class="mono">insert</span> hangs that new suffix back onto the tree, splitting a node at the divergence so future requests can share it too. This lifecycle—"match the longest prefix → reuse KV → compute only the new suffix → write back to the tree"—is the entire essence of <span class="mono">RadixAttention</span>, and the four diagrams below pull it apart from different angles.</p>
+<p>Two details deserve a pause. First, the "pinning" of <span class="mono">inc_lock_ref</span> is necessary because reuse and reclamation coexist on the same tree: while request A is computing down some shared prefix, the reclamation logic (<span class="mono">evict</span>) must never snatch that prefix's pages away, or A would "step into the void" mid-computation. Reference counting makes "who is using it" visible, so eviction only dares touch leaves no one references. Second, the "node splitting" of <span class="mono">insert</span> is the key to the tree continually growing shared structure: when a new suffix shares only the first half of an existing node, the system splits the old node in two at the divergence—the common upper half stays shared by both, the differing lower halves become two children. This "split on demand" keeps the radix tree in a compact "share what can be shared, fork exactly where it must" shape, rather than degenerating into a heap of unrelated full strings. Understand pinning and splitting and you understand <strong>why this tree is both safe and efficient</strong>.</p>
+
+<table class="t">
+<tr><th>Where shared prefixes appear</th><th>The role it plays there</th></tr>
+<tr><td>DSL fork/join (<strong>Lesson 11</strong>)</td><td>The language layer <strong>deliberately</strong> makes branches share one opening—the source of the "shared prefix"</td></tr>
+<tr><td>Prefix-cache concept (<strong>Lesson 7</strong>)</td><td>An early promise: identical openings are computed once, setting the tone for the implementation</td></tr>
+<tr><td>Radix-tree implementation (<strong>Lesson 29</strong>)</td><td>The promise lands: <span class="mono">RadixCache</span> made of <span class="mono">TreeNode</span>s—the cache IS this tree</td></tr>
+<tr><td>Paged KV (<strong>Lesson 30</strong>, on <strong>Lesson 6</strong>)</td><td>The physical pages a node's <span class="mono">value</span> points at—where prefixes actually live</td></tr>
+<tr><td>Cache-aware scheduling (<strong>Lesson 20</strong>)</td><td>Lets high prefix-hit requests through first so the stored KV truly pays off</td></tr>
+<tr><td>HiCache tiering (<strong>Lesson 31</strong>)</td><td>Tiers that same prefix tree by temperature across GPU/CPU/disk</td></tr>
+</table>
+
+<div class="layers">
+<div class="layer">root: the common starting point of all requests (empty prefix)</div>
+<div class="layer">shared-prefix node: the token span of <span class="mono">"You are a helpful assistant…"</span> + KV indices, shared by many requests</div>
+<div class="layer">divergence point: tokens differ from here, so the node is split into multiple children</div>
+<div class="layer">branch A leaf: the unique suffix of user question one</div>
+<div class="layer">branch B leaf: the unique suffix of user question two (sharing the whole prefix above with A)</div>
+</div>
+
+<div class="cols">
+<div class="col"><strong>Bolt-on optimization</strong><br/>The cache is an LRU dictionary beside the engine; scheduling knows nothing of it; hits are luck; tiering can only copy scattered blocks; changing the cache ripples nowhere.</div>
+<div class="col"><strong>First-class data structure</strong><br/>The cache IS a radix tree; scheduling estimates hits and actively clusters; memory pins/reclaims by sharing relationships; tiering moves whole segments along tree boundaries; one idea unifies the whole system.</div>
+</div>
+
+<div class="flow">
+<div class="node">request arrives with tokens</div>
+<div class="arrow">→</div>
+<div class="node">match_prefix finds the longest cached prefix</div>
+<div class="arrow">→</div>
+<div class="node">reuse that prefix's KV (inc_lock_ref pins it)</div>
+<div class="arrow">→</div>
+<div class="node">forward-compute only the new suffix</div>
+<div class="arrow">→</div>
+<div class="node">insert writes back to the tree, splitting at divergence</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache</span><span class="ln">the KV cache IS a radix tree of shared prefixes</span></div><pre>class TreeNode:
+    def __init__(self):
+        self.children = defaultdict(TreeNode)  # edge -&gt; child: the radix tree itself
+        self.key = None                        # the token-id span on the edge into this node
+        self.value = None                      # the KV cache indices for that span
+
+class RadixCache(BasePrefixCache):
+    # the prefix cache IS a radix tree of shared-prefix nodes
+    def match_prefix(self, params):   # walk the tree; return the longest already-cached prefix
+        ...
+    def insert(self, params):         # add a sequence's KV, splitting nodes where prefixes diverge
+        ...
+    def evict(self, params):          # LRU-evict evictable leaves to reclaim pages
+        ...
+    def inc_lock_ref(self, node):     # pin in-use nodes so eviction can't take them
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>First-class, not bolt-on:</strong> SGLang treats "the KV cache is a <span class="mono">radix tree of shared prefixes</span>" as the core data structure the whole engine revolves around, not an LRU cache glued on afterward.</li>
+<li><strong>Six faces of one idea:</strong> DSL fork/join (<strong>Lesson 11</strong>), the prefix-cache concept (<strong>Lesson 7</strong>), the radix-tree implementation (<strong>Lesson 29</strong>), paged KV (<strong>Lesson 30</strong>, on <strong>Lesson 6</strong>), cache-aware scheduling (<strong>Lesson 20</strong>), and HiCache tiering (<strong>Lesson 31</strong>) are all the same thing.</li>
+<li><strong>The lifecycle:</strong> match the longest prefix → reuse KV → compute only the new suffix → write back to the tree is the entire essence of <span class="mono">RadixAttention</span>.</li>
+<li><strong>Structure forces the algorithms:</strong> once the cache is a tree, <span class="mono">match_prefix/insert/evict/inc_lock_ref</span> are natural consequences of the tree shape.</li>
+<li><strong>Grasp it and a third of the guide connects:</strong> recognizing this one organizing idea suddenly weaves many seemingly independent lessons into a web.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. This lesson says RadixAttention is a 'first-class idea' in SGLang, not a 'bolt-on optimization'. What does that most accurately mean?</div>
+  <ol class="opts">
+    <li>It is just the fastest attention CUDA kernel, unrelated to cache structure</li>
+    <li>It is a standalone microservice that must be deployed separately</li>
+    <li>It is merely optional syntactic sugar at the DSL layer that the engine does not rely on</li>
+    <li><strong>'The KV cache is a radix tree of shared prefixes' is treated as the core data structure the whole engine is designed around, not a separate LRU dictionary glued on afterward</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. First-class means the idea is written, on purpose and repeatedly, into many layers: the cache's very shape is a radix tree. Scheduling, memory, and tiering all coordinate around it, so changing it ripples across the whole system — the hallmark of a structure, not a bolt-on.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which group of lessons are 'really about the same thing' — the single idea of shared prefixes wearing a different face at each layer?</div>
+  <ol class="opts">
+    <li>Log format, CI pipeline, PR conventions, docs directory</li>
+    <li><strong>DSL fork/join (Lesson 11), prefix-cache concept (Lesson 7), radix-tree implementation (Lesson 29), paged KV (Lesson 30, on Lesson 6), cache-aware scheduling (Lesson 20), HiCache tiering (Lesson 31)</strong></li>
+    <li>Quantization, tensor parallelism, speculative decoding, sampling temperature</li>
+    <li>REST routing, auth, rate limiting, monitoring dashboard</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. These six lessons describe the same shared-prefix worldview at the language, concept, implementation, physical, scheduling, and tiering layers: deliberately create sharing, promise to compute once, land as a radix tree, point at pages, favor hits, and tier by temperature. Stack them and the spine appears.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Placed on this tree, what is a request's 'lifecycle' in the correct order?</div>
+  <ol class="opts">
+    <li><strong>match_prefix finds the longest cached prefix → reuse that prefix's KV (inc_lock_ref pins it) → forward-compute only the new suffix → insert writes back, splitting the node at divergence</strong></li>
+    <li>Evict all leaves first → then match prefix → compute last</li>
+    <li>Recompute the whole sequence's KV → fill the entire tree → then delete duplicates</li>
+    <li>Compute only the prefix and discard the new suffix to save memory</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The essence is 'match the longest prefix → reuse KV → compute only the new suffix → write back to the tree'. The reused prefix is pinned by inc_lock_ref so it isn't evicted mid-flight, and after the new suffix is computed, insert hangs it back and splits the node at divergence so future requests can share it. This avoids recomputing identical openings.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why treating 'shared prefixes' as a first-class data structure (a radix tree) rather than an LRU cache bolted beside the engine lets scheduling (Lesson 20), paged memory (Lesson 30), and tiering (Lesson 31) all coordinate around it. Contrast the fundamental difference between the two approaches.</li>
+    <li>Pick at least three of the 'different faces of shared prefixes' from this lesson (e.g., DSL fork/join Lesson 11, the prefix-cache concept Lesson 7, the radix-tree implementation Lesson 29), explain why they are the same thing underneath, then use 'match the longest prefix → reuse KV → compute only the new suffix' to trace a request's full path through RadixCache.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="57-glossary.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">术语速查表</span><span class="lang-en">Glossary</span></div></a><a class="next" href="59-zero-overhead-scheduling.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">零开销调度的哲学</span><span class="lang-en">Zero-overhead scheduling</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

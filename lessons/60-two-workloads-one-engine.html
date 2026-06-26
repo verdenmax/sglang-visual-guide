@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>60 · 两种负载，一套引擎 / Two workloads, one engine - SGLang 图解教程</title>
+<meta name="description" content="第十三部分 · 设计专题综合｜两种负载，一套引擎 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="60 · 两种负载，一套引擎 / Two workloads, one engine - SGLang 图解教程">
+<meta property="og:description" content="第十三部分 · 设计专题综合｜两种负载，一套引擎 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="60 · 两种负载，一套引擎 / Two workloads, one engine - SGLang 图解教程">
+<meta name="twitter:description" content="第十三部分 · 设计专题综合｜两种负载，一套引擎 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></span>
+    <span class="pill">60 / 63</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:95%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></div>
+    <h1><span class="lang-zh">两种负载，一套引擎</span><span class="lang-en">Two workloads, one engine</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">前面五十多课，我们拆过调度器、拆过 KV 缓存、拆过注意力后端、拆过分离式部署。这一课不引入任何新机制，而是退后一步，找出那条贯穿全书的<strong>主线</strong>：在一台 GPU 上，<span class="mono">prefill</span>（预填充）和 <span class="mono">decode</span>（解码）根本就是<strong>两种不同的负载</strong>。看懂这一个对立，你会发现 SGLang 许多看似无关的设计，其实都在回答同一个问题。这一课的目标不是教你新东西，而是把前面学过的零件<strong>串成一条线</strong>，让你在脑子里建立一张"为什么这么设计"的地图。</p>
+<p>方法很简单：我们只盯住一条轴——prefill 和 decode 的对立——然后看 SGLang 是怎么沿着这条轴做取舍的。你会惊讶地发现，调度、批处理、KV 缓存、分离部署这些原本各讲各的话题，串起来竟是同一个故事。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象一家餐厅的厨房，要同时干两件性质完全不同的活。</p>
+<p>第一件是<strong>备料</strong>：开店前把一大筐菜一次性洗好切好。这活儿<strong>吃刀工和人手</strong>——人越多、案板越大，切得越快，所有灶台、所有厨师全开足马力，这是<span class="mono">compute-bound</span>（算力受限）。</p>
+<p>第二件是<strong>上菜</strong>：客人点一道、做一道，一道接一道地端出去。这活儿不缺刀工，缺的是<strong>来回跑腿</strong>——每上一道都要跑一趟冷库取食材、跑一趟取调料，厨师的手大半时间在等，真正在切的时间很少，这是 <span class="mono">bandwidth-bound</span>（带宽受限）。</p>
+<p>同一个厨房（一块 GPU）必须把两件活都干好。要命的是它们会<strong>互相抢厨房</strong>：一旦埋头切那一大筐菜，正等着上菜的客人就全都卡住了。SGLang 的许多设计，本质上就是在调解"备料"和"上菜"这两种负载的矛盾。</p>
+<p>顺着这个类比再想一层：你不会因为"上菜要跑腿"就去给厨师换一把更快的刀——刀再快也省不了跑冷库的那几趟。同理，decode 慢不是因为算力不够，而是因为来回搬数据慢，换更猛的算力卡未必管用。聪明的餐厅老板会怎么办？要么<strong>把备料切成小段，插在上菜的空当里做</strong>（这就是 chunked prefill）；要么<strong>干脆开两个厨房</strong>，一个专门备料、一个专门上菜，备好的料用传送带送过去（这就是 PD 分离）。两种思路，正对应 SGLang 的两条路线。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>这是一条<strong>根本对立（root tension）</strong>，不是某个模块的细节：</p>
+<ul>
+<li><strong>Prefill 是一次大并行</strong>：把整段 prompt 一口气喂进模型，几百上千个 token 同时过每一层，GPU 的乘加单元被<strong>喂得饱饱的</strong>——算力是瓶颈。</li>
+<li><strong>Decode 是逐字挤牙膏</strong>：一次只生成一个 token，但每生成一个就要把<strong>整套权重 + 全部 KV 缓存重新读一遍</strong>，乘加单元大半时间在空转——显存带宽是瓶颈。</li>
+<li><strong>一个引擎要同时服务两者</strong>，而它们在同一块 GPU 上<strong>互相打架</strong>。</li>
+</ul>
+<p>SGLang 有两条调解路线：要么<strong>同卡分时</strong>（第22课的 chunked prefill，把 prefill 切片，插进 decode 的缝隙里），要么<strong>分机分离</strong>（第45课的 PD 分离，给两种负载各自一池 GPU，再把 KV 搬过去）。两条路看似毫不相干，背后却是同一道题。</p>
+</div>
+
+<h2>一、为什么 prefill 与 decode 是两种负载</h2>
+<p>这正是<strong>第4课</strong>埋下的种子。当时我们第一次区分了 <span class="mono">compute-bound</span> 与 <span class="mono">bandwidth-bound</span>：一个算子到底卡在"算得不够快"还是"数据搬得不够快"，取决于它的<strong>算术强度</strong>（每读一字节数据能做多少次乘加）。</p>
+<p>Prefill 的算术强度<strong>很高</strong>。一次处理整段 prompt，意味着同一份权重被成百上千个 token 复用——权重读一次，做几百次乘加。GPU 的张量核心被喂满，这是它最擅长、最划算的工况。</p>
+<p>给个直观的量级感受：几千个 token 的 prompt 基本一口气流过网络的每一层，里面的矩阵乘又大又厚，GPU 跑在接近峰值算力的状态。这正是硬件厂商标在宣传页上那个漂亮 FLOPs 数字所对应的工况——而 prefill 是推理里少数几个真能逼近这个数字的阶段。</p>
+<p>Decode 的算术强度<strong>很低</strong>。每步只生成一个 token，却要把<strong>整套模型权重</strong>外加<strong>这条序列至今全部的 KV 缓存</strong>从显存里重新读一遍，读完只做了一个 token 的乘加。绝大部分时间花在<strong>搬数据</strong>上，乘加单元闲着。所以单纯堆算力对 decode 几乎没用，真正的解药是把 batch 做大（让一次权重读取服务更多序列）——但这又牵出新的张力。</p>
+<p>把这两条放在一起看，你会得到一个很反直觉的结论：<strong>同一块 GPU，跑 prefill 时几乎被榨干，跑 decode 时却大半空转。</strong>不是 GPU 偷懒，而是 decode 这种负载天生喂不饱它——瓶颈在显存到计算单元之间那条数据通道，不在算力本身。理解了这一点，你才能明白后面所有调度技巧的出发点：它们要么想办法让 decode 蹭上 prefill 的算力，要么干脆把两种负载彻底隔开，各自喂饱各自的瓶颈。</p>
+<p>更进一步，这条对立还解释了"为什么 LLM 推理跟训练手感如此不同"。训练几乎全是 compute-bound 的大矩阵乘，堆算力立竿见影；而在线推理里，真正决定用户体验的 decode 阶段是 bandwidth-bound 的，单纯换更强算力的卡未必能让吐字更快。SGLang 之所以在调度、批处理、KV 管理上下这么多功夫，根子都在这条 prefill-vs-decode 的轴上。</p>
+
+<h2>二、这个对立如何制造吞吐与延迟的拉扯</h2>
+<p><strong>第8课</strong>讲的<strong>吞吐 vs 延迟</strong>之争，根子就在这里。两个关键指标：<span class="mono">TTFT</span>（首字延迟，主要由 prefill 决定）和 <span class="mono">ITL</span>（字间延迟，由 decode 决定）。</p>
+<p>把两种负载塞进一个串行队列会发生什么？一个超长 prompt 的 prefill 是一大块算力密集的活，它一旦上 GPU，就会把<strong>所有正在解码的请求全部堵住</strong>——大家的 ITL 瞬间飙高，输出卡顿。反过来，若一味优先 decode 的流畅，新请求的 prefill 又迟迟排不上，TTFT 变长。</p>
+<p>于是矛盾凸显：<strong>prefill 想要大块、独占、算力拉满；decode 想要频繁、低延迟、雨露均沾。</strong>同一块 GPU 没法同时满足。这就是为什么 SGLang 不能简单地"先来先做"，而必须在调度层动脑筋。</p>
+<p>把这层张力说得再具体一点：假设此刻 GPU 上有 30 条序列在逐字解码，每一步几毫秒，用户能看到字一个个稳稳冒出来。这时来了一个 8000 token 的长 prompt，它的 prefill 需要把这 8000 个 token 一次性过完整个网络——这一大块算力密集的活若整块占住 GPU，那 30 条解码序列就得集体卡顿几十甚至上百毫秒，用户端立刻感到"卡了一下"。反过来，如果为了不卡顿而把这个 prefill 无限往后推，新用户的首字（TTFT）又迟迟出不来。<strong>无论先满足谁，另一方都受损</strong>——这就是一台引擎服务两种负载的代价。</p>
+<p>正因为这是结构性的矛盾、而非某次调参没调好，所以它需要结构性的答案。下面两节就是 SGLang 给出的两条结构性出路：一条不动硬件、靠调度（chunked prefill），一条直接动硬件、靠分机（PD 分离）。</p>
+
+<h2>三、同卡分时：chunked prefill</h2>
+<p><strong>第22课</strong>的 <span class="mono">chunked prefill</span>（分块预填充）是<strong>共置（co-located）</strong>路线的答案：既然一整块 prefill 会堵住 decode，那就<strong>别让它一整块上</strong>。把长 prompt 切成若干小片，每个 step 只处理一片 prefill，并把它和正在跑的 decode <strong>拼进同一个 batch 一起算</strong>。</p>
+<p>这样 GPU 在每一步里都<strong>同时</strong>干着两种活：一小片 prefill 借机会喂饱算力，一批 decode 顺道蹭上这次权重读取。谁都不至于饿死——prefill 不再独占整个 GPU 把 decode 闷住，decode 也不必干等一个巨长 prefill 跑完。这是用<strong>聪明的调度</strong>，在一块 GPU 上把两种负载<strong>时间分片</strong>地揉到一起。</p>
+<p>它精妙的地方在于<strong>顺势而为</strong>：decode 本来就是 bandwidth-bound、算力大半空着，那块空着的算力正好拿来跑一小片 compute-bound 的 prefill，几乎不额外占用带宽。换句话说，chunked prefill 让两种瓶颈互补的负载<strong>互相填空</strong>——decode 的空闲算力填给 prefill，prefill 顺手把这一步的权重读取分摊掉。切片的大小（chunk size）成了一个调节旋钮：切得太大，单片 prefill 又开始堵 decode；切得太小，调度和启动的固定开销又摊不下来。这正是第22课反复权衡的那个甜点区。</p>
+
+<h2>四、分机分离：PD 分离</h2>
+<p><strong>第45课</strong>的 <span class="mono">PD 分离</span>（Prefill-Decode Disaggregation）是另一条路：既然两种负载性质对立、互相干扰，那干脆<strong>物理上分开</strong>。给 prefill 一池 GPU，给 decode 另一池 GPU，prompt 先在 prefill 池跑完、算出 KV 缓存，再把<strong>KV 跨网络搬到</strong> decode 池继续逐字生成。</p>
+<p>好处是<strong>各自饱和各自的瓶颈、互不打扰</strong>：prefill 池可以把算力榨干，decode 池可以专心把 batch 做大、把带宽用足，两边能独立扩缩容、独立调优。代价是多了一道<strong>KV 传输</strong>——这正是下面那段代码所守护的接缝。</p>
+<p>为什么这种"看起来更费事"的方案反而值得？因为共置方案里两种负载永远在抢同一块 GPU，调度器再聪明，prefill 切片和 decode 之间总有一点互相挤压；而分离之后，prefill 池里全是清一色的大并行、可以用最适合 compute-bound 的批策略，decode 池里全是清一色的逐字生成、可以把 batch 堆到带宽极限——<strong>每一池都不再被另一种负载拖累</strong>。在超大规模、对 TTFT 和 ITL 都有严格 SLA 的线上服务里，这种物理隔离往往比"在一块卡上精打细算"更省心、也更稳。</p>
+<p>当然，分离不是免费的午餐。KV 缓存可能高达每条序列几百 MB，要在 prefill 池算完后跨网络搬到 decode 池，这条传输链路的带宽与延迟就成了新的关键路径——搬得慢，decode 侧就得干等。所以 PD 分离把一个"GPU 内部的调度问题"换成了一个"跨机的数据搬运问题"，而这个搬运问题的接口，正由 <span class="mono">BaseKVManager</span> 来定义。</p>
+
+<div class="cols"><div class="col">
+<p><strong>Prefill：一次大并行（算力受限）</strong></p>
+<p>整段 prompt 一口气进来，几百上千 token 同时过每一层。权重读一次、复用千百次，GPU 乘加单元<strong>被喂满</strong>。</p>
+<p><span class="mono">compute-bound</span>：瓶颈是算得多快。一块又宽又厚的活。</p>
+</div><div class="col">
+<p><strong>Decode：逐字挤牙膏（带宽受限）</strong></p>
+<p>一次只出一个 token，却要把整套权重 + 全部 KV 重读一遍，乘加单元大半空转。</p>
+<p><span class="mono">bandwidth-bound</span>：瓶颈是搬得多快。一根又细又长的活。</p>
+</div></div>
+
+<table class="t">
+<tr><th>设计回应</th><th>它在解的矛盾</th><th>出处</th></tr>
+<tr><td>根本对比：compute-bound vs bandwidth-bound</td><td>为什么两种负载天生不同</td><td>第4课</td></tr>
+<tr><td>吞吐 vs 延迟（TTFT vs ITL）</td><td>长 prefill 堵住大家的 decode</td><td>第8课</td></tr>
+<tr><td>同卡分时：chunked prefill</td><td>切片 prefill，插进 decode 缝隙，谁都不饿死</td><td>第22课</td></tr>
+<tr><td>分机分离：PD 分离</td><td>各给一池 GPU + 搬 KV，各自饱和不互扰</td><td>第45课</td></tr>
+</table>
+
+<div class="flow"><div class="node">请求 request</div><div class="arrow">→</div><div class="node">prefill 负载（算力受限）</div><div class="arrow">→</div><div class="node">KV 缓存</div><div class="arrow">→</div><div class="node">decode 负载（带宽受限）</div><div class="arrow">→</div><div class="node">逐字流式输出</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>共置 co-located</h4><p>一块 GPU <strong>时间分片</strong>同时跑两种负载——chunked prefill 把 prefill 切片，插进 decode 的缝隙里。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>分离 disaggregated</h4><p>prefill 池与 decode 池<strong>各自独立</strong>，中间靠 <strong>KV 传输</strong>把状态从 prefill 侧搬到 decode 侧。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>同一根本对立</h4><p>两种调解：要么聪明调度，要么物理分开。</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVManager</span><span class="ln">让 prefill 与 decode 分居两池的接缝</span></div><pre>class BaseKVManager(ABC):
+    # base class for managing KV-transfer state — the seam that lets prefill
+    # and decode live on SEPARATE pools
+    @abstractmethod
+    def __init__(self, args, disaggregation_mode, ...):
+        # disaggregation_mode says which side this is: PREFILL or DECODE
+        ...
+    @abstractmethod
+    def register_to_bootstrap(self):
+        # register so a prefill worker can be PAIRED with a decode worker,
+        # then KV is transferred from the prefill side to the decode side
+        ...</pre></div>
+
+<p>看这段代码：<span class="mono">BaseKVManager</span> 就是 PD 分离那条路的"接缝"。构造时传入的 <span class="mono">disaggregation_mode</span> 决定了当前进程是 prefill 侧还是 decode 侧——同一套接口，两种角色。<span class="mono">register_to_bootstrap()</span> 让一个 prefill worker 能和一个 decode worker <strong>配对</strong>，配对成功后，KV 缓存就从 prefill 侧传到 decode 侧。整个分离式架构的复杂度，都被这层抽象包住了。</p>
+<p>留意这里的设计哲学：它是一个 <span class="mono">ABC</span>（抽象基类），所有方法都标了 <span class="mono">@abstractmethod</span>。这意味着 SGLang 并不绑定某一种具体的传输实现——底层可以是 RDMA、可以是 NVLink、也可以是别的后端，只要它实现了这套接口。<strong>"prefill 和 decode 分居两池"这个抽象，和"具体用什么管子搬 KV"这个实现，被干净地解耦开了。</strong>这也呼应了全书反复出现的另一条主线：把"是什么"和"怎么做"分层，让上层的调度决策不必关心下层的硬件细节。</p>
+
+<h2>五、一个轴，看懂许多决定</h2>
+<p>现在把镜头拉到最远。第4课的 compute-bound vs bandwidth-bound、第8课的吞吐 vs 延迟、第22课的 chunked prefill、第45课的 PD 分离——这四课乍看分属四个话题，其实是同一根轴上的四个点。<strong>根本对立</strong>（prefill 与 decode 性质相反）产生<strong>张力</strong>（它们抢同一块 GPU），张力逼出<strong>两种调解</strong>（共置分时、或分机分离）。</p>
+<p>掌握了这条轴，很多原本要死记硬背的设计决策就变成了可以推导的结论。为什么要有 chunked prefill？因为不想让长 prefill 堵 decode。为什么要做 PD 分离？因为想让两种瓶颈各自饱和。为什么 decode 阶段拼命想把 batch 做大？因为它 bandwidth-bound，多一条序列几乎不额外读权重。<strong>看似零散的优化，背后是同一句话：prefill 和 decode 是两种负载，一套引擎要么聪明地让它们共处，要么干脆把它们分开。</strong></p>
+<p>所以下次你再遇到 SGLang 里某个陌生的调度参数或部署模式，别急着死记，先问自己一句：<strong>它是在帮 prefill 和 decode 更好地共处，还是在帮它们更彻底地分开？</strong>答案几乎总能落在这条轴的某一端。这就是"一个轴看懂全局"的真正含义——你记住的不再是几十条孤立的规则，而是一条能生成这些规则的根本原理。</p>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>一条根本对立</strong>：prefill 是 <span class="mono">compute-bound</span> 的大并行一次过，decode 是 <span class="mono">bandwidth-bound</span> 的逐字挤牙膏（第4课）。</li>
+<li><strong>对立制造张力</strong>：长 prefill 会一口气堵住大家的 decode，于是有了吞吐 vs 延迟、TTFT vs ITL 的拉扯（第8课）。</li>
+<li><strong>同卡分时</strong>：chunked prefill 把 prefill 切片、插进 decode 缝隙，一块 GPU 时间分片地服务两种负载（第22课）。</li>
+<li><strong>分机分离</strong>：PD 分离给两种负载各一池 GPU，再把 KV 搬过去，各自饱和各自瓶颈、互不干扰（第45课）。</li>
+<li><strong>一个轴看懂全局</strong>：prefill-vs-decode 这一条轴，能解释 SGLang 许多看似无关的设计——要么靠聪明的调度共处，要么靠物理上的分开隔离。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 本课的「一条根本对立」指的是什么？</div>
+  <ol class="opts">
+    <li>对立只存在于多卡之间，单卡上没有矛盾</li>
+    <li><strong>prefill 是算力受限（compute-bound）的一次大并行，decode 是带宽受限（bandwidth-bound）的逐字生成，两者性质相反却要共用一台引擎</strong></li>
+    <li>decode 才是算力受限，prefill 是带宽受限</li>
+    <li>prefill 和 decode 其实是同一种负载，只是名字不同</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。prefill 一次处理整段 prompt，权重读一次被成百上千 token 复用，算术强度高、吃满乘加单元，是 compute-bound；decode 每步只出一个 token 却要重读整套权重+全部 KV，算术强度低、乘加大半空转，是 bandwidth-bound。一台引擎要同时服务两者，这是第4课埋下的根本对立。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么在同一台 GPU 上 prefill 和 decode 会「互相打架」？</div>
+  <ol class="opts">
+    <li><strong>一个超长 prompt 的 prefill 是一大块算力密集的活，串行排队时会堵住所有正在解码的请求，让大家的 ITL 飙高、TTFT 与 ITL 互相拉扯</strong></li>
+    <li>因为 GPU 显存不够大，无法同时放下两份权重</li>
+    <li>因为它们使用不同的注意力算法，互相不兼容</li>
+    <li>其实并不打架，先来先做就能两全其美</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。prefill 想要大块、独占、算力拉满；decode 想要频繁、低延迟、雨露均沾。把两种负载塞进一个串行队列，长 prefill 一上 GPU 就把正在解码的请求全堵住，ITL 瞬间飙高（第8课的吞吐 vs 延迟）。一台 GPU 无法同时满足两种诉求，所以必须在调度层动脑筋。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 「同卡分时（chunked prefill）」与「分机分离（PD 分离）」这两条路线的区别是什么？</div>
+  <ol class="opts">
+    <li>两者完全相同，只是叫法不一样</li>
+    <li>chunked prefill 需要两池 GPU，PD 分离只需要一块 GPU</li>
+    <li><strong>chunked prefill 把 prefill 切片插进 decode 缝隙，让一块 GPU 时间分片地服务两者（第22课）；PD 分离给两种负载各一池 GPU 再搬 KV，让各自饱和各自瓶颈、互不干扰（第45课）</strong></li>
+    <li>PD 分离不需要传输 KV，chunked prefill 才需要</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。两条路在解同一道题：chunked prefill 是共置方案，用聪明调度把 prefill 切片、和 decode 拼进同一 batch，时间分片地共用一块 GPU；PD 分离是分离方案，物理上拆成 prefill 池和 decode 池，靠 BaseKVManager 这层接缝把 KV 从 prefill 侧搬到 decode 侧。一个靠调度，一个靠物理分开。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释：为什么单纯给 decode 阶段堆更多算力几乎没用，而把 batch 做大才是真正的解药？请结合「decode 每步要重读整套权重+全部 KV」这一事实，说明它为何是 bandwidth-bound 而非 compute-bound。</li>
+    <li>本课说「一个轴看懂全局」。请从第4、8、22、45课中至少挑三处，说明 prefill-vs-decode 这一条根本对立如何解释了这些看似无关的设计——它们要么靠聪明调度（共置），要么靠物理分开（分离）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">Over fifty-some lessons we've taken apart the scheduler, the KV cache, the attention backends, the disaggregated deployment. This lesson adds no new mechanism. It steps back to find the one <strong>through-line</strong> running across the whole book: on a single GPU, <span class="mono">prefill</span> and <span class="mono">decode</span> are fundamentally <strong>two different workloads</strong>. Grasp this one contrast and you'll see that many of SGLang's seemingly unrelated decisions are answering the very same question. The goal here isn't to teach you something new but to <strong>thread the parts you've already learned into one line</strong>, building a mental map of "why it's designed this way".</p>
+<p>The method is simple: we fix our eyes on a single axis—the prefill-vs-decode contrast—and watch how SGLang makes its trade-offs along it. You'll be surprised to find that scheduling, batching, KV caching, and disaggregated deployment, topics that once stood apart, turn out to be one story.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a restaurant kitchen doing two jobs of completely different nature at once.</p>
+<p>The first is <strong>prep</strong>: before opening, wash and chop a whole crate of vegetables in one go. This job is <strong>about knife-hands</strong>—the more cooks and the bigger the boards, the faster it goes; every stove and every cook runs flat out. That's <span class="mono">compute-bound</span>.</p>
+<p>The second is <strong>serving</strong>: a guest orders one dish, you make one, plate after plate. This job isn't short on knife skills, it's short on <strong>legwork</strong>—every dish means a trip to the cold store for ingredients and a trip for seasoning, so the cook's hands wait most of the time and chop very little. That's <span class="mono">bandwidth-bound</span>.</p>
+<p>One kitchen (one GPU) must do both well. The catch: they <strong>fight over the kitchen</strong>. The moment you bury yourself chopping that big crate, every guest waiting to be served is stuck. Many of SGLang's designs are, at heart, reconciling these two workloads—"prep" and "serving".</p>
+<p>Follow the analogy one layer deeper: you wouldn't hand the cook a faster knife just because "serving means legwork"—no knife saves those trips to the cold store. Likewise, decode is slow not because compute is short but because shuttling data is slow, and a beefier compute card may not help. What would a smart owner do? Either <strong>chop the prep into small bits and slot them into the gaps between serving</strong> (that's chunked prefill); or <strong>just open two kitchens</strong>, one only prepping, one only serving, with a conveyor moving the prepped goods across (that's PD disaggregation). Two ideas, matching SGLang's two paths.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>This is a <strong>root tension</strong>, not a detail of any one module:</p>
+<ul>
+<li><strong>Prefill is one big parallel pass</strong>: the whole prompt goes in at once, hundreds or thousands of tokens flow through every layer together, and the GPU's multiply-add units are <strong>kept fully fed</strong>—compute is the bottleneck.</li>
+<li><strong>Decode squeezes out one token at a time</strong>: each step generates a single token, yet must <strong>re-read the entire set of weights + all the KV cache</strong>, leaving the math units mostly idle—memory bandwidth is the bottleneck.</li>
+<li><strong>One engine must serve both</strong>, and on the same GPU they <strong>fight each other</strong>.</li>
+</ul>
+<p>SGLang has two ways to reconcile this: either <strong>time-share one GPU</strong> (Lesson 22's chunked prefill, slicing prefill and interleaving it into decode's gaps), or <strong>separate the machines</strong> (Lesson 45's PD disaggregation, giving each workload its own pool of GPUs and transferring the KV across). The two paths look unrelated, but they answer the same question.</p>
+</div>
+
+<h2>1. Why prefill and decode are two workloads</h2>
+<p>This is exactly the seed planted in <strong>Lesson 4</strong>. There we first distinguished <span class="mono">compute-bound</span> from <span class="mono">bandwidth-bound</span>: whether an operator is stuck "not computing fast enough" or "not moving data fast enough" depends on its <strong>arithmetic intensity</strong> (how many multiply-adds you do per byte read).</p>
+<p>Prefill has <strong>high</strong> arithmetic intensity. Processing the whole prompt at once means the same weights are reused by hundreds or thousands of tokens—read the weights once, do hundreds of multiply-adds. The tensor cores are kept full; it's the GPU's best, most economical regime.</p>
+<p>To picture the scale: a prompt of a few thousand tokens flows through every layer of the network in essentially one shot, the GEMMs are big and fat, and the GPU runs near its peak FLOPs. This is the regime hardware vendors quote their headline numbers for—and prefill is one of the few inference phases that actually reaches it.</p>
+<p>Decode has <strong>low</strong> arithmetic intensity. Each step generates one token, yet must re-read the <strong>entire model's weights</strong> plus <strong>all of this sequence's KV cache so far</strong> from memory, only to do one token's worth of multiply-adds. Most of the time is spent <strong>moving data</strong> while the math units sit idle. So piling on raw compute barely helps decode; the real cure is to grow the batch (so one weight read serves more sequences)—which raises a new tension.</p>
+<p>Put the two side by side and you reach a counterintuitive conclusion: <strong>the same GPU is nearly wrung dry during prefill, yet mostly idle during decode.</strong> The GPU isn't slacking—decode is a workload that inherently can't keep it fed; the bottleneck is the data path from memory to the compute units, not the compute itself. Grasp this and you understand the starting point of every scheduling trick that follows: either find a way for decode to piggyback on prefill's compute, or separate the two workloads entirely so each saturates its own bottleneck.</p>
+<p>Further, this contrast explains "why LLM inference feels so different from training." Training is almost entirely compute-bound big matmuls, where adding compute pays off immediately; in online serving, the decode phase that actually shapes the user experience is bandwidth-bound, and a stronger compute card alone may not make tokens come out faster. The reason SGLang invests so much in scheduling, batching, and KV management all traces back to this prefill-vs-decode axis.</p>
+
+<h2>2. How this contrast creates the throughput-vs-latency pull</h2>
+<p><strong>Lesson 8</strong>'s <strong>throughput vs latency</strong> fight is rooted right here. Two key metrics: <span class="mono">TTFT</span> (time to first token, driven mainly by prefill) and <span class="mono">ITL</span> (inter-token latency, driven by decode).</p>
+<p>What happens if you stuff both workloads into one serial queue? A very long prompt's prefill is a big compute-heavy chunk; once it hits the GPU it <strong>blocks every request that's currently decoding</strong>—everyone's ITL spikes and output stutters. Conversely, if you always favor smooth decode, new requests' prefill never gets scheduled and TTFT climbs.</p>
+<p>So the conflict surfaces: <strong>prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared.</strong> One GPU can't satisfy both at once. That's why SGLang can't simply go "first come first served" and must get clever at the scheduling layer.</p>
+<p>To make the tension concrete: suppose 30 sequences are decoding token by token on the GPU right now, a few milliseconds per step, so the user sees characters stream out steadily. Now an 8000-token prompt arrives; its prefill must push all 8000 tokens through the whole network in one pass—and if that compute-heavy block occupies the GPU as one chunk, those 30 decoding sequences stall for tens or even hundreds of milliseconds, and the user feels a "hitch". Conversely, if you defer that prefill indefinitely to avoid the hitch, the new user's first token (TTFT) never arrives. <strong>Whichever side you favor, the other suffers</strong>—that's the price of one engine serving two workloads.</p>
+<p>Precisely because this is a structural conflict—not a one-off mistuning—it needs a structural answer. The next two sections give SGLang's two structural ways out: one leaves the hardware alone and relies on scheduling (chunked prefill); the other changes the hardware layout directly and relies on separate machines (PD disaggregation).</p>
+
+<h2>3. Co-located time-sharing: chunked prefill</h2>
+<p><strong>Lesson 22</strong>'s <span class="mono">chunked prefill</span> is the <strong>co-located</strong> answer: since a whole block of prefill blocks decode, <strong>don't let it go in as one block</strong>. Slice the long prompt into chunks, process only one chunk of prefill per step, and <strong>pack it into the same batch</strong> as the decodes already running.</p>
+<p>Now in every step the GPU does <strong>both</strong> jobs: a small prefill chunk grabs the chance to fill the compute, and a batch of decodes piggybacks on that same weight read. Neither starves—prefill no longer monopolizes the whole GPU and smothers decode, and decode no longer idles waiting for one giant prefill to finish. It's <strong>smart scheduling</strong> that <strong>time-slices</strong> two workloads onto one GPU.</p>
+<p>The elegance is that it <strong>goes with the grain</strong>: decode is bandwidth-bound with most of its compute sitting idle, and that idle compute is exactly what a small compute-bound prefill chunk can use, with almost no extra bandwidth cost. In other words, chunked prefill lets two workloads with complementary bottlenecks <strong>fill each other's gaps</strong>—decode's spare compute goes to prefill, and prefill amortizes that step's weight read. The chunk size becomes a tuning knob: too big and a single chunk starts blocking decode again; too small and the fixed scheduling/launch overhead can't be amortized. That's the sweet spot Lesson 22 keeps weighing.</p>
+
+<h2>4. Separated machines: PD disaggregation</h2>
+<p><strong>Lesson 45</strong>'s <span class="mono">PD disaggregation</span> (Prefill-Decode Disaggregation) is the other path: since the two workloads are opposite in nature and interfere, just <strong>separate them physically</strong>. Give prefill one pool of GPUs and decode another; the prompt runs through the prefill pool first to compute its KV cache, then the <strong>KV is transferred across the network</strong> to the decode pool to keep generating token by token.</p>
+<p>The upside is that <strong>each pool saturates its own bottleneck without interference</strong>: the prefill pool can wring out compute, the decode pool can focus on growing the batch and using bandwidth fully, and each can scale and tune independently. The cost is an extra <strong>KV transfer</strong>—which is exactly the seam the code below guards.</p>
+<p>Why is this "seemingly more troublesome" approach worth it? Because in the co-located approach the two workloads forever contend for the same GPU; however clever the scheduler, there's always some squeeze between prefill chunks and decode. Once separated, the prefill pool is all uniform big parallel passes and can use the batching strategy best suited to compute-bound work, while the decode pool is all uniform token-by-token generation and can pile the batch up to the bandwidth limit—<strong>each pool is no longer dragged down by the other workload</strong>. In very large-scale online serving with strict SLAs on both TTFT and ITL, this physical isolation is often more reliable and less fiddly than penny-pinching on one card.</p>
+<p>Of course, separation is no free lunch. The KV cache can be hundreds of MB per sequence, and after the prefill pool computes it, it must be moved across the network to the decode pool, so that transfer link's bandwidth and latency become a new critical path—move it slowly and the decode side just waits. So PD disaggregation swaps an "in-GPU scheduling problem" for a "cross-machine data-movement problem", and the interface for that movement is exactly what <span class="mono">BaseKVManager</span> defines.</p>
+
+<div class="cols"><div class="col">
+<p><strong>Prefill: one big parallel pass (compute-bound)</strong></p>
+<p>The whole prompt arrives at once; hundreds-to-thousands of tokens flow through every layer together. Weights are read once and reused hundreds of times, keeping the GPU's multiply-add units <strong>fully fed</strong>.</p>
+<p><span class="mono">compute-bound</span>: the bottleneck is how fast you compute. A wide, thick chunk of work.</p>
+</div><div class="col">
+<p><strong>Decode: one token at a time (bandwidth-bound)</strong></p>
+<p>Only one token per step, yet the full weights + all KV are re-read, leaving the math units mostly idle.</p>
+<p><span class="mono">bandwidth-bound</span>: the bottleneck is how fast you move data. A skinny, long strip of work.</p>
+</div></div>
+
+<table class="t">
+<tr><th>Design response</th><th>The tension it resolves</th><th>Source</th></tr>
+<tr><td>Root contrast: compute-bound vs bandwidth-bound</td><td>why the two workloads are inherently different</td><td>Lesson 4</td></tr>
+<tr><td>Throughput vs latency (TTFT vs ITL)</td><td>a long prefill blocks everyone's decode</td><td>Lesson 8</td></tr>
+<tr><td>Co-located time-share: chunked prefill</td><td>slice prefill into decode's gaps, nobody starves</td><td>Lesson 22</td></tr>
+<tr><td>Separated machines: PD disaggregation</td><td>a pool each + transfer KV, each saturates without interfering</td><td>Lesson 45</td></tr>
+</table>
+
+<div class="flow"><div class="node">request</div><div class="arrow">→</div><div class="node">prefill workload (compute-bound)</div><div class="arrow">→</div><div class="node">KV cache</div><div class="arrow">→</div><div class="node">decode workload (bandwidth-bound)</div><div class="arrow">→</div><div class="node">streamed output</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>co-located</h4><p>One GPU <strong>time-shares</strong> both workloads—chunked prefill slices prefill and inserts it into decode's gaps.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>disaggregated</h4><p>The prefill pool and decode pool are <strong>independent</strong>, joined by a <strong>KV transfer</strong> that moves state from the prefill side to the decode side.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>same root tension</h4><p>Two reconciliations: smart scheduling, or physical separation.</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVManager</span><span class="ln">the seam that lets prefill and decode live on separate pools</span></div><pre>class BaseKVManager(ABC):
+    # base class for managing KV-transfer state — the seam that lets prefill
+    # and decode live on SEPARATE pools
+    @abstractmethod
+    def __init__(self, args, disaggregation_mode, ...):
+        # disaggregation_mode says which side this is: PREFILL or DECODE
+        ...
+    @abstractmethod
+    def register_to_bootstrap(self):
+        # register so a prefill worker can be PAIRED with a decode worker,
+        # then KV is transferred from the prefill side to the decode side
+        ...</pre></div>
+
+<p>Look at the code: <span class="mono">BaseKVManager</span> is the "seam" of the PD-disaggregation path. The <span class="mono">disaggregation_mode</span> passed at construction decides whether this process is the prefill side or the decode side—one interface, two roles. <span class="mono">register_to_bootstrap()</span> lets a prefill worker get <strong>paired</strong> with a decode worker; once paired, the KV cache is transferred from the prefill side to the decode side. The whole complexity of the disaggregated architecture is wrapped up behind this abstraction.</p>
+<p>Notice the design philosophy here: it's an <span class="mono">ABC</span> (abstract base class) with every method marked <span class="mono">@abstractmethod</span>. That means SGLang isn't bound to one concrete transport implementation—the backend can be RDMA, NVLink, or something else, as long as it implements this interface. <strong>The abstraction "prefill and decode live in separate pools" is cleanly decoupled from the implementation "which pipe actually moves the KV".</strong> This echoes another through-line of the whole book: layer the "what" apart from the "how", so the upper scheduling decisions need not care about the lower hardware details.</p>
+
+<h2>5. One axis explains many decisions</h2>
+<p>Now pull the camera all the way back. Lesson 4's compute-bound vs bandwidth-bound, Lesson 8's throughput vs latency, Lesson 22's chunked prefill, Lesson 45's PD disaggregation—these four lessons look like four separate topics, but they are four points on the same axis. The <strong>root tension</strong> (prefill and decode are opposite in nature) produces a <strong>pull</strong> (they contend for the same GPU), and the pull forces <strong>two reconciliations</strong> (co-located time-sharing, or separated machines).</p>
+<p>Master this axis and many design decisions that once needed rote memorization become derivable conclusions. Why have chunked prefill? Because you don't want a long prefill to block decode. Why do PD disaggregation? Because you want each bottleneck to saturate on its own. Why does the decode phase strive so hard to grow the batch? Because it's bandwidth-bound, so one more sequence reads almost no extra weights. <strong>Seemingly scattered optimizations all rest on the same sentence: prefill and decode are two workloads, and one engine must either let them coexist cleverly or separate them outright.</strong></p>
+<p>So next time you meet an unfamiliar scheduling knob or deployment mode in SGLang, don't rush to memorize it—first ask yourself: <strong>is it helping prefill and decode coexist better, or helping them separate more thoroughly?</strong> The answer almost always lands on one end of this axis. That's what "one axis explains the whole" really means—what you remember is no longer dozens of isolated rules, but the one root principle that generates them.</p>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>One root tension</strong>: prefill is a <span class="mono">compute-bound</span> big parallel pass; decode is a <span class="mono">bandwidth-bound</span> one-token-at-a-time squeeze (Lesson 4).</li>
+<li><strong>The tension creates a pull</strong>: a long prefill blocks everyone's decode, giving rise to throughput vs latency, TTFT vs ITL (Lesson 8).</li>
+<li><strong>Co-located time-sharing</strong>: chunked prefill slices prefill into decode's gaps, so one GPU time-slices to serve both workloads (Lesson 22).</li>
+<li><strong>Separated machines</strong>: PD disaggregation gives each workload its own GPU pool and transfers the KV across, so each saturates its own bottleneck without interference (Lesson 45).</li>
+<li><strong>One axis explains the whole</strong>: the prefill-vs-decode axis explains many seemingly unrelated SGLang decisions—reconciled either by smart scheduling or by physical separation.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the 'one root tension' this lesson is about?</div>
+  <ol class="opts">
+    <li>The tension exists only across multiple GPUs, never on a single one</li>
+    <li><strong>prefill is a compute-bound big parallel pass while decode is bandwidth-bound token-by-token generation; opposite in nature yet sharing one engine</strong></li>
+    <li>decode is the compute-bound one and prefill is bandwidth-bound</li>
+    <li>prefill and decode are really the same workload under different names</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Prefill processes the whole prompt at once—weights read once, reused by hundreds of tokens—so its arithmetic intensity is high and it saturates the math units: compute-bound. Decode emits one token per step yet re-reads the full weights + all KV, low arithmetic intensity, math units mostly idle: bandwidth-bound. One engine must serve both—the root tension seeded in Lesson 4.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why do prefill and decode 'fight each other' on the same GPU?</div>
+  <ol class="opts">
+    <li><strong>A very long prompt's prefill is a big compute-heavy chunk; queued serially it blocks every decoding request, spiking everyone's ITL and pitting TTFT against ITL</strong></li>
+    <li>Because GPU memory is too small to hold two copies of the weights</li>
+    <li>Because they use different attention algorithms that are incompatible</li>
+    <li>They don't actually fight; first-come-first-served satisfies both</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared. Stuff both into one serial queue and a long prefill, once on the GPU, blocks every decoding request and spikes ITL (Lesson 8's throughput vs latency). One GPU can't satisfy both, so the scheduler must get clever.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What distinguishes the 'co-located (chunked prefill)' path from the 'separated (PD disaggregation)' path?</div>
+  <ol class="opts">
+    <li>They are identical, just named differently</li>
+    <li>chunked prefill needs two GPU pools while PD needs only one GPU</li>
+    <li><strong>chunked prefill slices prefill into decode's gaps so one GPU time-shares both (L22); PD disaggregation gives each workload its own GPU pool and transfers the KV, so each saturates its own bottleneck without interference (L45)</strong></li>
+    <li>PD disaggregation needs no KV transfer; only chunked prefill does</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Both solve the same problem: chunked prefill is the co-located answer—smart scheduling slices prefill and packs it into the same batch as decode, time-sharing one GPU; PD disaggregation is the separated answer—physically split into prefill and decode pools, with the BaseKVManager seam moving KV from the prefill side to the decode side. One via scheduling, one via physical separation.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why simply piling more compute onto the decode phase barely helps, while growing the batch is the real cure. Using the fact that 'each decode step re-reads the full weights + all KV', argue why decode is bandwidth-bound rather than compute-bound.</li>
+    <li>The lesson claims 'one axis explains the whole'. Pick at least three of Lessons 4, 8, 22, 45 and show how the prefill-vs-decode root tension explains these seemingly unrelated designs—each reconciling it either by smart scheduling (co-located) or by physical separation (disaggregated).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="59-zero-overhead-scheduling.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">零开销调度的哲学</span><span class="lang-en">Zero-overhead scheduling</span></div></a><a class="next" href="61-draft-for-parallel-verify.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">用草稿换并行验证</span><span class="lang-en">Draft for parallel verify</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 57 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 63 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -393,6 +393,12 @@ details[open] > summary { list-style: none; }
   <li>Test suite & CI</li>
   <li>Conventions & opening a PR</li>
   <li>Glossary</li>
+  <li>RadixAttention as a first-class idea</li>
+  <li>Zero-overhead scheduling</li>
+  <li>Two workloads, one engine</li>
+  <li>Draft for parallel verify</li>
+  <li>Everything is pluggable</li>
+  <li>Built for throughput</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -10139,6 +10145,788 @@ git push origin my-feature</pre></div>
 </table>
 
 
+</section>
+<section class="lesson-print">
+<h1>RadixAttention as a first-class idea</h1>
+
+<p class="lead">If you spread out the first thirty-odd lessons like puzzle pieces, one pattern keeps reappearing—<strong>shared prefixes</strong>. It is not a local trick tucked in one corner; it is a <strong>first-class idea</strong> that runs from SGLang's language layer all the way down to its memory layer: treat every request as a node in one <span class="mono">radix tree of shared prefixes</span>, match the longest already-cached prefix, reuse its KV, and compute only the newly-appeared suffix. Grasp this single idea and you stitch together a third of the whole guide at once.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a <strong>family library</strong>. A new book is not reprinted from page one; it first checks the shelves: is there already a book whose first few hundred pages are identical to mine? If so, it simply <strong>borrows and shares</strong> that identical stack of paper and only prints the new chapters that begin at the point of divergence. The shelf itself is organized as a <strong>tree</strong>: the root is the opening common to all books, branching grows as you descend, and each fork records the position where "from here on we differ."</p>
+<p>Even better, this "share the opening" rule is not one librarian's private habit. The authors (the DSL) <strong>deliberately</strong> make several versions share the same opening; the library's expansion blueprint (the cache concept) states this intent from the start; the physical shelf slots (paged memory) are laid out by this rule; even the borrowing queue (scheduling) favors readers whose opening matches the stock; and when shelves overflow, old books are <strong>tiered</strong> down to the basement, then to off-site storage—yet the tree shape never changes. That is what "first-class" means: the same idea written, on purpose and repeatedly, into every layer of the system, rather than patched in as an afterthought.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Many systems treat the "prefix cache" as an afterthought patch: finish the inference engine, then bolt an LRU dictionary onto the side. SGLang takes the opposite path—it makes <strong>"the KV cache itself is a radix tree of shared prefixes"</strong> the core data structure, and the entire engine revolves around it. <span class="mono">RadixAttention</span> is not an isolated operator but a <strong>way of organizing everything</strong>: the DSL's <span class="mono">fork/join</span> (<strong>Lesson 11</strong>) manufactures shared prefixes at the language layer; the prefix-cache concept (<strong>Lesson 7</strong>) is raised early on; the radix-tree implementation (<strong>Lesson 29</strong>) makes the cache literally a <span class="mono">RadixCache</span> of <span class="mono">TreeNode</span>s; paged KV (<strong>Lesson 30</strong>, building on <strong>Lesson 6</strong>) is the physical pages those nodes point at; cache-aware scheduling (<strong>Lesson 20</strong>) lets high-hit requests run first so the cache pays off; and HiCache (<strong>Lesson 31</strong>) tiers that same prefix tree across GPU/CPU/disk. Connected, they form a web, not a string of isolated dots; remove any one thread and the web sags.</p>
+</div>
+
+<h2>1. Why "shared prefixes" earns the title "first-class"</h2>
+<p>The test for whether an idea is a system's first-class citizen is simple: is it written, <strong>on purpose and repeatedly</strong>, into multiple non-adjacent layers, and does changing it ripple across the whole system? Shared prefixes pass cleanly. It started as a plain observation: in real workloads, many requests begin <strong>identically</strong>—the same system prompt, the same few-shot examples, the same conversation history, the same several branches <span class="mono">fork</span>ed from one prompt. Since the openings match, the KV they produce in attention is <strong>byte-for-byte identical</strong>. Recomputing that KV burns memory and compute for nothing.</p>
+<p>SGLang did not demote this to an "optional optimization"; it promoted it to <strong>the shape of a data structure</strong>. Once you accept "the cache is a tree," many designs stop being coincidences: <span class="mono">match_prefix</span> is naturally "walk to the deepest known node," <span class="mono">insert</span> is naturally "split a node where prefixes diverge," <span class="mono">evict</span> is naturally "reclaim from the leaves, because leaves are the tails no one shares," and <span class="mono">inc_lock_ref</span> is naturally "pin nodes in use so eviction can't take them." Once the tree shape is fixed, the algorithms are <strong>forced out</strong> by it rather than cobbled together.</p>
+<p>The reverse thought confirms it: what if it had not been treated as first-class from the start? You would likely first write a naive per-request engine, then one day discover "the system prompt was recomputed a thousand times," and hastily add a hash-table cache of the whole prompt's KV. But you would soon hit a wall—users' prompts share only the <strong>prefix</strong> while the rest differs, so whole-string hashing never hits; you would be forced into <strong>longest-common-prefix</strong> matching, and the most natural data structure for efficiently prefix-matching a flood of sequences is precisely a <strong>radix tree</strong>. In other words, take "prefix reuse" seriously and you are almost inevitably pushed to the same destination. SGLang's cleverness is to acknowledge that destination <strong>from the outset</strong> and build the engine directly on it, skipping all the "do it wrong, then patch" detours. That is the value of promoting the right idea to a structure early.</p>
+
+<p>This also answers an often-overlooked question: why does SGLang dare to depend on prefix sharing in so many places without worrying that "an occasional miss wastes all the effort"? Because when it is a structure rather than a bolt-on, a miss merely degrades to the ordinary case of "the whole thing is a new suffix"—the tree can still hold, insert, and reclaim it, with no special fallback path needed. An idea promoted to a data structure naturally has <strong>graceful degradation</strong>: more hits save more, fewer hits are no worse, and it never crashes because "the cache wasn't ready." This "the worst case never gets worse" robustness is precisely the most overlooked yet most precious dividend of making it first-class.</p>
+
+<h2>2. One idea, a different face at every layer</h2>
+<p>What is truly striking is that <strong>shared prefixes</strong> appear <strong>in costume</strong> at different layers while staying the same thing underneath. At the DSL layer (<strong>Lesson 11</strong>), you write <span class="mono">fork</span> to split one prompt into branches and <span class="mono">join</span> to merge them—you are <strong>explicitly manufacturing</strong> a shared prefix at the language layer, expecting the engine not to recompute it. At the conceptual layer (<strong>Lesson 7</strong>), the "prefix cache" is offered as a promise: identical openings are computed once. At the implementation layer (<strong>Lesson 29</strong>), that promise becomes <span class="mono">RadixCache</span>, where each <span class="mono">TreeNode</span> carries a token-id span on its edge (<span class="mono">key</span>) and the matching KV indices (<span class="mono">value</span>). At the physical layer (<strong>Lesson 30</strong>, built on the paging of <strong>Lesson 6</strong>), a node's <span class="mono">value</span> points at pages of paged-KV. At the scheduling layer (<strong>Lesson 20</strong>), the scheduler favors requests with <strong>high prefix hit rate</strong>, because reuse is what makes the stored KV worthwhile. At the tiered-storage layer (<strong>Lesson 31</strong>), HiCache tiers that tree by temperature—hot on GPU, warm on CPU, cold on disk.</p>
+<p>Six faces, one soul. They mesh so tightly precisely because they all assume the same shared-prefix worldview. Study any single lesson and it looks like a local trick; stack Lessons 7, 11, 20, 29, 30, and 31 together and you finally see the spine running through them all.</p>
+<p>It helps to walk one concrete chain end to end. In a multi-turn chat app, the developer uses <span class="mono">fork</span> in the DSL (Lesson 11) to split the same history into three candidate replies; conceptually (Lesson 7) the three share one opening, so the engine should compute it once. In implementation (Lesson 29), that history becomes one <span class="mono">TreeNode</span> in <span class="mono">RadixCache</span> shared by three requests, whose <span class="mono">value</span> points at several physical pages (Lesson 30, on Lesson 6). The scheduler (Lesson 20), seeing the three requests' prefixes overlap heavily, places them together and runs them almost simultaneously, keeping that shared KV "hot" in memory for repeated hits. As the conversation grows and memory tightens, HiCache (Lesson 31) tiers that now-cooler history down to CPU or even disk, recalling it as a whole segment when needed. From the moment the developer types <span class="mono">fork</span> to the migration of that KV across three storage tiers, it is <strong>the same node on the same tree</strong> being tended by different layers in different ways. That is the most concrete picture of "one idea running through the full stack."</p>
+
+<h2>3. From "an optimization glued on" to "a structure grown into the skeleton"</h2>
+<p>The difference is not merely aesthetic. Treating prefix sharing as a bolt-on means the cache and the engine are two separate logics: the cache knows nothing about scheduling, scheduling never yields for the cache, and hits are pure luck. Treating it as first-class means the scheduler knows the tree's shape, can estimate hits, and can actively cluster similar requests; it means the memory manager knows how many requests share which pages and must not reclaim them carelessly; it means tiered storage can move whole segments along tree boundaries instead of scattered copies. Only after an idea is promoted to a structure can the whole system coordinate around it.</p>
+<p>This also explains why the name <span class="mono">RadixAttention</span> holds both "Radix (radix tree)" and "Attention": attention consumes KV, and KV is organized as a radix tree. The operator and the data structure here are <strong>two sides of one coin</strong>, not a before-and-after.</p>
+<p>There is another easily-underestimated benefit: when the cache is one tree shared across the whole system, <strong>cross-request</strong> reuse becomes the default behavior rather than an extra feature. Two completely unrelated users, as long as they happen to use the same system prompt, automatically land on the same shared-prefix node, and the compute the second one saves is "free." Replace this with a bolt-on cache and you must design a separate cross-request lookup-and-dedup logic; in the tree structure it is just <span class="mono">match_prefix</span> naturally walking to the same node. In other words, the first-class design turns "the most valuable reuse" into a zero-cost by-product—which is exactly why it saves enormous compute under real high-concurrency workloads.</p>
+
+<h2>4. How a single request lives out its life on this tree</h2>
+<p>Zoom back to one request: it arrives with a token sequence, first runs <span class="mono">match_prefix</span>, walks down the tree, and finds the <strong>longest prefix</strong> overlapping with the stock; that prefix's KV is <strong>reused</strong> as-is (and <span class="mono">inc_lock_ref</span> pins it so it won't be evicted mid-flight); the engine truly forward-computes only the <strong>newly-appeared suffix</strong>; afterward <span class="mono">insert</span> hangs that new suffix back onto the tree, splitting a node at the divergence so future requests can share it too. This lifecycle—"match the longest prefix → reuse KV → compute only the new suffix → write back to the tree"—is the entire essence of <span class="mono">RadixAttention</span>, and the four diagrams below pull it apart from different angles.</p>
+<p>Two details deserve a pause. First, the "pinning" of <span class="mono">inc_lock_ref</span> is necessary because reuse and reclamation coexist on the same tree: while request A is computing down some shared prefix, the reclamation logic (<span class="mono">evict</span>) must never snatch that prefix's pages away, or A would "step into the void" mid-computation. Reference counting makes "who is using it" visible, so eviction only dares touch leaves no one references. Second, the "node splitting" of <span class="mono">insert</span> is the key to the tree continually growing shared structure: when a new suffix shares only the first half of an existing node, the system splits the old node in two at the divergence—the common upper half stays shared by both, the differing lower halves become two children. This "split on demand" keeps the radix tree in a compact "share what can be shared, fork exactly where it must" shape, rather than degenerating into a heap of unrelated full strings. Understand pinning and splitting and you understand <strong>why this tree is both safe and efficient</strong>.</p>
+
+<table class="t">
+<tr><th>Where shared prefixes appear</th><th>The role it plays there</th></tr>
+<tr><td>DSL fork/join (<strong>Lesson 11</strong>)</td><td>The language layer <strong>deliberately</strong> makes branches share one opening—the source of the "shared prefix"</td></tr>
+<tr><td>Prefix-cache concept (<strong>Lesson 7</strong>)</td><td>An early promise: identical openings are computed once, setting the tone for the implementation</td></tr>
+<tr><td>Radix-tree implementation (<strong>Lesson 29</strong>)</td><td>The promise lands: <span class="mono">RadixCache</span> made of <span class="mono">TreeNode</span>s—the cache IS this tree</td></tr>
+<tr><td>Paged KV (<strong>Lesson 30</strong>, on <strong>Lesson 6</strong>)</td><td>The physical pages a node's <span class="mono">value</span> points at—where prefixes actually live</td></tr>
+<tr><td>Cache-aware scheduling (<strong>Lesson 20</strong>)</td><td>Lets high prefix-hit requests through first so the stored KV truly pays off</td></tr>
+<tr><td>HiCache tiering (<strong>Lesson 31</strong>)</td><td>Tiers that same prefix tree by temperature across GPU/CPU/disk</td></tr>
+</table>
+
+<div class="layers">
+<div class="layer">root: the common starting point of all requests (empty prefix)</div>
+<div class="layer">shared-prefix node: the token span of <span class="mono">"You are a helpful assistant…"</span> + KV indices, shared by many requests</div>
+<div class="layer">divergence point: tokens differ from here, so the node is split into multiple children</div>
+<div class="layer">branch A leaf: the unique suffix of user question one</div>
+<div class="layer">branch B leaf: the unique suffix of user question two (sharing the whole prefix above with A)</div>
+</div>
+
+<div class="cols">
+<div class="col"><strong>Bolt-on optimization</strong><br/>The cache is an LRU dictionary beside the engine; scheduling knows nothing of it; hits are luck; tiering can only copy scattered blocks; changing the cache ripples nowhere.</div>
+<div class="col"><strong>First-class data structure</strong><br/>The cache IS a radix tree; scheduling estimates hits and actively clusters; memory pins/reclaims by sharing relationships; tiering moves whole segments along tree boundaries; one idea unifies the whole system.</div>
+</div>
+
+<div class="flow">
+<div class="node">request arrives with tokens</div>
+<div class="arrow">→</div>
+<div class="node">match_prefix finds the longest cached prefix</div>
+<div class="arrow">→</div>
+<div class="node">reuse that prefix's KV (inc_lock_ref pins it)</div>
+<div class="arrow">→</div>
+<div class="node">forward-compute only the new suffix</div>
+<div class="arrow">→</div>
+<div class="node">insert writes back to the tree, splitting at divergence</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache</span><span class="ln">the KV cache IS a radix tree of shared prefixes</span></div><pre>class TreeNode:
+    def __init__(self):
+        self.children = defaultdict(TreeNode)  # edge -&gt; child: the radix tree itself
+        self.key = None                        # the token-id span on the edge into this node
+        self.value = None                      # the KV cache indices for that span
+
+class RadixCache(BasePrefixCache):
+    # the prefix cache IS a radix tree of shared-prefix nodes
+    def match_prefix(self, params):   # walk the tree; return the longest already-cached prefix
+        ...
+    def insert(self, params):         # add a sequence's KV, splitting nodes where prefixes diverge
+        ...
+    def evict(self, params):          # LRU-evict evictable leaves to reclaim pages
+        ...
+    def inc_lock_ref(self, node):     # pin in-use nodes so eviction can't take them
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>First-class, not bolt-on:</strong> SGLang treats "the KV cache is a <span class="mono">radix tree of shared prefixes</span>" as the core data structure the whole engine revolves around, not an LRU cache glued on afterward.</li>
+<li><strong>Six faces of one idea:</strong> DSL fork/join (<strong>Lesson 11</strong>), the prefix-cache concept (<strong>Lesson 7</strong>), the radix-tree implementation (<strong>Lesson 29</strong>), paged KV (<strong>Lesson 30</strong>, on <strong>Lesson 6</strong>), cache-aware scheduling (<strong>Lesson 20</strong>), and HiCache tiering (<strong>Lesson 31</strong>) are all the same thing.</li>
+<li><strong>The lifecycle:</strong> match the longest prefix → reuse KV → compute only the new suffix → write back to the tree is the entire essence of <span class="mono">RadixAttention</span>.</li>
+<li><strong>Structure forces the algorithms:</strong> once the cache is a tree, <span class="mono">match_prefix/insert/evict/inc_lock_ref</span> are natural consequences of the tree shape.</li>
+<li><strong>Grasp it and a third of the guide connects:</strong> recognizing this one organizing idea suddenly weaves many seemingly independent lessons into a web.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. This lesson says RadixAttention is a 'first-class idea' in SGLang, not a 'bolt-on optimization'. What does that most accurately mean?</div>
+  <ol class="opts">
+    <li>It is just the fastest attention CUDA kernel, unrelated to cache structure</li>
+    <li>It is a standalone microservice that must be deployed separately</li>
+    <li>It is merely optional syntactic sugar at the DSL layer that the engine does not rely on</li>
+    <li><strong>'The KV cache is a radix tree of shared prefixes' is treated as the core data structure the whole engine is designed around, not a separate LRU dictionary glued on afterward</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. First-class means the idea is written, on purpose and repeatedly, into many layers: the cache's very shape is a radix tree. Scheduling, memory, and tiering all coordinate around it, so changing it ripples across the whole system — the hallmark of a structure, not a bolt-on.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which group of lessons are 'really about the same thing' — the single idea of shared prefixes wearing a different face at each layer?</div>
+  <ol class="opts">
+    <li>Log format, CI pipeline, PR conventions, docs directory</li>
+    <li><strong>DSL fork/join (Lesson 11), prefix-cache concept (Lesson 7), radix-tree implementation (Lesson 29), paged KV (Lesson 30, on Lesson 6), cache-aware scheduling (Lesson 20), HiCache tiering (Lesson 31)</strong></li>
+    <li>Quantization, tensor parallelism, speculative decoding, sampling temperature</li>
+    <li>REST routing, auth, rate limiting, monitoring dashboard</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. These six lessons describe the same shared-prefix worldview at the language, concept, implementation, physical, scheduling, and tiering layers: deliberately create sharing, promise to compute once, land as a radix tree, point at pages, favor hits, and tier by temperature. Stack them and the spine appears.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Placed on this tree, what is a request's 'lifecycle' in the correct order?</div>
+  <ol class="opts">
+    <li><strong>match_prefix finds the longest cached prefix → reuse that prefix's KV (inc_lock_ref pins it) → forward-compute only the new suffix → insert writes back, splitting the node at divergence</strong></li>
+    <li>Evict all leaves first → then match prefix → compute last</li>
+    <li>Recompute the whole sequence's KV → fill the entire tree → then delete duplicates</li>
+    <li>Compute only the prefix and discard the new suffix to save memory</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The essence is 'match the longest prefix → reuse KV → compute only the new suffix → write back to the tree'. The reused prefix is pinned by inc_lock_ref so it isn't evicted mid-flight, and after the new suffix is computed, insert hangs it back and splits the node at divergence so future requests can share it. This avoids recomputing identical openings.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why treating 'shared prefixes' as a first-class data structure (a radix tree) rather than an LRU cache bolted beside the engine lets scheduling (Lesson 20), paged memory (Lesson 30), and tiering (Lesson 31) all coordinate around it. Contrast the fundamental difference between the two approaches.</li>
+    <li>Pick at least three of the 'different faces of shared prefixes' from this lesson (e.g., DSL fork/join Lesson 11, the prefix-cache concept Lesson 7, the radix-tree implementation Lesson 29), explain why they are the same thing underneath, then use 'match the longest prefix → reuse KV → compute only the new suffix' to trace a request's full path through RadixCache.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Zero-overhead scheduling</h1>
+
+<p class="lead">If you thread together many of the earlier lessons, you find they all answer one question: <strong>how do we make sure the GPU never waits for the CPU?</strong> This is the design north star of SGLang's scheduling subsystem—<span class="mono">zero-overhead scheduling</span>. A modern GPU's forward pass is absurdly fast, so any work the CPU does <strong>before</strong> or <strong>after</strong> the forward (scheduling, allocating, tokenizing, detokenizing, building the next batch) becomes a "bubble" where the GPU sits idle. This lesson teaches no new mechanism; instead it strings lessons 14, 16, 18, 21, 22, and 27 together like beads so you can see the single thread running through them all.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture the <strong>open kitchen</strong> of a high-end restaurant. The head chef (the GPU) has terrifying knife skills—a dish leaves the pan in ten seconds. But if after every dish the chef has to wash, chop, plate, and write the next ticket themselves (all CPU work), the chef spends most of the time <strong>idle</strong>, the stove going cold. The smart move: while the chef cooks <strong>dish N</strong>, a runner has already prepped <strong>dish N+1</strong> and is plating and carrying away <strong>dish N-1</strong>. The chef's stove <strong>never stops</strong>. SGLang's <span class="mono">overlap scheduler</span> does exactly this: it hides all the CPU "prep and plating" behind the GPU's "cooking" time.</p>
+<p>The analogy stretches further. If a guest orders a dish that needs two hours of slow braising (a very long prefill), a clever kitchen won't let the chef babysit that one pot while everyone else's food goes cold; it <strong>tends the braise in installments</strong>, cooking quick dishes in between—that is chunked prefill. If plating and ticket-writing pile up, just <strong>hire a separate runner</strong> at another station to do nothing else, so the chef never even glances at it—that is the process split. You'll find the whole wisdom of an efficient kitchen distills into one line: <strong>never let the chef sit idle</strong>.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>"Zero-overhead" doesn't mean the CPU does no work—it means the CPU's work costs <strong>no extra wall-clock time</strong>, because it is <strong>overlapped</strong> into the GPU's forward pass. Each step of an inference engine is logically: CPU schedule/pick batch → GPU forward → CPU process results (sample, append token, check stop). Run serially, the GPU sits <strong>idle</strong> during both CPU segments. SGLang's whole scheduling design—from the <strong>event loop (L18)</strong>, the <strong>overlap scheduler (L21)</strong>, <strong>chunked prefill (L22)</strong>, <strong>CUDA graphs (L27)</strong>, to the <strong>process split + IPC (L14/16)</strong>—is the same sentence from different angles: <span class="mono">find every CPU bubble and hide it behind GPU compute</span>.</p>
+<p>This "philosophy" deserves its own lesson because it can <strong>turn around and help you read the whole system</strong>. Many people learning SGLang treat these mechanisms as an <strong>unrelated feature checklist</strong> to memorize one by one, and end up only able to copy someone else's command line when tuning. But once you seize the single thread "don't let the GPU wait," you can understand <strong>top-down</strong> why each mechanism exists: not to show off, but to plug one specific bubble. The goal of this lesson is to <strong>pull that hidden thread out into the open</strong>, upgrading you from "memorizing many moves" to "grasping one underlying art."</p></div>
+
+<h2>1. Where bubbles come from: the GPU is fast, the CPU is "in the way"</h2>
+<p>Quantify the problem first. A single decode forward on a large model may take only a few milliseconds, or less. Yet the CPU work around it is not small: it must <strong>pick runnable requests</strong> from the waiting queue, <strong>allocate KV-cache pages</strong> for them, and <strong>move tensors</strong> onto the device; after the forward it must <strong>sample</strong> the next token, <strong>append</strong> it to each sequence, <strong>check stop conditions</strong>, and <strong>send</strong> finished results back to the tokenizer process. Each of these is microseconds to milliseconds—trivial alone, but the moment they are <strong>strung before and after</strong> the GPU, the GPU must wait. That idle gap is the bubble.</p>
+<p>A bubble is dangerous because it <strong>produces no value yet consumes wall-clock time</strong>. The GPU is the most expensive resource in the whole machine; you bought it to keep it saturated with matrix multiplies. The instant it must stop before and after every step to wait for the CPU to prepare the next batch, its <strong>real utilization</strong> is halved. You thought you bought a card that runs flat-out, but half the time it dozes. Worse, this waste <strong>accumulates across steps</strong>: generating a thousand-token answer takes a thousand steps, and the bit of time lost each step times a thousand is visible latency and throughput loss. Seen another way, throughput is roughly proportional to the GPU's effective occupancy, and every bubble you plug is a slice of compute you get <strong>for free</strong>—compute you have <strong>already paid for</strong>, that was sitting in the card all along and merely wasted before.</p>
+<p>The key insight: <strong>the faster the GPU, the larger the bubble's relative share</strong>. A decade ago GPUs were slow and that CPU overhead drowned in the compute; today a GPU step takes a few milliseconds, so a few CPU milliseconds become a <strong>fifty-fifty</strong> waste. In other words, the more advanced the hardware, the worse the waste if the software fails to hide CPU overhead—a <strong>counter-intuitive</strong> conclusion: upgrading the GPU without matching scheduler optimization may pour half the extra money down the drain. So "killing bubbles" graduates from a nice-to-have into the <strong>number-one factor deciding throughput</strong>. That is exactly why SGLang names its scheduler "zero-overhead"—its objective is to push GPU occupancy toward 100%.</p>
+
+<h2>2. The main thread: the event loop and overlap scheduling</h2>
+<p>At the heart of everything is the <strong>scheduler's event loop (L18)</strong>. It is a never-resting <span class="mono">while True</span>: take requests, form a batch, launch the forward, collect results, form the next batch. The whole inference engine "pumps" the system around this loop, emitting one batch of tokens per turn. A naive event loop is <strong>serial</strong>—form the batch, then launch, then wait for results, then form the next. That is the breeding ground for bubbles: at the two boundaries "launch forward" and "collect results", either the GPU or the CPU must be waiting on the other.</p>
+<p>The <strong>overlap scheduler (L21)</strong> turns that serial loop into a <strong>pipeline</strong>: while the GPU runs <span class="mono">forward(batch N)</span>, the CPU <strong>is not idle</strong>—it is already <strong>assembling batch N+1</strong> (pick requests, allocate pages, move tensors) and <strong>processing batch N-1's results in parallel</strong> (sample, append token, check stop). Note a subtle but important point: the CPU processes the results of the <strong>previous</strong> step, not the one just launched—because that forward hasn't finished yet. It is precisely this <strong>off-by-one-beat</strong> arrangement that keeps the CPU always busy and the GPU never waiting.</p>
+<p>All of this is controlled by the <span class="mono">enable_overlap</span> switch (the opposite of <span class="mono">--disable-overlap-schedule</span>). Once enabled, the CPU's scheduling and result handling are "tucked into" the shadow of the GPU forward, becoming nearly <strong>invisible</strong> in wall-clock time. The cost is that the engine must hold <strong>several steps' intermediate state</strong> at once (N-1, N, N+1), raising implementation complexity and making debugging harder—but this is where the words "zero-overhead" actually land, and it is worth it. Turn overlap off and the engine falls back to that naive serial loop: correctness unchanged, but GPU utilization and throughput drop noticeably. This also explains why it is on by default: for the vast majority of production loads, trading a little extra memory for nearly double the effective compute is as good a bargain as it gets.</p>
+
+<h2>3. The other beads: chunked prefill, CUDA graphs, process split</h2>
+<p>The same thread strings three more beads. <strong>Chunked prefill (L22)</strong> tackles a different bubble: if a very long prompt's prefill runs all at once, it fills the entire forward and every request currently decoding gets <strong>stalled</strong> waiting for it, causing a latency spike. SGLang <strong>slices</strong> the long prefill into chunks and <strong>interleaves</strong> them with decode—each step packs in a little new-prompt prefill while still serving the old generating requests—so a single big job can't clog the whole pipeline. Still the same idea: "don't let one segment break the GPU's rhythm," thinning a long-bubble-causing big task into many small ones that disturb no one.</p>
+<p><strong>CUDA graphs (L27)</strong> fight the <strong>kernel-launch overhead</strong> bubble: every CUDA kernel launch costs the CPU a fixed amount, a decode step launches dozens to hundreds of kernels, which adds up to real CPU time, and during it the GPU often waits for the next kernel to be submitted. CUDA graphs <strong>record the whole chain of kernels into one graph</strong> and later <strong>replay</strong> it to run the entire sequence on the GPU, so the CPU barely participates in launching one by one—another form of "don't let the CPU bottleneck the GPU," aimed squarely at decode, the <strong>many-small-kernel</strong> scenario most easily dragged down by launch overhead.</p>
+<p>Finally, the <strong>process split + IPC (L14/16)</strong>. SGLang puts <span class="mono">TokenizerManager</span> and <span class="mono">DetokenizerManager</span> in <strong>separate processes</strong> from the scheduler + GPU, passing messages over IPC (inter-process communication). So pure-CPU work like tokenize and detokenize is <strong>not</strong> on the forward's critical path at all—it runs in other processes, naturally parallel to GPU compute, no deliberate "overlap" even required, with the OS process scheduler staggering them for you. It also sidesteps Python's global interpreter lock (GIL): the tokenizer process's CPU usage can't slow the scheduler process. The process split is, in effect, <strong>physically isolating</strong> the bubble off the critical path.</p>
+
+<h2>4. Threading every bead into one sentence</h2>
+<p>Now step back and see the whole. Lessons 18, 21, 22, 27, 14, 16 look like six different mechanisms, but at the bone they are six implementations of <strong>one design philosophy</strong>: <span class="mono">enumerate every CPU bubble that could make the GPU wait, then hide it behind GPU compute, or move it to another process entirely</span>. The event loop gives the "pump" skeleton, overlap scheduling hides scheduling and result processing in the shadow, chunked prefill thins long tasks, CUDA graphs erase launch overhead, the process split moves tokenize/detokenize away—each bead targets one specific shape of bubble.</p>
+<p>Once you grasp this thread, every scheduling-related switch (<span class="mono">--disable-overlap-schedule</span>, <span class="mono">--chunked-prefill-size</span>, <span class="mono">--disable-cuda-graph</span>) immediately reveals which kind of bubble it is fighting, and you can predict which bubble re-emerges when you turn it off. That is the power of synthesis: what you remember is no longer six isolated parameters but <strong>one principle that lets you derive new optimizations yourself</strong>. Next time you meet a new CPU cost, you'll instinctively ask: "Can it hide behind GPU compute? Can it move to another process?"—and that is the true meaning of zero-overhead scheduling as the design north star of the entire scheduling subsystem.</p>
+
+<h2>5. One concrete round: walking the principle through</h2>
+<p>After all the abstraction, let's ground it in a real generation round and watch the zero-overhead principle act on every beat. Suppose the engine is decoding dozens of concurrent requests when a new request carrying a very long prompt arrives. With no optimization, this beat goes: the CPU stops to run the new request's full prefill (slow) while every old request waits idle; only after prefill does decode get a turn; once the decode forward is launched the CPU must fire off hundreds of kernels one by one; after the forward returns it serially samples, appends tokens, and checks stops. The GPU has at least <strong>three</strong> obvious idle stretches in this single beat.</p>
+<p>Now turn on SGLang's full machinery. <strong>Chunked prefill</strong> first slices that long prompt into chunks and packs only one chunk into this beat, <strong>batched together</strong> with the dozens of old requests' decode, so no one starves. <strong>CUDA graphs</strong> let that batch's hundreds of kernels replay in one shot, the CPU no longer launching them individually. <strong>Overlap scheduling</strong> ensures that while this beat's forward runs on the GPU, the CPU is already <strong>picking the next beat's requests and allocating pages</strong> while <strong>appending the previous beat's sampled tokens</strong> back into their sequences and checking which requests should stop. Those finishing requests are sent back to the user through the <strong>process-split</strong> channel—<span class="mono">DetokenizerManager</span> turns token ids back into text in another process, never touching the current forward's critical path.</p>
+<p>After one beat, the three idle stretches are packed full: the long prefill is thinned, kernel launches are erased, scheduling and result processing are hidden in the shadow, and tokenize/detokenize are physically isolated into other processes. The GPU is busy almost end to end. Repeat this beat a thousand times and you have a full generation; carry the zero-overhead principle into every beat and you have SGLang's underlying secret to high throughput. <strong>You'll find that "zero-overhead" is not one clever algorithm but a near-obsessive habit: whenever you see any stretch where the GPU might wait, find some other useful work to stuff into it.</strong></p>
+
+<div class="flow"><div class="node">CPU pick/allocate</div><div class="arrow">→</div><div class="node">GPU forward(N)</div><div class="arrow">→</div><div class="node">CPU sample/append</div><div class="arrow">→</div><div class="node">GPU idle (bubble)</div><div class="arrow">→</div><div class="node">CPU pick(N+1)</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>GPU is running forward(batch N)</h4><p class="mono">run_batch(batch_N)</p><p>This is the most expensive, longest step in the pipeline; the GPU runs at full tilt.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>same instant · CPU assembles batch N+1</h4><p class="mono">get_next_batch_to_run()</p><p>Pick requests, allocate KV pages, move tensors—all done quietly in the GPU's busy shadow.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>same instant · CPU processes batch N-1's results</h4><p class="mono">process_batch_result(prev)</p><p>Sample, append token, check stop, send results back—parallel to GPU compute.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>→ GPU never idles</h4><p class="mono">enable_overlap=True</p><p>The stove never stops; CPU overhead is fully invisible in wall-clock time.</p></div></div></div>
+
+<table class="t"><tr><th>CPU bubble</th><th>how SGLang hides it</th><th>lesson</th></tr>
+<tr><td>schedule / result processing</td><td>event loop + overlap scheduler, CPU work tucked into the GPU forward's shadow</td><td>L18 / L21</td></tr>
+<tr><td>a long prefill clogs the pipeline</td><td>chunked prefill, slice the long prefill and interleave with decode</td><td>L22</td></tr>
+<tr><td>per-step kernel-launch overhead</td><td>CUDA graphs record once, replay many times, CPU stops launching one by one</td><td>L27</td></tr>
+<tr><td>tokenize / detokenize on the critical path</td><td>process split + IPC, Tokenizer/Detokenizer run in other processes</td><td>L14 / L16</td></tr></table>
+
+<div class="cols"><div class="col"><strong>overlap OFF</strong><br>pick → forward → process results run serially; the GPU is <span class="mono">idle</span> during both CPU segments, occupancy drops to half or worse, and the bubble is plainly visible.</div><div class="col"><strong>overlap ON</strong><br>while the GPU runs forward(N), the CPU has already prepped N+1 and finished N-1; the GPU is <span class="mono">always busy</span> and the CPU overhead is invisible in wall-clock time—this is zero-overhead.</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler</span><span class="ln">while the GPU runs step N, the CPU is already preparing step N+1</span></div><pre>class Scheduler:
+    def __init__(self, server_args, ...):
+        # CPU bubbles are the enemy: hide them behind the GPU forward
+        self.enable_overlap = not server_args.disable_overlap_schedule
+        ...
+    def event_loop_overlap(self):
+        # while the GPU runs forward(batch N), the CPU already builds batch N+1,
+        # and the PREVIOUS step's result is processed in parallel -&gt; GPU never idles
+        while True:
+            batch = self.get_next_batch_to_run()    # CPU: schedule + allocate
+            result = self.run_batch(batch)          # launch GPU forward (async)
+            self.process_batch_result(prev_result)  # overlap: handle the prior step
+            prev_result = result</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>
+<li><strong>Overlap is the core tool</strong>: while the GPU runs forward(N), the CPU already assembles N+1 and processes N-1 in parallel (<span class="mono">enable_overlap</span>, L18/L21).</li>
+<li><strong>Many bubbles, many hiding tricks</strong>: chunked prefill stops long-prefill stalls (L22), CUDA graphs erase kernel-launch overhead (L27), the process split moves tokenize/detokenize off the critical path (L14/L16).</li>
+<li><strong>The faster the GPU, the deadlier the bubble</strong>: killing bubbles graduates from nice-to-have to the top factor deciding throughput; the more advanced the hardware, the more you must hide CPU overhead.</li>
+<li><strong>Synthesis</strong>: six lessons, six mechanisms, one philosophy—find every CPU bubble and hide it behind GPU compute. Remembering this one principle beats memorizing six isolated parameters, because it lets you <strong>derive</strong> the next optimization yourself.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the 'single thread' running through zero-overhead scheduling in this lesson?</div>
+  <ol class="opts">
+    <li>Make the CPU do no work at all and move every bit of logic onto the GPU</li>
+    <li>Raise the CPU clock speed to catch up with the GPU</li>
+    <li>Run every step serially to guarantee correctness</li>
+    <li><strong>The CPU must never make the GPU wait: any CPU work before or after the forward is a potential 'bubble' to be hidden behind GPU compute</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Zero-overhead doesn't mean the CPU is idle; it means the CPU's work costs no extra wall-clock time because it is overlapped into the GPU forward. A modern GPU is so fast that the CPU work around the forward becomes an idle bubble, and the whole scheduling subsystem aims to kill those bubbles.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. With overlap scheduling (Lesson 21) and enable_overlap on, what is the CPU doing while the GPU runs forward(batch N)?</div>
+  <ol class="opts">
+    <li>Recomputing batch N's KV cache to verify the result</li>
+    <li>Idly waiting for the GPU to return, doing nothing</li>
+    <li><strong>Already assembling batch N+1 and processing batch N-1's results in parallel, so the GPU never idles</strong></li>
+    <li>Pausing the GPU until the CPU drains the queue</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. A naive event loop is serial: form batch → forward → process results, leaving the GPU idle during both CPU segments. Overlap scheduling turns it into a pipeline: while the GPU runs forward(N), the CPU assembles N+1 and processes N-1, so the CPU overhead is tucked into the GPU forward's shadow and is nearly invisible in wall-clock time.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which group of 'CPU bubble → how SGLang hides it' pairings is entirely correct?</div>
+  <ol class="opts">
+    <li>schedule→quantization; long prefill→tensor parallelism; kernel launch→temperature sampling; tokenize→load balancing</li>
+    <li><strong>schedule/result processing→overlap scheduler (L18/21); long-prefill stall→chunked prefill (L22); kernel-launch overhead→CUDA graphs (L27); tokenize/detokenize→process split+IPC (L14/16)</strong></li>
+    <li>Every bubble can only be solved by adding GPU memory</li>
+    <li>Bubbles exist only in prefill; decode has no bubbles</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Six lessons, six mechanisms, all sides of one philosophy: the event loop + overlap scheduler hide scheduling and result processing, chunked prefill stops a long prefill from clogging the pipeline, CUDA graphs erase per-kernel launch overhead, and the process split + IPC move tokenize/detokenize off the forward's critical path.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why 'the faster the GPU, the deadlier the CPU bubble'. Using the fact that a decode forward may take only a few milliseconds while scheduling + sampling + appending tokens is also milliseconds, argue why killing bubbles graduates from a nice-to-have into the top factor deciding throughput.</li>
+    <li>Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop Lesson 18, overlap scheduling Lesson 21, chunked prefill Lesson 22, CUDA graphs Lesson 27, the process split Lesson 14/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Two workloads, one engine</h1>
+
+<p class="lead">Over fifty-some lessons we've taken apart the scheduler, the KV cache, the attention backends, the disaggregated deployment. This lesson adds no new mechanism. It steps back to find the one <strong>through-line</strong> running across the whole book: on a single GPU, <span class="mono">prefill</span> and <span class="mono">decode</span> are fundamentally <strong>two different workloads</strong>. Grasp this one contrast and you'll see that many of SGLang's seemingly unrelated decisions are answering the very same question. The goal here isn't to teach you something new but to <strong>thread the parts you've already learned into one line</strong>, building a mental map of "why it's designed this way".</p>
+<p>The method is simple: we fix our eyes on a single axis—the prefill-vs-decode contrast—and watch how SGLang makes its trade-offs along it. You'll be surprised to find that scheduling, batching, KV caching, and disaggregated deployment, topics that once stood apart, turn out to be one story.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a restaurant kitchen doing two jobs of completely different nature at once.</p>
+<p>The first is <strong>prep</strong>: before opening, wash and chop a whole crate of vegetables in one go. This job is <strong>about knife-hands</strong>—the more cooks and the bigger the boards, the faster it goes; every stove and every cook runs flat out. That's <span class="mono">compute-bound</span>.</p>
+<p>The second is <strong>serving</strong>: a guest orders one dish, you make one, plate after plate. This job isn't short on knife skills, it's short on <strong>legwork</strong>—every dish means a trip to the cold store for ingredients and a trip for seasoning, so the cook's hands wait most of the time and chop very little. That's <span class="mono">bandwidth-bound</span>.</p>
+<p>One kitchen (one GPU) must do both well. The catch: they <strong>fight over the kitchen</strong>. The moment you bury yourself chopping that big crate, every guest waiting to be served is stuck. Many of SGLang's designs are, at heart, reconciling these two workloads—"prep" and "serving".</p>
+<p>Follow the analogy one layer deeper: you wouldn't hand the cook a faster knife just because "serving means legwork"—no knife saves those trips to the cold store. Likewise, decode is slow not because compute is short but because shuttling data is slow, and a beefier compute card may not help. What would a smart owner do? Either <strong>chop the prep into small bits and slot them into the gaps between serving</strong> (that's chunked prefill); or <strong>just open two kitchens</strong>, one only prepping, one only serving, with a conveyor moving the prepped goods across (that's PD disaggregation). Two ideas, matching SGLang's two paths.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>This is a <strong>root tension</strong>, not a detail of any one module:</p>
+<ul>
+<li><strong>Prefill is one big parallel pass</strong>: the whole prompt goes in at once, hundreds or thousands of tokens flow through every layer together, and the GPU's multiply-add units are <strong>kept fully fed</strong>—compute is the bottleneck.</li>
+<li><strong>Decode squeezes out one token at a time</strong>: each step generates a single token, yet must <strong>re-read the entire set of weights + all the KV cache</strong>, leaving the math units mostly idle—memory bandwidth is the bottleneck.</li>
+<li><strong>One engine must serve both</strong>, and on the same GPU they <strong>fight each other</strong>.</li>
+</ul>
+<p>SGLang has two ways to reconcile this: either <strong>time-share one GPU</strong> (Lesson 22's chunked prefill, slicing prefill and interleaving it into decode's gaps), or <strong>separate the machines</strong> (Lesson 45's PD disaggregation, giving each workload its own pool of GPUs and transferring the KV across). The two paths look unrelated, but they answer the same question.</p>
+</div>
+
+<h2>1. Why prefill and decode are two workloads</h2>
+<p>This is exactly the seed planted in <strong>Lesson 4</strong>. There we first distinguished <span class="mono">compute-bound</span> from <span class="mono">bandwidth-bound</span>: whether an operator is stuck "not computing fast enough" or "not moving data fast enough" depends on its <strong>arithmetic intensity</strong> (how many multiply-adds you do per byte read).</p>
+<p>Prefill has <strong>high</strong> arithmetic intensity. Processing the whole prompt at once means the same weights are reused by hundreds or thousands of tokens—read the weights once, do hundreds of multiply-adds. The tensor cores are kept full; it's the GPU's best, most economical regime.</p>
+<p>To picture the scale: a prompt of a few thousand tokens flows through every layer of the network in essentially one shot, the GEMMs are big and fat, and the GPU runs near its peak FLOPs. This is the regime hardware vendors quote their headline numbers for—and prefill is one of the few inference phases that actually reaches it.</p>
+<p>Decode has <strong>low</strong> arithmetic intensity. Each step generates one token, yet must re-read the <strong>entire model's weights</strong> plus <strong>all of this sequence's KV cache so far</strong> from memory, only to do one token's worth of multiply-adds. Most of the time is spent <strong>moving data</strong> while the math units sit idle. So piling on raw compute barely helps decode; the real cure is to grow the batch (so one weight read serves more sequences)—which raises a new tension.</p>
+<p>Put the two side by side and you reach a counterintuitive conclusion: <strong>the same GPU is nearly wrung dry during prefill, yet mostly idle during decode.</strong> The GPU isn't slacking—decode is a workload that inherently can't keep it fed; the bottleneck is the data path from memory to the compute units, not the compute itself. Grasp this and you understand the starting point of every scheduling trick that follows: either find a way for decode to piggyback on prefill's compute, or separate the two workloads entirely so each saturates its own bottleneck.</p>
+<p>Further, this contrast explains "why LLM inference feels so different from training." Training is almost entirely compute-bound big matmuls, where adding compute pays off immediately; in online serving, the decode phase that actually shapes the user experience is bandwidth-bound, and a stronger compute card alone may not make tokens come out faster. The reason SGLang invests so much in scheduling, batching, and KV management all traces back to this prefill-vs-decode axis.</p>
+
+<h2>2. How this contrast creates the throughput-vs-latency pull</h2>
+<p><strong>Lesson 8</strong>'s <strong>throughput vs latency</strong> fight is rooted right here. Two key metrics: <span class="mono">TTFT</span> (time to first token, driven mainly by prefill) and <span class="mono">ITL</span> (inter-token latency, driven by decode).</p>
+<p>What happens if you stuff both workloads into one serial queue? A very long prompt's prefill is a big compute-heavy chunk; once it hits the GPU it <strong>blocks every request that's currently decoding</strong>—everyone's ITL spikes and output stutters. Conversely, if you always favor smooth decode, new requests' prefill never gets scheduled and TTFT climbs.</p>
+<p>So the conflict surfaces: <strong>prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared.</strong> One GPU can't satisfy both at once. That's why SGLang can't simply go "first come first served" and must get clever at the scheduling layer.</p>
+<p>To make the tension concrete: suppose 30 sequences are decoding token by token on the GPU right now, a few milliseconds per step, so the user sees characters stream out steadily. Now an 8000-token prompt arrives; its prefill must push all 8000 tokens through the whole network in one pass—and if that compute-heavy block occupies the GPU as one chunk, those 30 decoding sequences stall for tens or even hundreds of milliseconds, and the user feels a "hitch". Conversely, if you defer that prefill indefinitely to avoid the hitch, the new user's first token (TTFT) never arrives. <strong>Whichever side you favor, the other suffers</strong>—that's the price of one engine serving two workloads.</p>
+<p>Precisely because this is a structural conflict—not a one-off mistuning—it needs a structural answer. The next two sections give SGLang's two structural ways out: one leaves the hardware alone and relies on scheduling (chunked prefill); the other changes the hardware layout directly and relies on separate machines (PD disaggregation).</p>
+
+<h2>3. Co-located time-sharing: chunked prefill</h2>
+<p><strong>Lesson 22</strong>'s <span class="mono">chunked prefill</span> is the <strong>co-located</strong> answer: since a whole block of prefill blocks decode, <strong>don't let it go in as one block</strong>. Slice the long prompt into chunks, process only one chunk of prefill per step, and <strong>pack it into the same batch</strong> as the decodes already running.</p>
+<p>Now in every step the GPU does <strong>both</strong> jobs: a small prefill chunk grabs the chance to fill the compute, and a batch of decodes piggybacks on that same weight read. Neither starves—prefill no longer monopolizes the whole GPU and smothers decode, and decode no longer idles waiting for one giant prefill to finish. It's <strong>smart scheduling</strong> that <strong>time-slices</strong> two workloads onto one GPU.</p>
+<p>The elegance is that it <strong>goes with the grain</strong>: decode is bandwidth-bound with most of its compute sitting idle, and that idle compute is exactly what a small compute-bound prefill chunk can use, with almost no extra bandwidth cost. In other words, chunked prefill lets two workloads with complementary bottlenecks <strong>fill each other's gaps</strong>—decode's spare compute goes to prefill, and prefill amortizes that step's weight read. The chunk size becomes a tuning knob: too big and a single chunk starts blocking decode again; too small and the fixed scheduling/launch overhead can't be amortized. That's the sweet spot Lesson 22 keeps weighing.</p>
+
+<h2>4. Separated machines: PD disaggregation</h2>
+<p><strong>Lesson 45</strong>'s <span class="mono">PD disaggregation</span> (Prefill-Decode Disaggregation) is the other path: since the two workloads are opposite in nature and interfere, just <strong>separate them physically</strong>. Give prefill one pool of GPUs and decode another; the prompt runs through the prefill pool first to compute its KV cache, then the <strong>KV is transferred across the network</strong> to the decode pool to keep generating token by token.</p>
+<p>The upside is that <strong>each pool saturates its own bottleneck without interference</strong>: the prefill pool can wring out compute, the decode pool can focus on growing the batch and using bandwidth fully, and each can scale and tune independently. The cost is an extra <strong>KV transfer</strong>—which is exactly the seam the code below guards.</p>
+<p>Why is this "seemingly more troublesome" approach worth it? Because in the co-located approach the two workloads forever contend for the same GPU; however clever the scheduler, there's always some squeeze between prefill chunks and decode. Once separated, the prefill pool is all uniform big parallel passes and can use the batching strategy best suited to compute-bound work, while the decode pool is all uniform token-by-token generation and can pile the batch up to the bandwidth limit—<strong>each pool is no longer dragged down by the other workload</strong>. In very large-scale online serving with strict SLAs on both TTFT and ITL, this physical isolation is often more reliable and less fiddly than penny-pinching on one card.</p>
+<p>Of course, separation is no free lunch. The KV cache can be hundreds of MB per sequence, and after the prefill pool computes it, it must be moved across the network to the decode pool, so that transfer link's bandwidth and latency become a new critical path—move it slowly and the decode side just waits. So PD disaggregation swaps an "in-GPU scheduling problem" for a "cross-machine data-movement problem", and the interface for that movement is exactly what <span class="mono">BaseKVManager</span> defines.</p>
+
+<div class="cols"><div class="col">
+<p><strong>Prefill: one big parallel pass (compute-bound)</strong></p>
+<p>The whole prompt arrives at once; hundreds-to-thousands of tokens flow through every layer together. Weights are read once and reused hundreds of times, keeping the GPU's multiply-add units <strong>fully fed</strong>.</p>
+<p><span class="mono">compute-bound</span>: the bottleneck is how fast you compute. A wide, thick chunk of work.</p>
+</div><div class="col">
+<p><strong>Decode: one token at a time (bandwidth-bound)</strong></p>
+<p>Only one token per step, yet the full weights + all KV are re-read, leaving the math units mostly idle.</p>
+<p><span class="mono">bandwidth-bound</span>: the bottleneck is how fast you move data. A skinny, long strip of work.</p>
+</div></div>
+
+<table class="t">
+<tr><th>Design response</th><th>The tension it resolves</th><th>Source</th></tr>
+<tr><td>Root contrast: compute-bound vs bandwidth-bound</td><td>why the two workloads are inherently different</td><td>Lesson 4</td></tr>
+<tr><td>Throughput vs latency (TTFT vs ITL)</td><td>a long prefill blocks everyone's decode</td><td>Lesson 8</td></tr>
+<tr><td>Co-located time-share: chunked prefill</td><td>slice prefill into decode's gaps, nobody starves</td><td>Lesson 22</td></tr>
+<tr><td>Separated machines: PD disaggregation</td><td>a pool each + transfer KV, each saturates without interfering</td><td>Lesson 45</td></tr>
+</table>
+
+<div class="flow"><div class="node">request</div><div class="arrow">→</div><div class="node">prefill workload (compute-bound)</div><div class="arrow">→</div><div class="node">KV cache</div><div class="arrow">→</div><div class="node">decode workload (bandwidth-bound)</div><div class="arrow">→</div><div class="node">streamed output</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>co-located</h4><p>One GPU <strong>time-shares</strong> both workloads—chunked prefill slices prefill and inserts it into decode's gaps.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>disaggregated</h4><p>The prefill pool and decode pool are <strong>independent</strong>, joined by a <strong>KV transfer</strong> that moves state from the prefill side to the decode side.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>same root tension</h4><p>Two reconciliations: smart scheduling, or physical separation.</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVManager</span><span class="ln">the seam that lets prefill and decode live on separate pools</span></div><pre>class BaseKVManager(ABC):
+    # base class for managing KV-transfer state — the seam that lets prefill
+    # and decode live on SEPARATE pools
+    @abstractmethod
+    def __init__(self, args, disaggregation_mode, ...):
+        # disaggregation_mode says which side this is: PREFILL or DECODE
+        ...
+    @abstractmethod
+    def register_to_bootstrap(self):
+        # register so a prefill worker can be PAIRED with a decode worker,
+        # then KV is transferred from the prefill side to the decode side
+        ...</pre></div>
+
+<p>Look at the code: <span class="mono">BaseKVManager</span> is the "seam" of the PD-disaggregation path. The <span class="mono">disaggregation_mode</span> passed at construction decides whether this process is the prefill side or the decode side—one interface, two roles. <span class="mono">register_to_bootstrap()</span> lets a prefill worker get <strong>paired</strong> with a decode worker; once paired, the KV cache is transferred from the prefill side to the decode side. The whole complexity of the disaggregated architecture is wrapped up behind this abstraction.</p>
+<p>Notice the design philosophy here: it's an <span class="mono">ABC</span> (abstract base class) with every method marked <span class="mono">@abstractmethod</span>. That means SGLang isn't bound to one concrete transport implementation—the backend can be RDMA, NVLink, or something else, as long as it implements this interface. <strong>The abstraction "prefill and decode live in separate pools" is cleanly decoupled from the implementation "which pipe actually moves the KV".</strong> This echoes another through-line of the whole book: layer the "what" apart from the "how", so the upper scheduling decisions need not care about the lower hardware details.</p>
+
+<h2>5. One axis explains many decisions</h2>
+<p>Now pull the camera all the way back. Lesson 4's compute-bound vs bandwidth-bound, Lesson 8's throughput vs latency, Lesson 22's chunked prefill, Lesson 45's PD disaggregation—these four lessons look like four separate topics, but they are four points on the same axis. The <strong>root tension</strong> (prefill and decode are opposite in nature) produces a <strong>pull</strong> (they contend for the same GPU), and the pull forces <strong>two reconciliations</strong> (co-located time-sharing, or separated machines).</p>
+<p>Master this axis and many design decisions that once needed rote memorization become derivable conclusions. Why have chunked prefill? Because you don't want a long prefill to block decode. Why do PD disaggregation? Because you want each bottleneck to saturate on its own. Why does the decode phase strive so hard to grow the batch? Because it's bandwidth-bound, so one more sequence reads almost no extra weights. <strong>Seemingly scattered optimizations all rest on the same sentence: prefill and decode are two workloads, and one engine must either let them coexist cleverly or separate them outright.</strong></p>
+<p>So next time you meet an unfamiliar scheduling knob or deployment mode in SGLang, don't rush to memorize it—first ask yourself: <strong>is it helping prefill and decode coexist better, or helping them separate more thoroughly?</strong> The answer almost always lands on one end of this axis. That's what "one axis explains the whole" really means—what you remember is no longer dozens of isolated rules, but the one root principle that generates them.</p>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>One root tension</strong>: prefill is a <span class="mono">compute-bound</span> big parallel pass; decode is a <span class="mono">bandwidth-bound</span> one-token-at-a-time squeeze (Lesson 4).</li>
+<li><strong>The tension creates a pull</strong>: a long prefill blocks everyone's decode, giving rise to throughput vs latency, TTFT vs ITL (Lesson 8).</li>
+<li><strong>Co-located time-sharing</strong>: chunked prefill slices prefill into decode's gaps, so one GPU time-slices to serve both workloads (Lesson 22).</li>
+<li><strong>Separated machines</strong>: PD disaggregation gives each workload its own GPU pool and transfers the KV across, so each saturates its own bottleneck without interference (Lesson 45).</li>
+<li><strong>One axis explains the whole</strong>: the prefill-vs-decode axis explains many seemingly unrelated SGLang decisions—reconciled either by smart scheduling or by physical separation.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the 'one root tension' this lesson is about?</div>
+  <ol class="opts">
+    <li>The tension exists only across multiple GPUs, never on a single one</li>
+    <li><strong>prefill is a compute-bound big parallel pass while decode is bandwidth-bound token-by-token generation; opposite in nature yet sharing one engine</strong></li>
+    <li>decode is the compute-bound one and prefill is bandwidth-bound</li>
+    <li>prefill and decode are really the same workload under different names</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Prefill processes the whole prompt at once—weights read once, reused by hundreds of tokens—so its arithmetic intensity is high and it saturates the math units: compute-bound. Decode emits one token per step yet re-reads the full weights + all KV, low arithmetic intensity, math units mostly idle: bandwidth-bound. One engine must serve both—the root tension seeded in Lesson 4.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why do prefill and decode 'fight each other' on the same GPU?</div>
+  <ol class="opts">
+    <li><strong>A very long prompt's prefill is a big compute-heavy chunk; queued serially it blocks every decoding request, spiking everyone's ITL and pitting TTFT against ITL</strong></li>
+    <li>Because GPU memory is too small to hold two copies of the weights</li>
+    <li>Because they use different attention algorithms that are incompatible</li>
+    <li>They don't actually fight; first-come-first-served satisfies both</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared. Stuff both into one serial queue and a long prefill, once on the GPU, blocks every decoding request and spikes ITL (Lesson 8's throughput vs latency). One GPU can't satisfy both, so the scheduler must get clever.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What distinguishes the 'co-located (chunked prefill)' path from the 'separated (PD disaggregation)' path?</div>
+  <ol class="opts">
+    <li>They are identical, just named differently</li>
+    <li>chunked prefill needs two GPU pools while PD needs only one GPU</li>
+    <li><strong>chunked prefill slices prefill into decode's gaps so one GPU time-shares both (L22); PD disaggregation gives each workload its own GPU pool and transfers the KV, so each saturates its own bottleneck without interference (L45)</strong></li>
+    <li>PD disaggregation needs no KV transfer; only chunked prefill does</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Both solve the same problem: chunked prefill is the co-located answer—smart scheduling slices prefill and packs it into the same batch as decode, time-sharing one GPU; PD disaggregation is the separated answer—physically split into prefill and decode pools, with the BaseKVManager seam moving KV from the prefill side to the decode side. One via scheduling, one via physical separation.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why simply piling more compute onto the decode phase barely helps, while growing the batch is the real cure. Using the fact that 'each decode step re-reads the full weights + all KV', argue why decode is bandwidth-bound rather than compute-bound.</li>
+    <li>The lesson claims 'one axis explains the whole'. Pick at least three of Lessons 4, 8, 22, 45 and show how the prefill-vs-decode root tension explains these seemingly unrelated designs—each reconciling it either by smart scheduling (co-located) or by physical separation (disaggregated).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Draft for parallel verify</h1>
+
+<p class="lead">What's truly deep about speculative decoding isn't one new mechanism — it's a <strong>general design move</strong> threaded through all of SGLang: spend cheap, parallelizable work to dodge a sequential bottleneck. This lesson adds no new part; instead we <strong>zoom out</strong> and weave lessons 4, 27, 43, 44, and 59 into a single web, so you can see the recurring through-line.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Imagine grading a stack of multi-step chained calculations: each step depends on the previous result, so you can only work <strong>one step after another</strong> — that's the sequential bottleneck. Now try a different trick: let a fast-but-occasionally-wrong assistant <strong>guess the next k steps' answers ahead of time</strong> (the draft is cheap). Then, as the authority, you <strong>scan and check all k at once</strong> — checking is parallel because every answer is already in front of you. Every correct prefix the assistant guessed, you <span class="mono">accept</span> directly; at the first mistake, you jot down the right answer yourself as the <span class="mono">bonus token</span>. The result: one "parallel check" advances you several steps, and the final answer is <strong>identical</strong> to grinding through each step yourself. That's "draft for parallel verify."</p>
+<p>Notice the asymmetry: having the assistant derive each answer from scratch is slow (step-by-step reasoning), but checking a ready-made answer is fast — you can see at a glance whether it's right. Generating is serial and expensive; verifying is parallel and cheap. Speculative decoding turns that asymmetry into cash: let the cheap party guess, and let the expensive party do only what it's best at and happens to be idle for — parallel checking. Even if the assistant is wrong three times in ten, you just redo the tail of those three; you never risk "mis-grading the paper," because <strong>the final call is always yours</strong>.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Decode (token-by-token generation) is inherently <strong>sequential</strong>: token N+1 can't start until token N is done (Lesson 4). Worse, each step touches just one token, so the GPU's compute sits nearly idle while memory bandwidth is saturated — it's <strong>bandwidth-bound</strong> and <strong>latency-bound</strong>. Speculative decoding spends a cheap draft to turn "generate k tokens one-by-one (k sequential, bandwidth-bound steps)" into "VERIFY k tokens in <strong>one parallel forward</strong>" (Lesson 43) — a forward that uses the compute which was idle anyway. EAGLE pushes parallel-verify further with a token <strong>tree</strong>, verifying many candidate paths at once (Lesson 44). And it's the <strong>same shape</strong> as other SGLang wins: CUDA Graph records a fixed sequence so the GPU replays it without per-step CPU stalls (Lesson 27); the overlap scheduler runs CPU work in parallel with the GPU forward (Lesson 59). The unifying principle is one sentence: <strong>turn latency-bound serial steps into throughput-bound parallel ones — trade spare compute for saved sequential time.</strong></p>
+<p>Two often-confused notions are worth separating here: <strong>latency</strong> is "how long one thing takes end to end," while <strong>throughput</strong> is "how many things finish per unit time." Serial steps hurt because they're stuck on latency — each waits on the previous, time strung together one slot at a time. Reshaping them into parallel steps essentially moves work that was "billed by latency" onto a track "billed by throughput": the GPU is built to do a big batch at once, so the same total work gets flattened into a single parallel operation. Speculative decoding, CUDA Graph, and the overlap scheduler all do this same thing — they just act on three different serial links: "generating tokens," "launching kernels," and "CPU-GPU cooperation."</p>
+</div>
+
+<h2>The serial wall: why decode is slow</h2>
+<p>In training, all tokens of a sentence go into the GPU at once and compute in parallel — the GPU's favorite, <strong>compute-bound</strong> kind of work. Decode can't do that: you can't even speak of token N+1 before token N exists, because the latter is the former's input. So generating k tokens means k forwards, advancing one slot at a time. As Lesson 4 showed, in such a single-step forward the GPU's FLOPs sit mostly idle; the real bottleneck is moving huge weights and the KV cache from memory into the compute units — <strong>bandwidth</strong>. In other words, decode forces a machine built for "big parallel batches" into "compute a tiny bit, then wait on memory." This <strong>serial wall</strong> is exactly what every later trick tries to climb.</p>
+<p>Why does this happen? It comes down to <strong>arithmetic intensity</strong> — how many multiply-adds you get per byte of weights read from memory. Prefill processes hundreds or thousands of tokens at once, reusing the same weights over and over: high intensity, math units saturated. Decode computes one token per step yet still re-reads the entire weight set and full KV cache, so intensity is pitifully low and the math units idle most of the time, just waiting for data to stream in from memory. That's why piling more compute onto decode barely helps — the bottleneck isn't compute at all, it's bandwidth and the "each step waits on the last" serial nature. Grasp this and you see the cure: either pack more tokens into the same step (bigger batch, amortizing that weight read) or find a way to <strong>advance multiple tokens at once</strong>, compressing the serial step count itself. Speculative decoding takes the latter road.</p>
+
+<h2>Draft for verify: turning serial into parallel</h2>
+<p>The key insight: <strong>verifying is far cheaper than generating, and it parallelizes</strong>. If I already hold a string of "k candidate tokens," I can stitch them into one sequence and do <strong>one</strong> forward, letting the expensive target model compute, in that same pass, "what the target itself would pick at each position." Every <strong>longest correct prefix</strong> where candidate and target agree gets <span class="mono">accept</span>ed; at the first disagreement, the correct token the target computed in that very forward is the <span class="mono">bonus token</span>, taken for free.</p>
+<p>Here's an often-missed beauty: that verification forward is exactly the bandwidth-bound pass decode has to do every step anyway — the weights and KV must be hauled from memory regardless. Since the compute was idle, "checking k more positions on the side" adds almost no cost, yet collapses what were k serial hauls into one. In other words, the parallel verify rides along almost <strong>for free</strong>: the only price is a bit of compute from the small draft model, and the payoff is the saved, most-expensive serial bandwidth time.</p>
+<p>Where do the "k candidate tokens" come from? From a <strong>cheap draft model</strong> — small and fast, so spitting out tokens one-by-one doesn't hurt (Lesson 43). The whole trade becomes: <strong>spend a little cheap draft compute, get back one parallel verify that was idle anyway</strong>, and that verify advances multiple tokens at once. The better the draft guesses, the more tokens per target forward, and the harder the serial step count is compressed. A wrong guess does no harm either, because everything is settled by the target model — bad candidates are discarded at verify time, and <strong>correctness is backstopped by the target</strong>. That's why speculative decoding speeds things up without sacrificing quality: it never gambles, it just makes "guess then verify" very cheap.</p>
+<p>Worth stressing is the "leverage ratio" of this trade: the draft model is typically tens of times smaller than the target, so one draft pass costs almost nothing, yet it can collapse several of the most expensive target forwards into one. The higher the hit rate and the more "in tune" the draft is with the target, the better the leverage. This explains a seemingly counterintuitive fact: speculative decoding pays off most in <strong>low-concurrency, latency-sensitive</strong> settings — that's when the GPU's compute is idlest, with plenty of spare FLOPs to spend on parallel verify; whereas when the batch is already large and compute is near saturation, there's little idle compute left, and the cheap lunch of draft-for-verify isn't as tasty. Understand "trade spare compute for serial time" and you can predict which workloads make it worth enabling.</p>
+
+<h2>EAGLE and the token tree: pushing parallel-verify to the limit</h2>
+<p>If verification parallelizes, why verify only one path? EAGLE has the draft produce a token <strong>tree</strong>: at each branch point it keeps a few high-probability candidates, so one forward <strong>verifies many candidate paths at once</strong> (Lesson 44). An attention mask arranges the tree into a single pass; the target still runs only once yet covers exponentially many candidate combinations, walking the accepted path to the longest correct prefix. This maxes out the leverage of "parallel verify": the more idle compute there is, the more it pays to verify several paths in one shot.</p>
+<p>Put another way, the token tree makes the "draft for verify" trade <strong>even more profitable</strong>: for the same single target forward, a linear candidate can only check one k-long guess, while a tree places multiple bets at the branch points, lands more hits, and accepts more tokens per verify on average. The cost is handling more candidate positions at verify time — but that's exactly the compute decode leaves idle, so it's still spending "compute that was idle anyway" to buy "saved serial steps." EAGLE is the high point of this through-line precisely because it pushes "wherever there's idle compute, do more parallel verification there" to its limit.</p>
+<p>There's also an engineering balance hidden here: a bigger tree covers more candidates per verify, but arranging the tree, computing the attention mask, and handling more positions all cost more too. So EAGLE doesn't grow the tree without bound — it finds a sweet spot between "the payoff of placing more bets" and "the cost of one verify." This again confirms the lesson's through-line: none of these optimizations is free magic; each is a <strong>trade</strong> to be weighed — you're always spending one cheap resource to buy the saving of a more expensive one, and the key is seeing clearly what each side is worth. With this "eye for trade-offs," whenever you read a new optimization you'll instinctively look for what it's spending to buy what.</p>
+
+<h2>The same shape: a cross-lesson web</h2>
+<p>Once you recognize the shape "turn serial steps into parallel ones," you see it everywhere in SGLang. CUDA Graph (Lesson 27) records a fixed kernel sequence so the GPU just replays it, removing the CPU's serial stall at every kernel launch — again "compress a step-by-step serial dispatch into a one-shot parallel replay." The overlap scheduler (Lesson 59) runs CPU scheduling and sampling <strong>in parallel</strong> with the GPU forward instead of one waiting on the other. These aren't isolated tricks but different facets of one through-line: <strong>wherever there's a serial wall, use idle resources to do parallel work and climb it</strong>.</p>
+<p>Lay these lessons side by side and the structure is strikingly uniform: each first identifies a "must go step-by-step" serial bottleneck (token-by-token generation, per-kernel launch, CPU and GPU waiting on each other), then finds a resource that is "idle anyway or very cheap" (idle compute, a replayable fixed sequence, another chip that can run in parallel), and finally uses that resource to do the serial process <strong>in one parallel batch</strong>. Speculative decoding spends draft compute, CUDA Graph spends a one-time recording cost, the overlap scheduler spends one extra copy of scheduling logic — each price is cheap, and each payoff is the saved, most-expensive serial latency.</p>
+<p>See this web, and next time you hit a bottleneck you'll automatically ask: "could we draft here too, then verify in parallel?" — that's the value of this lesson as a "design theme" lesson: it teaches no new part, it hands you a pair of <strong>glasses</strong> you can reuse across scenarios. And remember, speculative decoding's verification is <strong>lossless</strong>: the output is identical to plain token-by-token decode; it saves time without changing the result. This matters enormously — any "parallel for serial" trick is only worth using if it guarantees the result is unchanged, otherwise it's a shoddy trade of correctness for speed. The shared bottom line of speculative decoding, CUDA Graph, and the overlap scheduler is the same: <strong>the result is strictly unchanged; only how it's computed is optimized</strong>.</p>
+
+<div class="flow"><div class="node">Serial decode: token N+1 waits on token N</div><div class="arrow">→</div><div class="node">k tokens = k serial forwards (bandwidth-bound, compute idle)</div><div class="arrow">→</div><div class="node">Cheap draft guesses k candidates first</div><div class="arrow">→</div><div class="node">Target model verifies all k in one parallel forward</div></div>
+
+<div class="cols"><div class="col"><strong>Spend: cheap draft compute</strong><br>Run a small draft model to emit k candidate tokens one-by-one. Little compute, using FLOPs that were idle anyway — the cost paid in this trade.</div><div class="col"><strong>Save: serial, bandwidth-bound steps</strong><br>k serial forwards that each advance one slot collapse into one parallel verify; what's saved is latency-bound serial time, and the result stays lossless.</div></div>
+
+<table class="t"><tr><th>The serial wall</th><th>Parallel trick that climbs it</th><th>Lesson</th></tr><tr><td>Token-by-token generation, step waits on step</td><td>Speculative decoding: draft for one parallel verify</td><td>Lesson 43</td></tr><tr><td>Verifying only one path is wasteful</td><td>EAGLE token tree: verify many candidate paths at once</td><td>Lesson 44</td></tr><tr><td>CPU stall at every per-step kernel launch</td><td>CUDA Graph: record a fixed sequence, GPU replays</td><td>Lesson 27</td></tr><tr><td>CPU scheduling and GPU forward wait on each other</td><td>Overlap scheduler: CPU work parallel with GPU forward</td><td>Lesson 59</td></tr></table>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>propose</h4><p>Draft model proposes k candidate tokens — cheap, generated one-by-one.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>verify</h4><p>Target model runs one parallel forward, verifying all k positions at once.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>accept</h4><p>accept the longest correct prefix (the part matching the target's choice).</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>bonus</h4><p>Take the bonus token at the first disagreement — output is lossless, identical to plain decode.</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/base_spec_worker.py ::BaseSpecWorker</span><span class="ln">a cheap draft + an expensive target: serial decode becomes one parallel verify</span></div><pre>class BaseSpecWorker(ABC):
+    # the trade made concrete: a cheap draft + the expensive target
+    @property
+    @abstractmethod
+    def draft_worker(self):     # cheap model: proposes k tokens (the speculation)
+        ...
+    @property
+    @abstractmethod
+    def target_worker(self):    # expensive model: VERIFIES all k in ONE parallel forward
+        ...
+    # net: many tokens per target forward when the draft is good — sequential
+    # decode steps become one parallel verify
+</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li>Decode is inherently <strong>serial</strong> and <strong>bandwidth-bound</strong>: token N+1 waits on token N, each step leaves compute idle, the bottleneck is memory bandwidth (Lesson 4).</li>
+<li>The core trade: spend a <strong>cheap draft</strong> to swap "k serial forwards" for "<strong>one parallel verify</strong> of k tokens" (Lesson 43).</li>
+<li>EAGLE pushes parallel-verify to the limit with a token <strong>tree</strong>, verifying many candidate paths at once (Lesson 44).</li>
+<li>Same shape: CUDA Graph replays a fixed sequence to cut CPU stalls (Lesson 27); the overlap scheduler runs CPU parallel with GPU (Lesson 59) — all turning <strong>serial steps into parallel ones</strong>.</li>
+<li>Verification is <strong>lossless</strong>: <span class="mono">accept</span> the longest correct prefix + a <span class="mono">bonus token</span>, output identical to plain decode.</li>
+<li>Unifying principle: turn latency-bound serial steps into throughput-bound parallel ones — <strong>trade spare compute for saved sequential time</strong>.</li>
+</ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What 'general design move' does this lesson distill?</div>
+  <ol class="opts">
+    <li>Use a bigger model to generate all tokens at once</li>
+    <li>Rewrite decode as a one-shot parallel forward like training, changing the output</li>
+    <li>It only works across multiple GPUs, never on a single one</li>
+    <li><strong>Spend cheap, parallelizable work to dodge a sequential bottleneck—turn latency-bound serial steps into throughput-bound parallel ones</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. What's deep about speculative decoding isn't a new mechanism but a general move across SGLang: decode is inherently serial and bandwidth-bound (Lesson 4), so spend a cheap draft to swap 'k serial forwards' for 'one parallel verify' (Lesson 43). The essence is trading spare compute for saved sequential time.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. After the draft proposes k tokens, how does the target model handle them, and does the output differ from plain decode?</div>
+  <ol class="opts">
+    <li><strong>The target verifies all k in one parallel forward, accepts the longest correct prefix and takes a bonus token at the first disagreement; verification is lossless, output identical to plain decode</strong></li>
+    <li>The target regenerates the k tokens one-by-one with no parallelism</li>
+    <li>The target trusts the draft without verifying, so it's faster but changes the output</li>
+    <li>It only works when draft and target fully agree, otherwise results are wrong</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Verifying is cheaper than generating and parallelizes: stitch the k candidates into one sequence for a single forward, and the target computes what it would pick at each position. The matching longest correct prefix is all accepted; at the first disagreement the correct token the target computed is the bonus token. Since the target always has final say, output is identical to plain decode—lossless.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which SGLang tricks share the 'same shape' as speculative decoding?</div>
+  <ol class="opts">
+    <li><strong>CUDA Graph records a fixed sequence so the GPU replays it without per-step CPU stalls (Lesson 27), and the overlap scheduler runs CPU work parallel with the GPU forward (Lesson 59)—both turn serial steps into parallel ones</strong></li>
+    <li>Only EAGLE's token tree counts; the rest are unrelated</li>
+    <li>No other trick shares the shape; speculative decoding is isolated</li>
+    <li>Quantization and pruning, because both shrink the model</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Once you recognize 'turn serial into parallel', you see it everywhere: CUDA Graph compresses a step-by-step serial dispatch into a one-shot replay (Lesson 27); the overlap scheduler runs CPU and GPU in parallel instead of waiting (Lesson 59); EAGLE verifies many paths at once with a token tree (Lesson 44). All facets of one through-line.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain the 'trade': what does speculative decoding spend and what does it get back? Using the fact that decode is serial and bandwidth-bound with idle compute per step (Lesson 4), argue why that parallel verify is nearly 'free'.</li>
+    <li>The lesson says that once you see the shape you'll ask 'where else could we draft-and-verify?'. Pick at least three of Lessons 27, 43, 44, 59 and show how the unifying principle 'turn serial steps into parallel ones' explains these seemingly unrelated designs, and explain why speculative decoding's verification must stay lossless.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Everything is pluggable</h1>
+
+<p class="lead">String the past few dozen lessons together and you notice SGLang doing the same thing over and over: it keeps the <strong>engine core</strong> stable (the scheduler, the model-execution loop, the memory pools) and pushes <strong>every axis that can vary</strong> behind a <span class="mono">pluggable interface</span>—you program against an abstract base class (ABC), and a concrete implementation is <strong>selected at deploy time</strong>. This lesson introduces no new mechanism; it makes the book's hidden through-line explicit: <strong>everything is pluggable</strong>.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Think of a wall <strong>socket</strong>. The wiring behind the wall (the core) is fixed, but the hole on the wall is a <strong>standard interface</strong>. A lamp, a charger, a rice cooker—any appliance with a conforming plug can be connected and just works, and you <strong>never have to open the wall or rewire it</strong>. SGLang's engine core is the wiring; the attention backend, the hardware platform, quantization, speculative algorithms… are the "appliances": each implements the same plug spec, and <span class="mono">at deploy time</span> whichever you plug in is the one the engine uses. New hardware or a new algorithm joins not by rewiring, but by <strong>building a conforming plug</strong>.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>This is a <strong>synthesis lesson</strong>: instead of introducing a part, it distills the <strong>shared shape</strong> across parts. Every earlier lesson is a different facet of one pattern—<span class="mono">program to an interface, choose an implementation at deploy time</span>. Once you see the shape, the engine collapses from "a pile of features" into "one recurring archetype," and you immediately know that <strong>contributing elsewhere</strong> usually means "implement an existing interface," not "rewrite the core."</p></div>
+
+<h2>A stable core, a variable edge</h2>
+<p>Picture SGLang as concentric circles. At the center sits the <strong>core that rarely changes</strong>: the <span class="mono">Scheduler</span> decides which requests run each step, the <span class="mono">ModelRunner</span> drives the model's forward execution loop, and the <span class="mono">memory pools</span> (KV cache and token slots) manage device memory. These three are the engine's center of gravity, and their stability is precisely what lets everything else be swapped freely. If the core itself churned with every scenario, any single swap could ripple across the whole engine and maintainability would collapse.</p>
+<p>Meanwhile <strong>every axis that varies with the scenario</strong>—which attention kernel you use, what chip you run on, what quantization, whether to speculate, how to split parallelism, whether output is grammar-constrained, how KV moves across machines—is not hard-coded into the core, but defined as an <span class="mono">abstract base class</span> satisfied by several <strong>parallel concrete implementations</strong>. The core knows only the interface, never the implementation. Variation is fenced into the edge, and the core stays simple and reliable. In other words, the core always faces a set of <strong>stable method signatures</strong>; which kernel, chip, or algorithm those methods ultimately invoke is <strong>transparent</strong> to it.</p>
+<p>This "stable core + variable edge" layering isn't cosmetic; it has a deep engineering rationale: it manages <strong>correctness</strong> and <strong>diversity</strong> separately. The core guarantees the scheduling, execution, and memory logic that "must never be wrong"; the edge absorbs every difference in hardware, algorithm, and format. The two meet at a <strong>narrow waist</strong> of interfaces—differences never seep into the core, and the core's stability never caps the edge's flourishing.</p>
+<p>It is worth stressing that "at deploy time" matters too. The choice of implementation happens neither at compile time (too rigid) nor on every inference step at runtime (too fragmented and slow), but precisely at <strong>the moment of deployment</strong>: when you launch the service, you pick one implementation per seam based on the hardware, model, and load at hand, and the whole service lifetime then uses that fixed combination. This makes the choice flexible enough (change a set of flags, change the implementations) yet stable enough (once chosen, no branch overhead remains on the hot path). That is the essence of pairing "interfaces" with "deploy-time binding."</p>
+
+<h2>One pattern, all over the engine</h2>
+<p>This "program to an interface, choose an implementation at deploy time" pattern is not a one-off coincidence but a <strong>recurring design theme</strong>. We met its incarnations across earlier lessons; line them up and the hidden through-line becomes clear:</p>
+<p>The attention backend (<strong>Lesson 33</strong>) is the archetypal seam: model code only calls <span class="mono">self.attn(...)</span>, and whether FlashInfer, Triton, or FlashAttention sits behind it, the backend satisfies the same set of methods—the model author need not know any kernel detail. The hardware platform abstraction (<strong>Lesson 42</strong>) gives you <strong>one engine, many chips</strong>, with chip differences tucked into the Platform interface, so swapping chips is not swapping engines. Quantization methods (<strong>Lesson 35</strong>) are swappable per model; FP8, INT4 and the rest are just different implementations of one interface. The speculative-algorithm family EAGLE/NGRAM/… (<strong>Lesson 43</strong>) hides behind one enum, so the scheduling path only knows "speculation," not the specific algorithm. The four parallelism axes TP/PP/DP/EP (<strong>Lesson 46</strong>) are expressed uniformly by one <span class="mono">GroupCoordinator</span>, with communication detail folded into a single coordinator. The grammar backends xgrammar/outlines/llguidance (<strong>Lesson 48</strong>) provide swappable implementations for structured output, decoupling the constraint engine from the decode loop. The KV-transfer connectors Mooncake/NIXL (<strong>Lesson 45</strong>) power PD disaggregation, with the way KV moves across machines swappable while scheduling stays put. And even "writing a model" (<strong>Lesson 26</strong>) is itself programming against stable layer APIs rather than editing the engine—you assemble layers, and which attention or quantization those layers use is yet another pluggable layer.</p>
+<p>Line them up and the consistency is striking: every one is "one interface + many implementations + pick one at deploy time." This is the <strong>cross-lesson web</strong> the synthesis lesson exists to light up. They seem to mind their own domains—hardware, algorithm, format, communication—but the <strong>skeleton is the same</strong>. Once you recognize that skeleton, formerly isolated facts hook into one another, forming a web that cross-validates itself rather than a pile of features to memorize. Better still, when you later meet a brand-new domain (say an accelerator or decoding strategy that does not yet exist), you can almost predict how SGLang will absorb it: define a new interface, supply a few implementations, pick one at deploy time. The archetype itself is predictive power.</p>
+<p>This also explains why this lesson introduces no new mechanism yet sits near the book's end. You must first have seen each seam concretely, lesson by lesson—seen how the attention backend is called, how the platform is abstracted, how parallelism is coordinated—before you can abstract them here into one shape. A synthesis lesson's value is not in adding knowledge but in <strong>reorganizing existing knowledge</strong>: gathering scattered dots into one line, upgrading you from "knowing many things" to "understanding one thing."</p>
+
+<h2>Why this makes SGLang extensible</h2>
+<p>The biggest dividend of this structure is <strong>extensibility</strong>. When a new chip, a new quantization, or a new attention kernel appears, you need not understand—let alone modify—the scheduler and the memory pools; you simply <strong>implement the interface that already exists</strong> and select it at deploy time. Not a line of core code changes, and the risk is firmly contained inside the new implementation. Reviewers then only need to check "does this new impl correctly satisfy the interface," not worry that it breaks scheduling or memory management.</p>
+<p>This also reshapes what "contributing" means: it usually is not rewriting the engine but <strong>filling a new implementation along an existing seam</strong>. The interface is the contract, the core is the stable stage, and the community expands in parallel at the edge. Many teams can contribute implementations for different chips, quantizations, and speculative algorithms at once with almost no conflict, because each operates only inside its own implementation and never touches the shared core. That is exactly what lets an open-source project evolve fast without spinning out of control.</p>
+<p>Once you grasp this, you will read any lesson by asking: "Where is the seam here? What is the interface? How many implementations? How is one chosen at deploy time?"—which is exactly the key to reading SGLang. It reduces a seemingly sprawling engine to <strong>one repeatedly reused archetype</strong>; learn that archetype and you not only understand the existing code but also gain the shortest path to adding to it.</p>
+
+<h2>What a seam's contract looks like</h2>
+<p>Zoom into the archetypal seam—the attention backend—and you see exactly what "the interface is the contract" means. The code file this lesson examines is <span class="mono">AttentionBackend</span> in <span class="mono">base_attn_backend.py</span>: an abstract base class that prescribes only a few <strong>methods that must be implemented</strong>, while writing no concrete kernel logic at all. <span class="mono">init_forward_metadata</span> plans whatever the batch needs, <span class="mono">forward_extend</span> handles prefill attention, and <span class="mono">forward_decode</span> handles decode attention. Model code knows only these three things and never touches a raw kernel directly.</p>
+<p>The beauty of this contract is its <strong>restraint</strong>: it declares only "what you must be able to do," and says nothing about "how you do it." So FlashInfer can implement the three methods with its highly optimized kernels, Triton with its templates, FlashAttention in its own way—and to the model the three are <strong>completely equivalent</strong>, because they satisfy the same contract. At deploy time you pick one via a switch, and the model code does not change in the slightest. This is the plainest and most powerful expression of "program to an interface, not an implementation." You can even flip back and forth between backends for comparison testing without changing a single line of model code—that freedom is exactly what the interface grants.</p>
+<p>Imagine the opposite: without this seam, model code would be littered with "if FlashInfer do this, if Triton do that" branches, and every new backend would force a sweep through the whole model code—the very nightmare of <strong>hard-coding</strong>. The interface <strong>collapses</strong> that "fork by implementation" complexity once, into one abstract base class, so the core and model code forever face a single clean table of methods. The reason SGLang keeps one model codebase across different hardware and algorithms is exactly this restrained, stable contract.</p>
+
+<p class="lead">So "everything is pluggable" is not a slogan but an <strong>engineering discipline</strong> SGLang applies again and again: whatever varies is abstracted into an interface first; whatever the core depends on depends only on the interface, never the implementation. After this lesson, may your first instinct on opening any module be to hunt for its abstract base class—find it and you have found the contract of the seam, and with it the starting point for understanding and extending it.</p>
+
+<table class="t"><tr><th>Pluggable seam</th><th>Interface / abstraction</th><th>Example (implementations)</th><th>Lesson</th></tr>
+<tr><td>Attention backend</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td>Lesson 33</td></tr>
+<tr><td>Hardware platform</td><td><span class="mono">Platform</span></td><td>Many chips, one engine</td><td>Lesson 42</td></tr>
+<tr><td>Quantization method</td><td><span class="mono">QuantizeMethod</span></td><td>Swappable per model</td><td>Lesson 35</td></tr>
+<tr><td>Speculative algorithm</td><td>Algorithm enum</td><td>EAGLE / NGRAM / …</td><td>Lesson 43</td></tr>
+<tr><td>Parallelism axes</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td>Lesson 46</td></tr>
+<tr><td>Grammar backend</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td>Lesson 48</td></tr>
+<tr><td>KV transfer</td><td>KV connector</td><td>Mooncake / NIXL</td><td>Lesson 45</td></tr>
+<tr><td>Write a model</td><td>Stable layer APIs</td><td>Implement a model on layer APIs</td><td>Lesson 26</td></tr></table>
+
+<div class="layers"><div class="layer">🔌 Attention backend (L33)</div><div class="layer">🔌 Hardware platform (L42)</div><div class="layer"><strong>Stable core: Scheduler · model loop · memory pools</strong></div><div class="layer">🔌 Quant / speculation / parallelism (L35/43/46)</div><div class="layer">🔌 Grammar / KV transfer / write a model (L48/45/26)</div></div>
+
+<div class="cols"><div class="col"><strong>Hard-coded (one impl welded into the core)</strong><br>New hardware = edit the scheduler; new algorithm = edit the loop; any change touches the core, risk spreads, collaboration is hard.</div><div class="col"><strong>Program to an interface (swap at deploy)</strong><br>The core knows only the ABC; a new impl plugs in by satisfying the interface; the concrete impl is selected at deploy time, core unchanged.</div></div>
+
+<div class="flow"><div class="node">request</div><div class="arrow">→</div><div class="node">stable core</div><div class="arrow">→</div><div class="node">selected impl at the seam</div><div class="arrow">→</div><div class="node">result</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">the program-to-an-interface archetype: implement it to plug in, never touch the core</span></div><pre>class AttentionBackend(ABC):
+    # the archetypal pluggable seam: model code calls THIS, never a raw kernel
+    @abstractmethod
+    def init_forward_metadata(self, forward_batch):
+        ...   # plan whatever this backend needs for the batch
+    @abstractmethod
+    def forward_extend(self, q, k, v, layer, forward_batch):
+        ...   # prefill attention
+    @abstractmethod
+    def forward_decode(self, q, k, v, layer, forward_batch):
+        ...   # decode attention
+    # FlashInfer / Triton / FA each implement these; chosen at deploy time,
+    # the model code never changes</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>One pattern, everywhere</strong>: program to an interface (an ABC); the concrete implementation is selected <span class="mono">at deploy time</span>—the same skeleton runs through the whole book.</li>
+<li><strong>Stable core</strong>: the Scheduler, the model-execution loop, and the memory pools stay fixed—the precondition for everything else being swappable; the steadier the core, the freer the edge.</li>
+<li><strong>Variable edge</strong>: attention backend (L33), platform (L42), quantization (L35), speculation (L43), parallelism (L46), grammar (L48), KV transfer (L45), writing a model (L26) are all incarnations of the same seam.</li>
+<li><strong>The interface is the contract</strong>: an ABC prescribes only "what you must be able to do," not "how"; multiple implementations are therefore equivalent to the core.</li>
+<li><strong>Source of extensibility</strong>: contributing = implementing an existing interface, not rewriting the core; changes stay local, review narrows, and teams work in parallel.</li>
+<li><strong>The key to reading the whole book</strong>: for any lesson, first ask "where is the seam, what is the interface, how many implementations, how is one chosen at deploy time," and on opening any module, hunt for its abstract base class first.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What 'recurring design archetype' does this lesson distill?</div>
+  <ol class="opts">
+    <li><strong>Program to an interface (an ABC), push every variable axis behind it, and select the concrete implementation at deploy time—keeping the core stable</strong></li>
+    <li>Hard-code every feature into the scheduler for maximum performance</li>
+    <li>Pick implementations randomly at runtime to improve robustness</li>
+    <li>Rewrite the model-execution loop for each new piece of hardware</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. This is a synthesis lesson: it lights up the book's through-line—one interface + many implementations + pick one at deploy time. The engine core (scheduler, model-execution loop, memory pools) stays stable while variation is fenced behind pluggable edges.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which best describes the relation between SGLang's 'stable core' and its 'pluggable edges'?</div>
+  <ol class="opts">
+    <li>Edge components must edit the memory pools directly to work</li>
+    <li>The core must be recompiled per deploy to fit each implementation</li>
+    <li>Only the attention backend is pluggable; everything else is welded into the core</li>
+    <li><strong>The core (Scheduler, model loop, memory pools) knows only abstract interfaces; the attention backend, platform, quantization, speculation, parallelism, grammar, KV transfer are swappable implementations satisfying those interfaces</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The core's stability is the precondition for everything else being swappable. The attention backend (L33), platform (L42), quantization (L35), speculation (L43), parallelism (L46), grammar (L48), and KV transfer (L45) are all incarnations of the same seam: the core knows only the interface, never the implementation.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does this 'program-to-an-interface' structure make SGLang easy to contribute to?</div>
+  <ol class="opts">
+    <li><strong>Because adding new hardware or an algorithm usually only requires implementing an existing interface and selecting it at deploy time—no core code changes and risk is contained inside the new impl</strong></li>
+    <li>Because contributors must rewrite the scheduler and memory pools each time</li>
+    <li>Because all implementations share one global mutable state</li>
+    <li>Because interfaces let you skip verification to merge faster</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The interface is the contract, the core is the stable stage, and the community expands in parallel at the edge. Contributing usually isn't rewriting the engine but filling a new implementation along an existing seam—which is why 'writing a model' (L26) is also just programming against stable layer APIs.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain the 'program to an interface, choose at deploy time' archetype: using the attention backend (Lesson 33) as an example, explain why model code only calls self.attn(...) without caring whether FlashInfer, Triton, or FA sits behind it, and what this decoupling buys you.</li>
+    <li>The lesson says that once you see the shape, you read any lesson by asking 'where is the seam, what is the interface, how many implementations, how is one chosen at deploy time'. Pick at least three of Lessons 35, 42, 43, 45, 46, 48 and show how they share the same shape, then explain why fencing variation behind pluggable edges keeps the engine core simple and reliable.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Built for throughput</h1>
+
+<p class="lead">This is the last lesson of the whole guide, and the one that tightens every part into a single machine. If you take away just one sentence from this book, let it be this: <strong>almost every design choice in SGLang serves one north star — keep the GPU busy doing USEFUL token work</strong>. In other words, maximize the FLOPs and memory bandwidth actually spent on useful computation every second. Read the previous 62 lessons together and you'll see they aren't a grab-bag of tricks but different facets of one carefully engineered <span class="mono">throughput machine</span>.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a giant <strong>central kitchen</strong> that never closes. The most expensive thing in it is a massive oven (the GPU and the model weights it must read over and over); firing and heating it once costs enormous energy. What does a smart head chef do? He never fires the oven for a single order — he <strong>bakes a whole tray at once</strong> (batching); he cuts the cold store into neat <strong>standard cells</strong> so not an inch is wasted (paging); he <strong>cooks one batch of sauce and shares it across tables</strong> (prefix caching); he keeps the prep crew and the oven in <strong>seamless lockstep</strong> so the oven is never idle (overlap scheduling); he turns "open door — slide tray — close door" into <strong>muscle memory</strong> (CUDA graphs); he keeps every knife razor-sharp so the cutting itself is as fast as possible (kernels and fusion). All of it points to one thing: <span class="mono">that expensive oven must never sit idle for a second — and every second it must be baking food that will actually be served</span>. This guide is the entire operating philosophy of that kitchen.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>At the macro level, every cost of an inference system ultimately collapses onto one line item: "GPU time." GPU time is wasted in exactly three ways: <strong>idling</strong> (the CPU didn't feed it, the oven sits empty), <strong>redundant work</strong> (the same prefix computed again and again), and <strong>not fitting</strong> (memory fragmentation or a too-big model keeps servable requests out the door). SGLang's whole architecture maps cleanly onto "eliminate those three wastes": overlap scheduling and CUDA graphs kill idling, prefix caching and RadixAttention kill redundancy, paging plus quantization and parallelism kill not-fitting. Once you hold this lens, any lesson in this book can be re-read in one sentence — <span class="mono">"this move is a deliberate trade made in the service of throughput."</span> That lens is what this lesson, and this whole book, hands you. Put it on and SGLang stops being a feature list and becomes a precise machine with a clear goal and components dividing the labor in concert.</p>
+</div>
+
+<h2>One north star: useful token work per second</h2>
+<p>First, let's make "throughput" precise. It is not the vague "how many requests per second," but <strong>the fraction of each second the GPU spends on useful computation × its effective compute</strong>. In a single decode step, the GPU's truly expensive act is reading the entire set of model weights from memory into the compute units — and the cost of that read is almost independent of how many requests the step served. From this a simple yet profound conclusion emerges: <span class="mono">if you can make one weight read serve 64 requests instead of 1, your effective throughput is nearly 64× higher</span>, at almost no added cost. That is why <strong>batching (Lesson 5)</strong> is the bedrock of everything — it amortizes that most expensive weight read across a whole batch of requests. Every later mechanism in this guide is really answering a different side of the same question: <em>how do we make that batch as large, as full, and as free of wasted work as possible?</em> Carve this sentence into your mind and you'll find it acts like a thread, stringing the next dozen-plus lessons into one chain: each lesson is either helping the batch grow, or helping the batch waste less effort, or helping the GPU not idle between steps. Put differently, the whole book circles around "that one big tray" — how to pile it fuller, how to avoid re-prepping ingredients, and how to keep the oven running without a pause.</p>
+<p>Once you see this, "memory" stops being merely a capacity limit and becomes a direct throughput lever. How big a batch you can run depends on how many requests' KV caches fit in memory at once. <strong>Paging (Lessons 6 and 30)</strong> slices KV into fixed-size pages, eliminating fragmentation, so the same memory holds more requests and the batch grows. <strong>Quantization and parallelism (Lessons 35 and 46)</strong> attack from the other end: shrink the model itself, or spread it across cards, to free up room for the batch. They look like solutions to different problems, but they converge on one place — <span class="mono">make the batch that a single weight read amortizes even larger</span>.</p>
+<p>It's worth pausing a second to feel the unifying beauty of this lens. Before you put these glasses on, you might have filed paging under "a memory-management trick," quantization under "a model-compression trick," and tensor parallelism under "a distributed-systems trick" — sorted into different chapters, dressed in different jargon, maintained by different people. But once you fix the north star as "make the amortized batch larger," all three instantly reveal themselves as three postures of the same act: each prepares a <strong>fuller tray</strong> for that expensive oven. This is the value of a synthesis lesson — it teaches you no new mechanism, but re-arranges every mechanism you've already learned onto one chain of cause and effect. <span class="mono">When the reason for each thing converges to a single sentence, you know you truly understand the system's design intent</span>, not just its parts list.</p>
+
+<h2>Kill the redundancy, kill the idle</h2>
+<p>Enlarging the batch is only the first move. The second is <strong>don't let the GPU do busywork</strong>. Many requests share an identical prefix — the same system prompt, the same few-shot examples, the same conversation history. Recomputing that shared prefix for every request is a huge waste. <strong>Prefix caching / RadixAttention (Lessons 7 and 29)</strong> uses a radix tree to remember already-computed KV, letting requests with a shared prefix reuse it and skip the redundant compute. What it saves is precisely the precious GPU time — equivalent to lifting throughput another notch out of thin air.</p>
+<p>The third move targets idling. Even with a big batch and no redundant compute, if the GPU waits while the CPU prepares the next batch, the oven goes empty. The <strong>overlap scheduler (Lessons 21 and 59)</strong> exists solely to eliminate that CPU bubble: while the GPU computes step N, the CPU is already queuing, sampling, and forming the batch for step N+1, the two overlapping in a pipeline so the GPU almost never stops. Paired with it is <strong>CUDA Graphs (Lesson 27)</strong>, which records the fixed kernel-launch sequence of each step into one graph and replays it in a single shot, cutting the per-step launch overhead — and in small-batch, decode-heavy regimes that saving is substantial. Finally, <strong>kernels and fusion (Lessons 38 and 41)</strong> merge operators and write them right up against the memory-bandwidth limit, so even "the part that actually computes" runs as fast as it can. Every layer answers the same question: <span class="mono">can each second of the GPU be filled more fully with useful work?</span></p>
+<p>Put these three moves side by side and you'll see they are really fighting over different slices of the same second. Within one decode step there's a useful part ("read weights, do compute") and a wasted part ("wait for data, launch kernels, recompute redundant prefixes"). Batching enlarges the output of the useful part, prefix caching cuts away the redundant-prefix slice, overlap scheduling and CUDA graphs flatten the wait and launch slices, and kernel fusion tightens the useful part itself one more turn. So within the same second, the share taken by "useful work" keeps rising and the wasted edges keep shrinking — <span class="mono">that is how a throughput machine is squeezed out, inch by inch</span>. No single move is a silver bullet, but stacked together they push that expensive oven's utilization toward the physical limit. It also explains why removing any one link visibly collapses a chunk of whole-system throughput: they aren't redundant insurance but complementary forces aimed at the same goal.</p>
+
+<h2>Scheduling: tightening all of it into one decision</h2>
+<p>All these levers ultimately meet and get weighed in one place — <strong>scheduling</strong>. The deceptively simple question "who runs next?" actually carries two throughput goals at once: one, <strong>pack the batch as large as possible</strong> (amortize the weight read); two, <strong>prefer requests with high prefix-hit</strong> (reuse KV, skip redundant compute). SGLang encodes both into the priority computation of the waiting queue via <span class="mono">SchedulePolicy</span> and <span class="mono">CacheAwarePolicy</span> — where LPM (longest-prefix-match) groups requests that share a prefix so they both form a big batch and concentrate cache hits. These are not two goals fighting each other but two components of the same north star: <span class="mono">big batch + high prefix-hit, both lead to throughput</span>.</p>
+<p>But here is a subtlety we must face honestly: chasing system throughput blindly can hurt the <strong>individual user</strong>. A very long prompt, if stuffed into prefill all at once, shoves the decode batch aside and stalls everyone else's tokens. So the mechanisms in this guide that look like they're "for latency" enter the stage: <strong>chunked prefill (Lesson 22)</strong> slices a long prompt into chunks interleaved with decode, so one big request can't hog a whole step; <strong>speculative decoding (Lesson 43)</strong> uses a small model to guess and the big model to verify, emitting several tokens per step without adding weight reads. Their spirit is not "sacrifice throughput for latency" but <span class="mono">maximize the system without sacrificing that specific human being</span> — and that is exactly the difference between a mature throughput machine and a brutish one.</p>
+<p>Think this tension all the way through and you hold the last key to reading SGLang. Pure throughput maximization would push the system into a machine that watches only the grand total, never the individual: it would gladly make one unlucky user wait several seconds so long as the aggregate tokens-per-second looks prettier. But in real serving no one wants to be the sacrificed individual. So mature design adds, alongside the north star, a constraint line — <span class="mono">push the system to its max without significantly slowing any single user</span>. Chunked prefill and speculative decoding are the embodiment of that constraint: the former keeps a long request from choking the decode stream in one gulp, the latter makes a single user's tokens arrive faster with almost no added system load. By now you should feel that the whole guide has been demonstrating one balancing act over and over: greedily squeeze the hardware, yet restrain yourself to protect the experience — both booked into the same ledger inside the scheduler.</p>
+
+<table class="t"><tr><th>Design choice</th><th>The throughput it buys</th><th>Lesson</th></tr>
+<tr><td>Batching</td><td>amortize one expensive weight read across a whole batch</td><td>Lesson 5</td></tr>
+<tr><td>Paging (Paged KV)</td><td>kill KV fragmentation, fit more requests in the same memory → bigger batch</td><td>Lessons 6, 30</td></tr>
+<tr><td>Prefix caching / RadixAttention</td><td>reuse shared-prefix KV, skip redundant compute</td><td>Lessons 7, 29</td></tr>
+<tr><td>Overlap scheduler</td><td>eliminate CPU bubbles, the GPU never idles</td><td>Lessons 21, 59</td></tr>
+<tr><td>CUDA Graphs</td><td>cut per-step kernel launch overhead</td><td>Lesson 27</td></tr>
+<tr><td>Kernels and fusion</td><td>ride the memory-bandwidth limit, make the real compute as fast as possible</td><td>Lessons 38, 41</td></tr>
+<tr><td>Quantization and parallelism</td><td>fit bigger models onto the hardware, freeing room for the batch</td><td>Lessons 35, 46</td></tr>
+</table>
+
+<div class="flow"><div class="node">Request arrives<br><span class="mono">form batch</span></div><div class="arrow">→</div><div class="node">Schedule queue<br><span class="mono">big batch+prefix-hit</span></div><div class="arrow">→</div><div class="node">Prefix cache<br><span class="mono">skip repeats</span></div><div class="arrow">→</div><div class="node">Prefill<br><span class="mono">chunked, no hog</span></div><div class="arrow">→</div><div class="node">Decode loop<br><span class="mono">overlap+graph</span></div><div class="arrow">→</div><div class="node">Kernel exec<br><span class="mono">ride bandwidth</span></div><div class="arrow">→</div><div class="node">Return token<br><span class="mono">oven never idle</span></div></div>
+
+<div class="cols"><div class="col"><strong>Throughput levers (push the system to its max)</strong><ul><li>Batching: amortize the weight read</li><li>Paging: fit more requests</li><li>Prefix caching: skip redundant compute</li><li>Overlap scheduling: eliminate idling</li><li>CUDA Graphs: cut launch overhead</li><li>Kernels and fusion: drain the bandwidth</li></ul></div><div class="col"><strong>Latency safeguards (don't sacrifice the person)</strong><ul><li>Chunked prefill (Lesson 22): slice long prompts, interleave, never hog a whole step</li><li>Speculative decoding (Lesson 43): emit several tokens per step without extra weight reads</li><li>Essence: maximize the system while protecting the individual user's experience</li></ul></div></div>
+
+<div class="layers"><div class="layer">Outermost: scheduling and batching — decide "how much to feed at once, and whom"</div><div class="layer">Middle: caching and paging — decide "how much fits, and how much can be reused"</div><div class="layer">Kernel layer: fusion and CUDA Graphs — decide "how fast each step computes, how cheap the launch"</div><div class="layer">Innermost core: the GPU that must never idle — every second doing useful token work</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_policy.py ::SchedulePolicy</span><span class="ln">who runs next is chosen to maximize useful GPU work: big batch + high prefix-hit</span></div><pre>class CacheAwarePolicy(Enum):
+    LPM = "lpm"          # longest-prefix-match: group requests that share a prefix
+    # ... other cache-aware policies
+
+class SchedulePolicy:
+    # who runs next is chosen to MAXIMIZE useful GPU work:
+    # pack the biggest batch (amortize the weight read) AND prefer high prefix-hit
+    # (reuse KV, skip redundant compute) — both serve throughput
+    def calc_priority(self, waiting_queue):
+        ...
+</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li><strong>One north star</strong>: almost every SGLang design keeps the GPU busy doing useful token work — maximizing useful FLOPs and bandwidth per second.</li>
+<li><strong>Batching is the bedrock (Lesson 5)</strong>: amortizing the most expensive weight read across a whole batch is where throughput begins.</li>
+<li><strong>Memory is throughput</strong>: paging (Lessons 6, 30), quantization and parallelism (Lessons 35, 46) all free room for a bigger batch.</li>
+<li><strong>Kill redundancy (Lessons 7, 29)</strong>: prefix caching / RadixAttention reuses shared prefixes, skipping redundant compute.</li>
+<li><strong>Kill idling (Lessons 21, 27, 59)</strong>: overlap scheduling removes CPU bubbles, CUDA Graphs remove launch overhead.</li>
+<li><strong>Drain the bandwidth (Lessons 38, 41)</strong>: kernels and fusion make the real compute ride the hardware limit.</li>
+<li><strong>Scheduling closes the loop</strong>: <span class="mono">SchedulePolicy</span> and <span class="mono">CacheAwarePolicy</span> pursue "big batch" and "high prefix-hit" at once — both serve throughput.</li>
+<li><strong>Latency safeguards</strong>: chunked prefill (Lesson 22) and speculative decoding (Lesson 43) ensure the system is maximized without sacrificing the individual user.</li>
+</ul>
+</div>
+
+<div class="card"><div class="tag">🏁 The end</div>
+<p>One paragraph to look back over the whole book: starting from the map in <strong>Lesson 3, "the life of a request,"</strong> we walked through batching, paging, prefix caching, scheduling, kernels, quantization, parallelism, speculative decoding… all the way to this moment. You can now re-read every part of SGLang as a <span class="mono">deliberate choice made in the service of throughput (or in service of not sacrificing the individual user)</span>. This pair of "throughput glasses" is exactly what the whole guide has been polishing for you since Lesson 1 — put them on, open any piece of source again, and you'll no longer see isolated tricks but coordination under one north star. Thank you for walking these 63 lessons with me; may you wear these glasses to understand, and to improve, the next great inference system. The road is long and the rivers run far — until we meet again. 🚀</p>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the single 'north star' this lesson distills as running through the whole guide?</div>
+  <ol class="opts">
+    <li>Let every component deploy independently on separate machines</li>
+    <li>Minimize a single request's latency at any cost</li>
+    <li>Reduce lines of code as much as possible for maintainability</li>
+    <li><strong>Keep the GPU busy doing useful token work—maximize the FLOPs and memory bandwidth actually spent on useful compute per second (i.e. throughput)</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. This is the closing synthesis lesson: almost every SGLang design serves one goal—never let the GPU idle, and make every second do useful compute that will actually be delivered. Batching, paging, prefix caching, overlap scheduling, CUDA graphs, kernel fusion, quantization, and parallelism are all facets of that north star.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is 'batching' (Lesson 5) called the bedrock of throughput?</div>
+  <ol class="opts">
+    <li>Because batching permanently caches the weights in CPU memory</li>
+    <li><strong>Because the most expensive act in a decode step is reading the whole model weights from memory into the compute units, a cost nearly independent of how many requests are served; a big batch amortizes that one read across many requests</strong></li>
+    <li>Because batching avoids any memory access at all</li>
+    <li>Because batching gives each request its own dedicated GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The weight-read cost is fixed and nearly independent of batch size. Making one read serve 64 requests instead of 1 lifts effective throughput nearly 64×. That is also why paging (Lessons 6, 30) and quantization/parallelism (Lessons 35, 46) all free room for a bigger batch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which pair are the 'latency safeguards'—features that avoid sacrificing the individual user while the system is maximized?</div>
+  <ol class="opts">
+    <li>CUDA Graphs (Lesson 27) and kernel fusion (Lesson 41)</li>
+    <li>Prefix caching (Lesson 7) and overlap scheduling (Lesson 21)</li>
+    <li><strong>Chunked prefill (Lesson 22) and speculative decoding (Lesson 43)</strong></li>
+    <li>Paging (Lesson 6) and quantization (Lesson 35)</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Chunked prefill slices a long prompt and interleaves it with decode so one big request can't hog a whole step; speculative decoding guesses with a small model and verifies with the big one, emitting several tokens per step without extra weight reads. Both are about maximizing the system without sacrificing the specific human, not trading throughput for latency. The other options are pure throughput levers.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Re-read SGLang through the 'throughput glasses': pick any three mechanisms (e.g. batching L5, prefix caching L7/L29, overlap scheduling L21/L59, CUDA graphs L27, kernel fusion L38/L41) and, for each, say which of the three GPU-time wastes—idling, redundant work, or not-fitting—it eliminates, and how it ultimately serves the north star of 'useful token work per second'.</li>
+    <li>The lesson says scheduling (SchedulePolicy / CacheAwarePolicy) pursues both 'big batch' and 'high prefix-hit', calling them both servants of throughput rather than rivals. Explain why these two goals are two components of the same north star, and use LPM (longest-prefix-match) as an example to show how it simultaneously helps form a big batch and concentrate cache hits.</li>
+  </ul>
+</div>
+</div>
 </section>
 </body>
 </html>

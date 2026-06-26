@@ -17,6 +17,7 @@ import part9
 import part10
 import part11
 import part12
+import part13
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -77,4 +78,10 @@ CONTENT = {
     "55-test-suite-and-ci.html": part12.LESSON_55,
     "56-code-conventions-and-pr.html": part12.LESSON_56,
     "57-glossary.html": part12.LESSON_57,
+    "58-radixattention-as-a-first-class-idea.html": part13.LESSON_58,
+    "59-zero-overhead-scheduling.html": part13.LESSON_59,
+    "60-two-workloads-one-engine.html": part13.LESSON_60,
+    "61-draft-for-parallel-verify.html": part13.LESSON_61,
+    "62-everything-is-pluggable.html": part13.LESSON_62,
+    "63-built-for-throughput.html": part13.LESSON_63,
 }

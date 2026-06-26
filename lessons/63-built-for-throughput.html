@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>63 · 为吞吐而生 / Built for throughput - SGLang 图解教程</title>
+<meta name="description" content="第十三部分 · 设计专题综合｜为吞吐而生 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="63 · 为吞吐而生 / Built for throughput - SGLang 图解教程">
+<meta property="og:description" content="第十三部分 · 设计专题综合｜为吞吐而生 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="63 · 为吞吐而生 / Built for throughput - SGLang 图解教程">
+<meta name="twitter:description" content="第十三部分 · 设计专题综合｜为吞吐而生 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></span>
+    <span class="pill">63 / 63</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></div>
+    <h1><span class="lang-zh">为吞吐而生</span><span class="lang-en">Built for throughput</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">这是全书的最后一课，也是把所有零件拧成一台机器的一课。如果你只想从这本指南里带走一句话，那就是这句：<strong>SGLang 的几乎每一个设计选择，都在为同一颗北极星服务——让 GPU 一直忙着做"有用的 token 工作"</strong>。换句话说，最大化每秒钟真正花在有用计算上的 FLOPs 与显存带宽。把前面 62 课连起来读，你会发现它们不是一堆互不相干的技巧，而是一台精心设计的<span class="mono">吞吐机器</span>的不同切面。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象一座 24 小时不打烊的<strong>大型中央厨房</strong>。厨房里最贵的东西是那台巨大的烤炉（GPU 与它要反复读取的模型权重），开一次炉、热一次就要付出巨大的能量成本。一个聪明的厨房长会怎么做？他不会为一份订单单独开炉——他会<strong>攒一大盘菜一起烤</strong>（批处理）；他会把冷藏库切成整齐的<strong>标准格子</strong>，不浪费一寸空间（分页）；同一种酱汁<strong>熬好一次给多桌共用</strong>（前缀缓存）；他让备菜工和烤炉<strong>永远无缝衔接</strong>，炉子一刻不空（重叠调度）；他把"开炉门—放盘—关门"的固定动作<strong>编成一套肌肉记忆</strong>（CUDA Graph）；他磨快每一把刀，让切配本身快到极限（内核与融合）。所有这些都指向同一件事：<span class="mono">那台贵烤炉，一秒都不许闲着，而且每一秒都在烤真正要交付的菜</span>。这本指南讲的，就是这家厨房的全部经营哲学。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>从宏观看，一个推理系统的所有成本，最终都压在"GPU 时间"这一项上。GPU 时间被浪费，无非三种方式：<strong>空转</strong>（CPU 没喂上数据，炉子空着）、<strong>重复劳动</strong>（同样的前缀算了一遍又一遍）、<strong>装不下</strong>（显存碎片或模型太大，本可服务的请求被挡在门外）。SGLang 的整套架构，可以逐条映射成"消灭这三种浪费"的针对性手术：重叠调度与 CUDA Graph 消灭空转，前缀缓存与 RadixAttention 消灭重复，分页、量化与并行消灭装不下。当你建立起这个视角，本书任何一课你都能重新读成一句话——<span class="mono">"这一招，是在为吞吐做的某个深思熟虑的取舍"</span>。这就是这门课、也是这整本书，想交到你手上的那副眼镜。戴上它，你看 SGLang 就不再是一份功能清单，而是一台目标明确、各部件分工协作的精密机器。</p>
+</div>
+
+<h2>一颗北极星：每秒有用的 token 工作</h2>
+<p>先把"吞吐"这个词说精确。它不是"每秒处理多少请求"那么含糊，而是<strong>每秒钟 GPU 花在有用计算上的比例×有效算力</strong>。一次解码步骤里，GPU 真正昂贵的动作是把整套模型权重从显存读进计算单元——这一步的成本几乎与"这一步服务了多少请求"无关。于是一个朴素却深刻的结论浮现：<span class="mono">如果你能让同一次权重读取同时服务 64 个请求而不是 1 个，你的有效吞吐就接近翻了 64 倍</span>，而几乎没有额外代价。这就是<strong>批处理（第5课）</strong>之所以是一切的地基的原因——它把最贵的那次"读权重"摊薄到了一大批请求头上。指南里后面所有的机制，本质上都在回答同一个问题的不同侧面：<em>如何让这个大批次尽可能大、尽可能满、尽可能少做无用功</em>。把这句话刻在脑子里，你会发现它像一根线，把后面十几课串成了一串：每一课要么在帮批次变大，要么在帮批次里少做白工，要么在帮 GPU 在两步之间不空转。换个说法，整本书都在围绕"那一大盘菜"打转——怎么攒得更满、怎么不重复备料、怎么让烤炉一刻不停。</p>
+<p>理解了这一点，"显存"就不再只是一个容量限制，而是直接的吞吐杠杆。批次能开多大，取决于显存里能同时塞下多少请求的 KV 缓存。<strong>分页（第6课、第30课）</strong>把 KV 切成固定大小的页，消灭了碎片，于是同样的显存能装下更多请求，批次就能更大。<strong>量化与并行（第35课、第46课）</strong>则从另一头出手：把模型本身压小、或摊到多张卡上，给批次腾出更多空间。它们看起来在解决不同的问题，但收口都在同一处——<span class="mono">让那个能被一次权重读取摊薄的批次，更大</span>。</p>
+<p>值得多停留一秒，去体会这个视角的统一之美。在没有这副眼镜之前，你可能把分页当成"内存管理的技巧"，把量化当成"压缩模型的技巧"，把张量并行当成"分布式系统的技巧"——它们被归在不同的章节、用着不同的术语、由不同的人维护。可一旦你认定北极星是"让被摊薄的批次更大"，这三者立刻显形为同一个动作的三种姿势：都是在为那台贵烤炉准备<strong>更满的一盘菜</strong>。这正是综合课的价值——它不教你任何新机制，而是把你已经学过的所有机制，重新排进同一根因果链里。<span class="mono">当解释一件事的理由收敛到同一句话，你就知道自己真正理解了这套系统的设计意图</span>，而不只是记住了它的零件清单。</p>
+
+<h2>消灭重复，消灭空转</h2>
+<p>把批次撑大只是第一招。第二招是<strong>别让 GPU 做白工</strong>。很多请求共享相同的前缀——同一段系统提示、同一份少样本示例、同一轮对话历史。如果每个请求都把这段共享前缀重新算一遍，那是巨大的浪费。<strong>前缀缓存 / RadixAttention（第7课、第29课）</strong>用一棵基数树记住已经算过的 KV，让共享前缀的请求直接复用，跳过冗余计算。这一招省下来的，正是宝贵的 GPU 时间，等价于凭空把吞吐又抬高了一截。</p>
+<p>第三招针对"空转"。哪怕批次很大、计算也不重复，如果 CPU 在准备下一批数据时 GPU 只能干等，炉子就空了。<strong>重叠调度器（第21课、第59课）</strong>的全部使命就是消灭这种 CPU 气泡：当 GPU 正在算第 N 步时，CPU 已经在为第 N+1 步排队、采样、组批，两者重叠流水，让 GPU 几乎永不停步。与之配合的是 <strong>CUDA Graph（第27课）</strong>，它把每一步固定的内核启动序列录制成一张图，一次回放，砍掉了逐次启动的 CPU 开销——在小批次、解码密集的场景下，这部分省下的开销相当可观。最后，<strong>内核与融合（第38课、第41课）</strong>把多个算子合并、贴着显存带宽的极限去写，让"真正算的那一段"本身也快到尽头。每一层都在回答同一个问题：<span class="mono">GPU 的每一秒，能不能更满地用在有用的工作上？</span></p>
+<p>把这三招放在一起看，会发现它们其实在抢同一秒钟的不同部分。一步解码的时间里，既有"读权重做计算"的有效部分，也有"等数据、启内核、算冗余前缀"的浪费部分。批处理放大了有效部分的产出，前缀缓存切掉了冗余前缀那一块，重叠调度与 CUDA Graph 压扁了等待与启动那两块，内核融合则把有效部分本身再拧紧一圈。于是同一秒钟里，"有用工作"占的比例越来越高，被浪费的边角越来越少——<span class="mono">这就是吞吐机器一寸一寸抠出来的</span>。没有哪一招是银弹，但它们叠在一起，就把那台贵烤炉的利用率推到了逼近物理极限的地步。这也解释了为什么去掉任何一环，整机的吞吐都会明显塌一块：它们不是冗余的保险，而是同一目标上互补的合力。</p>
+
+<h2>调度：把以上全部拧成一个决策</h2>
+<p>所有这些杠杆，最终要在一个地方汇合并被同时权衡——<strong>调度</strong>。"下一步该让谁跑"这个看似简单的问题，其实同时背负着两个吞吐目标：一是<strong>把批次塞到最大</strong>（摊薄权重读取），二是<strong>优先挑前缀命中率高的请求</strong>（复用 KV、跳过重复计算）。SGLang 用 <span class="mono">SchedulePolicy</span> 与 <span class="mono">CacheAwarePolicy</span> 把这两个目标编码进了等待队列的优先级计算里——其中 LPM（最长前缀匹配）会把共享前缀的请求聚到一起，让它们既能组成大批、又能集中命中缓存。这不是两个互相打架的目标，而是同一颗北极星的两个分量：<span class="mono">大批 + 高前缀命中，二者都通向吞吐</span>。</p>
+<p>但这里有一个必须诚实面对的微妙之处：一味追求系统吞吐，可能会伤害<strong>单个用户</strong>的体验。一个超长 prompt 如果一次性塞进预填充，会把解码批次顶到一边，让其他用户的 token 卡顿。于是指南里那些看似"为延迟"的机制登场了：<strong>分块预填充（第22课）</strong>把长 prompt 切成小块、与解码交错，避免一个大请求霸占整步；<strong>投机解码（第43课）</strong>用小模型猜、大模型验，在不增加权重读取次数的前提下一步吐出多个 token。它们的精神不是"牺牲吞吐换延迟"，而是<span class="mono">在最大化系统的同时，不牺牲那个具体的人</span>——这正是一台成熟的吞吐机器与一台粗暴的吞吐机器的区别。</p>
+<p>把这层张力想透，你就握住了阅读 SGLang 的最后一把钥匙。纯粹的吞吐最大化，会把系统逼成一台只看总账、不看个体的机器：它愿意让某个倒霉用户等上几秒，只要整体每秒 token 数更漂亮。但真实服务里，没有人愿意当那个被牺牲的个体。于是成熟的设计在北极星之外，又加了一条约束线——<span class="mono">在不显著拖慢任何单个用户的前提下，把系统推到最大</span>。分块预填充与投机解码正是这条约束线的化身：前者保证长请求不会一口气堵死解码流，后者让单用户的 token 更快吐出而几乎不增加系统负担。读到这里，你应该已经能感到，整本指南其实在反复演示同一种平衡术：既贪婪地榨取硬件，又克制地守护体验，二者在调度器里被同时计入同一笔账。</p>
+
+<table class="t"><tr><th>设计选择</th><th>它买来的吞吐</th><th>课次</th></tr>
+<tr><td>批处理</td><td>把一次昂贵的权重读取摊薄到一大批请求上</td><td>第5课</td></tr>
+<tr><td>分页（Paged KV）</td><td>消灭 KV 碎片，同样显存装下更多请求 → 批次更大</td><td>第6、30课</td></tr>
+<tr><td>前缀缓存 / RadixAttention</td><td>复用共享前缀的 KV，跳过冗余计算</td><td>第7、29课</td></tr>
+<tr><td>重叠调度器</td><td>消灭 CPU 气泡，GPU 永不空转</td><td>第21、59课</td></tr>
+<tr><td>CUDA Graph</td><td>砍掉逐步内核启动开销</td><td>第27课</td></tr>
+<tr><td>内核与融合</td><td>贴着显存带宽极限，让真正的计算快到尽头</td><td>第38、41课</td></tr>
+<tr><td>量化与并行</td><td>把更大的模型塞进硬件，给批次腾空间</td><td>第35、46课</td></tr>
+</table>
+
+<div class="flow"><div class="node">请求到达<br><span class="mono">攒批</span></div><div class="arrow">→</div><div class="node">调度排队<br><span class="mono">大批+前缀命中</span></div><div class="arrow">→</div><div class="node">前缀缓存<br><span class="mono">跳过重复</span></div><div class="arrow">→</div><div class="node">预填充<br><span class="mono">分块不霸占</span></div><div class="arrow">→</div><div class="node">解码循环<br><span class="mono">重叠+Graph</span></div><div class="arrow">→</div><div class="node">内核执行<br><span class="mono">贴带宽极限</span></div><div class="arrow">→</div><div class="node">返回 token<br><span class="mono">炉子不空</span></div></div>
+
+<div class="cols"><div class="col"><strong>吞吐杠杆（把系统推到最大）</strong><ul><li>批处理：摊薄权重读取</li><li>分页：装下更多请求</li><li>前缀缓存：跳过重复计算</li><li>重叠调度：消灭空转</li><li>CUDA Graph：砍启动开销</li><li>内核与融合：榨干带宽</li></ul></div><div class="col"><strong>延迟护栏（不牺牲那个人）</strong><ul><li>分块预填充（第22课）：长 prompt 切块交错，不霸占整步</li><li>投机解码（第43课）：一步多吐 token，不增加权重读取</li><li>本质：在最大化系统的同时守住单用户体验</li></ul></div></div>
+
+<div class="layers"><div class="layer">最外层：调度与批处理——决定"一次喂多少、喂谁"</div><div class="layer">中间层：缓存与分页——决定"装得下多少、能复用多少"</div><div class="layer">内核层：融合与 CUDA Graph——决定"每一步算得多快、启动多省"</div><div class="layer">最内核心：那台不许闲着的 GPU——每一秒都在做有用的 token 工作</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_policy.py ::SchedulePolicy</span><span class="ln">谁先跑，挑的是"最大化有用 GPU 工作"：大批 + 高前缀命中</span></div><pre>class CacheAwarePolicy(Enum):
+    LPM = "lpm"          # longest-prefix-match: group requests that share a prefix
+    # ... other cache-aware policies
+
+class SchedulePolicy:
+    # who runs next is chosen to MAXIMIZE useful GPU work:
+    # pack the biggest batch (amortize the weight read) AND prefer high prefix-hit
+    # (reuse KV, skip redundant compute) — both serve throughput
+    def calc_priority(self, waiting_queue):
+        ...
+</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div>
+<ul>
+<li><strong>一颗北极星</strong>：SGLang 几乎每个设计都在让 GPU 一直忙着做有用的 token 工作——最大化每秒有用的 FLOPs 与带宽。</li>
+<li><strong>批处理是地基（第5课）</strong>：把最贵的"读权重"摊薄到一大批请求上，是吞吐的起点。</li>
+<li><strong>显存即吞吐</strong>：分页（第6、30课）、量化与并行（第35、46课）都在为"更大的批次"腾空间。</li>
+<li><strong>消灭重复（第7、29课）</strong>：前缀缓存 / RadixAttention 复用共享前缀，跳过冗余计算。</li>
+<li><strong>消灭空转（第21、27、59课）</strong>：重叠调度去掉 CPU 气泡，CUDA Graph 去掉启动开销。</li>
+<li><strong>榨干带宽（第38、41课）</strong>：内核与融合让真正的计算贴着硬件极限跑。</li>
+<li><strong>调度收口</strong>：<span class="mono">SchedulePolicy</span> 与 <span class="mono">CacheAwarePolicy</span> 同时追求"大批"与"高前缀命中"，二者都服务吞吐。</li>
+<li><strong>延迟护栏</strong>：分块预填充（第22课）与投机解码（第43课）保证在最大化系统时不牺牲单个用户。</li>
+</ul>
+</div>
+
+<div class="card"><div class="tag">🏁 全书收束</div>
+<p>用一段话回望全书：从<strong>第3课"一次请求的一生"</strong>那张地图出发，我们一路走过批处理、分页、前缀缓存、调度、内核、量化、并行、投机解码……直到此刻。现在你已经能把 SGLang 的每一个部件，都重新读成一个<span class="mono">为吞吐（或在不牺牲单个用户的前提下）做出的深思熟虑的选择</span>。这副"吞吐眼镜"，正是这整本指南从第一课起就在为你打磨的东西——戴上它，再去翻任何一段源码，你看到的将不再是孤立的技巧，而是同一颗北极星下的协同。感谢你同行这 63 课，愿你带着这副眼镜，去读懂、也去改进下一个伟大的推理系统。山高水长，后会有期，江湖再见。🚀</p>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 本课提炼出贯穿全书的「唯一北极星」是什么？</div>
+  <ol class="opts">
+    <li>让每个组件都能独立部署在不同机器上</li>
+    <li>在任何代价下把单个请求的延迟压到最低</li>
+    <li>尽可能减少代码行数以方便维护</li>
+    <li><strong>让 GPU 一直忙着做有用的 token 工作——最大化每秒真正花在有用计算上的 FLOPs 与显存带宽（即吞吐）</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。这是收尾的综合课：SGLang 几乎每个设计都在为同一目标服务——让 GPU 一刻不空，且每一秒都在做真正要交付的有用计算。批处理、分页、前缀缓存、重叠调度、CUDA Graph、内核融合、量化并行都是这颗北极星的不同切面。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么说「批处理」（第5课）是吞吐的地基？</div>
+  <ol class="opts">
+    <li>因为批处理把模型权重永久缓存在 CPU 里</li>
+    <li><strong>因为一次解码里最贵的动作是把整套模型权重从显存读入计算单元，其成本几乎与服务的请求数无关；攒大批能把这次昂贵的读取摊薄到许多请求头上</strong></li>
+    <li>因为批处理避免了对显存的任何访问</li>
+    <li>因为批处理能让每个请求都用上独立的 GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。权重读取成本固定，与批内请求数几乎无关。让同一次读取服务 64 个请求而非 1 个，有效吞吐就接近翻 64 倍。这也是为什么分页（第6、30课）、量化与并行（第35、46课）都在为「更大的批」腾空间。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 下列哪一组属于「延迟护栏」——即在最大化系统吞吐的同时，避免牺牲单个用户？</div>
+  <ol class="opts">
+    <li>CUDA Graph（第27课）与内核融合（第41课）</li>
+    <li>前缀缓存（第7课）与重叠调度（第21课）</li>
+    <li><strong>分块预填充（第22课）与投机解码（第43课）</strong></li>
+    <li>分页（第6课）与量化（第35课）</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。分块预填充把长 prompt 切块、与解码交错，避免一个大请求霸占整步；投机解码用小模型猜、大模型验，一步多吐 token 而不增加权重读取。两者的精神都是「在最大化系统的同时不牺牲那个具体的人」，而非牺牲吞吐换延迟。其余各项都是纯粹的吞吐杠杆。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用「吞吐眼镜」重读 SGLang：任选三个机制（如批处理第5课、前缀缓存第7/29课、重叠调度第21/59课、CUDA Graph 第27课、内核融合第38/41课），分别说明它消灭的是「空转」「重复劳动」还是「装不下」这三种 GPU 时间浪费中的哪一种，以及它如何最终服务于「每秒有用 token 工作」这颗北极星。</li>
+    <li>本课说调度（SchedulePolicy / CacheAwarePolicy）同时追求「大批」与「高前缀命中」，并称二者都服务吞吐而非互相打架。请解释为什么这两个目标是同一颗北极星的两个分量，并以 LPM（最长前缀匹配）为例说明它如何同时帮助组成大批与集中缓存命中。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">This is the last lesson of the whole guide, and the one that tightens every part into a single machine. If you take away just one sentence from this book, let it be this: <strong>almost every design choice in SGLang serves one north star — keep the GPU busy doing USEFUL token work</strong>. In other words, maximize the FLOPs and memory bandwidth actually spent on useful computation every second. Read the previous 62 lessons together and you'll see they aren't a grab-bag of tricks but different facets of one carefully engineered <span class="mono">throughput machine</span>.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a giant <strong>central kitchen</strong> that never closes. The most expensive thing in it is a massive oven (the GPU and the model weights it must read over and over); firing and heating it once costs enormous energy. What does a smart head chef do? He never fires the oven for a single order — he <strong>bakes a whole tray at once</strong> (batching); he cuts the cold store into neat <strong>standard cells</strong> so not an inch is wasted (paging); he <strong>cooks one batch of sauce and shares it across tables</strong> (prefix caching); he keeps the prep crew and the oven in <strong>seamless lockstep</strong> so the oven is never idle (overlap scheduling); he turns "open door — slide tray — close door" into <strong>muscle memory</strong> (CUDA graphs); he keeps every knife razor-sharp so the cutting itself is as fast as possible (kernels and fusion). All of it points to one thing: <span class="mono">that expensive oven must never sit idle for a second — and every second it must be baking food that will actually be served</span>. This guide is the entire operating philosophy of that kitchen.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>At the macro level, every cost of an inference system ultimately collapses onto one line item: "GPU time." GPU time is wasted in exactly three ways: <strong>idling</strong> (the CPU didn't feed it, the oven sits empty), <strong>redundant work</strong> (the same prefix computed again and again), and <strong>not fitting</strong> (memory fragmentation or a too-big model keeps servable requests out the door). SGLang's whole architecture maps cleanly onto "eliminate those three wastes": overlap scheduling and CUDA graphs kill idling, prefix caching and RadixAttention kill redundancy, paging plus quantization and parallelism kill not-fitting. Once you hold this lens, any lesson in this book can be re-read in one sentence — <span class="mono">"this move is a deliberate trade made in the service of throughput."</span> That lens is what this lesson, and this whole book, hands you. Put it on and SGLang stops being a feature list and becomes a precise machine with a clear goal and components dividing the labor in concert.</p>
+</div>
+
+<h2>One north star: useful token work per second</h2>
+<p>First, let's make "throughput" precise. It is not the vague "how many requests per second," but <strong>the fraction of each second the GPU spends on useful computation × its effective compute</strong>. In a single decode step, the GPU's truly expensive act is reading the entire set of model weights from memory into the compute units — and the cost of that read is almost independent of how many requests the step served. From this a simple yet profound conclusion emerges: <span class="mono">if you can make one weight read serve 64 requests instead of 1, your effective throughput is nearly 64× higher</span>, at almost no added cost. That is why <strong>batching (Lesson 5)</strong> is the bedrock of everything — it amortizes that most expensive weight read across a whole batch of requests. Every later mechanism in this guide is really answering a different side of the same question: <em>how do we make that batch as large, as full, and as free of wasted work as possible?</em> Carve this sentence into your mind and you'll find it acts like a thread, stringing the next dozen-plus lessons into one chain: each lesson is either helping the batch grow, or helping the batch waste less effort, or helping the GPU not idle between steps. Put differently, the whole book circles around "that one big tray" — how to pile it fuller, how to avoid re-prepping ingredients, and how to keep the oven running without a pause.</p>
+<p>Once you see this, "memory" stops being merely a capacity limit and becomes a direct throughput lever. How big a batch you can run depends on how many requests' KV caches fit in memory at once. <strong>Paging (Lessons 6 and 30)</strong> slices KV into fixed-size pages, eliminating fragmentation, so the same memory holds more requests and the batch grows. <strong>Quantization and parallelism (Lessons 35 and 46)</strong> attack from the other end: shrink the model itself, or spread it across cards, to free up room for the batch. They look like solutions to different problems, but they converge on one place — <span class="mono">make the batch that a single weight read amortizes even larger</span>.</p>
+<p>It's worth pausing a second to feel the unifying beauty of this lens. Before you put these glasses on, you might have filed paging under "a memory-management trick," quantization under "a model-compression trick," and tensor parallelism under "a distributed-systems trick" — sorted into different chapters, dressed in different jargon, maintained by different people. But once you fix the north star as "make the amortized batch larger," all three instantly reveal themselves as three postures of the same act: each prepares a <strong>fuller tray</strong> for that expensive oven. This is the value of a synthesis lesson — it teaches you no new mechanism, but re-arranges every mechanism you've already learned onto one chain of cause and effect. <span class="mono">When the reason for each thing converges to a single sentence, you know you truly understand the system's design intent</span>, not just its parts list.</p>
+
+<h2>Kill the redundancy, kill the idle</h2>
+<p>Enlarging the batch is only the first move. The second is <strong>don't let the GPU do busywork</strong>. Many requests share an identical prefix — the same system prompt, the same few-shot examples, the same conversation history. Recomputing that shared prefix for every request is a huge waste. <strong>Prefix caching / RadixAttention (Lessons 7 and 29)</strong> uses a radix tree to remember already-computed KV, letting requests with a shared prefix reuse it and skip the redundant compute. What it saves is precisely the precious GPU time — equivalent to lifting throughput another notch out of thin air.</p>
+<p>The third move targets idling. Even with a big batch and no redundant compute, if the GPU waits while the CPU prepares the next batch, the oven goes empty. The <strong>overlap scheduler (Lessons 21 and 59)</strong> exists solely to eliminate that CPU bubble: while the GPU computes step N, the CPU is already queuing, sampling, and forming the batch for step N+1, the two overlapping in a pipeline so the GPU almost never stops. Paired with it is <strong>CUDA Graphs (Lesson 27)</strong>, which records the fixed kernel-launch sequence of each step into one graph and replays it in a single shot, cutting the per-step launch overhead — and in small-batch, decode-heavy regimes that saving is substantial. Finally, <strong>kernels and fusion (Lessons 38 and 41)</strong> merge operators and write them right up against the memory-bandwidth limit, so even "the part that actually computes" runs as fast as it can. Every layer answers the same question: <span class="mono">can each second of the GPU be filled more fully with useful work?</span></p>
+<p>Put these three moves side by side and you'll see they are really fighting over different slices of the same second. Within one decode step there's a useful part ("read weights, do compute") and a wasted part ("wait for data, launch kernels, recompute redundant prefixes"). Batching enlarges the output of the useful part, prefix caching cuts away the redundant-prefix slice, overlap scheduling and CUDA graphs flatten the wait and launch slices, and kernel fusion tightens the useful part itself one more turn. So within the same second, the share taken by "useful work" keeps rising and the wasted edges keep shrinking — <span class="mono">that is how a throughput machine is squeezed out, inch by inch</span>. No single move is a silver bullet, but stacked together they push that expensive oven's utilization toward the physical limit. It also explains why removing any one link visibly collapses a chunk of whole-system throughput: they aren't redundant insurance but complementary forces aimed at the same goal.</p>
+
+<h2>Scheduling: tightening all of it into one decision</h2>
+<p>All these levers ultimately meet and get weighed in one place — <strong>scheduling</strong>. The deceptively simple question "who runs next?" actually carries two throughput goals at once: one, <strong>pack the batch as large as possible</strong> (amortize the weight read); two, <strong>prefer requests with high prefix-hit</strong> (reuse KV, skip redundant compute). SGLang encodes both into the priority computation of the waiting queue via <span class="mono">SchedulePolicy</span> and <span class="mono">CacheAwarePolicy</span> — where LPM (longest-prefix-match) groups requests that share a prefix so they both form a big batch and concentrate cache hits. These are not two goals fighting each other but two components of the same north star: <span class="mono">big batch + high prefix-hit, both lead to throughput</span>.</p>
+<p>But here is a subtlety we must face honestly: chasing system throughput blindly can hurt the <strong>individual user</strong>. A very long prompt, if stuffed into prefill all at once, shoves the decode batch aside and stalls everyone else's tokens. So the mechanisms in this guide that look like they're "for latency" enter the stage: <strong>chunked prefill (Lesson 22)</strong> slices a long prompt into chunks interleaved with decode, so one big request can't hog a whole step; <strong>speculative decoding (Lesson 43)</strong> uses a small model to guess and the big model to verify, emitting several tokens per step without adding weight reads. Their spirit is not "sacrifice throughput for latency" but <span class="mono">maximize the system without sacrificing that specific human being</span> — and that is exactly the difference between a mature throughput machine and a brutish one.</p>
+<p>Think this tension all the way through and you hold the last key to reading SGLang. Pure throughput maximization would push the system into a machine that watches only the grand total, never the individual: it would gladly make one unlucky user wait several seconds so long as the aggregate tokens-per-second looks prettier. But in real serving no one wants to be the sacrificed individual. So mature design adds, alongside the north star, a constraint line — <span class="mono">push the system to its max without significantly slowing any single user</span>. Chunked prefill and speculative decoding are the embodiment of that constraint: the former keeps a long request from choking the decode stream in one gulp, the latter makes a single user's tokens arrive faster with almost no added system load. By now you should feel that the whole guide has been demonstrating one balancing act over and over: greedily squeeze the hardware, yet restrain yourself to protect the experience — both booked into the same ledger inside the scheduler.</p>
+
+<table class="t"><tr><th>Design choice</th><th>The throughput it buys</th><th>Lesson</th></tr>
+<tr><td>Batching</td><td>amortize one expensive weight read across a whole batch</td><td>Lesson 5</td></tr>
+<tr><td>Paging (Paged KV)</td><td>kill KV fragmentation, fit more requests in the same memory → bigger batch</td><td>Lessons 6, 30</td></tr>
+<tr><td>Prefix caching / RadixAttention</td><td>reuse shared-prefix KV, skip redundant compute</td><td>Lessons 7, 29</td></tr>
+<tr><td>Overlap scheduler</td><td>eliminate CPU bubbles, the GPU never idles</td><td>Lessons 21, 59</td></tr>
+<tr><td>CUDA Graphs</td><td>cut per-step kernel launch overhead</td><td>Lesson 27</td></tr>
+<tr><td>Kernels and fusion</td><td>ride the memory-bandwidth limit, make the real compute as fast as possible</td><td>Lessons 38, 41</td></tr>
+<tr><td>Quantization and parallelism</td><td>fit bigger models onto the hardware, freeing room for the batch</td><td>Lessons 35, 46</td></tr>
+</table>
+
+<div class="flow"><div class="node">Request arrives<br><span class="mono">form batch</span></div><div class="arrow">→</div><div class="node">Schedule queue<br><span class="mono">big batch+prefix-hit</span></div><div class="arrow">→</div><div class="node">Prefix cache<br><span class="mono">skip repeats</span></div><div class="arrow">→</div><div class="node">Prefill<br><span class="mono">chunked, no hog</span></div><div class="arrow">→</div><div class="node">Decode loop<br><span class="mono">overlap+graph</span></div><div class="arrow">→</div><div class="node">Kernel exec<br><span class="mono">ride bandwidth</span></div><div class="arrow">→</div><div class="node">Return token<br><span class="mono">oven never idle</span></div></div>
+
+<div class="cols"><div class="col"><strong>Throughput levers (push the system to its max)</strong><ul><li>Batching: amortize the weight read</li><li>Paging: fit more requests</li><li>Prefix caching: skip redundant compute</li><li>Overlap scheduling: eliminate idling</li><li>CUDA Graphs: cut launch overhead</li><li>Kernels and fusion: drain the bandwidth</li></ul></div><div class="col"><strong>Latency safeguards (don't sacrifice the person)</strong><ul><li>Chunked prefill (Lesson 22): slice long prompts, interleave, never hog a whole step</li><li>Speculative decoding (Lesson 43): emit several tokens per step without extra weight reads</li><li>Essence: maximize the system while protecting the individual user's experience</li></ul></div></div>
+
+<div class="layers"><div class="layer">Outermost: scheduling and batching — decide "how much to feed at once, and whom"</div><div class="layer">Middle: caching and paging — decide "how much fits, and how much can be reused"</div><div class="layer">Kernel layer: fusion and CUDA Graphs — decide "how fast each step computes, how cheap the launch"</div><div class="layer">Innermost core: the GPU that must never idle — every second doing useful token work</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_policy.py ::SchedulePolicy</span><span class="ln">who runs next is chosen to maximize useful GPU work: big batch + high prefix-hit</span></div><pre>class CacheAwarePolicy(Enum):
+    LPM = "lpm"          # longest-prefix-match: group requests that share a prefix
+    # ... other cache-aware policies
+
+class SchedulePolicy:
+    # who runs next is chosen to MAXIMIZE useful GPU work:
+    # pack the biggest batch (amortize the weight read) AND prefer high prefix-hit
+    # (reuse KV, skip redundant compute) — both serve throughput
+    def calc_priority(self, waiting_queue):
+        ...
+</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li><strong>One north star</strong>: almost every SGLang design keeps the GPU busy doing useful token work — maximizing useful FLOPs and bandwidth per second.</li>
+<li><strong>Batching is the bedrock (Lesson 5)</strong>: amortizing the most expensive weight read across a whole batch is where throughput begins.</li>
+<li><strong>Memory is throughput</strong>: paging (Lessons 6, 30), quantization and parallelism (Lessons 35, 46) all free room for a bigger batch.</li>
+<li><strong>Kill redundancy (Lessons 7, 29)</strong>: prefix caching / RadixAttention reuses shared prefixes, skipping redundant compute.</li>
+<li><strong>Kill idling (Lessons 21, 27, 59)</strong>: overlap scheduling removes CPU bubbles, CUDA Graphs remove launch overhead.</li>
+<li><strong>Drain the bandwidth (Lessons 38, 41)</strong>: kernels and fusion make the real compute ride the hardware limit.</li>
+<li><strong>Scheduling closes the loop</strong>: <span class="mono">SchedulePolicy</span> and <span class="mono">CacheAwarePolicy</span> pursue "big batch" and "high prefix-hit" at once — both serve throughput.</li>
+<li><strong>Latency safeguards</strong>: chunked prefill (Lesson 22) and speculative decoding (Lesson 43) ensure the system is maximized without sacrificing the individual user.</li>
+</ul>
+</div>
+
+<div class="card"><div class="tag">🏁 The end</div>
+<p>One paragraph to look back over the whole book: starting from the map in <strong>Lesson 3, "the life of a request,"</strong> we walked through batching, paging, prefix caching, scheduling, kernels, quantization, parallelism, speculative decoding… all the way to this moment. You can now re-read every part of SGLang as a <span class="mono">deliberate choice made in the service of throughput (or in service of not sacrificing the individual user)</span>. This pair of "throughput glasses" is exactly what the whole guide has been polishing for you since Lesson 1 — put them on, open any piece of source again, and you'll no longer see isolated tricks but coordination under one north star. Thank you for walking these 63 lessons with me; may you wear these glasses to understand, and to improve, the next great inference system. The road is long and the rivers run far — until we meet again. 🚀</p>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the single 'north star' this lesson distills as running through the whole guide?</div>
+  <ol class="opts">
+    <li>Let every component deploy independently on separate machines</li>
+    <li>Minimize a single request's latency at any cost</li>
+    <li>Reduce lines of code as much as possible for maintainability</li>
+    <li><strong>Keep the GPU busy doing useful token work—maximize the FLOPs and memory bandwidth actually spent on useful compute per second (i.e. throughput)</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. This is the closing synthesis lesson: almost every SGLang design serves one goal—never let the GPU idle, and make every second do useful compute that will actually be delivered. Batching, paging, prefix caching, overlap scheduling, CUDA graphs, kernel fusion, quantization, and parallelism are all facets of that north star.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is 'batching' (Lesson 5) called the bedrock of throughput?</div>
+  <ol class="opts">
+    <li>Because batching permanently caches the weights in CPU memory</li>
+    <li><strong>Because the most expensive act in a decode step is reading the whole model weights from memory into the compute units, a cost nearly independent of how many requests are served; a big batch amortizes that one read across many requests</strong></li>
+    <li>Because batching avoids any memory access at all</li>
+    <li>Because batching gives each request its own dedicated GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The weight-read cost is fixed and nearly independent of batch size. Making one read serve 64 requests instead of 1 lifts effective throughput nearly 64×. That is also why paging (Lessons 6, 30) and quantization/parallelism (Lessons 35, 46) all free room for a bigger batch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which pair are the 'latency safeguards'—features that avoid sacrificing the individual user while the system is maximized?</div>
+  <ol class="opts">
+    <li>CUDA Graphs (Lesson 27) and kernel fusion (Lesson 41)</li>
+    <li>Prefix caching (Lesson 7) and overlap scheduling (Lesson 21)</li>
+    <li><strong>Chunked prefill (Lesson 22) and speculative decoding (Lesson 43)</strong></li>
+    <li>Paging (Lesson 6) and quantization (Lesson 35)</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Chunked prefill slices a long prompt and interleaves it with decode so one big request can't hog a whole step; speculative decoding guesses with a small model and verifies with the big one, emitting several tokens per step without extra weight reads. Both are about maximizing the system without sacrificing the specific human, not trading throughput for latency. The other options are pure throughput levers.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Re-read SGLang through the 'throughput glasses': pick any three mechanisms (e.g. batching L5, prefix caching L7/L29, overlap scheduling L21/L59, CUDA graphs L27, kernel fusion L38/L41) and, for each, say which of the three GPU-time wastes—idling, redundant work, or not-fitting—it eliminates, and how it ultimately serves the north star of 'useful token work per second'.</li>
+    <li>The lesson says scheduling (SchedulePolicy / CacheAwarePolicy) pursues both 'big batch' and 'high prefix-hit', calling them both servants of throughput rather than rivals. Explain why these two goals are two components of the same north star, and use LPM (longest-prefix-match) as an example to show how it simultaneously helps form a big batch and concentrate cache hits.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="62-everything-is-pluggable.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">一切皆可插拔</span><span class="lang-en">Everything is pluggable</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

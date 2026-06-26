@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>59 · 零开销调度的哲学 / Zero-overhead scheduling - SGLang 图解教程</title>
+<meta name="description" content="第十三部分 · 设计专题综合｜零开销调度的哲学 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="59 · 零开销调度的哲学 / Zero-overhead scheduling - SGLang 图解教程">
+<meta property="og:description" content="第十三部分 · 设计专题综合｜零开销调度的哲学 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="59 · 零开销调度的哲学 / Zero-overhead scheduling - SGLang 图解教程">
+<meta name="twitter:description" content="第十三部分 · 设计专题综合｜零开销调度的哲学 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></span>
+    <span class="pill">59 / 63</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:93%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十三部分 · 设计专题综合</span><span class="lang-en">Part 13 · Design themes (synthesis)</span></div>
+    <h1><span class="lang-zh">零开销调度的哲学</span><span class="lang-en">Zero-overhead scheduling</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">如果把前面许多课串成一条线，你会发现它们其实都在回答同一个问题：<strong>如何让 GPU 永远不等 CPU</strong>。这就是 SGLang 调度子系统的设计北极星——<span class="mono">零开销调度（zero-overhead scheduling）</span>。现代 GPU 的前向计算快到离谱，任何在前向<strong>之前</strong>或<strong>之后</strong>由 CPU 做的工作（调度、分配、分词、解码、拼下一批），都会变成 GPU 干等的"气泡（bubble）"。本课不教新机制，而是把第18、21、22、27、14、16 课像珠子一样串起来，让你看清那条贯穿始终的主线。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象一条高级餐厅的<strong>开放式厨房</strong>。主厨（GPU）刀工快得吓人，一道菜十秒钟出锅。可是如果每次出菜后都要主厨自己去洗菜、切配、摆盘、写下一单（这些都是 CPU 的活），那主厨大部分时间都在<strong>空等</strong>，灶台凉着。聪明的做法是：在主厨炒<strong>第 N 道菜</strong>的同时，旁边的小工已经把<strong>第 N+1 道菜</strong>的料备好了，同时把<strong>第 N-1 道菜</strong>端走摆盘。这样主厨的灶台<strong>一刻不停</strong>。SGLang 的 <span class="mono">overlap scheduler</span> 干的就是这件事：把所有 CPU 的"备菜、摆盘"藏到 GPU"炒菜"的时间背后。</p>
+<p>这个类比还能再推一步。如果某位客人点了一道需要慢炖两小时的硬菜（超长 prefill），聪明的厨房不会让主厨守着这一锅、把别人的菜全晾着，而是把慢炖<strong>分几次照看</strong>、其间照常出别的快手菜——这正是分块预填充。如果摆盘、写单这些杂事太多，干脆<strong>另雇一个传菜员</strong>在别的工位上专门干，主厨连看都不用看——这正是进程拆分。你会发现，一家高效厨房的全部智慧，都浓缩成一句话：<strong>千万别让主厨闲下来</strong>。</p></div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>"零开销"不是说 CPU 不干活，而是说 CPU 的活<strong>不占用额外的墙钟时间</strong>——它们被<strong>重叠（overlap）</strong>进了 GPU 的前向计算里。一个推理引擎的每一步，逻辑上是：CPU 调度选批 → GPU 前向 → CPU 处理结果（采样、拼 token、检测停止）。如果三者串行，GPU 在前后两段 CPU 时间里都<strong>闲着</strong>。SGLang 的整套调度设计，从<strong>事件循环（第18课）</strong>、<strong>重叠调度（第21课）</strong>、<strong>分块预填充（第22课）</strong>、<strong>CUDA 图（第27课）</strong>，到<strong>进程拆分 + IPC（第14/16课）</strong>，本质上都是同一句话的不同侧面：<span class="mono">找到每一个 CPU 气泡，把它藏到 GPU 的计算背后</span>。</p>
+<p>之所以值得单独用一课来讲这个"哲学"，是因为它能<strong>反过来指导你读懂整个系统</strong>。很多人学 SGLang 时把这些机制当成一张<strong>互不相关的特性清单</strong>逐条死记，结果调参时只能照抄别人的命令行。但只要你抓住"别让 GPU 等"这一条主线，就能<strong>自上而下</strong>地理解每个机制存在的理由：它不是为了炫技，而是在堵某一个具体的气泡。本课的目标，就是把这条贯穿前面许多课的隐线<strong>显式地拎出来</strong>，让你从"记住很多招"升级到"看懂一套心法"。</p></div>
+
+<h2>一、气泡从哪来：GPU 太快，CPU 太"碍事"</h2>
+<p>先把问题量化。一次 decode 前向，在大模型上可能只需要几毫秒甚至更短。可是围绕它的 CPU 工作并不少：要从等待队列里<strong>挑出能跑的请求</strong>、给它们<strong>分配 KV cache 的页</strong>、把张量<strong>搬上设备</strong>；前向结束后，又要<strong>采样</strong>下一个 token、把 token <strong>追加</strong>到各个序列、<strong>判断是否触发停止条件</strong>、把完成的结果<strong>发回</strong>给分词进程。这些 CPU 操作每一项都是微秒到毫秒级的，单看不起眼，但只要它们<strong>串在 GPU 前后</strong>，GPU 就得乖乖等着——这段空等，就是气泡。</p>
+<p>气泡之所以可怕，是因为它<strong>不产生任何价值却消耗墙钟时间</strong>。GPU 是整台机器里最贵的资源，买它就是为了让它满载算矩阵乘法。可一旦它在每一步前后都要停下来等 CPU 把下一批准备好，它的<strong>实际利用率</strong>就被腰斩。你以为买了一块能跑满的卡，结果一半时间它在打盹。更糟的是，这种浪费<strong>随步数累积</strong>：生成一个一千 token 的回答要跑一千步，每步漏掉的那点时间乘以一千，就是肉眼可见的延迟和吞吐损失。换个角度看，吞吐量几乎正比于 GPU 的有效占用率，每堵住一个气泡，就等于<strong>白捡</strong>了一截算力，而且这截算力是<strong>已经付过钱</strong>的——它本来就在那张卡里，只是之前被白白浪费掉了。</p>
+<p>关键洞察是：<strong>GPU 越快，气泡的相对占比越大</strong>。十年前 GPU 慢，CPU 那点开销淹没在计算里看不出来；今天 GPU 一步只要几毫秒，CPU 的几毫秒就成了<strong>对半开</strong>的浪费。换句话说，硬件越先进，软件不把 CPU 开销藏好，浪费就越严重——这是一个<strong>反直觉</strong>的结论：升级显卡如果不配套优化调度，多花的钱可能有一半打了水漂。于是"消灭气泡"从一个锦上添花的优化，升级成了<strong>决定吞吐的头等大事</strong>。这正是 SGLang 把调度器命名为"零开销"的原因——它的目标函数就是让 GPU 占用率逼近 100%。</p>
+
+<h2>二、主线：事件循环与重叠调度</h2>
+<p>一切的心脏是<strong>调度器的事件循环（第18课）</strong>。它是一个永不停歇的 <span class="mono">while True</span>：收请求、组批、发前向、收结果、再组下一批。整个推理引擎就靠这个循环一圈一圈地把系统"泵"起来，每转一圈就吐出一批 token。朴素的事件循环是<strong>串行</strong>的——组完批才发前向，前向回来才处理结果，处理完才组下一批。这就是气泡的温床：在"发前向"和"收结果"这两个边界上，GPU 和 CPU 必然有一方在等另一方。</p>
+<p><strong>重叠调度（第21课）</strong>把这个串行循环改造成<strong>流水线</strong>：当 GPU 正在跑 <span class="mono">forward(批 N)</span> 时，CPU<strong>不闲着</strong>——它已经在<strong>组装批 N+1</strong>（挑请求、分配页、搬张量），并且<strong>并行处理批 N-1 的结果</strong>（采样、拼 token、检测停止）。注意这里有一个微妙但重要的点：CPU 处理的是<strong>上一步</strong>的结果，而不是刚发出去那一步的——因为刚发出的前向还没算完。正是这种"<strong>错一拍</strong>"的安排，让 CPU 永远有活干、GPU 永远不用等。</p>
+<p>这一切由 <span class="mono">enable_overlap</span> 开关控制（即 <span class="mono">--disable-overlap-schedule</span> 的反面）。一旦打开，CPU 的调度与结果处理就被"塞进"了 GPU 前向的影子里，墙钟时间上几乎<strong>不可见</strong>。代价是引擎要同时持有<strong>多步的中间状态</strong>（N-1、N、N+1），实现复杂度更高，也更难调试——但这正是"零开销"四个字真正落地、值得付出的地方。如果你把 overlap 关掉，引擎会退回到那个朴素串行循环，正确性不变，但 GPU 利用率和吞吐都会明显下滑。这也解释了为什么默认就是打开的：对绝大多数线上负载来说，多花一点内存换回近乎翻倍的有效算力，是再划算不过的交易。</p>
+
+<h2>三、其他珠子：分块预填充、CUDA 图、进程拆分</h2>
+<p>同一条主线还串着另外三颗珠子。<strong>分块预填充（第22课）</strong>解决的是另一种气泡：一个超长 prompt 的 prefill 如果一口气跑完，会占满整个前向，让所有正在 decode 的请求<strong>全体卡住</strong>等它，造成延迟尖刺。SGLang 把长 prefill <strong>切成小块</strong>，与 decode <strong>交替</strong>进行——每一步既塞进一点新 prompt 的 prefill，又照顾正在生成的老请求，避免单个大活堵死整条流水线。本质还是那句话："别让某一段把 GPU 的节奏打乱"，把一个会引发长气泡的大任务摊薄成许多不打扰别人的小任务。</p>
+<p><strong>CUDA 图（第27课）</strong>对付的是<strong>内核启动开销</strong>这种气泡：每发射一个 CUDA kernel，CPU 都要付出固定的启动成本，decode 一步要发几十上百个 kernel，加起来就是可观的 CPU 时间，而且这段时间 GPU 往往在等下一个 kernel 被提交。CUDA 图把整串 kernel<strong>录制成一张图</strong>，之后一次<strong>重放</strong>就能在 GPU 上跑完整条序列，CPU 几乎不再逐个参与发射——这是"别让 CPU 成为 GPU 瓶颈"的又一种形态，专门针对 decode 这种<strong>kernel 多、单个小</strong>、最容易被启动开销拖累的场景。</p>
+<p>最后是<strong>进程拆分 + IPC（第14/16课）</strong>。SGLang 把 <span class="mono">TokenizerManager</span> 和 <span class="mono">DetokenizerManager</span> 放在<strong>独立于</strong>调度器 + GPU 的<strong>另外的进程</strong>里，靠 IPC（进程间通信）传消息。这样分词、解码这些纯 CPU 活，根本<strong>不在</strong>前向的关键路径上——它们在别的进程里和 GPU 计算天然并行，连"重叠"都不用刻意安排，操作系统的进程调度就帮你把它们错开了。这也顺带绕开了 Python 的全局解释器锁（GIL）：分词进程的 CPU 占用不会拖慢调度进程。可以说，进程拆分是把气泡<strong>物理隔离</strong>到了关键路径之外。</p>
+
+<h2>四、把所有珠子串成一句话</h2>
+<p>现在退后一步看全局。第18、21、22、27、14、16 课，表面上是六个不同的机制，骨子里是<strong>同一个设计哲学</strong>的六种实现：<span class="mono">枚举每一个可能让 GPU 干等的 CPU 气泡，然后把它藏到 GPU 计算背后，或者干脆挪到别的进程</span>。事件循环给出了"泵"的骨架，重叠调度把调度和结果处理藏进影子，分块预填充把长任务摊薄，CUDA 图消掉启动开销，进程拆分把分词解码搬走——每一颗珠子瞄准的都是一种特定形状的气泡。</p>
+<p>理解了这条主线，你再回头看任何一个调度相关的开关（<span class="mono">--disable-overlap-schedule</span>、<span class="mono">--chunked-prefill-size</span>、<span class="mono">--disable-cuda-graph</span>），都会立刻明白它在和哪一种气泡作战，也能预判关掉它会让哪种气泡重新冒出来。这就是融会贯通的力量：你记住的不再是六个孤立的参数，而是<strong>一条能自己推导出新优化的原则</strong>。下次遇到一个新的 CPU 开销，你会本能地问："它能不能藏到 GPU 计算背后？能不能挪到别的进程？"——这，就是零开销调度作为整个调度子系统设计北极星的真正含义。</p>
+
+<h2>五、一个具体的回合：把原则走一遍</h2>
+<p>抽象讲了这么多，我们把它落到一次真实的生成回合上，看看零开销原则如何在每一拍里发力。假设此刻引擎正在为几十条并发请求做 decode，同时还有一条携带超长 prompt 的新请求刚刚到达。如果没有任何优化，这一拍会是这样：CPU 先停下来给新请求做完整的 prefill（很慢），所有老请求干等；prefill 算完才轮到 decode；decode 的前向发出去后，CPU 又得逐个发射上百个 kernel；前向回来后再串行地采样、拼 token、检测停止。GPU 在这一拍里至少有<strong>三段</strong>明显的空闲。</p>
+<p>现在打开 SGLang 的全套机制。<strong>分块预填充</strong>先把那条长 prompt 切成小块，本拍只塞进一块，和几十条老请求的 decode <strong>拼成同一个批</strong>一起算，没人被饿死。<strong>CUDA 图</strong>让这个批的上百个 kernel 一次重放完成，CPU 不再逐个发射。<strong>重叠调度</strong>则保证：当这一拍的前向在 GPU 上跑时，CPU 已经在<strong>挑下一拍的请求、分配页</strong>，同时把<strong>上一拍</strong>采样出来的 token <strong>拼回</strong>各序列、检测哪些请求该停了。而那些该停的请求要回传给用户，这一步走的是<strong>进程拆分</strong>的通道——<span class="mono">DetokenizerManager</span> 在另一个进程里把 token id 还原成文字，完全不占用当前前向的关键路径。</p>
+<p>一拍下来，原本三段空闲被填得满满当当：长 prefill 被摊薄、kernel 启动被消除、调度与结果处理被藏进影子、分词解码被物理隔离到别的进程。GPU 几乎从头忙到尾。把这一拍重复一千次，就是一次完整的生成；把零开销原则贯彻到每一拍，就是 SGLang 高吞吐的底层秘密。<strong>你会发现，所谓"零开销"，并不是某一个聪明的算法，而是一种近乎偏执的习惯：见到任何一段 GPU 可能干等的时间，就想方设法把别的有用工作填进去。</strong></p>
+
+<div class="flow"><div class="node">CPU 选批/分配</div><div class="arrow">→</div><div class="node">GPU 前向(N)</div><div class="arrow">→</div><div class="node">CPU 采样/拼token</div><div class="arrow">→</div><div class="node">GPU 闲等(气泡)</div><div class="arrow">→</div><div class="node">CPU 选批(N+1)</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>GPU 正在跑 forward(批 N)</h4><p class="mono">run_batch(batch_N)</p><p>这一步是整个流水线里最贵、最耗时的，GPU 满负荷运转。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>同一时刻 · CPU 组装批 N+1</h4><p class="mono">get_next_batch_to_run()</p><p>挑请求、分配 KV 页、搬张量，全都在 GPU 忙的影子里悄悄做完。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>同一时刻 · CPU 处理批 N-1 的结果</h4><p class="mono">process_batch_result(prev)</p><p>采样、拼 token、检测停止、回发结果，与 GPU 计算并行。</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>→ GPU 永不空等</h4><p class="mono">enable_overlap=True</p><p>灶台一刻不停，CPU 开销在墙钟上彻底隐身。</p></div></div></div>
+
+<table class="t"><tr><th>CPU 气泡</th><th>SGLang 如何把它藏起来</th><th>对应课</th></tr>
+<tr><td>调度选批 / 结果处理</td><td>事件循环 + 重叠调度，CPU 活塞进 GPU 前向影子里</td><td>第18 / 21 课</td></tr>
+<tr><td>超长 prefill 堵塞流水线</td><td>分块预填充，把长 prefill 切块与 decode 交替</td><td>第22 课</td></tr>
+<tr><td>每步内核启动开销</td><td>CUDA 图录制一次、重放多次，CPU 不再逐个发射</td><td>第27 课</td></tr>
+<tr><td>分词 / 解码占用关键路径</td><td>进程拆分 + IPC，Tokenizer/Detokenizer 跑在别的进程</td><td>第14 / 16 课</td></tr></table>
+
+<div class="cols"><div class="col"><strong>overlap 关闭</strong><br>组批 → 前向 → 处理结果 串行执行，GPU 在两段 CPU 时间里都<span class="mono">空闲</span>，占用率掉到一半甚至更低，气泡清晰可见。</div><div class="col"><strong>overlap 打开</strong><br>GPU 跑 forward(N) 的同时，CPU 已备好 N+1、处理完 N-1，GPU<span class="mono">始终忙碌</span>，墙钟上看不到 CPU 开销——这就是零开销。</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler</span><span class="ln">GPU 跑第 N 步时，CPU 已在准备第 N+1 步</span></div><pre>class Scheduler:
+    def __init__(self, server_args, ...):
+        # CPU bubbles are the enemy: hide them behind the GPU forward
+        self.enable_overlap = not server_args.disable_overlap_schedule
+        ...
+    def event_loop_overlap(self):
+        # while the GPU runs forward(batch N), the CPU already builds batch N+1,
+        # and the PREVIOUS step's result is processed in parallel -&gt; GPU never idles
+        while True:
+            batch = self.get_next_batch_to_run()    # CPU: schedule + allocate
+            result = self.run_batch(batch)          # launch GPU forward (async)
+            self.process_batch_result(prev_result)  # overlap: handle the prior step
+            prev_result = result</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>一条主线</strong>：CPU 绝不能让 GPU 等。任何前向<strong>前后</strong>的 CPU 工作都是潜在气泡。</li>
+<li><strong>重叠是核心手段</strong>：GPU 跑 forward(N) 时，CPU 已组装 N+1、并行处理 N-1（<span class="mono">enable_overlap</span>，第18/21课）。</li>
+<li><strong>多种气泡多种藏法</strong>：分块预填充防长 prefill 堵塞（第22课）、CUDA 图消内核启动开销（第27课）、进程拆分让分词解码离开关键路径（第14/16课）。</li>
+<li><strong>GPU 越快，气泡越致命</strong>：消灭气泡从锦上添花升级为决定吞吐的头等大事，硬件越先进越要把 CPU 开销藏好。</li>
+<li><strong>融会贯通</strong>：六课六机制，同一个哲学——找到每个 CPU 气泡，把它藏到 GPU 计算背后。记住这一条原则，胜过死记六个孤立的参数，因为它能让你<strong>自己推导</strong>出下一个优化。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 本课说零开销调度的「一条主线」是什么？</div>
+  <ol class="opts">
+    <li>让 CPU 完全不做任何工作，所有逻辑都搬到 GPU 上</li>
+    <li>通过提高 CPU 主频来追上 GPU 的速度</li>
+    <li>把每一步都串行执行以保证结果正确</li>
+    <li><strong>CPU 绝不能让 GPU 等：任何在前向之前或之后的 CPU 工作都是潜在「气泡」，要把它藏到 GPU 计算背后</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。零开销不是 CPU 不干活，而是 CPU 的活不占额外墙钟时间——它们被重叠进 GPU 前向里。现代 GPU 极快，前向前后那点 CPU 工作就成了 GPU 干等的气泡，整个调度子系统的目标就是消灭这些气泡。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 重叠调度（第21课）打开 enable_overlap 后，GPU 在跑 forward(批 N) 的同时，CPU 在做什么？</div>
+  <ol class="opts">
+    <li>重新计算批 N 的 KV 缓存以校验结果</li>
+    <li>空等 GPU 返回，什么也不做</li>
+    <li><strong>已经在组装批 N+1，并且并行处理批 N-1 的结果，让 GPU 一刻不停</strong></li>
+    <li>把 GPU 暂停下来等 CPU 把队列清空</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。朴素事件循环是串行的：组批→前向→处理结果，GPU 在两段 CPU 时间里都闲着。重叠调度把循环改成流水线：GPU 跑 forward(N) 时 CPU 同时组装 N+1、处理 N-1，CPU 开销被塞进 GPU 前向的影子里，墙钟上几乎看不见。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 下列「CPU 气泡 → SGLang 如何藏它」的配对，哪一组完全正确？</div>
+  <ol class="opts">
+    <li>调度→量化；长 prefill→张量并行；内核启动→温度采样；分词→负载均衡</li>
+    <li><strong>调度/结果处理→重叠调度(第18/21课)；长 prefill 堵塞→分块预填充(第22课)；内核启动开销→CUDA 图(第27课)；分词解码→进程拆分+IPC(第14/16课)</strong></li>
+    <li>所有气泡都只能靠加 GPU 显存解决</li>
+    <li>气泡只存在于 prefill，decode 阶段没有气泡</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。六课六机制其实是同一哲学的不同侧面：事件循环+重叠调度藏掉调度与结果处理，分块预填充防止长 prefill 堵死流水线，CUDA 图消除逐个内核启动的开销，进程拆分+IPC 让分词解码离开前向关键路径。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释：为什么「GPU 越快，CPU 气泡越致命」？结合一次 decode 前向只要几毫秒、而调度+采样+拼 token 也是毫秒级这个事实，说明为什么消灭气泡从锦上添花升级成了决定吞吐的头等大事。</li>
+    <li>挑出本课提到的至少三处「零开销主线的不同面孔」（如事件循环第18课、重叠调度第21课、分块预填充第22课、CUDA 图第27课、进程拆分第14/16课），说明它们骨子里都是同一句话：找到每个 CPU 气泡，把它藏到 GPU 计算背后或挪到别的进程。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">If you thread together many of the earlier lessons, you find they all answer one question: <strong>how do we make sure the GPU never waits for the CPU?</strong> This is the design north star of SGLang's scheduling subsystem—<span class="mono">zero-overhead scheduling</span>. A modern GPU's forward pass is absurdly fast, so any work the CPU does <strong>before</strong> or <strong>after</strong> the forward (scheduling, allocating, tokenizing, detokenizing, building the next batch) becomes a "bubble" where the GPU sits idle. This lesson teaches no new mechanism; instead it strings lessons 14, 16, 18, 21, 22, and 27 together like beads so you can see the single thread running through them all.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture the <strong>open kitchen</strong> of a high-end restaurant. The head chef (the GPU) has terrifying knife skills—a dish leaves the pan in ten seconds. But if after every dish the chef has to wash, chop, plate, and write the next ticket themselves (all CPU work), the chef spends most of the time <strong>idle</strong>, the stove going cold. The smart move: while the chef cooks <strong>dish N</strong>, a runner has already prepped <strong>dish N+1</strong> and is plating and carrying away <strong>dish N-1</strong>. The chef's stove <strong>never stops</strong>. SGLang's <span class="mono">overlap scheduler</span> does exactly this: it hides all the CPU "prep and plating" behind the GPU's "cooking" time.</p>
+<p>The analogy stretches further. If a guest orders a dish that needs two hours of slow braising (a very long prefill), a clever kitchen won't let the chef babysit that one pot while everyone else's food goes cold; it <strong>tends the braise in installments</strong>, cooking quick dishes in between—that is chunked prefill. If plating and ticket-writing pile up, just <strong>hire a separate runner</strong> at another station to do nothing else, so the chef never even glances at it—that is the process split. You'll find the whole wisdom of an efficient kitchen distills into one line: <strong>never let the chef sit idle</strong>.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>"Zero-overhead" doesn't mean the CPU does no work—it means the CPU's work costs <strong>no extra wall-clock time</strong>, because it is <strong>overlapped</strong> into the GPU's forward pass. Each step of an inference engine is logically: CPU schedule/pick batch → GPU forward → CPU process results (sample, append token, check stop). Run serially, the GPU sits <strong>idle</strong> during both CPU segments. SGLang's whole scheduling design—from the <strong>event loop (L18)</strong>, the <strong>overlap scheduler (L21)</strong>, <strong>chunked prefill (L22)</strong>, <strong>CUDA graphs (L27)</strong>, to the <strong>process split + IPC (L14/16)</strong>—is the same sentence from different angles: <span class="mono">find every CPU bubble and hide it behind GPU compute</span>.</p>
+<p>This "philosophy" deserves its own lesson because it can <strong>turn around and help you read the whole system</strong>. Many people learning SGLang treat these mechanisms as an <strong>unrelated feature checklist</strong> to memorize one by one, and end up only able to copy someone else's command line when tuning. But once you seize the single thread "don't let the GPU wait," you can understand <strong>top-down</strong> why each mechanism exists: not to show off, but to plug one specific bubble. The goal of this lesson is to <strong>pull that hidden thread out into the open</strong>, upgrading you from "memorizing many moves" to "grasping one underlying art."</p></div>
+
+<h2>1. Where bubbles come from: the GPU is fast, the CPU is "in the way"</h2>
+<p>Quantify the problem first. A single decode forward on a large model may take only a few milliseconds, or less. Yet the CPU work around it is not small: it must <strong>pick runnable requests</strong> from the waiting queue, <strong>allocate KV-cache pages</strong> for them, and <strong>move tensors</strong> onto the device; after the forward it must <strong>sample</strong> the next token, <strong>append</strong> it to each sequence, <strong>check stop conditions</strong>, and <strong>send</strong> finished results back to the tokenizer process. Each of these is microseconds to milliseconds—trivial alone, but the moment they are <strong>strung before and after</strong> the GPU, the GPU must wait. That idle gap is the bubble.</p>
+<p>A bubble is dangerous because it <strong>produces no value yet consumes wall-clock time</strong>. The GPU is the most expensive resource in the whole machine; you bought it to keep it saturated with matrix multiplies. The instant it must stop before and after every step to wait for the CPU to prepare the next batch, its <strong>real utilization</strong> is halved. You thought you bought a card that runs flat-out, but half the time it dozes. Worse, this waste <strong>accumulates across steps</strong>: generating a thousand-token answer takes a thousand steps, and the bit of time lost each step times a thousand is visible latency and throughput loss. Seen another way, throughput is roughly proportional to the GPU's effective occupancy, and every bubble you plug is a slice of compute you get <strong>for free</strong>—compute you have <strong>already paid for</strong>, that was sitting in the card all along and merely wasted before.</p>
+<p>The key insight: <strong>the faster the GPU, the larger the bubble's relative share</strong>. A decade ago GPUs were slow and that CPU overhead drowned in the compute; today a GPU step takes a few milliseconds, so a few CPU milliseconds become a <strong>fifty-fifty</strong> waste. In other words, the more advanced the hardware, the worse the waste if the software fails to hide CPU overhead—a <strong>counter-intuitive</strong> conclusion: upgrading the GPU without matching scheduler optimization may pour half the extra money down the drain. So "killing bubbles" graduates from a nice-to-have into the <strong>number-one factor deciding throughput</strong>. That is exactly why SGLang names its scheduler "zero-overhead"—its objective is to push GPU occupancy toward 100%.</p>
+
+<h2>2. The main thread: the event loop and overlap scheduling</h2>
+<p>At the heart of everything is the <strong>scheduler's event loop (L18)</strong>. It is a never-resting <span class="mono">while True</span>: take requests, form a batch, launch the forward, collect results, form the next batch. The whole inference engine "pumps" the system around this loop, emitting one batch of tokens per turn. A naive event loop is <strong>serial</strong>—form the batch, then launch, then wait for results, then form the next. That is the breeding ground for bubbles: at the two boundaries "launch forward" and "collect results", either the GPU or the CPU must be waiting on the other.</p>
+<p>The <strong>overlap scheduler (L21)</strong> turns that serial loop into a <strong>pipeline</strong>: while the GPU runs <span class="mono">forward(batch N)</span>, the CPU <strong>is not idle</strong>—it is already <strong>assembling batch N+1</strong> (pick requests, allocate pages, move tensors) and <strong>processing batch N-1's results in parallel</strong> (sample, append token, check stop). Note a subtle but important point: the CPU processes the results of the <strong>previous</strong> step, not the one just launched—because that forward hasn't finished yet. It is precisely this <strong>off-by-one-beat</strong> arrangement that keeps the CPU always busy and the GPU never waiting.</p>
+<p>All of this is controlled by the <span class="mono">enable_overlap</span> switch (the opposite of <span class="mono">--disable-overlap-schedule</span>). Once enabled, the CPU's scheduling and result handling are "tucked into" the shadow of the GPU forward, becoming nearly <strong>invisible</strong> in wall-clock time. The cost is that the engine must hold <strong>several steps' intermediate state</strong> at once (N-1, N, N+1), raising implementation complexity and making debugging harder—but this is where the words "zero-overhead" actually land, and it is worth it. Turn overlap off and the engine falls back to that naive serial loop: correctness unchanged, but GPU utilization and throughput drop noticeably. This also explains why it is on by default: for the vast majority of production loads, trading a little extra memory for nearly double the effective compute is as good a bargain as it gets.</p>
+
+<h2>3. The other beads: chunked prefill, CUDA graphs, process split</h2>
+<p>The same thread strings three more beads. <strong>Chunked prefill (L22)</strong> tackles a different bubble: if a very long prompt's prefill runs all at once, it fills the entire forward and every request currently decoding gets <strong>stalled</strong> waiting for it, causing a latency spike. SGLang <strong>slices</strong> the long prefill into chunks and <strong>interleaves</strong> them with decode—each step packs in a little new-prompt prefill while still serving the old generating requests—so a single big job can't clog the whole pipeline. Still the same idea: "don't let one segment break the GPU's rhythm," thinning a long-bubble-causing big task into many small ones that disturb no one.</p>
+<p><strong>CUDA graphs (L27)</strong> fight the <strong>kernel-launch overhead</strong> bubble: every CUDA kernel launch costs the CPU a fixed amount, a decode step launches dozens to hundreds of kernels, which adds up to real CPU time, and during it the GPU often waits for the next kernel to be submitted. CUDA graphs <strong>record the whole chain of kernels into one graph</strong> and later <strong>replay</strong> it to run the entire sequence on the GPU, so the CPU barely participates in launching one by one—another form of "don't let the CPU bottleneck the GPU," aimed squarely at decode, the <strong>many-small-kernel</strong> scenario most easily dragged down by launch overhead.</p>
+<p>Finally, the <strong>process split + IPC (L14/16)</strong>. SGLang puts <span class="mono">TokenizerManager</span> and <span class="mono">DetokenizerManager</span> in <strong>separate processes</strong> from the scheduler + GPU, passing messages over IPC (inter-process communication). So pure-CPU work like tokenize and detokenize is <strong>not</strong> on the forward's critical path at all—it runs in other processes, naturally parallel to GPU compute, no deliberate "overlap" even required, with the OS process scheduler staggering them for you. It also sidesteps Python's global interpreter lock (GIL): the tokenizer process's CPU usage can't slow the scheduler process. The process split is, in effect, <strong>physically isolating</strong> the bubble off the critical path.</p>
+
+<h2>4. Threading every bead into one sentence</h2>
+<p>Now step back and see the whole. Lessons 18, 21, 22, 27, 14, 16 look like six different mechanisms, but at the bone they are six implementations of <strong>one design philosophy</strong>: <span class="mono">enumerate every CPU bubble that could make the GPU wait, then hide it behind GPU compute, or move it to another process entirely</span>. The event loop gives the "pump" skeleton, overlap scheduling hides scheduling and result processing in the shadow, chunked prefill thins long tasks, CUDA graphs erase launch overhead, the process split moves tokenize/detokenize away—each bead targets one specific shape of bubble.</p>
+<p>Once you grasp this thread, every scheduling-related switch (<span class="mono">--disable-overlap-schedule</span>, <span class="mono">--chunked-prefill-size</span>, <span class="mono">--disable-cuda-graph</span>) immediately reveals which kind of bubble it is fighting, and you can predict which bubble re-emerges when you turn it off. That is the power of synthesis: what you remember is no longer six isolated parameters but <strong>one principle that lets you derive new optimizations yourself</strong>. Next time you meet a new CPU cost, you'll instinctively ask: "Can it hide behind GPU compute? Can it move to another process?"—and that is the true meaning of zero-overhead scheduling as the design north star of the entire scheduling subsystem.</p>
+
+<h2>5. One concrete round: walking the principle through</h2>
+<p>After all the abstraction, let's ground it in a real generation round and watch the zero-overhead principle act on every beat. Suppose the engine is decoding dozens of concurrent requests when a new request carrying a very long prompt arrives. With no optimization, this beat goes: the CPU stops to run the new request's full prefill (slow) while every old request waits idle; only after prefill does decode get a turn; once the decode forward is launched the CPU must fire off hundreds of kernels one by one; after the forward returns it serially samples, appends tokens, and checks stops. The GPU has at least <strong>three</strong> obvious idle stretches in this single beat.</p>
+<p>Now turn on SGLang's full machinery. <strong>Chunked prefill</strong> first slices that long prompt into chunks and packs only one chunk into this beat, <strong>batched together</strong> with the dozens of old requests' decode, so no one starves. <strong>CUDA graphs</strong> let that batch's hundreds of kernels replay in one shot, the CPU no longer launching them individually. <strong>Overlap scheduling</strong> ensures that while this beat's forward runs on the GPU, the CPU is already <strong>picking the next beat's requests and allocating pages</strong> while <strong>appending the previous beat's sampled tokens</strong> back into their sequences and checking which requests should stop. Those finishing requests are sent back to the user through the <strong>process-split</strong> channel—<span class="mono">DetokenizerManager</span> turns token ids back into text in another process, never touching the current forward's critical path.</p>
+<p>After one beat, the three idle stretches are packed full: the long prefill is thinned, kernel launches are erased, scheduling and result processing are hidden in the shadow, and tokenize/detokenize are physically isolated into other processes. The GPU is busy almost end to end. Repeat this beat a thousand times and you have a full generation; carry the zero-overhead principle into every beat and you have SGLang's underlying secret to high throughput. <strong>You'll find that "zero-overhead" is not one clever algorithm but a near-obsessive habit: whenever you see any stretch where the GPU might wait, find some other useful work to stuff into it.</strong></p>
+
+<div class="flow"><div class="node">CPU pick/allocate</div><div class="arrow">→</div><div class="node">GPU forward(N)</div><div class="arrow">→</div><div class="node">CPU sample/append</div><div class="arrow">→</div><div class="node">GPU idle (bubble)</div><div class="arrow">→</div><div class="node">CPU pick(N+1)</div></div>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>GPU is running forward(batch N)</h4><p class="mono">run_batch(batch_N)</p><p>This is the most expensive, longest step in the pipeline; the GPU runs at full tilt.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>same instant · CPU assembles batch N+1</h4><p class="mono">get_next_batch_to_run()</p><p>Pick requests, allocate KV pages, move tensors—all done quietly in the GPU's busy shadow.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>same instant · CPU processes batch N-1's results</h4><p class="mono">process_batch_result(prev)</p><p>Sample, append token, check stop, send results back—parallel to GPU compute.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>→ GPU never idles</h4><p class="mono">enable_overlap=True</p><p>The stove never stops; CPU overhead is fully invisible in wall-clock time.</p></div></div></div>
+
+<table class="t"><tr><th>CPU bubble</th><th>how SGLang hides it</th><th>lesson</th></tr>
+<tr><td>schedule / result processing</td><td>event loop + overlap scheduler, CPU work tucked into the GPU forward's shadow</td><td>L18 / L21</td></tr>
+<tr><td>a long prefill clogs the pipeline</td><td>chunked prefill, slice the long prefill and interleave with decode</td><td>L22</td></tr>
+<tr><td>per-step kernel-launch overhead</td><td>CUDA graphs record once, replay many times, CPU stops launching one by one</td><td>L27</td></tr>
+<tr><td>tokenize / detokenize on the critical path</td><td>process split + IPC, Tokenizer/Detokenizer run in other processes</td><td>L14 / L16</td></tr></table>
+
+<div class="cols"><div class="col"><strong>overlap OFF</strong><br>pick → forward → process results run serially; the GPU is <span class="mono">idle</span> during both CPU segments, occupancy drops to half or worse, and the bubble is plainly visible.</div><div class="col"><strong>overlap ON</strong><br>while the GPU runs forward(N), the CPU has already prepped N+1 and finished N-1; the GPU is <span class="mono">always busy</span> and the CPU overhead is invisible in wall-clock time—this is zero-overhead.</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler</span><span class="ln">while the GPU runs step N, the CPU is already preparing step N+1</span></div><pre>class Scheduler:
+    def __init__(self, server_args, ...):
+        # CPU bubbles are the enemy: hide them behind the GPU forward
+        self.enable_overlap = not server_args.disable_overlap_schedule
+        ...
+    def event_loop_overlap(self):
+        # while the GPU runs forward(batch N), the CPU already builds batch N+1,
+        # and the PREVIOUS step's result is processed in parallel -&gt; GPU never idles
+        while True:
+            batch = self.get_next_batch_to_run()    # CPU: schedule + allocate
+            result = self.run_batch(batch)          # launch GPU forward (async)
+            self.process_batch_result(prev_result)  # overlap: handle the prior step
+            prev_result = result</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>
+<li><strong>Overlap is the core tool</strong>: while the GPU runs forward(N), the CPU already assembles N+1 and processes N-1 in parallel (<span class="mono">enable_overlap</span>, L18/L21).</li>
+<li><strong>Many bubbles, many hiding tricks</strong>: chunked prefill stops long-prefill stalls (L22), CUDA graphs erase kernel-launch overhead (L27), the process split moves tokenize/detokenize off the critical path (L14/L16).</li>
+<li><strong>The faster the GPU, the deadlier the bubble</strong>: killing bubbles graduates from nice-to-have to the top factor deciding throughput; the more advanced the hardware, the more you must hide CPU overhead.</li>
+<li><strong>Synthesis</strong>: six lessons, six mechanisms, one philosophy—find every CPU bubble and hide it behind GPU compute. Remembering this one principle beats memorizing six isolated parameters, because it lets you <strong>derive</strong> the next optimization yourself.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the 'single thread' running through zero-overhead scheduling in this lesson?</div>
+  <ol class="opts">
+    <li>Make the CPU do no work at all and move every bit of logic onto the GPU</li>
+    <li>Raise the CPU clock speed to catch up with the GPU</li>
+    <li>Run every step serially to guarantee correctness</li>
+    <li><strong>The CPU must never make the GPU wait: any CPU work before or after the forward is a potential 'bubble' to be hidden behind GPU compute</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Zero-overhead doesn't mean the CPU is idle; it means the CPU's work costs no extra wall-clock time because it is overlapped into the GPU forward. A modern GPU is so fast that the CPU work around the forward becomes an idle bubble, and the whole scheduling subsystem aims to kill those bubbles.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. With overlap scheduling (Lesson 21) and enable_overlap on, what is the CPU doing while the GPU runs forward(batch N)?</div>
+  <ol class="opts">
+    <li>Recomputing batch N's KV cache to verify the result</li>
+    <li>Idly waiting for the GPU to return, doing nothing</li>
+    <li><strong>Already assembling batch N+1 and processing batch N-1's results in parallel, so the GPU never idles</strong></li>
+    <li>Pausing the GPU until the CPU drains the queue</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. A naive event loop is serial: form batch → forward → process results, leaving the GPU idle during both CPU segments. Overlap scheduling turns it into a pipeline: while the GPU runs forward(N), the CPU assembles N+1 and processes N-1, so the CPU overhead is tucked into the GPU forward's shadow and is nearly invisible in wall-clock time.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which group of 'CPU bubble → how SGLang hides it' pairings is entirely correct?</div>
+  <ol class="opts">
+    <li>schedule→quantization; long prefill→tensor parallelism; kernel launch→temperature sampling; tokenize→load balancing</li>
+    <li><strong>schedule/result processing→overlap scheduler (L18/21); long-prefill stall→chunked prefill (L22); kernel-launch overhead→CUDA graphs (L27); tokenize/detokenize→process split+IPC (L14/16)</strong></li>
+    <li>Every bubble can only be solved by adding GPU memory</li>
+    <li>Bubbles exist only in prefill; decode has no bubbles</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Six lessons, six mechanisms, all sides of one philosophy: the event loop + overlap scheduler hide scheduling and result processing, chunked prefill stops a long prefill from clogging the pipeline, CUDA graphs erase per-kernel launch overhead, and the process split + IPC move tokenize/detokenize off the forward's critical path.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why 'the faster the GPU, the deadlier the CPU bubble'. Using the fact that a decode forward may take only a few milliseconds while scheduling + sampling + appending tokens is also milliseconds, argue why killing bubbles graduates from a nice-to-have into the top factor deciding throughput.</li>
+    <li>Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop Lesson 18, overlap scheduling Lesson 21, chunked prefill Lesson 22, CUDA graphs Lesson 27, the process split Lesson 14/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="58-radixattention-as-a-first-class-idea.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">RadixAttention 作为一等公民</span><span class="lang-en">RadixAttention as a first-class idea</span></div></a><a class="next" href="60-two-workloads-one-engine.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">两种负载，一套引擎</span><span class="lang-en">Two workloads, one engine</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

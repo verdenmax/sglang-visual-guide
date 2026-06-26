@@ -161,6 +161,18 @@ PAGES = [
      "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
     ("57-glossary.html", "术语速查表", "Glossary",
      "第十二部分 · 实战与贡献", "Part 12 · Practice & contributing"),
+    ("58-radixattention-as-a-first-class-idea.html", "RadixAttention 作为一等公民", "RadixAttention as a first-class idea",
+     "第十三部分 · 设计专题综合", "Part 13 · Design themes (synthesis)"),
+    ("59-zero-overhead-scheduling.html", "零开销调度的哲学", "Zero-overhead scheduling",
+     "第十三部分 · 设计专题综合", "Part 13 · Design themes (synthesis)"),
+    ("60-two-workloads-one-engine.html", "两种负载，一套引擎", "Two workloads, one engine",
+     "第十三部分 · 设计专题综合", "Part 13 · Design themes (synthesis)"),
+    ("61-draft-for-parallel-verify.html", "用草稿换并行验证", "Draft for parallel verify",
+     "第十三部分 · 设计专题综合", "Part 13 · Design themes (synthesis)"),
+    ("62-everything-is-pluggable.html", "一切皆可插拔", "Everything is pluggable",
+     "第十三部分 · 设计专题综合", "Part 13 · Design themes (synthesis)"),
+    ("63-built-for-throughput.html", "为吞吐而生", "Built for throughput",
+     "第十三部分 · 设计专题综合", "Part 13 · Design themes (synthesis)"),
 ]
 
 
@@ -724,6 +736,18 @@ SUBTITLES = {
                                         "fork→branch→pre-commit→test→PR · touch srt then add a test · docs go under docs_new"),
     "57-glossary.html": ("全书术语速查 · 一句话定义 + 课次回查 · 按主题归拢成表",
                          "whole-guide term lookup · one-line definitions + lesson back-refs · grouped into tables by theme"),
+    "58-radixattention-as-a-first-class-idea.html": ("前缀共享不是补丁而是一等数据结构 · 从 DSL 到调度处处可见 · KV 缓存是共享前缀的树",
+                                                     "prefix sharing is a first-class data structure, not a patch · it shows up from DSL to scheduling · the KV cache is a tree of shared prefixes"),
+    "59-zero-overhead-scheduling.html": ("CPU 永不让 GPU 等 · 调度/分词/解码与前向重叠 · 把每个气泡藏进 GPU 工作里",
+                                         "the CPU never makes the GPU wait · scheduling/tokenize/detokenize overlap the forward · hide every bubble behind GPU work"),
+    "60-two-workloads-one-engine.html": ("prefill 算力受限 vs decode 带宽受限 · 一套引擎服务两种相反负载 · 同卡分时或分机分离",
+                                         "prefill is compute-bound vs decode bandwidth-bound · one engine serves two opposite workloads · time-share one GPU or disaggregate"),
+    "61-draft-for-parallel-verify.html": ("投机的本质：拿便宜的并行换串行瓶颈 · 草稿把串行 decode 变成一次并行验证 · 把延迟瓶颈变吞吐瓶颈",
+                                          "the essence of speculation: trade cheap parallel work for a serial bottleneck · a draft turns serial decode into one parallel verify · convert a latency wall into a throughput one"),
+    "62-everything-is-pluggable.html": ("稳定内核 + 可插拔接口 · 注意力/硬件/量化/并行/语法都按接口编程 · 部署时选实现",
+                                        "a stable core + pluggable interfaces · attention/hardware/quant/parallel/grammar all program to an interface · pick the impl at deploy time"),
+    "63-built-for-throughput.html": ("几乎每个设计都服务一个北极星：让 GPU 一直做有用功 · 批/页/缓存/重叠/图/内核齐上 · 全书收束",
+                                     "almost every design serves one north star: keep the GPU doing useful work · batching/paging/caching/overlap/graphs/kernels together · the guide's finale"),
 }
 
 
