@@ -1686,6 +1686,376 @@ QUIZZES = {
             },
         ],
     },
+    "24-model-runner-and-forward-batch.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 SGLang 里，<code>ModelRunner</code> 和调度器（第 18 课）各自的职责边界是什么？",
+                    "en": "In SGLang, what is the responsibility boundary between <code>ModelRunner</code> and the scheduler (Lesson 18)?",
+                },
+                "opts": [
+                    {
+                        "zh": "调度器<strong>只决策不计算</strong>（收请求、组批、定策略），每步调 <code>run_batch</code> 把活儿派下去；<strong>ModelRunner 才把一批 token 真正在 GPU 上算成 logits</strong>——它是“决策→计算”的那道边界，<strong>每个 TP rank 一个</strong>，由 TpWorker 持有",
+                        "en": "The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpWorker",
+                    },
+                    {"zh": "调度器既决策又亲自跑前向，ModelRunner 只负责采样出 token", "en": "The scheduler both decides and runs the forward itself; ModelRunner only samples the token"},
+                    {"zh": "整个进程共用一个 ModelRunner，所有 TP rank 都调它", "en": "The whole process shares one ModelRunner that all TP ranks call"},
+                    {"zh": "ModelRunner 负责接收 HTTP 请求并分词，调度器负责前向计算", "en": "ModelRunner receives HTTP requests and tokenizes; the scheduler does the forward"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "第五部分讲的都是调度器“怎么决策”，它<strong>从不碰 GPU</strong>；真正把 token 算成 logits 的是 ModelRunner。调用链是 <code>run_batch</code> → TpWorker → 它独占的 ModelRunner，<strong>每个 TP rank 一个</strong>，各算模型一片再靠集合通信拼齐。所以它是“决策变计算”的边界，而不是共享单例，也不管接请求/分词。",
+                    "en": "Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<code>ForwardBatch</code> 与 <code>ScheduleBatch</code>（第 19 课）是什么关系？",
+                    "en": "What is the relationship between <code>ForwardBatch</code> and <code>ScheduleBatch</code> (Lesson 19)?",
+                },
+                "opts": [
+                    {
+                        "zh": "ForwardBatch 是 ScheduleBatch 的 <strong>GPU 视图</strong>——同一批请求换成 GPU 看得懂的张量与元数据：<code>input_ids</code>、<code>positions</code>（喂 RoPE）、<code>forward_mode</code>（选前向路径）、注意力元数据 + <code>out_cache_loc</code>（KV 读写槽位）；ScheduleBatch 记“谁要算”，ForwardBatch 记“GPU 这一步怎么算”",
+                        "en": "ForwardBatch is the <strong>GPU view</strong> of a ScheduleBatch — the same batch re-expressed as GPU tensors/metadata: <code>input_ids</code>, <code>positions</code> (for RoPE), <code>forward_mode</code> (picks the path), attention metadata + <code>out_cache_loc</code> (KV read/write slots); ScheduleBatch records 'who needs computing', ForwardBatch records 'how the GPU computes this step'",
+                    },
+                    {"zh": "两者完全相同，只是改了个名字", "en": "They are identical, just renamed"},
+                    {"zh": "ForwardBatch 是采样结果，ScheduleBatch 是输入提示", "en": "ForwardBatch is the sampling result; ScheduleBatch is the input prompt"},
+                    {"zh": "ScheduleBatch 在 GPU 上、ForwardBatch 在 CPU 上，互为备份", "en": "ScheduleBatch lives on GPU and ForwardBatch on CPU, mirroring each other"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ModelRunner 先把调度器给的 ScheduleBatch（一堆 Req）<strong>翻译</strong>成 ForwardBatch——GPU 前向真正需要的那几样：要喂哪些 token、每个 token 的位置、是预填充还是解码、注意力后端与 KV 槽位。一句话：ScheduleBatch=“谁要算”，ForwardBatch=“GPU 具体怎么算这一步”。它不是采样结果，也不是简单改名或 CPU 备份。",
+                    "en": "ModelRunner first <strong>translates</strong> the scheduler's ScheduleBatch (a set of Reqs) into a ForwardBatch — exactly what the GPU forward needs: which tokens, each token's position, prefill vs decode, attention backend and KV slots. In short ScheduleBatch='who needs computing', ForwardBatch='how the GPU computes this step'. It is not a sampling result, a mere rename, or a CPU mirror.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 <strong>解码（DECODE）</strong>前向适合走 CUDA Graph 重放（第 27 课），而<strong>预填充（EXTEND）</strong>多走即时路径？",
+                    "en": "Why does the <strong>DECODE</strong> forward suit CUDA-graph replay (Lesson 27) while <strong>EXTEND</strong>/prefill mostly runs eager?",
+                },
+                "opts": [
+                    {
+                        "zh": "解码每步每条请求只产出 <strong>1 个新 token</strong>，形状<strong>高度规整</strong>（可 padding 到几档固定桶），且每步算得少、内核启动开销占比高，正好让重放<strong>抹平启动开销</strong>；预填充长度千变万化、形状每批都不同、本就计算密集，录图既不划算也录不过来",
+                        "en": "Decode emits <strong>just 1 new token</strong> per request per step with <strong>highly regular shapes</strong> (paddable to a few fixed buckets), and with little compute per step the launch overhead dominates, so replay <strong>flattens that overhead</strong>; prefill has wildly varying lengths, different shapes every batch, and is already compute-bound, so recording graphs is neither worthwhile nor feasible",
+                    },
+                    {"zh": "因为解码不需要读 KV 缓存，所以可以录图", "en": "Because decode doesn't read the KV cache, it can be graphed"},
+                    {"zh": "因为预填充必须在 CPU 上跑，无法用 GPU 图", "en": "Because prefill must run on CPU and can't use a GPU graph"},
+                    {"zh": "因为解码比预填充计算量更大，更值得优化", "en": "Because decode is more compute-heavy than prefill and more worth optimizing"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "CUDA 图录的是<strong>固定形状、固定地址</strong>的内核序列，重放只能套同样的形状。解码恰好“小而规整、重复千万次”，是访存密集、启动开销占大头的阶段，图重放收益最大；预填充“大而多变、各算各的”，是计算密集阶段，形状几乎每批都不同，更适合灵活的即时路径。解码并非不读 KV，预填充也不在 CPU 跑，解码单步算量也更小。",
+                    "en": "A CUDA graph records a <strong>fixed-shape, fixed-address</strong> kernel sequence; replay only fits the same shapes. Decode is 'small, regular, repeated millions of times', memory-bound with launch overhead dominating, so replay pays most; prefill is 'big, varied, each its own', compute-bound with shapes differing nearly every batch, better on the eager path. Decode does read KV, prefill doesn't run on CPU, and decode does less compute per step.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“车间机台操作工”的类比，完整讲清一次前向在 ModelRunner 里怎么走完。请逐一覆盖：①调用链——第 18 课调度器 <code>run_batch</code> → TpWorker → <strong>每 rank 一个</strong>的 ModelRunner，以及为什么 8 个 rank 必须<strong>步调一致</strong>跑同一批（集合通信会死锁）；②ModelRunner 先把 <code>ScheduleBatch</code> 翻成 <code>ForwardBatch</code>，并说明 <code>positions/forward_mode/</code>注意力元数据/<code>out_cache_loc</code> 各驱动了什么；③前向内部 <strong>嵌入 → N 层解码层（注意力读写 KV 池、命中时复用 RadixAttention 前缀，第 7 课）→ 末端归一 + <code>lm_head</code> → logits</strong>，并指出 <strong>logits→token</strong> 的转折点（<code>sample()</code> 交给第 28 课采样器）发生在哪一步。",
+                "en": "Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.",
+            },
+            {
+                "zh": "围绕 <strong>EXTEND vs DECODE</strong> 展开，把“同一个 forward 的两种性格”讲透，并说明它如何决定 Part 6 后续几课的脉络。请说明：①两者在 token 数、形状规整度、瓶颈（预填充<strong>计算密集</strong> vs 解码<strong>访存密集</strong>）上的差异；②为什么解码适合 <strong>CUDA Graph 重放</strong>（第 27 课）而预填充多走即时/分块（第 22 课）；③为什么 ModelRunner 还要<strong>同时</strong>握住模型（第 25/26 课）、KV 池（第 30 课）、注意力后端（第 33 课）乃至草稿模型（第 43 课），并据此说明 Part 6 接下来分别拆解的是哪几样零件。",
+                "en": "Centered on <strong>EXTEND vs DECODE</strong>, fully explain the 'two personalities of one forward' and how it shapes the rest of Part 6. Explain: (1) their differences in token count, shape regularity, and bottleneck (prefill <strong>compute-bound</strong> vs decode <strong>memory-bound</strong>); (2) why decode suits <strong>CUDA-graph replay</strong> (Lesson 27) while prefill mostly runs eager/chunked (Lesson 22); (3) why ModelRunner must hold the model (Lessons 25/26), KV pool (Lesson 30), attention backend (Lesson 33), and even a draft model (Lesson 43) <strong>all at once</strong>, and from that, which parts the rest of Part 6 takes apart one by one.",
+            },
+        ],
+    },
+    "25-model-loading-and-weights.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "<code>DefaultModelLoader</code> 为什么要把权重做成<strong>流式（streaming）</strong>读取，而不是先全读进主机内存再分发？",
+                    "en": "Why does <code>DefaultModelLoader</code> read weights via <strong>streaming</strong> instead of reading everything into host RAM first and then distributing?",
+                },
+                "opts": [
+                    {
+                        "zh": "权重是一个 <code>(name, tensor)</code> <strong>生成器</strong>，读一个、灌一个、丢一个，<strong>主机内存上界与模型总大小解耦</strong>——哪怕几百 GB 的模型，任意时刻内存里也只驻留当前这一个张量，不会把内存撑爆",
+                        "en": "Weights are a <code>(name, tensor)</code> <strong>generator</strong>: read one, load one, drop one, so the <strong>host-memory bound is decoupled from total model size</strong> — even a hundreds-of-GB model keeps only the current tensor in memory at any instant and won't blow up RAM",
+                    },
+                    {"zh": "因为流式加载比一次性加载在数值上更精确", "en": "Because streaming loads are numerically more accurate than one-shot loads"},
+                    {"zh": "因为只有流式才能把权重放到 GPU，整读无法上卡", "en": "Because only streaming can place weights on the GPU; a full read can't reach the card"},
+                    {"zh": "因为流式加载会自动跳过不需要的层，省下计算", "en": "Because streaming automatically skips unneeded layers, saving compute"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<code>_get_all_weights</code> 返回的是生成器，<code>model.load_weights</code> 逐张量灌入，所以任意时刻内存里只有当前张量（及其目标分片），上界与模型大小<strong>解耦</strong>。这才是同一台机器既能装小模型又能装几百 GB 大模型的原因。它跟数值精度无关，整读其实也能上卡，更不会自动跳层。",
+                    "en": "<code>_get_all_weights</code> returns a generator and <code>model.load_weights</code> pours tensors in one by one, so only the current tensor (and its target slice) lives in memory at any instant, the bound <strong>decoupled</strong> from model size. That's why one machine fits both small and hundreds-of-GB models. It has nothing to do with numerical precision, a full read can still reach the card, and nothing auto-skips layers.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把 HuggingFace 权重名映射到 SGLang 内部参数、并<strong>融合</strong> q/k/v、gate/up 的逻辑，写在哪里？",
+                    "en": "Where does the logic that maps HuggingFace weight names to SGLang internal params and <strong>fuses</strong> q/k/v, gate/up live?",
+                },
+                "opts": [
+                    {
+                        "zh": "写在<strong>每个模型类自己的</strong> <code>load_weights(weights)</code> 里——它内置映射表，知道 <code>q_proj/k_proj/v_proj</code> 该塞进打包权重的哪一段偏移；Loader 只负责<strong>把张量流式读出来</strong>，不关心模型内部叫什么",
+                        "en": "In <strong>each model class's own</strong> <code>load_weights(weights)</code> — it carries a mapping table knowing which offset segment of the packed weight each of <code>q_proj/k_proj/v_proj</code> goes into; the Loader only <strong>streams tensors out</strong> and doesn't care about a model's internal names",
+                    },
+                    {"zh": "写在 <code>DefaultModelLoader</code> 里，对所有模型用同一张硬编码映射表", "en": "In <code>DefaultModelLoader</code>, using one hard-coded mapping table for all models"},
+                    {"zh": "写在 safetensors 文件的元数据里，加载时自动套用", "en": "In the safetensors file metadata, applied automatically at load"},
+                    {"zh": "不需要映射，HF 名字和 SGLang 参数名永远一一对应", "en": "No mapping is needed; HF names and SGLang param names always match one to one"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "Loader 只流式读张量，<strong>不该也不关心</strong>某模型内部叫什么；而“这个名字对应哪个参数、要不要融合/转置”是模型私有知识，封装在模型的 <code>load_weights</code> 里。所以新增模型<strong>不必碰 Loader</strong>，只写好 <code>load_weights</code>（第 26 课）即可。磁盘上 q/k/v 是分开三份，内存里要打包一份，正需要这层映射。",
+                    "en": "The Loader only streams tensors and <strong>shouldn't</strong> know a model's internals; which param a name maps to and whether to fuse/transpose is model-private, encapsulated in the model's <code>load_weights</code>. So adding a model <strong>needs no Loader change</strong> — just write its <code>load_weights</code> (Lesson 26). q/k/v are three separate parts on disk but one packed param in memory, which is exactly why this mapping is needed.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 8 卡张量并行（TP）部署里，加载时每张卡的显存里存的是什么权重？",
+                    "en": "In an 8-GPU tensor-parallel (TP) deployment, what weights end up in each card's memory at load time?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>只存本 rank 那一片</strong>：q/k/v、gate/up 走列并行（按输出维切），o_proj、down_proj 走行并行（按输入维切），每卡只接自己 1/8 的权重，加载本身就是分布式的",
+                        "en": "<strong>Only this rank's slice</strong>: q/k/v and gate/up go column-parallel (split on output dim), o_proj and down_proj go row-parallel (split on input dim), each card takes only its 1/8 of weights — loading itself is distributed",
+                    },
+                    {"zh": "每张卡都存一整份完整权重，靠冗余提高可靠性", "en": "Each card stores a full copy of the weights for redundancy/reliability"},
+                    {"zh": "只有 0 号卡存权重，其余卡每步向它请求", "en": "Only card 0 stores weights; the others request from it each step"},
+                    {"zh": "权重存在 CPU 内存，GPU 每步临时拷贝需要的部分", "en": "Weights live in CPU RAM; the GPU copies the needed part each step"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "TP 下每个权重<strong>按 rank 切片</strong>：列并行（q/k/v、gate/up）每卡算一段输出，行并行（o_proj、down_proj）每卡算部分和再 all-reduce。Loader/模型加载时就只把本 rank 的那一片搬上这张卡，于是 8 卡各只有 1/8 权重（第 24/46 课）。并非整份冗余、单卡集中或常驻 CPU。",
+                    "en": "Under TP each weight is <strong>sliced per rank</strong>: column-parallel (q/k/v, gate/up) computes a slice of output per card, row-parallel (o_proj, down_proj) computes partial sums then all-reduce. The Loader/model moves only this rank's slice onto the card, so 8 cards each hold 1/8 of the weights (Lessons 24/46). It is not full redundancy, a single hub card, or CPU-resident weights.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“编号纸箱布置新家”的类比，完整讲清 <code>DefaultModelLoader</code> 把一堆磁盘文件变成“每卡各就各位的张量”的全过程。请逐一覆盖：①<strong>两步走</strong>——<code>_initialize_model</code> 先搭空壳（结构有了、权重是占位张量），再 <code>load_weights_and_postprocess</code> 把 <code>_get_all_weights</code> 的<strong>生成器</strong>交给 <code>model.load_weights</code> 逐张量灌入；②为什么必须<strong>流式</strong>（主机内存上界与模型大小解耦）；③<strong>名字映射 + 融合</strong>为什么交给模型自己的 <code>load_weights</code>（第 26 课），以及 q/k/v、gate/up 如何打包；④<strong>TP 切片</strong>（列/行并行，第 46 课）与 <strong>dtype/量化</strong>（FP8/INT4 + scales，第 35 课）各在这步做了什么。",
+                "en": "Using the 'numbered flat-pack boxes furnishing a home' analogy, fully explain how <code>DefaultModelLoader</code> turns a pile of disk files into 'all-in-place tensors per card'. Cover each: (1) the <strong>two steps</strong> — <code>_initialize_model</code> builds the shell (structure present, params placeholders), then <code>load_weights_and_postprocess</code> hands <code>_get_all_weights</code>'s <strong>generator</strong> to <code>model.load_weights</code> to pour tensors in; (2) why <strong>streaming</strong> is required (host-memory bound decoupled from model size); (3) why <strong>name mapping + fusion</strong> live in the model's own <code>load_weights</code> (Lesson 26), and how q/k/v, gate/up are packed; (4) what <strong>TP slicing</strong> (column/row-parallel, Lesson 46) and <strong>dtype/quantization</strong> (FP8/INT4 + scales, Lesson 35) each do at this step.",
+            },
+            {
+                "zh": "SGLang 不止一种 Loader：<code>DefaultModelLoader</code> 是常路，另有 <code>DummyModelLoader</code>、<code>ShardedStateLoader</code>、<code>LayeredModelLoader</code>/远程加载等变体。请说明：①各自适合什么场景（测试量显存、按已切分状态快启、按层省内存、远程分发）；②为什么把“加载逻辑统一收口”能让 SGLang 用一套框架托起上百种模型 + 各类量化格式；③如果你要加载一个 <strong>FP8 量化</strong>的 checkpoint，加载这一步相比 bf16 多做了什么（读 scales、按量化布局摆放、前向用量化内核或惰性反量化，第 35 课）。",
+                "en": "SGLang has more than one Loader: <code>DefaultModelLoader</code> is the common path, with <code>DummyModelLoader</code>, <code>ShardedStateLoader</code>, <code>LayeredModelLoader</code>/remote variants. Explain: (1) what each suits (testing/memory measurement, fast start from an already-sliced state, layer-by-layer low memory, remote distribution); (2) why 'funneling loading through one point' lets SGLang support hundreds of models + many quant formats under one framework; (3) if you load an <strong>FP8-quantized</strong> checkpoint, what loading does beyond bf16 (read scales, arrange by quant layout, forward uses quantized kernels or lazy dequant, Lesson 35).",
+            },
+        ],
+    },
+    "26-writing-a-model.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 SGLang 里“写一个模型”（如 Llama），模型作者真正<strong>新写</strong>的主要是什么？",
+                    "en": "When you 'write a model' (e.g. Llama) in SGLang, what does the author mainly write <strong>anew</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>架构 + load_weights 名字映射</strong>：用哪些层、各维度、残差怎么连，再把 HF 权重名映射到内部参数；注意力内核、TP 通信、KV 管理都用 SGLang 现成的<strong>并行层</strong>，作者不实现底层算子",
+                        "en": "<strong>Architecture + load_weights name mapping</strong>: which layers, what dims, how residuals connect, plus mapping HF weight names to internal params; attention kernels, TP comms, KV mgmt all reuse SGLang's ready <strong>parallel layers</strong> — the author writes no low-level ops",
+                    },
+                    {"zh": "从零手写注意力 CUDA 内核和跨卡 all-reduce 通信", "en": "Hand-write the attention CUDA kernel and cross-GPU all-reduce from scratch"},
+                    {"zh": "实现自己的 KV 缓存分页与显存分配器", "en": "Implement its own KV-cache paging and GPU memory allocator"},
+                    {"zh": "编写张量并行的权重切分与通信调度逻辑", "en": "Write the tensor-parallel weight-slicing and communication scheduling logic"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "模型文件就是把 SGLang 现成的并行层（<code>QKVParallelLinear</code>、<code>RowParallelLinear</code>、<code>RadixAttention</code>、<code>RMSNorm</code> 等）<strong>组装</strong>起来：作者只描述架构并写 <code>load_weights</code> 的名字映射（第 25 课）。注意力内核、TP 通信、KV 管理、CUDA 图全是白拿的——这正是“加模型便宜、day-0 支持广”的根因。",
+                    "en": "A model file <strong>assembles</strong> SGLang's ready parallel layers (<code>QKVParallelLinear</code>, <code>RowParallelLinear</code>, <code>RadixAttention</code>, <code>RMSNorm</code>, ...): the author only describes the architecture and writes <code>load_weights</code> name mapping (Lesson 25). Attention kernels, TP comms, KV mgmt, CUDA graphs come free — the root reason adding a model is cheap and day-0 support is broad.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "Llama 的四（五）个类是怎么<strong>层层套娃</strong>的？",
+                    "en": "How do Llama's four (five) classes <strong>nest</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<code>LlamaAttention</code> 和 <code>LlamaMLP</code> 组成 <code>LlamaDecoderLayer</code>；N 层 + 嵌入 + 末端归一组成 <code>LlamaModel</code>；再加 <code>lm_head</code> 与 <code>forward</code> 就是对运行时暴露的 <code>LlamaForCausalLM</code>",
+                        "en": "<code>LlamaAttention</code> and <code>LlamaMLP</code> compose <code>LlamaDecoderLayer</code>; N layers + embed + final norm compose <code>LlamaModel</code>; add <code>lm_head</code> and <code>forward</code> and you get <code>LlamaForCausalLM</code>, the class the runtime sees",
+                    },
+                    {"zh": "五个类彼此平级，由调度器在运行时按需拼接", "en": "The five classes are siblings, stitched on demand by the scheduler at runtime"},
+                    {"zh": "<code>LlamaForCausalLM</code> 最底层，注意力包着整模型", "en": "<code>LlamaForCausalLM</code> is innermost; attention wraps the whole model"},
+                    {"zh": "只有一个大类，所有逻辑写在一个 forward 里", "en": "There is only one big class with all logic in a single forward"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "套娃关系是 <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>。每个类只负责一件事、内部都用 SGLang 现成层。ModelRunner（第 24 课）握住的是最外层 <code>LlamaForCausalLM</code>，它提供 <code>forward(...)→logits</code> 与 <code>load_weights</code>。",
+                    "en": "The nesting is <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>. Each class does one thing, all using SGLang's ready layers. ModelRunner (Lesson 24) holds the outermost <code>LlamaForCausalLM</code>, which offers <code>forward(...)→logits</code> and <code>load_weights</code>.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<code>forward_batch</code> 被一路传到每一层注意力，它扮演什么角色？",
+                    "en": "<code>forward_batch</code> is threaded into every layer's attention — what role does it play?",
+                },
+                "opts": [
+                    {
+                        "zh": "它是模型文件与运行时之间的<strong>那道缝</strong>：告诉注意力该读/写 KV 池的哪些槽位、用哪个注意力后端（第 24/33 课），模型只管算对张量",
+                        "en": "It is <strong>the seam</strong> between model file and runtime: it tells attention which KV-pool slots to read/write and which attention backend to use (Lessons 24/33); the model just computes tensors correctly",
+                    },
+                    {"zh": "它保存模型权重，前向时按需加载到 GPU", "en": "It stores model weights and loads them to the GPU on demand during forward"},
+                    {"zh": "它是采样参数容器，决定 temperature/top-p", "en": "It is a sampling-params container deciding temperature/top-p"},
+                    {"zh": "它只在预填充用到，解码阶段不传", "en": "It is only used in prefill and not passed during decode"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<code>forward_batch</code>（第 24 课）携带 KV 槽位、注意力元数据等，逐层穿到 <code>self_attn</code>，让注意力知道当前 k/v 写到池子哪、历史从哪读（第 33 课）。这正是“模型只管把张量算对、运行时负责 KV 寻址”的分界。它不存权重、不是采样容器，预填充与解码都要传。",
+                    "en": "<code>forward_batch</code> (Lesson 24) carries KV slots and attention metadata, threading layer by layer into <code>self_attn</code> so attention knows where to write current k/v and read history (Lesson 33). That is the boundary 'model computes tensors right, runtime owns KV addressing.' It doesn't store weights, isn't a sampling container, and is passed in both prefill and decode.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“标准乐高积木拼模型”的类比，完整讲清在 SGLang 里“写一个 Llama”到底写了什么、又白拿了什么。请逐一覆盖：①四（五）个类如何<strong>层层套娃</strong>（<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>）；②每个类用到哪些 SGLang 现成层（<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE）；③一层里“input_norm→注意力(读写 KV)→残差→post_norm→MLP→残差”的结构；④作者真正<strong>新写</strong>的只有架构 + <code>load_weights</code> 映射（第 25 课），而注意力内核、TP 切片/通信（第 46 课）、KV 管理（第 33 课）都是白拿。",
+                "en": "Using the 'building with standard LEGO bricks' analogy, fully explain what 'writing a Llama' in SGLang actually writes and what it gets for free. Cover each: (1) how the four (five) classes <strong>nest</strong> (<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>); (2) which ready SGLang layers each uses (<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE); (3) the in-layer structure 'input_norm→attention(read/write KV)→residual→post_norm→MLP→residual'; (4) that the author truly writes anew only the architecture + <code>load_weights</code> mapping (Lesson 25), while attention kernels, TP slicing/comms (Lesson 46), KV mgmt (Lesson 33) come free.",
+            },
+            {
+                "zh": "解释为什么 SGLang 能对新开源模型做到近乎 <strong>day-0 支持</strong>、模型覆盖面极广。请说明：①“模型文件薄、底层库厚”的分工——<code>LlamaForCausalLM.forward</code> 几乎只是把活儿交给 <code>self.model</code> 再交给 <code>logits_processor</code>/<code>lm_head</code>，没有 CUDA/all-reduce/KV 分页的影子；②<code>forward_batch</code> 作为模型与运行时之间的缝，如何让同一份模型文件适配不同注意力后端与并行配置（第 24/33/46 课）；③MoE（第 34 课）、多模态（第 49 课）等更复杂架构为何只是“同套脚手架上多插几种层”，而非推倒重来。",
+                "en": "Explain why SGLang achieves near <strong>day-0 support</strong> for new open models with very broad coverage. Cover: (1) the 'thin model file, thick library' split — <code>LlamaForCausalLM.forward</code> basically just hands work to <code>self.model</code> then <code>logits_processor</code>/<code>lm_head</code>, with no trace of CUDA/all-reduce/KV paging; (2) how <code>forward_batch</code>, as the model/runtime seam, lets one model file adapt to different attention backends and parallel configs (Lessons 24/33/46); (3) why more complex architectures like MoE (Lesson 34) and multimodal (Lesson 49) are just 'plug a few extra layers into the same scaffolding' rather than a rewrite.",
+            },
+        ],
+    },
+    "27-cuda-graph-capture-and-replay.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "CUDA Graph 在解码前向里主要消灭的是哪种开销？",
+                    "en": "What overhead does a CUDA graph mainly eliminate in the decode forward?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>逐个内核的启动（launch）开销</strong>——一次解码前向要发起几百个小内核，每次发起都有一笔<strong>固定的 CPU 启动费</strong>；解码内核太短，这笔费用反而主导整步、GPU 干等 CPU。图把整条前向录成一张，<strong>一次提交整体重放</strong>，把几百次发起压成一次",
+                        "en": "<strong>Per-kernel launch overhead</strong> — one decode forward launches hundreds of tiny kernels, each with a <strong>fixed CPU issue fee</strong>; decode kernels are so short the fee dominates the step and the GPU waits on the CPU. The graph records the whole forward and <strong>replays it as a single submission</strong>, collapsing hundreds of launches into one",
+                    },
+                    {"zh": "矩阵乘法本身的浮点计算量（FLOPs）", "en": "The floating-point compute (FLOPs) of the matmuls themselves"},
+                    {"zh": "KV 缓存占用的显存", "en": "The GPU memory used by the KV cache"},
+                    {"zh": "网络上 token 传输的带宽", "en": "Network bandwidth for transferring tokens"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "图重放不改变要算多少（FLOPs 不变），也不省显存或网络；它省的是 CPU <strong>逐个发起内核</strong>的固定开销。解码每步每条只算 1 个 token、内核极短，发起费占比最高，所以重放收益最大——一次提交替代几百次发起，GPU 不再停下来等 CPU 递下一个内核。",
+                    "en": "Replay doesn't change how much is computed (FLOPs are the same), nor save memory or network; it removes the fixed CPU cost of <strong>launching kernels one by one</strong>. Decode computes just 1 token per request per step with extremely short kernels, so the launch fee dominates and replay pays most — one submission replaces hundreds of launches, and the GPU stops waiting on the CPU for the next kernel.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 SGLang 要为<strong>一组固定 batch 尺寸</strong>分别录图，运行时还要把真实 batch <strong>padding</strong> 到最近的桶？",
+                    "en": "Why does SGLang record graphs for a <strong>set of fixed batch sizes</strong> and then <strong>pad</strong> the real batch up to the nearest bucket at run time?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为图绑定录制时的<strong>静态形状与显存地址</strong>，重放只能套同样的形状；真实 batch 每步可能不同，不可能为每个具体大小都录一张。于是只录几档桶（1/2/4/8/…/max），真实 batch <strong>向上取整到最近桶</strong>（<code>_pad_to_bucket</code>）后重放——多算几行 padding 的代价，远小于省下的几百次内核启动",
+                        "en": "Because a graph binds the <strong>static shapes and memory addresses</strong> from capture, replay only fits the same shape; the real batch can differ every step, so you can't record one per exact size. Hence only a few buckets (1/2/4/8/…/max) are recorded, and the real batch is <strong>rounded up to the nearest bucket</strong> (<code>_pad_to_bucket</code>) before replay — the few padded rows cost far less than the hundreds of launches saved",
+                    },
+                    {"zh": "因为 GPU 一次只能处理 2 的幂次大小的 batch", "en": "Because the GPU can only process power-of-two batch sizes"},
+                    {"zh": "因为 padding 能提高数值精度", "en": "Because padding improves numerical precision"},
+                    {"zh": "因为每个 batch 尺寸需要单独的 GPU", "en": "Because each batch size needs its own GPU"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "CUDA 图是“录死”的：形状和地址在捕获时就固定，重放无法适配任意大小。逐个大小录图既不划算也录不过来，所以分桶 + 向上 padding 是用“少量空算”换“能复用整张图”。这与 GPU 是否支持任意大小、精度、或硬件数量都无关。",
+                    "en": "A CUDA graph is frozen: shape and address are fixed at capture, so replay can't adapt to arbitrary sizes. Recording one per size is neither worthwhile nor feasible, so bucketing + rounding up trades a little wasted compute for reusing a whole graph. It has nothing to do with power-of-two limits, precision, or hardware count.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么<strong>解码</strong>走 CUDA 图，而<strong>预填充</strong>大多不走？CUDA 图又如何与<strong>重叠调度器（第 21 课）</strong>配合？",
+                    "en": "Why is <strong>decode</strong> graphed while <strong>prefill</strong> mostly isn't, and how does the CUDA graph pair with the <strong>overlap scheduler (Lesson 21)</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "解码形状高度规整（batch 稳定、序列每步只长 1），天然能套固定桶；预填充长度多变、一次算几百上千 token、几乎每批形状不同，录图不划算。配合上：<strong>GPU 重放整张图时，CPU 正好腾手去调度下一步</strong>，两者叠加让 GPU 几乎不空转",
+                        "en": "Decode shapes are highly regular (steady batch, sequence growing by 1), fitting fixed buckets naturally; prefill lengths vary, computing hundreds-to-thousands of tokens with a different shape almost every batch, so graphing isn't worthwhile. Pairing: <strong>while the GPU replays the whole graph, the CPU is freed to schedule the next step</strong>, so together the GPU barely idles",
+                    },
+                    {"zh": "解码必须在 CPU 上跑，所以用图；预填充在 GPU 上跑", "en": "Decode must run on CPU so it uses a graph; prefill runs on GPU"},
+                    {"zh": "预填充不需要注意力，所以不用图", "en": "Prefill doesn't need attention, so no graph"},
+                    {"zh": "重叠调度器让 CPU 和 GPU 同时跑同一个内核", "en": "The overlap scheduler makes CPU and GPU run the same kernel simultaneously"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "图要求静态形状：解码规整、可分桶，预填充多变、不划算，这就是“解码走图、预填充走即时”的根因（第 24 课）。重叠调度（第 21 课）让 CPU 在 GPU 重放期间排下一步，两者天作之合——GPU 几乎不留空隙。解码并非在 CPU 跑，预填充也需要注意力，CPU/GPU 也不是跑同一个内核。",
+                    "en": "Graphs need static shapes: decode is regular and bucketable, prefill is varied and not worthwhile — the root reason for 'decode graphed, prefill eager' (Lesson 24). The overlap scheduler (Lesson 21) lets the CPU line up the next step while the GPU replays, a perfect match leaving almost no GPU idle. Decode doesn't run on CPU, prefill does need attention, and CPU/GPU don't run the same kernel.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“自动钢琴纸卷 / 录好的宏”的类比，把 CUDA Graph 的捕获与重放从头讲透。请覆盖：①问题——一次解码前向要发起几百个小内核（每层 norm、q/k/v、注意力、o_proj、gate/up、down…），每次发起有<strong>固定 CPU 启动费</strong>，解码内核太短时这笔费用为何主导整步、GPU 为何干等 CPU；②解法——图如何把整条前向的内核序列与依赖<strong>录一次</strong>、再<strong>一次提交整体重放</strong>；③SGLang 的工程做法——启动时 <code>BaseCudaGraphRunner.capture</code> 为一组尺寸（1/2/4/8/…/max）各录一张，运行时用 <code>_pad_to_bucket</code> 向上取整到最近桶、<code>can_run_graph</code> 通过后重放（第 24 课）。",
+                "en": "Using the 'player-piano roll / recorded macro' analogy, fully explain CUDA-graph capture and replay from scratch. Cover: (1) the problem — one decode forward launches hundreds of tiny kernels (per layer: norm, q/k/v, attention, o_proj, gate/up, down…), each with a <strong>fixed CPU launch fee</strong>, and why that fee dominates the step when decode kernels are short, leaving the GPU waiting on the CPU; (2) the fix — how a graph <strong>records</strong> the whole forward's kernel sequence and dependencies once and <strong>replays it as a single submission</strong>; (3) SGLang's engineering — at startup <code>BaseCudaGraphRunner.capture</code> records one graph per size (1/2/4/8/…/max), and at run time <code>_pad_to_bucket</code> rounds up to the nearest bucket and replays once <code>can_run_graph</code> passes (Lesson 24).",
+            },
+            {
+                "zh": "围绕“图必须静态”这条硬约束，说明它如何决定 SGLang 的设计，并解释由此带来的权衡。请说明：①静态形状 → <strong>batch 分桶 + padding</strong>；静态地址 → <strong>预分配静态缓冲、每步拷入</strong>；捕获区内<strong>禁止数据相关控制流</strong> → 动态算子留图外或用分段/可断开图（第 33 课）；②为什么这三条合起来正好解释“<strong>解码走图、预填充走即时</strong>”；③回报与代价——解码吞吐大涨、与重叠调度器（第 21 课）天作之合，但录很多档要花<strong>启动时间</strong>与<strong>显存</strong>（每张图握着自己的静态缓冲），桶太密太疏各有什么坏处；并联系投机解码（第 43 课）为何要为更复杂的形状专门考虑录图。",
+                "en": "Centered on the hard constraint 'a graph must be static', explain how it shapes SGLang's design and the resulting tradeoffs. Cover: (1) static shapes → <strong>batch bucketing + padding</strong>; static addresses → <strong>pre-allocated static buffers copied into each step</strong>; <strong>no data-dependent control flow</strong> in the captured region → dynamic ops outside or a piecewise/breakable graph (Lesson 33); (2) why these three together explain '<strong>decode graphed, prefill eager</strong>'; (3) payoff vs cost — big decode throughput and a perfect match with the overlap scheduler (Lesson 21), but recording many sizes costs <strong>startup time</strong> and <strong>memory</strong> (each graph holds its own static buffers), and what goes wrong if buckets are too dense or too sparse; and relate to why speculative decoding (Lesson 43) must specially consider capturing more complex shapes.",
+            },
+        ],
+    },
+    "28-sampler-and-sampling-params.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在采样管线里，<strong>温度（temperature）</strong>到底改变了什么？",
+                    "en": "In the sampling pipeline, what does <strong>temperature</strong> actually change?",
+                },
+                "opts": [
+                    {
+                        "zh": "它把 logits <strong>除以 T</strong> 来重塑分布的<strong>陡峭程度</strong>：T&lt;1 让分布更尖、更确定（大热门更稳），T&gt;1 让它更平、更随机（冷门也有机会），<strong>T=0 退化为贪心 argmax</strong>。它<strong>不改变 token 之间的排名</strong>，只改变高低之间的悬殊程度",
+                        "en": "It <strong>divides the logits by T</strong> to reshape the distribution's <strong>steepness</strong>: T&lt;1 sharpens it (more deterministic, the favorite is steadier), T&gt;1 flattens it (more random, longshots get a chance), <strong>T=0 collapses to greedy argmax</strong>. It <strong>does not change the ranking</strong> of tokens, only how lopsided the gaps are",
+                    },
+                    {"zh": "它直接删掉概率最低的若干 token", "en": "It directly deletes the lowest-probability tokens"},
+                    {"zh": "它决定一次生成多少个 token", "en": "It decides how many tokens to generate at once"},
+                    {"zh": "它给已经出现过的词扣分以抑制复读", "en": "It penalizes already-seen words to suppress repetition"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "温度是唯一重塑整条曲线陡峭程度的旋钮：除以 T 改变高低差距而非排名，T=0 等价贪心。删低概率 token 是 top-k/top-p/min-p 的活，扣分是 penalties 的活，生成多少是 max_new_tokens 的活——别混淆。",
+                    "en": "Temperature is the only knob that reshapes curve steepness: dividing by T changes the gaps, not the ranking, and T=0 equals greedy. Deleting low-prob tokens is top-k/top-p/min-p's job, penalizing is penalties' job, and how many tokens is max_new_tokens — don't conflate them.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<strong>结构化输出</strong>（如强制合法 JSON，第 48 课）是怎么挂进采样、保证输出永远语法合法的？",
+                    "en": "How does <strong>structured output</strong> (e.g. forcing valid JSON, Lesson 48) hook into sampling to guarantee grammar-valid output?",
+                },
+                "opts": [
+                    {
+                        "zh": "在<strong>采样之前</strong>，约束引擎把所有“此刻语法不允许”的 token 的 logit <strong>置为 −∞</strong>（mask 掉）；softmax 后它们概率正好是 0，<strong>采样根本不可能选到</strong>。于是从机制上保证合法，而不是事后校验、失败再重试",
+                        "en": "<strong>Before sampling</strong>, the constraint engine sets the logit of every “grammar-disallowed-right-now” token to <strong>−∞</strong> (masks it); after softmax their probability is exactly 0, so <strong>sampling can never pick them</strong>. Validity is guaranteed by mechanism, not by validating afterward and retrying on failure",
+                    },
+                    {"zh": "它在采样之后检查 token，若不合法就重新采样", "en": "It checks the token after sampling and resamples if invalid"},
+                    {"zh": "它把温度调到 0，强制贪心", "en": "It sets temperature to 0 to force greedy"},
+                    {"zh": "它训练一个专门的模型只输出 JSON", "en": "It trains a dedicated model that only outputs JSON"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键在“采样前对 logits 动手”：把违规 token 置 −∞，softmax 后概率为 0，机制上就选不到。这比“事后校验+重试”高效且确定。它和温度、专用模型无关——logit-bias、min_tokens/EOS 抑制也都挂在同一个采样前的位置。",
+                    "en": "The key is acting on logits before sampling: set violating tokens to −∞ and after softmax their prob is 0, so they're mechanically unselectable — more efficient and certain than validate-then-retry. It's unrelated to temperature or a dedicated model; logit-bias and min_tokens/EOS suppression hook at the same pre-sampling spot.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于<strong>同一个 batch 里的多条请求</strong>，下面哪句是对的？",
+                    "en": "About <strong>multiple requests in the same batch</strong>, which statement is correct?",
+                },
+                "opts": [
+                    {
+                        "zh": "它们可以<strong>各用各的采样参数</strong>：每条请求的 <span class='mono'>SamplingParams</span> 被打包进 <span class='mono'>SamplingBatchInfo</span> 的张量里（如 <span class='mono'>temperatures</span> 是一整个张量），Sampler <strong>逐请求向量化</strong>处理——A 请求贪心、B 请求温度 0.9、C 请求 top_p=0.8 可以在同一步里一起算",
+                        "en": "They can each use <strong>their own sampling params</strong>: every request's <span class='mono'>SamplingParams</span> is packed into <span class='mono'>SamplingBatchInfo</span> tensors (e.g. <span class='mono'>temperatures</span> is a whole tensor), and the Sampler processes them <strong>per-request, vectorized</strong> — request A greedy, B at temperature 0.9, C at top_p=0.8 can all be computed together in one step",
+                    },
+                    {"zh": "整个 batch 必须共用同一套采样参数", "en": "The whole batch must share one set of sampling params"},
+                    {"zh": "每条请求都要单独跑一次 Sampler", "en": "Each request must run the Sampler separately one at a time"},
+                    {"zh": "batch 里只有第一条请求的参数生效", "en": "Only the first request's params in the batch take effect"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "SamplingBatchInfo 把每请求参数打包成张量，所以 div_(temperatures) 之类操作天然逐请求向量化，一个 batch 里参数可各不相同、一次算完。无需逐条单跑，也不是共用或只取第一条——这正是高吞吐批处理的关键。",
+                    "en": "SamplingBatchInfo packs per-request params into tensors, so ops like div_(temperatures) are inherently per-request vectorized: params can differ across the batch and are computed in one pass. No per-request looping, no shared-only or first-only behavior — this is key to high-throughput batching.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“按词表开的加权摸彩”这个类比，把采样管线从头讲透。请覆盖：①起点——model.forward（第 24 课）出的 logits 是词表里每个 token 一个分数，为什么它还不是答案；②管线顺序——惩罚（repetition/frequency/presence，反复读机）→ 温度（÷T：&lt;1 尖、&gt;1 平、=0 贪心，且只改悬殊不改排名）→ top-k（限个数）/ top-p（限累计概率）/ min-p（设相对地板）三道闸门 → softmax → 多项式采样，并说明每一步为什么排在这个位置；③贪心 vs 采样的区别（确定可复现 vs 随机多样），以及“截断管质量、温度管多样性”这句话的含义。",
+                "en": "Using the 'weighted lottery over the vocabulary' analogy, fully explain the sampling pipeline from scratch. Cover: (1) the start — model.forward (Lesson 24) yields logits, one score per vocab token, and why that isn't the answer yet; (2) the pipeline order — penalties (repetition/frequency/presence, anti-parrot) → temperature (÷T: &lt;1 sharp, &gt;1 flat, =0 greedy, and it only changes lopsidedness not ranking) → top-k (caps count) / top-p (caps cumulative prob) / min-p (relative floor) gates → softmax → multinomial sample, explaining why each step sits where it does; (3) greedy vs sampling (deterministic/reproducible vs random/diverse), and what 'truncation governs quality, temperature governs diversity' means.",
+            },
+            {
+                "zh": "解释为什么 Sampler 是很多功能<strong>挂钩的枢纽</strong>，以及它如何接回整条主线。请说明：①结构化输出（第 48 课）如何在采样前把违规 token 的 logit 置 −∞，从机制上保证语法合法；②同一位置还挂着哪些钩子——logit-bias、min_tokens/EOS 抑制、确定性推理（钉死 RNG 种子）；③为什么“同一 batch 不同请求可用不同参数”在工程上重要（SamplingBatchInfo 把参数打包成张量、向量化）；④把采样接回请求循环（第 18 课）的第 4 步与自回归（第 4 课）：采到的 token 追加回 Req、再喂下一步。",
+                "en": "Explain why the Sampler is a <strong>hub where many features hook in</strong>, and how it ties back to the main line. Cover: (1) how structured output (Lesson 48) sets violating tokens' logits to −∞ before sampling, guaranteeing grammar validity by mechanism; (2) what other hooks live at the same spot — logit-bias, min_tokens/EOS suppression, deterministic inference (pinning the RNG seed); (3) why 'different requests in one batch can use different params' matters in practice (SamplingBatchInfo packs params into tensors, vectorized); (4) tie sampling back to step 4 of the request loop (Lesson 18) and autoregression (Lesson 4): the sampled token is appended to the Req and fed into the next step.",
+            },
+        ],
+    },
 }
 
 

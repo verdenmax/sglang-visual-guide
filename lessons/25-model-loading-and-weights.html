@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>25 · 模型加载与权重 / Model loading &amp; weights - SGLang 图解教程</title>
+<meta name="description" content="第六部分 · 模型执行｜模型加载与权重 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="25 · 模型加载与权重 / Model loading &amp; weights - SGLang 图解教程">
+<meta property="og:description" content="第六部分 · 模型执行｜模型加载与权重 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="25 · 模型加载与权重 / Model loading &amp; weights - SGLang 图解教程">
+<meta name="twitter:description" content="第六部分 · 模型执行｜模型加载与权重 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></span>
+    <span class="pill">25 / 28</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:89%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></div>
+    <h1><span class="lang-zh">模型加载与权重</span><span class="lang-en">Model loading &amp; weights</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课的 <span class="inline">ModelRunner</span> 张口就要"<strong>加载好的模型</strong>"——可这模型到底是<strong>怎么从硬盘搬上 GPU</strong> 的？
+一个 70B 的权重有上百 GB、散在几十个文件里，名字还是 HuggingFace 的命名，和 SGLang 内部的模块对不上。这一课就讲那个把"<strong>一堆磁盘文件</strong>"
+变成"<strong>每张卡上各就各位的张量</strong>"的幕后角色：<span class="inline">DefaultModelLoader</span>。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把加载模型想成<strong>用一堆编号纸箱布置新家</strong>：先读<strong>装箱清单</strong>（HuggingFace 的权重名，如 <span class="mono">model.layers.0.self_attn.q_proj.weight</span>），
+  把每个零件认领到<strong>对的房间</strong>（SGLang 里对应的模块参数），需要时把<strong>层板裁到合适尺寸</strong>（按张量并行切成本 rank 的那一片），
+  再按<strong>统一的漆面</strong>装好（转成 bf16/fp16，或装成量化格式）。关键是：<strong>不要一次把所有箱子全倒进客厅</strong>——而是<strong>一箱一箱地流式搬运</strong>，
+  否则主机内存当场爆掉。Loader 干的就是这套"照单认领、按需裁切、流式装配"的活。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  <span class="mono">DefaultModelLoader.load_model</span> 是绝大多数模型的<strong>共同入口</strong>：它先按 <span class="mono">model_config</span> 搭出一个<strong>空壳模型</strong>
+  （结构有了、权重还是占位），再打开磁盘上的 <strong>safetensors 分片</strong>，把张量<strong>一个一个地流式喂进去</strong>。喂的过程由<strong>每个模型自己的</strong>
+  <span class="mono">load_weights(weights)</span> 接手：它知道 HF 的名字该<strong>映射</strong>到哪个内部参数、哪些权重要<strong>融合</strong>、本 rank 该拿<strong>哪一片</strong>。
+  正因为加载逻辑被这样统一收口，SGLang 才能用一套框架托起<strong>上百种模型 + 各类量化格式</strong>。
+</div>
+
+<h2>load_model：先搭空壳，再流式灌权重</h2>
+<p>整条加载路径其实只有两步，但每一步都暗藏讲究。<strong>第一步</strong>，在目标设备（GPU）和目标 dtype 的上下文里，用 <span class="mono">_initialize_model</span>
+按配置<strong>实例化模型结构</strong>——这时各层的线性层、注意力、嵌入都建好了，但参数还是<strong>未初始化的占位张量</strong>，几乎不占有效显存。<strong>第二步</strong>，
+调 <span class="mono">load_weights_and_postprocess</span>，它从 <span class="mono">_get_all_weights</span> 拿到一个<strong>权重迭代器</strong>，再交给
+<span class="mono">model.load_weights(weights)</span> 把真值<strong>逐张量灌进去</strong>。注意这里的精妙：权重不是"先全读进内存再分发"，而是一个 <span class="mono">(name, tensor)</span>
+的<strong>生成器</strong>——读一个、灌一个、丢一个，<strong>主机内存占用被牢牢卡在一个很小的上界</strong>，哪怕模型有几百 GB 也不会把内存撑爆。这也意味着加载是<strong>可被流水线化</strong>的：当一个张量正在被映射、切片、搬卡时，下一个张量可以同时从磁盘预读，磁盘 I/O 与 CPU/GPU 处理彼此重叠，整体加载时间被进一步压短。</p>
+
+<p>为什么非要<strong>流式（streaming）</strong>不可？设想一台 8 卡机要加载 70B：如果先把全部权重读进主机内存再切分下发，单是这份临时副本就可能逼近甚至超过物理内存，
+更别提 safetensors 的零拷贝优势会被白白浪费。流式加载把"读—映射—切片—搬卡"做成一条<strong>边读边丢的流水线</strong>：任意时刻内存里只驻留<strong>当前这一个张量</strong>
+（及其正在处理的目标分片），上界与模型总大小<strong>解耦</strong>。这就是为什么同一台机器，既能加载几 GB 的小模型，也能加载几百 GB 的大模型——内存压力几乎是<strong>常数</strong>。
+理解了这一点，你也就懂了为什么 SGLang 默认用 safetensors、为什么"加载慢"往往是磁盘/网络带宽而非内存瓶颈。</p>
+
+<p>再补一个常被忽略的细节：流式之所以能成立，<strong>safetensors 这种格式功不可没</strong>。它把每个张量的名字、形状、dtype、字节偏移都写在文件头的索引里，于是 Loader 可以<strong>不解析整份文件</strong>就精确定位"我现在要的这个张量在第几个分片、从哪个字节开始"，再用内存映射（mmap）<strong>零拷贝</strong>地把它取出来。对比早年的 <span class="mono">.bin</span>（pickle）格式——必须把整个对象图反序列化进内存才能取用——safetensors 的"<strong>按需、零拷贝、可流式</strong>"正是大模型时代的刚需。这也是为什么本课的索引步骤要先打开 <span class="mono">*.safetensors.index.json</span>：它就是那张"哪个权重在哪个分片"的总目录，Loader 照着它一片片地按需读取。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>定位 checkpoint</h4><p>按 <span class="mono">model_path</span> 找到本地或下载好的目录（HF / ModelScope）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>safetensors 分片</h4><p>按索引打开多个 <span class="mono">*.safetensors</span>，零拷贝、可流式逐张量读取。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>名字映射</h4><p>HF 权重名 →（模型自己的 <span class="mono">load_weights</span>）→ SGLang 内部参数，常顺手<strong>融合</strong> q/k/v、gate/up。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>按 TP 切片</h4><p>每个权重按列/行并行切开，本 rank <strong>只接自己那一片</strong>（第 24/46 课）。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>dtype / 量化</h4><p>转成 bf16/fp16，或装成 FP8/INT4/AWQ/GPTQ 并带上 scales（第 35 课）。</p></div></div>
+  <div class="step"><div class="num">6</div><div class="sc"><h4>落到 GPU</h4><p>写进空壳模型对应参数的显存槽位，加载完即 <span class="mono">model.eval()</span>。</p></div></div>
+</div>
+
+<h2>名字映射与融合：HF 的名字怎么对上 SGLang 的参数</h2>
+<p>磁盘上的权重用的是 HuggingFace 的命名习惯，比如注意力的查询投影叫 <span class="mono">model.layers.0.self_attn.q_proj.weight</span>，
+键、值各自又是 <span class="mono">k_proj</span>、<span class="mono">v_proj</span>。但 SGLang 为了<strong>性能</strong>，往往把 q/k/v <strong>三个投影融合成一个打包权重</strong>
+（一次大矩阵乘代替三次小矩阵乘），把 MLP 的 <span class="mono">gate_proj</span> 和 <span class="mono">up_proj</span> 也<strong>融成一个</strong>。这就带来一个"对不上"的问题：
+磁盘里是<strong>分开的三份</strong>，内存里要的是<strong>合并的一份</strong>。解决它的，正是每个模型类自己实现的 <span class="mono">load_weights(weights)</span>——
+它内置一张"<strong>映射表</strong>"，知道遇到 <span class="mono">q_proj/k_proj/v_proj</span> 时分别该塞进打包权重的<strong>哪一段偏移</strong>，遇到 <span class="mono">gate/up</span> 时又该怎么拼。</p>
+
+<p>把"映射"这件事交给<strong>模型自己</strong>而不是 Loader，是一处关键的职责划分。Loader 只负责<strong>把张量流式读出来</strong>（它不关心也不该关心某个模型内部叫什么），
+而"这个名字对应我的哪个参数、要不要融合、要不要转置"全是<strong>模型私有的知识</strong>，自然封装在模型的 <span class="mono">load_weights</span> 里。于是新增一个模型时，
+你<strong>不必碰 Loader</strong>，只要在模型文件里写好它的 <span class="mono">load_weights</span>（第 26 课）即可——这就是为什么 SGLang 能相对轻松地支持上百种模型架构。
+映射与融合也不是可有可无的细节：融合直接决定了前向时矩阵乘的形状，融合得对，后续的张量并行切片和量化才能顺理成章地接上。</p>
+
+<p>这里值得多想一层：为什么"<strong>融合</strong>"对性能这么关键？GPU 跑一次矩阵乘有固定的<strong>启动与调度开销</strong>，把 q、k、v 三个小投影合成一个大投影，意味着一次大矩阵乘代替三次小矩阵乘——既摊薄了启动开销，又让 GPU 的计算单元被喂得更满，访存也更连续。gate/up 融成一个 <span class="mono">gate_up_proj</span> 同理。代价是加载时要做"<strong>反向拼装</strong>"：磁盘上是三份独立张量，必须按正确的偏移、正确的顺序拼进同一个打包参数，任何一段对错位，前向算出来的就是乱码。所以 <span class="mono">load_weights</span> 里那张映射表看似琐碎，实则是<strong>正确性与性能的双重保险</strong>——它把"磁盘的存储布局"和"内存的计算布局"这两套不同的世界精确地缝合在一起。</p>
+
+<div class="cols">
+  <div class="col"><h4>磁盘上的 HF 权重名</h4><p>分开存：<span class="mono">...self_attn.q_proj.weight</span>、<span class="mono">k_proj.weight</span>、<span class="mono">v_proj.weight</span>；
+  MLP 是 <span class="mono">gate_proj</span> 与 <span class="mono">up_proj</span> 两份。命名跟着 HuggingFace 走，<strong>逐个投影各一份</strong>。</p></div>
+  <div class="col"><h4>SGLang 内部参数</h4><p>融合存：q/k/v 打包成<strong>一个</strong> <span class="mono">qkv_proj</span>，gate/up 打包成<strong>一个</strong> <span class="mono">gate_up_proj</span>。
+  <span class="mono">load_weights</span> 按偏移把分开的 HF 权重<strong>填进打包参数的各段</strong>，一次大矩阵乘替代多次小乘。</p></div>
+</div>
+
+<h2>为 TP 切片，按 dtype/量化落地</h2>
+<p>映射之后还有两道工序。<strong>其一是张量并行（TP）切片</strong>：在多卡部署里，每个权重并不会整份地存在每张卡上，而是<strong>按 rank 切成片</strong>。
+注意力的 q/k/v、MLP 的 gate/up 走<strong>列并行</strong>（按输出维切，每卡算一段输出），注意力的 <span class="mono">o_proj</span>、MLP 的 <span class="mono">down_proj</span> 走<strong>行并行</strong>
+（按输入维切，每卡算部分和再 all-reduce）。Loader/模型在加载时就<strong>只把本 rank 的那一片搬上这张卡</strong>，所以 8 卡各自的显存里都<strong>只有 1/8 的权重</strong>
+（第 24/46 课）。这也解释了为什么加载本身就是分布式的：每张卡读的是同一批文件，但<strong>各取所需、各留一片</strong>。</p>
+
+<p><strong>其二是 dtype 与量化</strong>。最常见的是把权重<strong>转成 bf16 或 fp16</strong> 再上卡；但如果 checkpoint 本身是<strong>量化格式</strong>——FP8、INT4、AWQ、GPTQ（第 35 课）——
+加载时就要连同它的<strong>缩放因子（scales）/零点</strong>一起读进来，按量化布局摆好。之后前向要么用<strong>专门的量化内核</strong>直接在低比特上算，要么在用到时<strong>惰性反量化</strong>回高精度。
+量化的意义在于<strong>用更小的显存装下更大的模型</strong>，代价是要正确处理 scales 与打包格式——而这些细节同样被收进各量化方法的加载逻辑里，Loader 只需把字节流交给它们。
+正因为"切片"和"量化"都在加载这一步被妥善安排，上层的 ModelRunner（第 24 课）才能拿到一个<strong>开箱即用、各就各位</strong>的模型。</p>
+
+<p>把列并行和行并行放在一起再看一眼，会更清楚加载为什么要"按方向"切。<strong>列并行</strong>切的是权重的<strong>输出维</strong>：q/k/v、gate/up 这些"<strong>向外扩张</strong>"的投影，把输出通道平均分给各 rank，每张卡只算自己负责的那几列输出，彼此<strong>互不依赖</strong>，算完直接拼接即可。<strong>行并行</strong>切的是<strong>输入维</strong>：<span class="mono">o_proj</span>、<span class="mono">down_proj</span> 这些"<strong>向内收拢</strong>"的投影，每张卡只拿到输入的一部分、算出一个<strong>部分和</strong>，必须再用 all-reduce 把各卡的部分和相加才得到正确结果。这一"列切—算—行切—规约"的配对不是随意的：它让每层中间正好只需要一次集合通信，把跨卡开销压到最低。而加载阶段的职责，就是<strong>提前把每个权重按正确的方向切好、只把本 rank 的那一片落到本卡</strong>，前向时才不必再临时搬运。第 46 课会把这套并行切分讲透，这里你只需记住：<strong>权重怎么切，是在加载时就定下的</strong>。</p>
+
+<table class="t">
+  <tr><th>加载要操心的事</th><th>为什么必须在这步做</th></tr>
+  <tr><td>流式读取（边读边丢）</td><td>主机内存上界<strong>与模型大小解耦</strong>，几百 GB 也不爆内存</td></tr>
+  <tr><td class="mono">load_weights</td><td>把 HF 名字映射到内部参数，并<strong>融合</strong> q/k/v、gate/up</td></tr>
+  <tr><td>按 TP 切片</td><td>每卡只留<strong>自己那一片</strong>权重，显存才装得下（第 46 课）</td></tr>
+  <tr><td>dtype / 量化</td><td>转 bf16/fp16 或装 FP8/INT4 + scales，决定前向用<strong>哪种内核</strong>（第 35 课）</td></tr>
+  <tr><td><span class="mono">model.eval()</span></td><td>权重就位后切到推理模式，交给 ModelRunner（第 24 课）</td></tr>
+</table>
+
+<h2>不止一种 Loader：DefaultModelLoader 只是常路</h2>
+<p>SGLang 里其实有<strong>一族</strong> Loader，对应不同的加载场景，但<span class="mono">DefaultModelLoader</span> 是<strong>最常走的那条路</strong>。
+了解其余几种，能帮你看懂"加载"在不同部署下的变体：</p>
+
+<p>这些变体共享同一套<strong>骨架</strong>，只在"权重从哪来、怎么摆"上各有侧重：<span class="mono">DummyModelLoader</span> 跳过真权重，专为压测与结构验证服务，启动极快；<span class="mono">ShardedStateLoader</span> 把"已经按某并行度切好的状态"直接喂回来，省掉每次重启时的重复切片，对反复拉起同一配置的线上服务很友好；按层加载与远程加载则在<strong>峰值内存</strong>和<strong>分发速度</strong>上各做取舍。但无论哪种，最终都殊途同归地走到同一个动作：<strong>把张量灌进模型参数</strong>。这就是"<strong>多方言、单内核</strong>"思路在加载侧的翻版：加载入口可以千变万化，模型那端只认 <span class="mono">load_weights</span> 一个接口。</p>
+
+<div class="layers">
+  <div class="layer l-core"><div class="lh"><span class="badge">常路</span><span class="name">DefaultModelLoader</span></div><div class="ld">从磁盘读 safetensors/bin 分片，<strong>流式</strong>喂给 <span class="mono">model.load_weights</span>。绝大多数模型、绝大多数部署都走它。</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">测试</span><span class="name">DummyModelLoader</span></div><div class="ld">不读真权重，直接<strong>填随机/占位</strong>。用来量显存、测吞吐、跑结构正确性，不关心数值。</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">快启</span><span class="name">ShardedStateLoader</span></div><div class="ld">从<strong>已按 TP 切好</strong>的分片状态直接载入，省去每次重新切片，适合反复重启同一并行度的服务。</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">省内存</span><span class="name">LayeredModelLoader / 远程</span></div><div class="ld">按层逐步加载，或从远程实例/对象存储拉取，进一步压低峰值内存或加速分发。</div></div>
+</div>
+
+<p>下面是 <span class="mono">DefaultModelLoader.load_model</span> 的真实骨架。读它你会清楚看到那"两步走"：<strong>先 <span class="mono">_initialize_model</span> 搭壳，
+再把流式权重交给 <span class="mono">model.load_weights</span></strong>。注意 <span class="mono">_get_all_weights</span> 返回的是<strong>生成器</strong>，这正是"流式"的实现根基。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_loader/loader.py ::DefaultModelLoader</span><span class="ln">搭壳 + 流式灌权重</span></div>
+  <pre><span class="kw">def</span> load_model(self, *, model_config, device_config):
+    target_device = torch.device(device_config.device)
+    quant_config = _get_quantization_config(model_config, self.load_config)
+    <span class="kw">with</span> set_default_torch_dtype(model_config.dtype):
+        <span class="kw">with</span> target_device:
+            model = _initialize_model(model_config, self.load_config, quant_config)  <span class="cm"># 空壳</span>
+        self.load_weights_and_postprocess(
+            model, self._get_all_weights(model_config, model), target_device)        <span class="cm"># 流式权重</span>
+    <span class="kw">return</span> model.eval()
+
+<span class="kw">def</span> load_weights_and_postprocess(model, weights, target_device):
+    ...
+    model.load_weights(weights)   <span class="cm"># 逐个 (name, tensor) 灌进模型参数</span></pre>
+</div>
+
+<p>把这一课接回主线：第 24 课的 ModelRunner 张口要的"加载好的模型"，就是 <span class="mono">DefaultModelLoader</span> 这样搭壳、映射、切片、量化、流式灌好之后交出来的成品。
+往后第 26 课会带你<strong>真正写一个模型文件</strong>，重点正是它的 <span class="mono">load_weights</span> 怎么写（名字映射与融合都在那儿落地）；第 35 课讲<strong>量化</strong>格式如何加载与计算；
+第 46 课讲<strong>张量并行</strong>怎么把权重按列/行切到多卡。带着"<strong>Loader = 把磁盘文件流式装配成每卡各就各位的张量</strong>"这把钥匙，这几课你会读得很顺。</p>
+
+<p>最后把这一课的因果链收一收：模型之所以能"开箱即用"，是因为 Loader 在加载的那一刻就把<strong>四件麻烦事</strong>一并办妥了——名字对齐（映射）、形状打包（融合）、按卡切片（TP）、精度落地（dtype/量化），而且全程<strong>流式</strong>不爆内存。这四件事但凡漏一件，前向都会出问题：映射错了对不上参数，融合错了矩阵乘形状不对，切片错了跨卡通信对不齐，量化处理错了数值直接崩。正因为它们被集中、规范地安排在加载这一步，ModelRunner 才敢在前向里<strong>什么都不问、拿来就算</strong>。这就是"<strong>把复杂性收敛到边界</strong>"的工程美学：加载这道关把脏活累活全扛了，上层于是干净，整条推理流水线也因此更稳更快。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>两步走</strong>：<span class="mono">_initialize_model</span> 先搭<strong>空壳</strong>，再 <span class="mono">model.load_weights</span> 把权重<strong>流式</strong>灌进去。</li>
+    <li><strong>流式加载</strong>：权重是 <span class="mono">(name, tensor)</span> 生成器，读一个灌一个，<strong>主机内存上界与模型大小解耦</strong>。</li>
+    <li><strong>名字映射 + 融合</strong>：HF 名 →（模型自己的 <span class="mono">load_weights</span>）→ 内部参数，常把 q/k/v、gate/up <strong>融成打包权重</strong>。</li>
+    <li><strong>TP 切片</strong>：列并行（q/k/v、gate/up）/行并行（o_proj、down_proj），每卡<strong>只留自己那一片</strong>（第 46 课）。</li>
+    <li><strong>dtype/量化</strong>：转 bf16/fp16，或装 FP8/INT4/AWQ/GPTQ + scales（第 35 课）；<span class="mono">DefaultModelLoader</span> 是常路，另有 dummy/sharded/layered 等变体。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. <code>DefaultModelLoader</code> 为什么要把权重做成<strong>流式（streaming）</strong>读取，而不是先全读进主机内存再分发？</div>
+  <ol class="opts">
+    <li>因为流式加载会自动跳过不需要的层，省下计算</li>
+    <li>因为只有流式才能把权重放到 GPU，整读无法上卡</li>
+    <li>因为流式加载比一次性加载在数值上更精确</li>
+    <li>权重是一个 <code>(name, tensor)</code> <strong>生成器</strong>，读一个、灌一个、丢一个，<strong>主机内存上界与模型总大小解耦</strong>——哪怕几百 GB 的模型，任意时刻内存里也只驻留当前这一个张量，不会把内存撑爆</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。<code>_get_all_weights</code> 返回的是生成器，<code>model.load_weights</code> 逐张量灌入，所以任意时刻内存里只有当前张量（及其目标分片），上界与模型大小<strong>解耦</strong>。这才是同一台机器既能装小模型又能装几百 GB 大模型的原因。它跟数值精度无关，整读其实也能上卡，更不会自动跳层。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 把 HuggingFace 权重名映射到 SGLang 内部参数、并<strong>融合</strong> q/k/v、gate/up 的逻辑，写在哪里？</div>
+  <ol class="opts">
+    <li>写在 safetensors 文件的元数据里，加载时自动套用</li>
+    <li>不需要映射，HF 名字和 SGLang 参数名永远一一对应</li>
+    <li>写在 <code>DefaultModelLoader</code> 里，对所有模型用同一张硬编码映射表</li>
+    <li>写在<strong>每个模型类自己的</strong> <code>load_weights(weights)</code> 里——它内置映射表，知道 <code>q_proj/k_proj/v_proj</code> 该塞进打包权重的哪一段偏移；Loader 只负责<strong>把张量流式读出来</strong>，不关心模型内部叫什么</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。Loader 只流式读张量，<strong>不该也不关心</strong>某模型内部叫什么；而“这个名字对应哪个参数、要不要融合/转置”是模型私有知识，封装在模型的 <code>load_weights</code> 里。所以新增模型<strong>不必碰 Loader</strong>，只写好 <code>load_weights</code>（第 26 课）即可。磁盘上 q/k/v 是分开三份，内存里要打包一份，正需要这层映射。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在 8 卡张量并行（TP）部署里，加载时每张卡的显存里存的是什么权重？</div>
+  <ol class="opts">
+    <li>每张卡都存一整份完整权重，靠冗余提高可靠性</li>
+    <li>权重存在 CPU 内存，GPU 每步临时拷贝需要的部分</li>
+    <li>只有 0 号卡存权重，其余卡每步向它请求</li>
+    <li><strong>只存本 rank 那一片</strong>：q/k/v、gate/up 走列并行（按输出维切），o_proj、down_proj 走行并行（按输入维切），每卡只接自己 1/8 的权重，加载本身就是分布式的</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。TP 下每个权重<strong>按 rank 切片</strong>：列并行（q/k/v、gate/up）每卡算一段输出，行并行（o_proj、down_proj）每卡算部分和再 all-reduce。Loader/模型加载时就只把本 rank 的那一片搬上这张卡，于是 8 卡各只有 1/8 权重（第 24/46 课）。并非整份冗余、单卡集中或常驻 CPU。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“编号纸箱布置新家”的类比，完整讲清 <code>DefaultModelLoader</code> 把一堆磁盘文件变成“每卡各就各位的张量”的全过程。请逐一覆盖：①<strong>两步走</strong>——<code>_initialize_model</code> 先搭空壳（结构有了、权重是占位张量），再 <code>load_weights_and_postprocess</code> 把 <code>_get_all_weights</code> 的<strong>生成器</strong>交给 <code>model.load_weights</code> 逐张量灌入；②为什么必须<strong>流式</strong>（主机内存上界与模型大小解耦）；③<strong>名字映射 + 融合</strong>为什么交给模型自己的 <code>load_weights</code>（第 26 课），以及 q/k/v、gate/up 如何打包；④<strong>TP 切片</strong>（列/行并行，第 46 课）与 <strong>dtype/量化</strong>（FP8/INT4 + scales，第 35 课）各在这步做了什么。</li>
+    <li>SGLang 不止一种 Loader：<code>DefaultModelLoader</code> 是常路，另有 <code>DummyModelLoader</code>、<code>ShardedStateLoader</code>、<code>LayeredModelLoader</code>/远程加载等变体。请说明：①各自适合什么场景（测试量显存、按已切分状态快启、按层省内存、远程分发）；②为什么把“加载逻辑统一收口”能让 SGLang 用一套框架托起上百种模型 + 各类量化格式；③如果你要加载一个 <strong>FP8 量化</strong>的 checkpoint，加载这一步相比 bf16 多做了什么（读 scales、按量化布局摆放、前向用量化内核或惰性反量化，第 35 课）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson's <span class="inline">ModelRunner</span> casually asked for "<strong>the loaded model</strong>" — but how does that model
+actually <strong>move from disk onto the GPU</strong>? A 70B's weights are hundreds of GB, scattered across dozens of files, still
+named the HuggingFace way, not matching SGLang's internal modules. This lesson is about the backstage role that turns "<strong>a
+pile of disk files</strong>" into "<strong>tensors in their right place on each card</strong>": <span class="inline">DefaultModelLoader</span>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of loading a model as <strong>furnishing a new home from numbered flat-pack boxes</strong>: first read the <strong>parts
+  list</strong> (the HuggingFace weight names, e.g. <span class="mono">model.layers.0.self_attn.q_proj.weight</span>), match each part
+  to the <strong>right room</strong> (the corresponding SGLang module param), <strong>cut each shelf to fit</strong> when needed (slice
+  it into this rank's share under tensor parallelism), and assemble in the <strong>right finish</strong> (cast to bf16/fp16, or load a
+  quantized format). The key: <strong>don't dump all the boxes into the living room at once</strong> — carry them in <strong>one box at
+  a time, streamed</strong>, or host RAM blows up on the spot. That "claim-by-list, cut-to-fit, stream-assemble" is exactly the Loader's job.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  <span class="mono">DefaultModelLoader.load_model</span> is the <strong>common entry</strong> for almost every model: it first builds an
+  <strong>empty shell</strong> from <span class="mono">model_config</span> (structure present, weights still placeholders), then opens the
+  <strong>safetensors shards</strong> on disk and <strong>streams the tensors in one by one</strong>. The feeding is handled by each
+  model's <strong>own</strong> <span class="mono">load_weights(weights)</span>: it knows which internal param an HF name <strong>maps</strong>
+  to, which weights to <strong>fuse</strong>, and which <strong>slice</strong> this rank takes. Because loading is funneled through this one
+  point, SGLang can support <strong>hundreds of models + many quant formats</strong> under one framework.
+</div>
+
+<h2>load_model: build the shell first, then stream the weights in</h2>
+<p>The whole load path is just two steps, but each hides nuance. <strong>Step one</strong>: within the target device (GPU) and target
+dtype context, <span class="mono">_initialize_model</span> <strong>instantiates the structure</strong> — all the linear layers, attention,
+and embeddings are built, but the params are still <strong>uninitialized placeholder tensors</strong>, taking almost no real GPU memory.
+<strong>Step two</strong>: call <span class="mono">load_weights_and_postprocess</span>, which gets a <strong>weight iterator</strong> from
+<span class="mono">_get_all_weights</span> and hands it to <span class="mono">model.load_weights(weights)</span> to <strong>pour the real values
+in, tensor by tensor</strong>. Note the subtlety: weights are not "read fully into memory then distributed" — they are a
+<span class="mono">(name, tensor)</span> <strong>generator</strong>: read one, load one, drop one, so <strong>host memory stays pinned to a
+small upper bound</strong> even for a hundreds-of-GB model.</p>
+
+<p>Why insist on <strong>streaming</strong>? Picture an 8-GPU box loading a 70B: if you read all weights into host RAM before slicing and
+dispatching, that temporary copy alone could approach or exceed physical memory, and safetensors' zero-copy advantage is wasted.
+Streaming makes "read—map—slice—move-to-card" a <strong>read-and-drop pipeline</strong>: at any instant only the <strong>current tensor</strong>
+(and the target slice being processed) lives in memory, so the bound is <strong>decoupled</strong> from the model's total size. That's why
+the same machine can load a few-GB small model and a hundreds-of-GB large one — memory pressure is nearly <strong>constant</strong>. Once you
+see this, you understand why SGLang defaults to safetensors, and why "slow loading" is usually disk/network bandwidth, not a memory bottleneck.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Locate the checkpoint</h4><p>Find the local or downloaded dir from <span class="mono">model_path</span> (HF / ModelScope).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>safetensors shards</h4><p>Open multiple <span class="mono">*.safetensors</span> by index; zero-copy, readable tensor-by-tensor.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Name mapping</h4><p>HF weight name →(the model's own <span class="mono">load_weights</span>)→ SGLang internal param, often <strong>fusing</strong> q/k/v, gate/up.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Slice for TP</h4><p>Each weight split column/row-wise; this rank <strong>takes only its slice</strong> (Lessons 24/46).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>dtype / quant</h4><p>Cast to bf16/fp16, or load FP8/INT4/AWQ/GPTQ with scales (Lesson 35).</p></div></div>
+  <div class="step"><div class="num">6</div><div class="sc"><h4>Land on GPU</h4><p>Write into the shell model's param slots; once loaded, <span class="mono">model.eval()</span>.</p></div></div>
+</div>
+
+<h2>Name mapping & fusion: matching HF names to SGLang params</h2>
+<p>The on-disk weights use HuggingFace naming, e.g. attention's query projection is <span class="mono">model.layers.0.self_attn.q_proj.weight</span>,
+with keys and values as <span class="mono">k_proj</span> and <span class="mono">v_proj</span>. But for <strong>performance</strong>, SGLang often
+<strong>fuses q/k/v into one packed weight</strong> (one big matmul instead of three small ones) and fuses MLP's <span class="mono">gate_proj</span>
+and <span class="mono">up_proj</span> into <strong>one</strong>. That creates a "mismatch": disk has <strong>three separate parts</strong>, memory wants
+<strong>one merged part</strong>. Resolving it is each model class's own <span class="mono">load_weights(weights)</span> — it carries a built-in
+"<strong>mapping table</strong>" that knows which <strong>offset segment</strong> of the packed weight each of
+<span class="mono">q_proj/k_proj/v_proj</span> goes into, and how to stitch <span class="mono">gate/up</span>.</p>
+
+<p>Handing "mapping" to the <strong>model itself</strong> rather than the Loader is a key division of duties. The Loader only <strong>streams
+tensors out</strong> (it doesn't, and shouldn't, care what a model calls things internally), while "which of my params this name maps to,
+whether to fuse, whether to transpose" is <strong>model-private knowledge</strong>, naturally encapsulated in the model's
+<span class="mono">load_weights</span>. So when adding a new model you <strong>don't touch the Loader</strong> — you just write its
+<span class="mono">load_weights</span> in the model file (Lesson 26). That's why SGLang can support hundreds of architectures relatively easily.
+Mapping and fusion aren't optional details either: fusion directly sets the matmul shapes in the forward, and only when fused correctly can
+the downstream TP slicing and quantization line up cleanly.</p>
+
+<div class="cols">
+  <div class="col"><h4>HF weight names on disk</h4><p>Stored separately: <span class="mono">...self_attn.q_proj.weight</span>, <span class="mono">k_proj.weight</span>,
+  <span class="mono">v_proj.weight</span>; MLP is two parts, <span class="mono">gate_proj</span> and <span class="mono">up_proj</span>. Naming follows
+  HuggingFace, <strong>one part per projection</strong>.</p></div>
+  <div class="col"><h4>SGLang internal params</h4><p>Stored fused: q/k/v packed into <strong>one</strong> <span class="mono">qkv_proj</span>, gate/up into
+  <strong>one</strong> <span class="mono">gate_up_proj</span>. <span class="mono">load_weights</span> writes the separate HF weights <strong>into each
+  segment of the packed param</strong> by offset — one big matmul replaces several small ones.</p></div>
+</div>
+
+<h2>Slice for TP, land by dtype/quant</h2>
+<p>After mapping come two more steps. <strong>First, tensor-parallel (TP) slicing</strong>: in a multi-GPU deployment, each weight is not stored
+whole on every card but <strong>sliced per rank</strong>. Attention's q/k/v and MLP's gate/up go <strong>column-parallel</strong> (split on the
+output dim, each card computes a slice of the output), while attention's <span class="mono">o_proj</span> and MLP's <span class="mono">down_proj</span>
+go <strong>row-parallel</strong> (split on the input dim, each card computes a partial sum, then all-reduce). The Loader/model moves <strong>only
+this rank's slice</strong> onto this card during loading, so each of 8 cards holds <strong>only 1/8 of the weights</strong> (Lessons 24/46). That's
+why loading is itself distributed: every card reads the same files but <strong>takes what it needs and keeps one slice</strong>.</p>
+
+<p><strong>Second, dtype and quantization</strong>. Most commonly, weights are <strong>cast to bf16 or fp16</strong> before going on-card; but if the
+checkpoint is itself a <strong>quantized format</strong> — FP8, INT4, AWQ, GPTQ (Lesson 35) — loading must read in its <strong>scales / zero-points</strong>
+too and arrange them by the quant layout. The forward then either uses <strong>dedicated quantized kernels</strong> directly in low bits, or
+<strong>lazily dequantizes</strong> back to high precision when used. Quantization's point is to <strong>fit a bigger model in less memory</strong>, at the
+cost of correctly handling scales and packing formats — details likewise tucked into each quant method's loading logic, with the Loader just handing it
+the byte stream. Because both "slicing" and "quantization" are arranged here at load time, the upper-level ModelRunner (Lesson 24) receives an
+<strong>out-of-the-box, all-in-place</strong> model.</p>
+
+<table class="t">
+  <tr><th>What loading must handle</th><th>Why it must happen at this step</th></tr>
+  <tr><td>Streaming (read-and-drop)</td><td>Host-memory bound is <strong>decoupled from model size</strong> — hundreds of GB won't blow up RAM</td></tr>
+  <tr><td class="mono">load_weights</td><td>Maps HF names to internal params and <strong>fuses</strong> q/k/v, gate/up</td></tr>
+  <tr><td>Slice for TP</td><td>Each card keeps <strong>only its slice</strong> so the weights fit in memory (Lesson 46)</td></tr>
+  <tr><td>dtype / quant</td><td>Cast bf16/fp16 or load FP8/INT4 + scales, deciding <strong>which kernel</strong> the forward uses (Lesson 35)</td></tr>
+  <tr><td><span class="mono">model.eval()</span></td><td>Switch to inference mode once weights are in place; hand to ModelRunner (Lesson 24)</td></tr>
+</table>
+
+<h2>More than one Loader: DefaultModelLoader is just the common path</h2>
+<p>SGLang actually has a <strong>family</strong> of Loaders for different scenarios, but <span class="mono">DefaultModelLoader</span> is <strong>the most
+common path</strong>. Knowing the others helps you see how "loading" varies across deployments:</p>
+
+<div class="layers">
+  <div class="layer l-core"><div class="lh"><span class="badge">common</span><span class="name">DefaultModelLoader</span></div><div class="ld">Reads safetensors/bin shards from disk and <strong>streams</strong> them to <span class="mono">model.load_weights</span>. Most models, most deployments use it.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">testing</span><span class="name">DummyModelLoader</span></div><div class="ld">Reads no real weights; just fills <strong>random/placeholder</strong> values. For measuring memory, throughput, and structural correctness, not numerics.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">fast start</span><span class="name">ShardedStateLoader</span></div><div class="ld">Loads directly from an <strong>already-TP-sliced</strong> sharded state, skipping re-slicing each time — ideal for repeatedly restarting the same parallelism.</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">low memory</span><span class="name">LayeredModelLoader / remote</span></div><div class="ld">Loads layer by layer, or pulls from a remote instance/object store, to further cut peak memory or speed up distribution.</div></div>
+</div>
+
+<p>Here is the real skeleton of <span class="mono">DefaultModelLoader.load_model</span>. Read it and the "two steps" are clear: <strong>first
+<span class="mono">_initialize_model</span> builds the shell, then the streamed weights go to <span class="mono">model.load_weights</span></strong>. Note
+that <span class="mono">_get_all_weights</span> returns a <strong>generator</strong> — that is the very basis of "streaming".</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_loader/loader.py ::DefaultModelLoader</span><span class="ln">build shell + stream weights</span></div>
+  <pre><span class="kw">def</span> load_model(self, *, model_config, device_config):
+    target_device = torch.device(device_config.device)
+    quant_config = _get_quantization_config(model_config, self.load_config)
+    <span class="kw">with</span> set_default_torch_dtype(model_config.dtype):
+        <span class="kw">with</span> target_device:
+            model = _initialize_model(model_config, self.load_config, quant_config)  <span class="cm"># shell</span>
+        self.load_weights_and_postprocess(
+            model, self._get_all_weights(model_config, model), target_device)        <span class="cm"># streamed weights</span>
+    <span class="kw">return</span> model.eval()
+
+<span class="kw">def</span> load_weights_and_postprocess(model, weights, target_device):
+    ...
+    model.load_weights(weights)   <span class="cm"># pour each (name, tensor) into the model's params</span></pre>
+</div>
+
+<p>Tie this back to the main thread: the "loaded model" that Lesson 24's ModelRunner demanded is exactly what
+<span class="mono">DefaultModelLoader</span> hands over after building the shell, mapping, slicing, quantizing, and streaming the weights in. Next,
+Lesson 26 walks you through <strong>actually writing a model file</strong>, focused on writing its <span class="mono">load_weights</span> (where name
+mapping and fusion land); Lesson 35 covers how <strong>quantized</strong> formats load and compute; Lesson 46 covers how <strong>tensor parallelism</strong>
+slices weights column/row-wise across cards. With the key "<strong>Loader = stream disk files into all-in-place tensors per card</strong>", these
+lessons will read smoothly.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key takeaways</div>
+  <ul>
+    <li><strong>Two steps</strong>: <span class="mono">_initialize_model</span> builds the <strong>shell</strong>, then <span class="mono">model.load_weights</span> <strong>streams</strong> the weights in.</li>
+    <li><strong>Streaming</strong>: weights are a <span class="mono">(name, tensor)</span> generator — read one, load one — so the <strong>host-memory bound is decoupled from model size</strong>.</li>
+    <li><strong>Name mapping + fusion</strong>: HF name →(the model's own <span class="mono">load_weights</span>)→ internal param, often <strong>fusing</strong> q/k/v and gate/up into packed weights.</li>
+    <li><strong>TP slicing</strong>: column-parallel (q/k/v, gate/up) / row-parallel (o_proj, down_proj); each card <strong>keeps only its slice</strong> (Lesson 46).</li>
+    <li><strong>dtype/quant</strong>: cast bf16/fp16, or load FP8/INT4/AWQ/GPTQ + scales (Lesson 35); <span class="mono">DefaultModelLoader</span> is the common path, with dummy/sharded/layered variants.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why does <code>DefaultModelLoader</code> read weights via <strong>streaming</strong> instead of reading everything into host RAM first and then distributing?</div>
+  <ol class="opts">
+    <li>Because streaming automatically skips unneeded layers, saving compute</li>
+    <li>Because only streaming can place weights on the GPU; a full read can't reach the card</li>
+    <li>Because streaming loads are numerically more accurate than one-shot loads</li>
+    <li>Weights are a <code>(name, tensor)</code> <strong>generator</strong>: read one, load one, drop one, so the <strong>host-memory bound is decoupled from total model size</strong> — even a hundreds-of-GB model keeps only the current tensor in memory at any instant and won't blow up RAM</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. <code>_get_all_weights</code> returns a generator and <code>model.load_weights</code> pours tensors in one by one, so only the current tensor (and its target slice) lives in memory at any instant, the bound <strong>decoupled</strong> from model size. That's why one machine fits both small and hundreds-of-GB models. It has nothing to do with numerical precision, a full read can still reach the card, and nothing auto-skips layers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Where does the logic that maps HuggingFace weight names to SGLang internal params and <strong>fuses</strong> q/k/v, gate/up live?</div>
+  <ol class="opts">
+    <li>In the safetensors file metadata, applied automatically at load</li>
+    <li>No mapping is needed; HF names and SGLang param names always match one to one</li>
+    <li>In <code>DefaultModelLoader</code>, using one hard-coded mapping table for all models</li>
+    <li>In <strong>each model class's own</strong> <code>load_weights(weights)</code> — it carries a mapping table knowing which offset segment of the packed weight each of <code>q_proj/k_proj/v_proj</code> goes into; the Loader only <strong>streams tensors out</strong> and doesn't care about a model's internal names</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The Loader only streams tensors and <strong>shouldn't</strong> know a model's internals; which param a name maps to and whether to fuse/transpose is model-private, encapsulated in the model's <code>load_weights</code>. So adding a model <strong>needs no Loader change</strong> — just write its <code>load_weights</code> (Lesson 26). q/k/v are three separate parts on disk but one packed param in memory, which is exactly why this mapping is needed.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. In an 8-GPU tensor-parallel (TP) deployment, what weights end up in each card's memory at load time?</div>
+  <ol class="opts">
+    <li>Each card stores a full copy of the weights for redundancy/reliability</li>
+    <li>Weights live in CPU RAM; the GPU copies the needed part each step</li>
+    <li>Only card 0 stores weights; the others request from it each step</li>
+    <li><strong>Only this rank's slice</strong>: q/k/v and gate/up go column-parallel (split on output dim), o_proj and down_proj go row-parallel (split on input dim), each card takes only its 1/8 of weights — loading itself is distributed</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Under TP each weight is <strong>sliced per rank</strong>: column-parallel (q/k/v, gate/up) computes a slice of output per card, row-parallel (o_proj, down_proj) computes partial sums then all-reduce. The Loader/model moves only this rank's slice onto the card, so 8 cards each hold 1/8 of the weights (Lessons 24/46). It is not full redundancy, a single hub card, or CPU-resident weights.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'numbered flat-pack boxes furnishing a home' analogy, fully explain how <code>DefaultModelLoader</code> turns a pile of disk files into 'all-in-place tensors per card'. Cover each: (1) the <strong>two steps</strong> — <code>_initialize_model</code> builds the shell (structure present, params placeholders), then <code>load_weights_and_postprocess</code> hands <code>_get_all_weights</code>'s <strong>generator</strong> to <code>model.load_weights</code> to pour tensors in; (2) why <strong>streaming</strong> is required (host-memory bound decoupled from model size); (3) why <strong>name mapping + fusion</strong> live in the model's own <code>load_weights</code> (Lesson 26), and how q/k/v, gate/up are packed; (4) what <strong>TP slicing</strong> (column/row-parallel, Lesson 46) and <strong>dtype/quantization</strong> (FP8/INT4 + scales, Lesson 35) each do at this step.</li>
+    <li>SGLang has more than one Loader: <code>DefaultModelLoader</code> is the common path, with <code>DummyModelLoader</code>, <code>ShardedStateLoader</code>, <code>LayeredModelLoader</code>/remote variants. Explain: (1) what each suits (testing/memory measurement, fast start from an already-sliced state, layer-by-layer low memory, remote distribution); (2) why 'funneling loading through one point' lets SGLang support hundreds of models + many quant formats under one framework; (3) if you load an <strong>FP8-quantized</strong> checkpoint, what loading does beyond bf16 (read scales, arrange by quant layout, forward uses quantized kernels or lazy dequant, Lesson 35).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="24-model-runner-and-forward-batch.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">ModelRunner 与 ForwardBatch</span><span class="lang-en">ModelRunner &amp; ForwardBatch</span></div></a><a class="next" href="26-writing-a-model.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">写一个模型</span><span class="lang-en">Writing a model</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

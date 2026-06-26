@@ -93,6 +93,16 @@ PAGES = [
      "第五部分 · 调度器", "Part 5 · The scheduler"),
     ("23-dp-controller-and-pp-scheduling.html", "DP 控制器与 PP 调度", "DP controller & PP scheduling",
      "第五部分 · 调度器", "Part 5 · The scheduler"),
+    ("24-model-runner-and-forward-batch.html", "ModelRunner 与 ForwardBatch", "ModelRunner & ForwardBatch",
+     "第六部分 · 模型执行", "Part 6 · Model execution"),
+    ("25-model-loading-and-weights.html", "模型加载与权重", "Model loading & weights",
+     "第六部分 · 模型执行", "Part 6 · Model execution"),
+    ("26-writing-a-model.html", "写一个模型", "Writing a model",
+     "第六部分 · 模型执行", "Part 6 · Model execution"),
+    ("27-cuda-graph-capture-and-replay.html", "CUDA Graph 捕获与重放", "CUDA graph capture & replay",
+     "第六部分 · 模型执行", "Part 6 · Model execution"),
+    ("28-sampler-and-sampling-params.html", "采样器与采样参数", "Sampler & sampling params",
+     "第六部分 · 模型执行", "Part 6 · Model execution"),
 ]
 
 
@@ -588,6 +598,16 @@ SUBTITLES = {
                                 "split long prefills into chunks · mix with decode · smooth latency spikes"),
     "23-dp-controller-and-pp-scheduling.html": ("DP 控制器分发到 N 个调度器副本 · PP 流水线跨阶段",
                                                 "DP controller fans out to N scheduler replicas · PP pipelines across stages"),
+    "24-model-runner-and-forward-batch.html": ("GPU 执行器 · ForwardBatch 是 ScheduleBatch 的 GPU 视图 · forward→logits→采样",
+                                               "the GPU executor · ForwardBatch is the GPU view of ScheduleBatch · forward→logits→sample"),
+    "25-model-loading-and-weights.html": ("读 HF 分片 · 名称映射 · 按 TP 切分 · dtype/量化 上卡",
+                                          "read HF shards · map names · shard for TP · dtype/quant onto GPU"),
+    "26-writing-a-model.html": ("用并行层拼模型 · Llama 为例 · 加模型很便宜",
+                                "compose a model from parallel layers · Llama as the example · adding a model is cheap"),
+    "27-cuda-graph-capture-and-replay.html": ("捕获整段 forward 的 kernel 序列一次性重放 · 抹掉逐核启动开销",
+                                              "capture the forward's kernel sequence and replay it · kill per-kernel launch overhead"),
+    "28-sampler-and-sampling-params.html": ("logits→下一个 token · 温度/top-k/p/惩罚 · SamplingParams",
+                                            "logits→next token · temperature/top-k/p/penalties · SamplingParams"),
 }
 
 

@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>28 · 采样器与采样参数 / Sampler &amp; sampling params - SGLang 图解教程</title>
+<meta name="description" content="第六部分 · 模型执行｜采样器与采样参数 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="28 · 采样器与采样参数 / Sampler &amp; sampling params - SGLang 图解教程">
+<meta property="og:description" content="第六部分 · 模型执行｜采样器与采样参数 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="28 · 采样器与采样参数 / Sampler &amp; sampling params - SGLang 图解教程">
+<meta name="twitter:description" content="第六部分 · 模型执行｜采样器与采样参数 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></span>
+    <span class="pill">28 / 28</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></div>
+    <h1><span class="lang-zh">采样器与采样参数</span><span class="lang-en">Sampler &amp; sampling params</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+第 24 课的 ModelRunner 把一批 token 跑成了 <strong>logits</strong>——词表里每个 token 一个分数。可分数不是答案，
+<strong>下一个 token 才是答案</strong>。从一排几万个分数里挑出"这一步到底吐哪个字"，正是这一课主角 <span class="inline">Sampler</span> 干的活。
+它是 Part 6 的收尾，也是请求循环（第 18 课）那一圈里的<strong>第 4 步</strong>：<strong>logits → 下一个 token</strong>。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把采样想成一场<strong>按词表开的加权摸彩</strong>：每个 token 是一张彩票，logits 决定它中奖的<strong>权重</strong>。
+  <strong>温度</strong>负责调"赔率有多悬殊"——温度很低（冷），几乎每次都摸到大热门；温度很高（热），冷门也可能爆出。
+  <strong>top-k / top-p</strong> 则在开摸之前先把"绝无可能"的烂票<strong>扔出箱子</strong>，这样你永远不会摸到一张胡言乱语。
+  而<strong>贪心（greedy）</strong>干脆不摸了，直接把权重最大的那张拿走。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  <span class="inline">Sampler</span> 是一个 <span class="mono">nn.Module</span>，输入是 <span class="mono">model.forward</span> 出的 logits，
+  输出是<strong>每条请求的下一个 token id</strong>。它读的另一份输入叫 <span class="mono">SamplingBatchInfo</span>：把整批请求的采样参数
+  <strong>打包成张量</strong>，于是<strong>同一个 batch 里的不同请求可以用各自不同的参数</strong>（温度、top_p…），一次向量化算完。
+  而每条请求的那套旋钮，源头是用户随请求发来的 <span class="mono">SamplingParams</span>（第 53 课）。
+</div>
+
+<h2>从一排分数到一个字：采样流水线</h2>
+<p>logits 不能直接当答案，因为它只是<strong>未归一化的偏好分</strong>。Sampler 要把它<strong>一步步</strong>塑形，最后才掷一次"骰子"。
+完整管线（对每条请求并行做）是这样的：先做<strong>惩罚</strong>（repetition / frequency / presence penalty——压制已经出现过的词，避免复读机），
+再做<strong>温度</strong>缩放（拿 logits 去除以温度：小于 1 让分布更尖、更确定，大于 1 让它更平、更敢冒险，等于 0 就退化成贪心 argmax），
+然后是三道<strong>截断闸门</strong>——<strong>top-k</strong>（只留分数最高的 k 个）、<strong>top-p / nucleus</strong>（按概率从大到小累加，留下刚好凑够 p 的最小集合）、
+<strong>min-p</strong>（凡是概率低于"最大概率 × 某个比例"的，一律丢掉）——最后 <strong>softmax</strong> 把活下来的 token 归一成概率，再用<strong>多项式采样</strong>掷一次得到结果。
+如果整条请求是贪心的，前面这些花活全跳过，直接 <span class="mono">argmax</span> 取最大。</p>
+
+<p>顺序为什么是这个顺序，值得多想一层。<strong>惩罚必须在最前</strong>，因为它要修改的是"原始偏好"——你得先把"这个词刚说过、扣分"算进去，后面的塑形才作数。
+<strong>温度紧随其后</strong>，它是唯一一个<strong>重塑整条曲线陡峭程度</strong>的旋钮：温度不改变谁高谁低的<strong>排名</strong>，只改变高低之间的<strong>悬殊程度</strong>，所以必须在截断之前先把曲线调到位。
+<strong>top-k / top-p / min-p 三道闸门负责"划定候选圈"</strong>：它们都不改概率的相对大小，只决定"哪些 token 还有资格被摸到"，把没希望的尾巴一刀切掉，既挡住胡言乱语，又给真正合理的几个词留出空间。
+最后才 softmax + 采样——<strong>先塑形、再划圈、最后掷骰</strong>，每一步只干一件事，这正是这套代码清晰好维护的原因。</p>
+
+<p>这里要澄清一个新手最容易踩的坑：<strong>logits 不是概率</strong>。它只是一排有大有小、甚至有正有负的<strong>实数分数</strong>，彼此之间没有"加起来等于一"的约束，所以你不能直接拿它当概率去抽签。
+真正把分数变成概率的是<strong>softmax</strong>：它先对每个分数取指数（让差距按指数放大、并保证全为正），再除以总和归一，得到一排<strong>和为一</strong>的概率。
+正因为有这个指数，<strong>温度的威力才那么大</strong>——你在 softmax <strong>之前</strong>把 logits 除以一个小于一的温度，相当于把所有分差<strong>等比例放大</strong>，指数一吃，大的更大、小的几乎归零，分布瞬间变尖；
+反过来除以一个大于一的温度，分差被压扁，softmax 出来就接近"人人有份"的均匀分布。理解了"温度作用在 softmax 之前、靠指数放大"，你才真正懂了为什么同一个 0.1 的温度差，在不同区间感受完全不同。</p>
+
+<p>还要强调采样是<strong>逐请求并行</strong>而非逐请求串行的。整批请求的 logits 是一个二维张量（行是请求、列是词表），上面这套惩罚、除温度、softmax、截断、采样，全部以<strong>张量算子</strong>一次性铺开在整批上跑，
+而不是写个 for 循环一条条算。这就是为什么把每条请求的参数<strong>打包成张量</strong>如此关键：温度是一列张量、top_p 是一列张量，算子按行广播，天然支持"<strong>这一批里张三贪心、李四温度 0.9、王五还要 top_p=0.8</strong>"同时算完。
+高吞吐推理的底层哲学贯穿始终——<strong>能向量化的绝不循环，能一次算完的绝不分多次</strong>，采样这一环也不例外。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>model.forward 出的原始分数：词表里<strong>每个 token 一个分</strong>（第 24 课）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>惩罚 penalties</h4><p>repetition / frequency / presence——压低已出现过的词，<strong>反复读机</strong>。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>温度 temperature</h4><p>logits ÷ T：&lt;1 更尖更稳，&gt;1 更平更野，<strong>=0 ⇒ 贪心</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>top-k / top-p / min-p</h4><p>三道闸门<strong>划定候选圈</strong>：切掉没希望的尾巴。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>softmax → 采样</h4><p>归一成概率，<strong>多项式掷骰</strong>出下一个 token（贪心则 argmax）。</p></div></div>
+</div>
+
+<h2>四个旋钮各自在干什么</h2>
+<p>用户能拧的旋钮就那么几个，但每个的脾气很不一样，搞混了输出就会"太呆"或"太疯"。一句话记法：<strong>温度调悬殊、top-k 限个数、top-p 限累计、min-p 设地板、惩罚反复读</strong>。
+温度是<strong>连续</strong>地控制随机性的总阀门；top-k 是个<strong>硬上限</strong>，无论分布多平都只留 k 个；top-p 则是<strong>自适应</strong>的——分布很尖时它可能只留 1～2 个，分布很平时它会多留几个，正好把"该确定时确定、该发散时发散"自动化了；
+min-p 用"相对最大值的比例"当门槛，比固定的 top-k 更鲁棒。它们常常<strong>叠加使用</strong>（先 top-k 再 top-p 再 min-p），层层收窄候选集。</p>
+
+<table class="t">
+  <tr><th>参数</th><th>它做什么</th></tr>
+  <tr><td class="mono">temperature</td><td>logits 除以它：&lt;1 让分布更尖更确定，&gt;1 更平更随机，<strong>=0 退化为贪心 argmax</strong></td></tr>
+  <tr><td class="mono">top_k</td><td>只保留分数<strong>最高的 k 个</strong> token，其余直接丢弃（硬性个数上限）</td></tr>
+  <tr><td class="mono">top_p</td><td>按概率从大到小累加，留下<strong>刚好凑够 p</strong> 的最小集合（nucleus，自适应大小）</td></tr>
+  <tr><td class="mono">min_p</td><td>丢掉概率低于"<strong>最大概率 × min_p</strong>"的所有 token（相对地板）</td></tr>
+  <tr><td class="mono">penalties</td><td>repetition / frequency / presence——<strong>压低已出现的词</strong>，抑制复读</td></tr>
+</table>
+
+<p>把这张表读活：温度=0 是一个特殊而常用的设置——它让输出<strong>完全确定</strong>，同样的输入永远得到同样的输出，做评测、做单测、要可复现时几乎都用它。
+而做创意写作、对话、需要多样性时，则会把温度抬到 0.7～1.0，再配 top_p≈0.9 之类的截断，让它"<strong>在合理范围内自由发挥</strong>"。
+理解了每个旋钮，你就能把"模型输出太死板"或"模型胡说八道"这类抱怨，精确翻译成"该调哪个参数"，而不是瞎试。</p>
+
+<p>再点破 top-k 与 top-p 的<strong>本质区别</strong>，这是面试与调参里最常被问倒的一点。top-k 是<strong>"按名次"</strong>截断——不管分布长什么样，永远只留前 k 名，所以分布很尖时它可能多留了一堆其实没必要的尾巴，分布很平时又可能误杀了不少势均力敌的好词。
+top-p 则是<strong>"按累计概率"</strong>截断——它会根据当下分布的形状<strong>动态伸缩候选集</strong>：当模型很笃定（某个词概率 0.95）时，它可能只留 1 个；当模型很犹豫（一堆词各 0.1）时，它会多留十几个。
+正因为这种自适应，top-p 在实践中往往比固定的 top-k 更省心，也更不容易在"该确定时发散、该发散时收死"上翻车。而 min-p 又补上一条更稳的地板：它不看名次也不看累计，只问"你的概率有没有达到最大概率的某个零头"，达不到就一律踢掉，对极端分布尤其鲁棒。三者各管一个维度，叠起来用才周全。</p>
+
+<h2>贪心 vs 采样：要确定，还是要多样</h2>
+<p>整条管线的最后一掷，只有两种性格。<strong>贪心</strong>每步都拿概率最大的那个 token，<strong>确定、可复现，但容易呆板、爱重复</strong>；
+<strong>采样</strong>则按概率<strong>掷骰子</strong>，<strong>有随机性、更多样、更像人</strong>，但也可能偶尔抽到次优的词。
+代码里这是一个清爽的二分支：<span class="mono">is_all_greedy</span> 为真就 <span class="mono">argmax</span> 收工，否则走"温度 → softmax → top-k/top-p/min-p → 多项式采样"那条完整路径。</p>
+
+<div class="cols">
+  <div class="col"><h4>贪心 Greedy（argmax）</h4><p>每步取概率<strong>最大</strong>的 token；<strong>确定、可复现</strong>，评测/单测/要稳的场景首选。
+  代价：输出<strong>呆板、易复读</strong>，多样性差。等价于 temperature=0，连骰子都不掷。</p></div>
+  <div class="col"><h4>采样 Sampling（multinomial）</h4><p>按概率<strong>随机抽</strong>一个 token；<strong>多样、有创造力、更自然</strong>。
+  靠 temperature/top-k/top-p/min-p <strong>控制随机的程度与范围</strong>。代价：<strong>不可复现</strong>（除非固定 RNG）、偶有次优。</p></div>
+</div>
+
+<p>实践中怎么在两者之间选？<strong>要稳就贪心，要活就采样</strong>：跑评测、做单测、要逐字复现的，统一用贪心（或温度=0）；做对话、写作、要多样性的，用采样并把温度配到 0.7～1.0。
+调参时顺手的次序是"<strong>先定温度、再定截断</strong>"：温度决定整体的冒险程度，截断再在此基础上划定安全边界，两步各管一段、互不打架，调起来心里有数。</p>
+
+<p>这里有个常见误区：以为"采样=不可控"。其实采样的随机性是被那几个旋钮<strong>牢牢框住</strong>的——top-k/top-p 先把没希望的词全部踢出候选，
+所以掷骰子时<strong>箱子里根本没有烂票</strong>，再随机也随机不到胡言乱语上去。温度则决定"在这些合理候选之间，要多大胆地冒险"。
+换句话说，<strong>截断管质量，温度管多样性</strong>，两者配合，才能既不呆板又不离谱。</p>
+
+<h2>采样之前的"钩子"：约束、偏置与确定性</h2>
+<p>采样不是孤立的一掷，它是很多功能<strong>挂钩</strong>的地方，而且大多挂在"softmax 之前对 logits 动手"这一步。最重要的是<strong>结构化输出</strong>（第 48 课）：
+当你要求模型<strong>必须</strong>输出合法 JSON、或匹配某个正则/语法时，约束引擎会在采样前把所有"此刻语法不允许"的 token 的 logit <strong>置为 −∞</strong>（mask 掉），
+于是 softmax 后它们的概率正好是 0，<strong>采样根本不可能选到它们</strong>——这就从机制上保证了输出永远语法合法，而不是事后去校验、失败再重试。</p>
+
+<p>同一个位置还挂着别的钩子：<strong>logit-bias</strong> 让用户手动给某些 token 加减分（鼓励或禁止特定词）；<strong>min_tokens / EOS 抑制</strong>在生成长度还没达标时，
+把结束符 EOS 的 logit 压到 −∞，强迫模型<strong>先别停</strong>；<strong>确定性推理</strong>则把随机数发生器（RNG）的种子<strong>钉死</strong>（用 positions 派生每个位置的种子），
+让"采样"这件本质随机的事也能逐 token 复现。这些功能各有各的课，但它们都在<strong>同一个 logits 上、采样这一掷之前</strong>动手，这正是"为什么 Sampler 是个枢纽"的原因。</p>
+
+<p>为什么这些钩子非得挤在采样<strong>之前</strong>、而不是采样之后再补救？因为采样是一道<strong>不可逆的"坍缩"</strong>：一旦掷了骰子，一整排概率就塌成了一个确定的 token id，信息全丢了。
+事后想纠正——比如发现选了个违反语法的词——就只能<strong>整步重来</strong>，既慢又可能反复失败。而在采样前对 logits 动手，等于在"还是一排概率"的阶段就把规则<strong>焊进分布本身</strong>：违规的词概率直接归零，越界的结束符永远抽不到，被偏置的词按你的意愿增减。
+这是一种"<strong>用约束塑造可能性、而非事后否决结果</strong>"的思路，既高效又确定，也是为什么结构化输出、min_tokens、logit-bias 这些看似不相干的功能，最终都汇聚到采样器这一个收口上。</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>top-p 截断</b>（设 p=0.9）：概率从大到小排好，<strong>累加</strong>到刚好 ≥ 0.9 就停，<strong>保留这段前缀（高亮），其余全丢</strong></div>
+  <div class="cells"><span class="lab">排序概率</span><span class="cell hl">0.50</span><span class="sep">+</span><span class="cell hl">0.30</span><span class="sep">+</span><span class="cell hl">0.12</span><span class="sep">|</span><span class="cell">0.05</span><span class="sep">+</span><span class="cell">0.03</span></div>
+  <div class="cells"><span class="lab">累计和</span><span class="cell">0.50</span><span class="sep">→</span><span class="cell">0.80</span><span class="sep">→</span><span class="cell hl">0.92 ✓ 停</span><span class="sep">→</span><span class="cell q">后面的 0.05/0.03 被切掉，不参与采样</span></div>
+</div>
+
+<h2>看一眼真正的代码</h2>
+<p>下面是 <span class="mono">Sampler.forward</span> 的真实骨架（class 约第 68 行，forward 约第 93 行）。看那个清爽的<strong>贪心 vs 采样</strong>二分支，
+以及标准路径上"<strong>温度 → softmax → 截断+采样</strong>"的次序——和上面讲的管线一一对得上：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/sampler.py ::Sampler</span><span class="ln">logits → 下一个 token</span></div>
+  <pre><span class="kw">def</span> forward(self, logits_output, sampling_info, ...):
+    logits = logits_output.next_token_logits
+    logits = self._preprocess_logits(logits, sampling_info)   <span class="cm"># 自定义处理 + 清理 NaN</span>
+    <span class="kw">if</span> sampling_info.is_all_greedy:                           <span class="cm"># 整批贪心：直接取最大</span>
+        batch_next_token_ids = torch.argmax(logits, -1)
+    <span class="kw">else</span>:
+        logits.div_(sampling_info.temperatures)               <span class="cm"># 1) 温度缩放（按请求向量化）</span>
+        logits[:] = torch.softmax(logits, dim=-1)             <span class="cm"># 2) 转成概率</span>
+        probs = logits
+        batch_next_token_ids = self._sample_from_probs(       <span class="cm"># 3) top-k/top-p/min-p + 多项式采样</span>
+            probs, sampling_info, positions, simple_sampling_case)
+    <span class="kw">return</span> batch_next_token_ids</pre>
+</div>
+
+<p>注意几个细节：<span class="mono">sampling_info.temperatures</span> 是<strong>一整个张量</strong>——每条请求一个温度，所以 <span class="mono">div_</span> 是逐请求向量化的，
+这正是"<strong>一个 batch 里不同请求用不同参数</strong>"在代码里的样子。<span class="mono">is_all_greedy</span> 是个整批级的快捷判断：只有当这一批<strong>全都</strong>是贪心时才走 argmax 快路径，
+否则统一走采样路径（贪心请求在那条路上用各自的温度/参数也能得到等价结果）。<span class="mono">_sample_from_probs</span> 内部才真正调用 top-k/top-p/min-p 的算子和多项式采样。</p>
+
+<p>把这一课接回整条主线：这是请求循环（第 18 课）一圈里的<strong>第 4 步</strong>。model.forward（第 24 课）出 logits，Sampler 把它变成下一个 token，
+这个 token 会被<strong>追加回 Req</strong>，下一步又喂进模型——这正是<strong>自回归</strong>（第 4 课）"吐一个、接上去、再吐一个"的循环。
+Part 6 到此收尾：第 24 课讲 ModelRunner 这道"决策→计算"的门，第 25/26 课讲模型怎么加载、怎么写，第 27 课讲解码为何能用 CUDA 图，
+而本课补上最后一环——<strong>算出来的 logits，究竟怎么变成你屏幕上的那个字</strong>。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>Sampler</strong>：一个 <span class="mono">nn.Module</span>，把 <strong>logits → 下一个 token id</strong>；读 <span class="mono">SamplingBatchInfo</span>（把每请求参数打包成张量）。</li>
+    <li><strong>管线</strong>：惩罚 → 温度（÷T；&lt;1 尖、&gt;1 平、=0 贪心）→ top-k / top-p / min-p 截断 → softmax → 多项式采样。</li>
+    <li><strong>旋钮</strong>：<span class="mono">SamplingParams</span> 逐请求设温度/top_p/top_k/min_p/惩罚；<strong>同一 batch 不同请求可用不同参数</strong>（向量化）。</li>
+    <li><strong>贪心 vs 采样</strong>：argmax 确定可复现 vs 多项式随机多样；截断管质量、温度管多样性。</li>
+    <li><strong>钩子</strong>：结构化输出（第 48 课）在采样前把违规 token 置 −∞；logit-bias、min_tokens/EOS 抑制、确定性 RNG 都挂在这里。它是请求循环（第 18 课）的第 4 步、自回归（第 4 课）的一环。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在采样管线里，<strong>温度（temperature）</strong>到底改变了什么？</div>
+  <ol class="opts">
+    <li>它直接删掉概率最低的若干 token</li>
+    <li>它把 logits <strong>除以 T</strong> 来重塑分布的<strong>陡峭程度</strong>：T&lt;1 让分布更尖、更确定（大热门更稳），T&gt;1 让它更平、更随机（冷门也有机会），<strong>T=0 退化为贪心 argmax</strong>。它<strong>不改变 token 之间的排名</strong>，只改变高低之间的悬殊程度</li>
+    <li>它决定一次生成多少个 token</li>
+    <li>它给已经出现过的词扣分以抑制复读</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。温度是唯一重塑整条曲线陡峭程度的旋钮：除以 T 改变高低差距而非排名，T=0 等价贪心。删低概率 token 是 top-k/top-p/min-p 的活，扣分是 penalties 的活，生成多少是 max_new_tokens 的活——别混淆。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <strong>结构化输出</strong>（如强制合法 JSON，第 48 课）是怎么挂进采样、保证输出永远语法合法的？</div>
+  <ol class="opts">
+    <li>它把温度调到 0，强制贪心</li>
+    <li>它训练一个专门的模型只输出 JSON</li>
+    <li>它在采样之后检查 token，若不合法就重新采样</li>
+    <li>在<strong>采样之前</strong>，约束引擎把所有“此刻语法不允许”的 token 的 logit <strong>置为 −∞</strong>（mask 掉）；softmax 后它们概率正好是 0，<strong>采样根本不可能选到</strong>。于是从机制上保证合法，而不是事后校验、失败再重试</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。关键在“采样前对 logits 动手”：把违规 token 置 −∞，softmax 后概率为 0，机制上就选不到。这比“事后校验+重试”高效且确定。它和温度、专用模型无关——logit-bias、min_tokens/EOS 抑制也都挂在同一个采样前的位置。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 关于<strong>同一个 batch 里的多条请求</strong>，下面哪句是对的？</div>
+  <ol class="opts">
+    <li>每条请求都要单独跑一次 Sampler</li>
+    <li>batch 里只有第一条请求的参数生效</li>
+    <li>整个 batch 必须共用同一套采样参数</li>
+    <li>它们可以<strong>各用各的采样参数</strong>：每条请求的 <span class='mono'>SamplingParams</span> 被打包进 <span class='mono'>SamplingBatchInfo</span> 的张量里（如 <span class='mono'>temperatures</span> 是一整个张量），Sampler <strong>逐请求向量化</strong>处理——A 请求贪心、B 请求温度 0.9、C 请求 top_p=0.8 可以在同一步里一起算</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。SamplingBatchInfo 把每请求参数打包成张量，所以 div_(temperatures) 之类操作天然逐请求向量化，一个 batch 里参数可各不相同、一次算完。无需逐条单跑，也不是共用或只取第一条——这正是高吞吐批处理的关键。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“按词表开的加权摸彩”这个类比，把采样管线从头讲透。请覆盖：①起点——model.forward（第 24 课）出的 logits 是词表里每个 token 一个分数，为什么它还不是答案；②管线顺序——惩罚（repetition/frequency/presence，反复读机）→ 温度（÷T：&lt;1 尖、&gt;1 平、=0 贪心，且只改悬殊不改排名）→ top-k（限个数）/ top-p（限累计概率）/ min-p（设相对地板）三道闸门 → softmax → 多项式采样，并说明每一步为什么排在这个位置；③贪心 vs 采样的区别（确定可复现 vs 随机多样），以及“截断管质量、温度管多样性”这句话的含义。</li>
+    <li>解释为什么 Sampler 是很多功能<strong>挂钩的枢纽</strong>，以及它如何接回整条主线。请说明：①结构化输出（第 48 课）如何在采样前把违规 token 的 logit 置 −∞，从机制上保证语法合法；②同一位置还挂着哪些钩子——logit-bias、min_tokens/EOS 抑制、确定性推理（钉死 RNG 种子）；③为什么“同一 batch 不同请求可用不同参数”在工程上重要（SamplingBatchInfo 把参数打包成张量、向量化）；④把采样接回请求循环（第 18 课）的第 4 步与自回归（第 4 课）：采到的 token 追加回 Req、再喂下一步。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+The ModelRunner of Lesson 24 turned a batch of tokens into <strong>logits</strong> — one score per vocabulary token. But a score isn't an answer;
+<strong>the next token is the answer</strong>. Picking "which token do we emit this step" out of a row of tens of thousands of scores is exactly what this lesson's star, the <span class="inline">Sampler</span>, does.
+It closes Part 6, and it is <strong>step 4</strong> of the request loop (Lesson 18): <strong>logits → the next token</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of sampling as a <strong>weighted lottery over the vocabulary</strong>: every token is a ticket and the logits set its <strong>odds</strong>.
+  <strong>Temperature</strong> reshapes how lopsided the odds are — cold (low T) almost always draws the favorite; hot (high T) lets wild cards win.
+  <strong>top-k / top-p</strong> first <strong>throw the no-hope tickets out of the box</strong>, so you can never draw garbage.
+  And <strong>greedy</strong> skips the draw entirely and just takes the heaviest ticket.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  The <span class="inline">Sampler</span> is an <span class="mono">nn.Module</span>; its input is the logits from <span class="mono">model.forward</span>,
+  its output is <strong>the next token id for each request</strong>. Its other input is <span class="mono">SamplingBatchInfo</span>: the per-request params
+  <strong>packed into tensors</strong>, so <strong>different requests in ONE batch can use different params</strong> (temperature, top_p…) in one vectorized pass.
+  Each request's knob set comes from the user's <span class="mono">SamplingParams</span> (Lesson 53).
+</div>
+
+<h2>From a row of scores to one token: the sampling pipeline</h2>
+<p>logits can't be the answer directly — they're just <strong>unnormalized preferences</strong>. The Sampler reshapes them <strong>step by step</strong>, then rolls a single die.
+The full pipeline (done in parallel per request): first <strong>penalties</strong> (repetition / frequency / presence — discourage words already produced, kill the parrot),
+then <strong>temperature</strong> scaling (divide the logits by T: &lt;1 sharpens and steadies, &gt;1 flattens and dares, =0 collapses to greedy argmax),
+then three <strong>truncation gates</strong> — <strong>top-k</strong> (keep the k highest), <strong>top-p / nucleus</strong> (sort by prob descending and keep the smallest set summing to p),
+<strong>min-p</strong> (drop every token below "max prob × a fraction") — finally <strong>softmax</strong> renormalizes the survivors and a <strong>multinomial sample</strong> rolls the die.
+If the whole request is greedy, all that is skipped and it's just <span class="mono">argmax</span>.</p>
+
+<p>The order is worth a second thought. <strong>Penalties come first</strong> because they edit the "raw preference" — you must fold in "this word was just said, dock points" before any reshaping counts.
+<strong>Temperature is next</strong>; it's the only knob that <strong>reshapes the steepness of the whole curve</strong>: it never changes the <strong>ranking</strong> of who's higher, only how <strong>lopsided</strong> the gaps are, so it must run before truncation.
+<strong>top-k / top-p / min-p draw the candidate circle</strong>: none of them changes relative probabilities, they only decide "which tokens are still eligible", chopping off the hopeless tail — blocking garbage while leaving room for the genuinely reasonable few.
+Only then softmax + sample — <strong>shape, then circle, then roll</strong>, each step doing one thing, which is why this code stays clean.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>raw scores from model.forward: <strong>one score per token</strong> in the vocabulary (Lesson 24).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>penalties</h4><p>repetition / frequency / presence — push down words already produced, <strong>anti-parrot</strong>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>temperature</h4><p>logits ÷ T: &lt;1 sharper and steadier, &gt;1 flatter and wilder, <strong>=0 ⇒ greedy</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>top-k / top-p / min-p</h4><p>three gates <strong>draw the candidate circle</strong>: chop off the hopeless tail.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>softmax → sample</h4><p>renormalize to probs, <strong>roll a multinomial die</strong> for the next token (or argmax if greedy).</p></div></div>
+</div>
+
+<h2>What each of the four knobs does</h2>
+<p>The user only gets a handful of knobs, but each has a different temperament — mix them up and the output goes "too dull" or "too wild". One-line memory: <strong>temperature sets lopsidedness, top-k caps the count, top-p caps the cumulative, min-p sets a floor, penalties fight repetition</strong>.
+Temperature is a <strong>continuous</strong> master valve for randomness; top-k is a <strong>hard cap</strong> that keeps exactly k no matter how flat the distribution; top-p is <strong>adaptive</strong> — it may keep 1–2 tokens when the distribution is sharp and several when it's flat, automating "be decisive when you should, diverge when you should";
+min-p uses "a fraction of the max" as a threshold, more robust than a fixed top-k. They're often <strong>stacked</strong> (top-k then top-p then min-p), narrowing the candidate set in layers.</p>
+
+<table class="t">
+  <tr><th>Param</th><th>What it does</th></tr>
+  <tr><td class="mono">temperature</td><td>divide logits by it: &lt;1 sharpens (more deterministic), &gt;1 flattens (more random), <strong>=0 collapses to greedy argmax</strong></td></tr>
+  <tr><td class="mono">top_k</td><td>keep only the <strong>k highest-scoring</strong> tokens, discard the rest (a hard count cap)</td></tr>
+  <tr><td class="mono">top_p</td><td>sort by prob descending, keep the smallest set <strong>summing to p</strong> (nucleus, adaptive size)</td></tr>
+  <tr><td class="mono">min_p</td><td>drop every token below "<strong>max prob × min_p</strong>" (a relative floor)</td></tr>
+  <tr><td class="mono">penalties</td><td>repetition / frequency / presence — <strong>push down words already seen</strong>, suppress repeats</td></tr>
+</table>
+
+<p>Read the table live: temperature=0 is a special, common setting — it makes output <strong>fully deterministic</strong>, the same input always yields the same output, which is what you want for evals, unit tests, reproducibility.
+For creative writing, chat, or anything needing diversity, you raise temperature to 0.7–1.0 and add a truncation like top_p≈0.9, letting it "<strong>roam freely within a sane range</strong>".
+Once you understand each knob, you can translate "output too rigid" or "model rambling" into "which param to turn" instead of guessing.</p>
+
+<h2>Greedy vs sampling: determinism, or diversity</h2>
+<p>The final roll has only two temperaments. <strong>Greedy</strong> takes the highest-prob token every step — <strong>deterministic, reproducible, but dull and repetition-prone</strong>;
+<strong>sampling</strong> <strong>rolls a die</strong> by probability — <strong>random, diverse, more human</strong>, but occasionally draws a suboptimal word.
+In code it's a crisp two-way branch: if <span class="mono">is_all_greedy</span>, do <span class="mono">argmax</span> and finish; otherwise take the full "temperature → softmax → top-k/top-p/min-p → multinomial" path.</p>
+
+<div class="cols">
+  <div class="col"><h4>Greedy (argmax)</h4><p>take the <strong>highest</strong>-prob token each step; <strong>deterministic, reproducible</strong>, the default for evals/tests/stable scenarios.
+  Cost: output is <strong>dull, prone to repeats</strong>, low diversity. Equivalent to temperature=0 — no die rolled at all.</p></div>
+  <div class="col"><h4>Sampling (multinomial)</h4><p>draw a token <strong>at random</strong> by probability; <strong>diverse, creative, more natural</strong>.
+  temperature/top-k/top-p/min-p <strong>control how much and how wide</strong> the randomness is. Cost: <strong>not reproducible</strong> (unless RNG is pinned), occasionally suboptimal.</p></div>
+</div>
+
+<p>A common misconception: "sampling = uncontrollable". In fact the randomness is <strong>tightly fenced</strong> by those knobs — top-k/top-p first kick every hopeless word out of the candidate set,
+so when you roll the die <strong>there are no garbage tickets in the box</strong>; however random, you can't draw nonsense. Temperature then decides "how boldly to gamble among these sane candidates".
+In other words, <strong>truncation governs quality, temperature governs diversity</strong>; together they keep output neither dull nor unhinged.</p>
+
+<h2>The hooks before sampling: constraints, bias, determinism</h2>
+<p>Sampling isn't an isolated roll; it's where many features <strong>hook in</strong>, and most of them act "on the logits, before softmax". The most important is <strong>structured output</strong> (Lesson 48):
+when you require the model to emit <strong>valid</strong> JSON, or match a regex/grammar, the constraint engine sets the logit of every "grammar-disallowed-right-now" token to <strong>−∞</strong> (masks it) before sampling,
+so after softmax their probability is exactly 0 and <strong>sampling can never pick them</strong> — guaranteeing grammar-valid output by mechanism, not by validating afterward and retrying on failure.</p>
+
+<p>The same spot carries other hooks: <strong>logit-bias</strong> lets the user manually add/subtract on specific tokens (encourage or ban words); <strong>min_tokens / EOS suppression</strong> pushes the EOS logit to −∞
+while the generation length hasn't been met, forcing the model <strong>not to stop yet</strong>; <strong>deterministic inference</strong> <strong>pins the RNG</strong> seed (derived per position from positions),
+making the inherently random act of "sampling" reproducible token by token. These features each have their own lesson, but they all act on <strong>the same logits, before this one roll</strong> — which is why the Sampler is a hub.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>top-p truncation</b> (p=0.9): probs sorted descending, <strong>accumulate</strong> until just ≥ 0.9, then <strong>keep that prefix (highlighted), drop the rest</strong></div>
+  <div class="cells"><span class="lab">sorted probs</span><span class="cell hl">0.50</span><span class="sep">+</span><span class="cell hl">0.30</span><span class="sep">+</span><span class="cell hl">0.12</span><span class="sep">|</span><span class="cell">0.05</span><span class="sep">+</span><span class="cell">0.03</span></div>
+  <div class="cells"><span class="lab">running sum</span><span class="cell">0.50</span><span class="sep">→</span><span class="cell">0.80</span><span class="sep">→</span><span class="cell hl">0.92 ✓ stop</span><span class="sep">→</span><span class="cell q">the trailing 0.05/0.03 are cut, never sampled</span></div>
+</div>
+
+<h2>A look at the real code</h2>
+<p>Here is the real skeleton of <span class="mono">Sampler.forward</span> (class ~line 68, forward ~line 93). Note the crisp <strong>greedy vs sampling</strong> branch,
+and on the standard path the "<strong>temperature → softmax → truncate+sample</strong>" order — matching the pipeline above one-to-one:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/sampler.py ::Sampler</span><span class="ln">logits → the next token</span></div>
+  <pre><span class="kw">def</span> forward(self, logits_output, sampling_info, ...):
+    logits = logits_output.next_token_logits
+    logits = self._preprocess_logits(logits, sampling_info)   <span class="cm"># custom processors + NaN cleanup</span>
+    <span class="kw">if</span> sampling_info.is_all_greedy:                           <span class="cm"># whole batch greedy: take the max</span>
+        batch_next_token_ids = torch.argmax(logits, -1)
+    <span class="kw">else</span>:
+        logits.div_(sampling_info.temperatures)               <span class="cm"># 1) temperature scale (per-request, vectorized)</span>
+        logits[:] = torch.softmax(logits, dim=-1)             <span class="cm"># 2) turn into probabilities</span>
+        probs = logits
+        batch_next_token_ids = self._sample_from_probs(       <span class="cm"># 3) top-k/top-p/min-p + multinomial sample</span>
+            probs, sampling_info, positions, simple_sampling_case)
+    <span class="kw">return</span> batch_next_token_ids</pre>
+</div>
+
+<p>Note the details: <span class="mono">sampling_info.temperatures</span> is <strong>a whole tensor</strong> — one temperature per request, so <span class="mono">div_</span> is per-request vectorized,
+exactly how "<strong>different requests in one batch use different params</strong>" looks in code. <span class="mono">is_all_greedy</span> is a batch-level shortcut: only when the batch is <strong>entirely</strong> greedy does it take the argmax fast path,
+otherwise everything goes the sampling route (greedy requests still get equivalent results there via their own temperature/params). <span class="mono">_sample_from_probs</span> is where top-k/top-p/min-p kernels and the multinomial sample actually run.</p>
+
+<p>Tie it back to the main line: this is <strong>step 4</strong> of the request loop (Lesson 18). model.forward (Lesson 24) produces logits, the Sampler turns them into the next token,
+which is <strong>appended back to the Req</strong> and fed into the model next step — exactly the <strong>autoregression</strong> (Lesson 4) loop of "emit one, append, emit again".
+Part 6 closes here: Lesson 24 was the ModelRunner "decide → compute" door, Lessons 25/26 how the model loads and is written, Lesson 27 why decode can use CUDA graphs,
+and this lesson adds the last link — <strong>how the computed logits actually become the token on your screen</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key takeaways</div>
+  <ul>
+    <li><strong>Sampler</strong>: an <span class="mono">nn.Module</span> turning <strong>logits → next token id</strong>; reads <span class="mono">SamplingBatchInfo</span> (per-request params packed into tensors).</li>
+    <li><strong>Pipeline</strong>: penalties → temperature (÷T; &lt;1 sharp, &gt;1 flat, =0 greedy) → top-k / top-p / min-p truncation → softmax → multinomial sample.</li>
+    <li><strong>Knobs</strong>: <span class="mono">SamplingParams</span> sets temperature/top_p/top_k/min_p/penalties per request; <strong>different requests in one batch can use different params</strong> (vectorized).</li>
+    <li><strong>Greedy vs sampling</strong>: argmax is deterministic/reproducible vs multinomial is random/diverse; truncation governs quality, temperature governs diversity.</li>
+    <li><strong>Hooks</strong>: structured output (Lesson 48) sets disallowed-token logits to −∞ before sampling; logit-bias, min_tokens/EOS suppression, deterministic RNG all hook here. It is step 4 of the request loop (Lesson 18), one turn of autoregression (Lesson 4).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In the sampling pipeline, what does <strong>temperature</strong> actually change?</div>
+  <ol class="opts">
+    <li>It directly deletes the lowest-probability tokens</li>
+    <li>It <strong>divides the logits by T</strong> to reshape the distribution's <strong>steepness</strong>: T&lt;1 sharpens it (more deterministic, the favorite is steadier), T&gt;1 flattens it (more random, longshots get a chance), <strong>T=0 collapses to greedy argmax</strong>. It <strong>does not change the ranking</strong> of tokens, only how lopsided the gaps are</li>
+    <li>It decides how many tokens to generate at once</li>
+    <li>It penalizes already-seen words to suppress repetition</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Temperature is the only knob that reshapes curve steepness: dividing by T changes the gaps, not the ranking, and T=0 equals greedy. Deleting low-prob tokens is top-k/top-p/min-p's job, penalizing is penalties' job, and how many tokens is max_new_tokens — don't conflate them.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. How does <strong>structured output</strong> (e.g. forcing valid JSON, Lesson 48) hook into sampling to guarantee grammar-valid output?</div>
+  <ol class="opts">
+    <li>It sets temperature to 0 to force greedy</li>
+    <li>It trains a dedicated model that only outputs JSON</li>
+    <li>It checks the token after sampling and resamples if invalid</li>
+    <li><strong>Before sampling</strong>, the constraint engine sets the logit of every “grammar-disallowed-right-now” token to <strong>−∞</strong> (masks it); after softmax their probability is exactly 0, so <strong>sampling can never pick them</strong>. Validity is guaranteed by mechanism, not by validating afterward and retrying on failure</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The key is acting on logits before sampling: set violating tokens to −∞ and after softmax their prob is 0, so they're mechanically unselectable — more efficient and certain than validate-then-retry. It's unrelated to temperature or a dedicated model; logit-bias and min_tokens/EOS suppression hook at the same pre-sampling spot.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. About <strong>multiple requests in the same batch</strong>, which statement is correct?</div>
+  <ol class="opts">
+    <li>Each request must run the Sampler separately one at a time</li>
+    <li>Only the first request's params in the batch take effect</li>
+    <li>The whole batch must share one set of sampling params</li>
+    <li>They can each use <strong>their own sampling params</strong>: every request's <span class='mono'>SamplingParams</span> is packed into <span class='mono'>SamplingBatchInfo</span> tensors (e.g. <span class='mono'>temperatures</span> is a whole tensor), and the Sampler processes them <strong>per-request, vectorized</strong> — request A greedy, B at temperature 0.9, C at top_p=0.8 can all be computed together in one step</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. SamplingBatchInfo packs per-request params into tensors, so ops like div_(temperatures) are inherently per-request vectorized: params can differ across the batch and are computed in one pass. No per-request looping, no shared-only or first-only behavior — this is key to high-throughput batching.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'weighted lottery over the vocabulary' analogy, fully explain the sampling pipeline from scratch. Cover: (1) the start — model.forward (Lesson 24) yields logits, one score per vocab token, and why that isn't the answer yet; (2) the pipeline order — penalties (repetition/frequency/presence, anti-parrot) → temperature (÷T: &lt;1 sharp, &gt;1 flat, =0 greedy, and it only changes lopsidedness not ranking) → top-k (caps count) / top-p (caps cumulative prob) / min-p (relative floor) gates → softmax → multinomial sample, explaining why each step sits where it does; (3) greedy vs sampling (deterministic/reproducible vs random/diverse), and what 'truncation governs quality, temperature governs diversity' means.</li>
+    <li>Explain why the Sampler is a <strong>hub where many features hook in</strong>, and how it ties back to the main line. Cover: (1) how structured output (Lesson 48) sets violating tokens' logits to −∞ before sampling, guaranteeing grammar validity by mechanism; (2) what other hooks live at the same spot — logit-bias, min_tokens/EOS suppression, deterministic inference (pinning the RNG seed); (3) why 'different requests in one batch can use different params' matters in practice (SamplingBatchInfo packs params into tensors, vectorized); (4) tie sampling back to step 4 of the request loop (Lesson 18) and autoregression (Lesson 4): the sampled token is appended to the Req and fed into the next step.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="27-cuda-graph-capture-and-replay.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">CUDA Graph 捕获与重放</span><span class="lang-en">CUDA graph capture &amp; replay</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

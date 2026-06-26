@@ -10,6 +10,7 @@ import part2
 import part3
 import part4
 import part5
+import part6
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -36,4 +37,9 @@ CONTENT = {
     "21-zero-overhead-overlap-scheduler.html": part5.LESSON_21,
     "22-chunked-prefill.html": part5.LESSON_22,
     "23-dp-controller-and-pp-scheduling.html": part5.LESSON_23,
+    "24-model-runner-and-forward-batch.html": part6.LESSON_24,
+    "25-model-loading-and-weights.html": part6.LESSON_25,
+    "26-writing-a-model.html": part6.LESSON_26,
+    "27-cuda-graph-capture-and-replay.html": part6.LESSON_27,
+    "28-sampler-and-sampling-params.html": part6.LESSON_28,
 }

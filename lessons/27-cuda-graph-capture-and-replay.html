@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>27 · CUDA Graph 捕获与重放 / CUDA graph capture &amp; replay - SGLang 图解教程</title>
+<meta name="description" content="第六部分 · 模型执行｜CUDA Graph 捕获与重放 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="27 · CUDA Graph 捕获与重放 / CUDA graph capture &amp; replay - SGLang 图解教程">
+<meta property="og:description" content="第六部分 · 模型执行｜CUDA Graph 捕获与重放 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="27 · CUDA Graph 捕获与重放 / CUDA graph capture &amp; replay - SGLang 图解教程">
+<meta name="twitter:description" content="第六部分 · 模型执行｜CUDA Graph 捕获与重放 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></span>
+    <span class="pill">27 / 28</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:96%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></div>
+    <h1><span class="lang-zh">CUDA Graph 捕获与重放</span><span class="lang-en">CUDA graph capture &amp; replay</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课的 ModelRunner 在解码时有一条"快路径"：能用 CUDA Graph 就<strong>重放</strong>一张录好的图，否则才即时（eager）地一层层算。这一课就把那条快路径拆开看：
+一次解码前向其实要在 GPU 上<strong>发起几百个小内核</strong>，而每发起一个，CPU 都要付一笔固定的"启动费"。当每个 token 本身算得很少时，<strong>这笔启动费会反过来主导整步耗时</strong>——
+GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA Graph 要解决的，正是这个"<strong>per-step 内核启动开销</strong>"。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把一次前向想成弹一首固定的曲子。<strong>没有图</strong>时，就像钢琴家<strong>现场一个键一个键地按</strong>（每按一下=启动一个内核）——手再快，每个音符之间也有"抬手再落下"的固定延迟。
+  CUDA Graph 像一卷<strong>自动钢琴的打孔纸卷（player-piano roll）/ 录好的宏</strong>：你<strong>只把整首曲子录一次</strong>，之后让纸卷<strong>一口气自动播放</strong>，中间不再需要人逐个按键。
+  但纸卷是<strong>定死的</strong>（静态形状）：孔位、长度都固定，所以你得<strong>按常见曲长各留一卷</strong>（batch-size 分桶），短曲子就<strong>补空拍 padding</strong> 到最接近的那一卷长度去播放。一句话：<strong>录一次、放多次，灵活性换来了速度</strong>。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  CUDA Graph 把<strong>整条前向的内核序列及其依赖</strong>录成<strong>一张图</strong>，之后<strong>一次提交、整体重放</strong>，把成百上千次"CPU 逐个发起内核"压成"一次提交"，从此 CPU 不再是解码步里的瓶颈。
+  SGLang 在<strong>启动时</strong>就为<strong>一组 batch 尺寸</strong>（如 1、2、4、8…直到 max）各录一张图（<span class="mono">BaseCudaGraphRunner.capture</span>）；运行时把真实 batch
+  <strong>向上 padding 到最近的已录桶</strong>，再重放那张图（<span class="mono">can_run_graph</span> + 执行，第 24 课）。因为解码形状规整、预填充长度多变，所以<strong>解码走图、预填充多走即时</strong>。
+</div>
+
+<h2>问题：一次解码前向，要发起几百个小内核</h2>
+<p>先把"开销"具体化。一层 Transformer 解码层并不是"一个大内核"，而是一连串小算子：输入归一化、Q/K/V 三个投影、把 K/V 写进缓存、注意力、输出投影 o_proj、又一次归一化、MLP 的 gate/up、激活、down……
+几十层叠下来，一次前向就是<strong>几百个内核排队上 GPU</strong>。每发起一个内核，CPU 都要做一套固定动作：准备参数、配置启动、塞进 CUDA 流——这套动作的耗时<strong>和内核算多大无关</strong>，是一笔<strong>固定的启动费</strong>。</p>
+<p>这笔费用在<strong>预填充</strong>里不显眼：一次要算几百上千个 token，每个内核本身就很重，启动费相对算量小到可以忽略。可到了<strong>解码</strong>（第 4 课），每条请求每步只算 <strong>1 个新 token</strong>，矩阵又瘦又小，<strong>每个内核都极短</strong>——
+这时候"发起内核"的固定开销反而成了大头。最坏的情形是：GPU 把一个小内核几微秒就算完了，却要<strong>停下来等 CPU</strong> 把下一个内核排好递过来。算力明明闲着，整步时间却被一串"等 CPU"拖长。这就是 CUDA Graph 要消灭的敌人。</p>
+<p>换个角度量化一下这件事的严重性。假设一个模型有 32 层，每层粗算十来个小算子，一次前向就是<strong>三四百个内核</strong>；若每个内核的发起费是几微秒，单这一项累计起来就有上百微秒甚至毫秒级。而解码时单个内核的<strong>真实计算</strong>可能也只有几微秒——于是你会看到一条荒诞却真实的曲线：<strong>GPU 实际算的时间，可能还不如它等 CPU 发起内核的时间长</strong>。
+这也解释了一个常见的困惑：为什么有人把 batch 调小、把模型换小，吞吐不升反降？因为模型越小、batch 越小，<strong>每个内核越短</strong>，启动开销占比就越高，瓶颈彻底从"算力"挪到了"发起内核"这件纯 CPU 的杂事上。理解了这一点，你就明白 CUDA Graph 不是锦上添花的小优化，而是把解码从"被 CPU 拖着走"里解放出来的<strong>关键一招</strong>。</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ 无图（eager）：CPU 逐个发起</h4><p>CPU 发起内核①→GPU 算①→CPU 发起内核②→GPU 算②……几百次往返。每次发起都有<strong>固定启动费</strong>；解码内核太短，GPU 常<strong>干等 CPU</strong>。启动开销<strong>主导</strong>整步，GPU 利用率低。</p></div>
+  <div class="col"><h4>✅ 有图（replay）：一次提交</h4><p>启动时把整条前向<strong>录成一张图</strong>；运行时 CPU <strong>只提交一次</strong>，GPU 顺着图把几百个内核<strong>连续跑完</strong>，中间不再回头等 CPU。启动开销几乎<strong>归零</strong>，GPU 被<strong>喂满</strong>。</p></div>
+</div>
+
+<h2>解法：录一次，重放整条前向</h2>
+<p>CUDA Graph 的核心动作只有两步：<strong>捕获（capture）</strong>与<strong>重放（replay）</strong>。捕获时，让模型<strong>空跑一遍</strong>前向，CUDA 在底层把这一遍<strong>所有内核的调用顺序和彼此依赖</strong>记成一张有向图，但<strong>并不真正执行计算</strong>；
+之后重放时，只需把这张图作为<strong>单个提交</strong>交给 GPU，硬件就按图把整串内核<strong>一次跑完</strong>，CPU 完全不必再逐个发起。一次提交替代几百次发起——这就是开销被抹平的地方。打个比方：捕获像是把一整套流水线动作<strong>录成一段视频</strong>，重放则是<strong>按下播放键</strong>，机器自己顺着录好的动作连贯做完，不必每一步都等人喊口令。</p>
+<p>但图是<strong>录死的</strong>：它绑定了录制时的<strong>张量形状和显存地址</strong>。真实请求的 batch 大小每步都可能不同，不可能为每一个具体大小都录一张。SGLang 的做法是<strong>分桶 + padding</strong>：启动时只为<strong>几档固定 batch 尺寸</strong>（1、2、4、8…直到 max）各录一张图（<span class="mono">capture</span> 遍历这些尺寸逐个录）；
+运行时拿到真实 batch，先<strong>向上取整到最近的那个桶</strong>（<span class="mono">_pad_to_bucket</span>），把张量 padding 到该尺寸，再重放对应的图。比如真实 batch=5，就 padding 到桶 8 的图去跑——多算 3 行空请求的代价，远小于省下的几百次内核启动。</p>
+<p>这里有个容易混淆的点值得点破：<strong>捕获时并不是真的在算这一批用户请求</strong>。捕获阶段喂进去的是一批<strong>假数据（dummy）</strong>，目的只是让前向的<strong>每一个内核都被触发一次</strong>，好让 CUDA 把它们的调用顺序和依赖关系记下来；记的是"<strong>动作的剧本</strong>"，不是"<strong>具体的数值</strong>"。所以重放时换上真实数据，跑的还是同一套剧本、同一串内核、同一组显存地址，只是缓冲里的内容变了。
+正因如此，运行器必须预先备好一组<strong>固定地址的输入/输出缓冲</strong>：每一步把真实的 input_ids、positions 等<strong>拷进</strong>这些固定缓冲，再触发重放，图就会从这些固定地址读数、往固定地址写结果。这也是为什么代码里 <span class="mono">buffers</span> 是和图绑在一起、由运行器统一持有的——它们是图能够反复复用的物理前提。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>启动时·捕获</h4><p>让模型空跑前向，CUDA 把整条内核序列与依赖<strong>录成一张图</strong>（不真算）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>为一组尺寸各录一张</h4><p>遍历 batch 尺寸桶 1/2/4/8/…/max，每档录一张图，连同<strong>静态缓冲</strong>一起留着。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>运行时·padding</h4><p>真实 batch 向上取整到<strong>最近的已录桶</strong>（<span class="mono">_pad_to_bucket</span>），张量补到该尺寸。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>重放</h4><p><span class="mono">can_run_graph</span> 通过 → <strong>一次提交</strong>重放那张图（第 24 课），取出真实部分的 logits。</p></div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">捕获与分桶 padding</span></div>
+  <pre><span class="kw">class</span> BaseCudaGraphRunner(BaseRunner):
+    <span class="cm"># 启动时把整条前向录成图；运行时按桶 padding 后重放</span>
+    buffers: ForwardInputBuffers       <span class="cm"># 预分配的静态输入缓冲（地址固定）</span>
+    backend: BaseCudaGraphBackend      <span class="cm"># 负责 capture / replay 机制</span>
+
+    <span class="kw">@staticmethod</span>
+    <span class="kw">def</span> _pad_to_bucket(raw_size, buckets):
+        <span class="cm"># 把真实 batch 向上取整到最近的已录制桶</span>
+        <span class="kw">assert</span> raw_size &lt;= buckets[-1]     <span class="cm"># 超过最大桶 → can_run_graph 应已拒绝</span>
+        index = bisect.bisect_left(buckets, raw_size)
+        <span class="kw">return</span> buckets[index]
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> capture(self):                  <span class="cm"># 一次性：遍历所有 batch 尺寸逐个录图</span>
+        ...                            <span class="cm"># 每个尺寸调 capture_one_shape 录一张图</span></pre>
+</div>
+
+<h2>约束：图为什么必须"静态"</h2>
+<p>能享受重放的红利，是有代价的：图要求<strong>静态的形状与地址</strong>。这条硬约束直接决定了 SGLang 的三个工程选择。第一，<strong>形状必须固定</strong>，所以要<strong>分桶 + padding</strong>，不能让 batch 自由变化。
+第二，<strong>地址必须固定</strong>，所以运行器预先开好一组<strong>静态输入/输出缓冲</strong>（上面代码里的 <span class="mono">buffers</span>），每步把真实数据<strong>拷进</strong>这些固定缓冲再重放，而不是每次新分配。
+第三，<strong>捕获区域内不能有依赖数据的控制流</strong>——图录的是一条固定路径，不能"这一步走 if、下一步走 else"。所以有些算子只能<strong>留在图外</strong>，或者用"分段/可断开（piecewise）"的图把动态算子<strong>切出去</strong>、其余部分照录（第 33 课讲注意力后端时会细说）。</p>
+<p>把这三条连起来，就彻底解释了上一课那句"<strong>解码走图、预填充多走即时</strong>"：解码每步形状高度规整（batch 在一段时间内不变、序列每步只长 1），天然能套进固定的桶；预填充长度千变万化、一次要算几百上千个 token，几乎每批形状都不同，硬要为每种形状录图既不划算也录不过来，于是它更愿意走灵活的即时路径。</p>
+<p>第三条约束尤其值得多想一层。所谓"<strong>数据相关的控制流</strong>"，指的是<strong>要根据张量里的具体数值才能决定走哪条分支</strong>的逻辑——比如"如果这一步命中了某个缓存就走 A、否则走 B"。这种分支没法录进图，因为图是一条<strong>录死的直路</strong>，它不会在重放时临场判断。
+解决办法有两种：要么把这类动态算子<strong>挪到图外</strong>，让图只覆盖那段"无论数据如何、动作都一样"的稳定区间；要么用<strong>分段 / 可断开（piecewise）</strong>的图，把整条前向<strong>在动态算子处切成几段</strong>，每段各录一张稳定的子图，中间留出口给动态逻辑插手。后者让更多算子也能享受重放，但实现更复杂——第 33 课讲注意力后端时会看到，不同后端对"哪些能录进图"给出的答案并不一样，这正是 SGLang 把图运行器和注意力后端分层设计的原因之一。</p>
+
+<table class="t">
+  <tr><th>约束</th><th>为什么</th><th>SGLang 的应对</th></tr>
+  <tr><td>形状必须静态</td><td>图绑定录制时的张量形状</td><td>batch 分桶 + 向上 padding</td></tr>
+  <tr><td class="mono">地址必须静态</td><td>图绑定录制时的显存指针</td><td>预分配静态缓冲，每步拷入</td></tr>
+  <tr><td>无数据相关控制流</td><td>图是一条固定路径，不能 if/else</td><td>动态算子留图外 / 分段图（第 33 课）</td></tr>
+  <tr><td>桶有上限 max</td><td>不能为任意大小录图</td><td>超过 max 的 batch 拒绝走图，转即时</td></tr>
+</table>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>batch-size 分桶 + padding</b>：启动时只录这几档；真实 batch=5 时<strong>向上取整到桶 8</strong> 的图去重放（高亮档）</div>
+  <div class="cells"><span class="lab">已录桶</span><span class="cell">1</span><span class="sep">·</span><span class="cell">2</span><span class="sep">·</span><span class="cell">4</span><span class="sep">·</span><span class="cell hl">8</span><span class="sep">·</span><span class="cell">16</span><span class="sep">·</span><span class="cell">…</span><span class="sep">·</span><span class="cell">max</span></div>
+  <div class="cells"><span class="lab">真实=5</span><span class="cell">5 行真实</span><span class="sep">+</span><span class="cell">3 行 padding</span><span class="sep">→</span><span class="cell hl">套桶 8 的图</span><span class="sep">→</span><span class="cell q">重放后只取前 5 行 logits</span></div>
+</div>
+
+<h2>回报：解码吞吐大涨，且与重叠调度天作之合</h2>
+<p>消灭了每步几百次内核启动，<strong>解码吞吐通常有可观增益</strong>——尤其在小模型、短内核、大并发的场景，启动开销占比最高，收益也最明显。更妙的是它和<strong>重叠调度器（第 21 课）</strong>是<strong>天作之合</strong>：
+图重放期间，GPU 只管闷头跑这一整张图、几乎不回头找 CPU；与此同时 CPU 正好腾出手去<strong>调度下一步</strong>（采样、组下一个 batch）。两者一叠加，<strong>GPU 在重放、CPU 在排下一步</strong>，GPU 几乎不留空隙——这正是高吞吐推理引擎的核心节奏。</p>
+<p>当然也有成本，这是个真实的权衡：录很多档尺寸要花<strong>启动时间</strong>（每张图都要空跑一遍前向去录），也要吃<strong>显存</strong>（每张图都握着自己那份静态缓冲）。所以桶不是越多越好——太密则启动慢、占显存；太疏则 padding 浪费大。
+这条"<strong>启动成本/显存 ↔ 运行时省下的启动开销</strong>"的权衡，会在后面反复出现：第 33 课的分段图让动态算子也能部分享受重放，第 43 课的投机解码则要为"草稿+验证"这种更复杂的形状专门考虑怎么录图。把这一课记牢：<strong>CUDA Graph = 把"逐个发起内核"换成"一次重放整条前向"，用静态形状换掉启动开销</strong>。</p>
+<p>最后把这一课放回整条 GPU 侧流水线。第 24 课的 ModelRunner 是"决策→计算"的边界，它在解码时优先走的那条快路径，骨子里就是本课的图重放；第 25/26 课告诉你它手里的模型怎么加载、怎么写；而本课补上了"<strong>这台机器为什么跑得这么快</strong>"的答案——不是靠某个更聪明的算法，而是靠<strong>把 CPU 从"逐个发起内核"的苦役里彻底解放出来</strong>。
+顺着这条线再往下，第 33 课会讲注意力后端如何决定"哪些能录进图"，第 43 课的投机解码会把图重放推到更复杂的形状上。带着"<strong>图 = 录一次、重放整条、用静态换启动开销</strong>"这把钥匙，你会发现后面很多看似零散的性能优化，其实都在围绕同一个主题打转：<strong>别让 GPU 闲着，也别让 CPU 拖后腿</strong>。</p>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <strong>① 敌人是启动开销：</strong>一次解码前向要发起几百个小内核，每次发起有固定 CPU 启动费；解码内核太短，这笔费用反而主导整步、GPU 干等 CPU。
+  <strong>② 解法是录一次重放整条：</strong>CUDA Graph 把整条前向的内核序列录成一张图，运行时一次提交整体重放，把几百次发起压成一次，CPU 不再逐个递内核。
+  <strong>③ 代价是静态：</strong>图绑定形状与地址，故需 batch 分桶 + padding（<span class="mono">_pad_to_bucket</span>）、预分配静态缓冲、捕获区内禁止数据相关控制流——这也是<strong>解码走图、预填充走即时</strong>的根因。
+  <strong>④ SGLang 怎么做：</strong>启动时 <span class="mono">BaseCudaGraphRunner.capture</span> 为一组尺寸（1/2/4/8/…/max）各录一张；运行时 padding 到最近桶后 <span class="mono">can_run_graph</span> + 重放（第 24 课）。
+  <strong>⑤ 回报与搭档：</strong>解码吞吐大涨，并与重叠调度器（第 21 课）天作之合——GPU 重放、CPU 排下一步，GPU 几乎不空转；代价是启动时间与显存（分段图见第 33 课，投机解码见第 43 课）。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. CUDA Graph 在解码前向里主要消灭的是哪种开销？</div>
+  <ol class="opts">
+    <li><strong>逐个内核的启动（launch）开销</strong>——一次解码前向要发起几百个小内核，每次发起都有一笔<strong>固定的 CPU 启动费</strong>；解码内核太短，这笔费用反而主导整步、GPU 干等 CPU。图把整条前向录成一张，<strong>一次提交整体重放</strong>，把几百次发起压成一次</li>
+    <li>矩阵乘法本身的浮点计算量（FLOPs）</li>
+    <li>网络上 token 传输的带宽</li>
+    <li>KV 缓存占用的显存</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。图重放不改变要算多少（FLOPs 不变），也不省显存或网络；它省的是 CPU <strong>逐个发起内核</strong>的固定开销。解码每步每条只算 1 个 token、内核极短，发起费占比最高，所以重放收益最大——一次提交替代几百次发起，GPU 不再停下来等 CPU 递下一个内核。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么 SGLang 要为<strong>一组固定 batch 尺寸</strong>分别录图，运行时还要把真实 batch <strong>padding</strong> 到最近的桶？</div>
+  <ol class="opts">
+    <li>因为 padding 能提高数值精度</li>
+    <li>因为图绑定录制时的<strong>静态形状与显存地址</strong>，重放只能套同样的形状；真实 batch 每步可能不同，不可能为每个具体大小都录一张。于是只录几档桶（1/2/4/8/…/max），真实 batch <strong>向上取整到最近桶</strong>（<code>_pad_to_bucket</code>）后重放——多算几行 padding 的代价，远小于省下的几百次内核启动</li>
+    <li>因为 GPU 一次只能处理 2 的幂次大小的 batch</li>
+    <li>因为每个 batch 尺寸需要单独的 GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。CUDA 图是“录死”的：形状和地址在捕获时就固定，重放无法适配任意大小。逐个大小录图既不划算也录不过来，所以分桶 + 向上 padding 是用“少量空算”换“能复用整张图”。这与 GPU 是否支持任意大小、精度、或硬件数量都无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么<strong>解码</strong>走 CUDA 图，而<strong>预填充</strong>大多不走？CUDA 图又如何与<strong>重叠调度器（第 21 课）</strong>配合？</div>
+  <ol class="opts">
+    <li>解码必须在 CPU 上跑，所以用图；预填充在 GPU 上跑</li>
+    <li>解码形状高度规整（batch 稳定、序列每步只长 1），天然能套固定桶；预填充长度多变、一次算几百上千 token、几乎每批形状不同，录图不划算。配合上：<strong>GPU 重放整张图时，CPU 正好腾手去调度下一步</strong>，两者叠加让 GPU 几乎不空转</li>
+    <li>预填充不需要注意力，所以不用图</li>
+    <li>重叠调度器让 CPU 和 GPU 同时跑同一个内核</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。图要求静态形状：解码规整、可分桶，预填充多变、不划算，这就是“解码走图、预填充走即时”的根因（第 24 课）。重叠调度（第 21 课）让 CPU 在 GPU 重放期间排下一步，两者天作之合——GPU 几乎不留空隙。解码并非在 CPU 跑，预填充也需要注意力，CPU/GPU 也不是跑同一个内核。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“自动钢琴纸卷 / 录好的宏”的类比，把 CUDA Graph 的捕获与重放从头讲透。请覆盖：①问题——一次解码前向要发起几百个小内核（每层 norm、q/k/v、注意力、o_proj、gate/up、down…），每次发起有<strong>固定 CPU 启动费</strong>，解码内核太短时这笔费用为何主导整步、GPU 为何干等 CPU；②解法——图如何把整条前向的内核序列与依赖<strong>录一次</strong>、再<strong>一次提交整体重放</strong>；③SGLang 的工程做法——启动时 <code>BaseCudaGraphRunner.capture</code> 为一组尺寸（1/2/4/8/…/max）各录一张，运行时用 <code>_pad_to_bucket</code> 向上取整到最近桶、<code>can_run_graph</code> 通过后重放（第 24 课）。</li>
+    <li>围绕“图必须静态”这条硬约束，说明它如何决定 SGLang 的设计，并解释由此带来的权衡。请说明：①静态形状 → <strong>batch 分桶 + padding</strong>；静态地址 → <strong>预分配静态缓冲、每步拷入</strong>；捕获区内<strong>禁止数据相关控制流</strong> → 动态算子留图外或用分段/可断开图（第 33 课）；②为什么这三条合起来正好解释“<strong>解码走图、预填充走即时</strong>”；③回报与代价——解码吞吐大涨、与重叠调度器（第 21 课）天作之合，但录很多档要花<strong>启动时间</strong>与<strong>显存</strong>（每张图握着自己的静态缓冲），桶太密太疏各有什么坏处；并联系投机解码（第 43 课）为何要为更复杂的形状专门考虑录图。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson's ModelRunner had a decode "fast path": if a CUDA graph is available it <strong>replays</strong> a pre-recorded graph, otherwise it computes eagerly layer by layer. This lesson opens up that fast path.
+One decode forward actually has to <strong>launch hundreds of tiny GPU kernels</strong>, and every launch costs the CPU a fixed "issue fee". When each token computes very little, <strong>that launch fee ends up dominating the step</strong> —
+the GPU finishes one kernel and then just waits for the CPU to hand it the next. CUDA graphs exist to kill exactly this <strong>per-step kernel-launch overhead</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of a forward as playing one fixed song. <strong>Without a graph</strong>, it is like a pianist <strong>pressing each key live</strong> (each press = launching a kernel) — no matter how fast the hands, there's a fixed "lift and drop" delay between notes.
+  A CUDA graph is like a <strong>player-piano roll / a recorded macro</strong>: you <strong>record the whole song once</strong>, then let the roll <strong>play it in one go</strong>, with no human pressing keys one by one.
+  But the roll is <strong>fixed</strong> (static shapes): the holes and length are set, so you <strong>keep one roll per common song length</strong> (batch-size bucket) and <strong>pad shorter songs</strong> up to the nearest roll length to play them.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  A CUDA graph records the <strong>entire forward's kernel sequence and its dependencies</strong> into <strong>one graph</strong>, then <strong>replays it as a single submission</strong>, collapsing hundreds of "CPU launches a kernel" into "one submission".
+  SGLang <strong>captures</strong> graphs <strong>at startup</strong> for a <strong>set of batch sizes</strong> (e.g. 1, 2, 4, 8, …, max) via <span class="mono">BaseCudaGraphRunner.capture</span>; at run time it <strong>pads the real batch up to the nearest captured bucket</strong>
+  and replays that graph (<span class="mono">can_run_graph</span> + execute, Lesson 24). Because decode shapes are regular and prefill lengths vary, <strong>decode is graphed, prefill mostly runs eager</strong>.
+</div>
+
+<h2>The problem: one decode forward launches hundreds of tiny kernels</h2>
+<p>Let's make "overhead" concrete. A Transformer decoder layer is not "one big kernel" but a chain of small ops: input norm, the Q/K/V projections, writing K/V into the cache, attention, the o_proj output projection, another norm, the MLP gate/up, activation, down…
+Stack dozens of layers and one forward becomes <strong>hundreds of kernels queued onto the GPU</strong>. Each launch makes the CPU do a fixed routine: prepare args, configure the launch, enqueue into the CUDA stream — and that cost is <strong>independent of how big the kernel is</strong>; it is a <strong>fixed launch fee</strong>.</p>
+<p>This fee is invisible in <strong>prefill</strong>: it computes hundreds-to-thousands of tokens at once, each kernel is heavy, so the launch fee is negligible against the compute. But in <strong>decode</strong> (Lesson 4), each request computes just <strong>1 new token</strong> per step, the matrices are thin and small, so <strong>every kernel is extremely short</strong> —
+and now the fixed cost of "launching a kernel" becomes the dominant term. Worst case: the GPU finishes a tiny kernel in microseconds, then has to <strong>stop and wait for the CPU</strong> to enqueue the next one. The compute units sit idle while the step is stretched by a string of "wait for CPU". That is the enemy CUDA graphs eliminate.</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ No graph (eager): launch one by one</h4><p>CPU launches kernel ①→GPU runs ①→CPU launches ②→GPU runs ②… hundreds of round-trips. Each launch has a <strong>fixed fee</strong>; decode kernels are so short the GPU often <strong>waits on the CPU</strong>. Launch overhead <strong>dominates</strong>, GPU utilization is low.</p></div>
+  <div class="col"><h4>✅ Graph (replay): one submission</h4><p>At startup the whole forward is <strong>recorded into one graph</strong>; at run time the CPU <strong>submits just once</strong> and the GPU runs the hundreds of kernels <strong>back-to-back</strong> along the graph, never turning back to wait. Launch overhead is nearly <strong>zero</strong>, the GPU is <strong>saturated</strong>.</p></div>
+</div>
+
+<h2>The fix: record once, replay the whole forward</h2>
+<p>A CUDA graph has just two moves: <strong>capture</strong> and <strong>replay</strong>. During capture, the model <strong>runs the forward once</strong> while CUDA records, underneath, <strong>the call order and dependencies of all kernels</strong> into a directed graph — <strong>without actually computing</strong>;
+then at replay, you hand that graph to the GPU as a <strong>single submission</strong> and the hardware runs the whole kernel string <strong>in one shot</strong>, with the CPU never launching anything one by one. One submission replaces hundreds of launches — that is where the overhead vanishes.</p>
+<p>But a graph is <strong>frozen</strong>: it binds the <strong>tensor shapes and memory addresses</strong> from capture time. Real requests have a batch size that may change every step, so you can't record one graph per exact size. SGLang's answer is <strong>bucketing + padding</strong>: at startup it records a graph for only <strong>a few fixed batch sizes</strong> (1, 2, 4, 8, …, max) — <span class="mono">capture</span> iterates over these sizes recording each;
+at run time it takes the real batch, <strong>rounds it up to the nearest bucket</strong> (<span class="mono">_pad_to_bucket</span>), pads the tensors to that size, and replays the matching graph. E.g. a real batch of 5 pads up to the bucket-8 graph — the cost of 3 extra padded rows is far smaller than the hundreds of kernel launches it saves.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Startup · capture</h4><p>Run the forward once while CUDA <strong>records the whole kernel sequence and dependencies into a graph</strong> (no real compute).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>One graph per size</h4><p>Iterate batch buckets 1/2/4/8/…/max, record a graph for each, kept alongside its <strong>static buffers</strong>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Run time · pad</h4><p>Round the real batch up to the <strong>nearest captured bucket</strong> (<span class="mono">_pad_to_bucket</span>); pad tensors to that size.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p><span class="mono">can_run_graph</span> passes → <strong>one submission</strong> replays that graph (Lesson 24); slice out the real rows' logits.</p></div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">capture &amp; bucket padding</span></div>
+  <pre><span class="kw">class</span> BaseCudaGraphRunner(BaseRunner):
+    <span class="cm"># record the whole forward at startup; pad to a bucket and replay at run time</span>
+    buffers: ForwardInputBuffers       <span class="cm"># pre-allocated static input buffers (fixed addrs)</span>
+    backend: BaseCudaGraphBackend      <span class="cm"># owns the capture / replay mechanics</span>
+
+    <span class="kw">@staticmethod</span>
+    <span class="kw">def</span> _pad_to_bucket(raw_size, buckets):
+        <span class="cm"># round the real batch up to the nearest captured bucket</span>
+        <span class="kw">assert</span> raw_size &lt;= buckets[-1]     <span class="cm"># over max bucket -> can_run_graph should reject</span>
+        index = bisect.bisect_left(buckets, raw_size)
+        <span class="kw">return</span> buckets[index]
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> capture(self):                  <span class="cm"># one-time: iterate all batch sizes, record a graph each</span>
+        ...                            <span class="cm"># each size calls capture_one_shape to record one graph</span></pre>
+</div>
+
+<h2>Constraints: why the graph must be "static"</h2>
+<p>The replay payoff has a price: the graph demands <strong>static shapes and addresses</strong>. This hard constraint directly drives three of SGLang's engineering choices. First, <strong>shapes must be fixed</strong>, hence <strong>bucketing + padding</strong> — the batch can't vary freely.
+Second, <strong>addresses must be fixed</strong>, so the runner pre-allocates a set of <strong>static input/output buffers</strong> (the <span class="mono">buffers</span> in the code above) and each step <strong>copies</strong> the real data into those fixed buffers before replay, instead of allocating anew.
+Third, <strong>no data-dependent control flow inside the captured region</strong> — a graph records one fixed path, it can't "take the if this step, the else next step". So some ops must <strong>stay outside</strong> the graph, or a "piecewise / breakable" graph <strong>splits out</strong> the dynamic ops and records the rest (covered in Lesson 33 on attention backends).</p>
+<p>Chain these three together and last lesson's line "<strong>decode is graphed, prefill runs eager</strong>" is fully explained: decode shapes are highly regular each step (batch steady for a while, sequence growing by 1), so they fit fixed buckets naturally; prefill lengths vary wildly, computing hundreds-to-thousands of tokens at once with a different shape almost every batch, so recording a graph per shape is neither worthwhile nor feasible — it prefers the flexible eager path.</p>
+
+<table class="t">
+  <tr><th>Constraint</th><th>Why</th><th>SGLang's response</th></tr>
+  <tr><td>Shapes must be static</td><td>Graph binds capture-time tensor shapes</td><td>Bucket the batch + pad up</td></tr>
+  <tr><td class="mono">Addresses must be static</td><td>Graph binds capture-time memory pointers</td><td>Pre-allocate static buffers, copy in each step</td></tr>
+  <tr><td>No data-dependent control flow</td><td>A graph is one fixed path, no if/else</td><td>Dynamic ops outside / piecewise graph (Lesson 33)</td></tr>
+  <tr><td>Buckets have a max</td><td>Can't record a graph for any size</td><td>Batch over max is rejected, falls back to eager</td></tr>
+</table>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>batch-size buckets + padding</b>: only these sizes are recorded; a real batch of 5 <strong>rounds up to the bucket-8</strong> graph for replay (highlighted)</div>
+  <div class="cells"><span class="lab">buckets</span><span class="cell">1</span><span class="sep">·</span><span class="cell">2</span><span class="sep">·</span><span class="cell">4</span><span class="sep">·</span><span class="cell hl">8</span><span class="sep">·</span><span class="cell">16</span><span class="sep">·</span><span class="cell">…</span><span class="sep">·</span><span class="cell">max</span></div>
+  <div class="cells"><span class="lab">real=5</span><span class="cell">5 real rows</span><span class="sep">+</span><span class="cell">3 padding rows</span><span class="sep">→</span><span class="cell hl">use bucket-8 graph</span><span class="sep">→</span><span class="cell q">after replay keep first 5 rows' logits</span></div>
+</div>
+
+<h2>The payoff: big decode throughput, and a perfect match with the overlap scheduler</h2>
+<p>Having killed the hundreds of launches per step, <strong>decode throughput usually gains a lot</strong> — most of all on small models, short kernels, large concurrency, where launch overhead is the highest share. Even better, it is a <strong>perfect match for the overlap scheduler (Lesson 21)</strong>:
+while a graph replays, the GPU just powers through the whole graph and barely turns back to the CPU; meanwhile the CPU is freed to <strong>schedule the next step</strong> (sampling, building the next batch). Stack the two and <strong>the GPU replays while the CPU lines up the next step</strong>, leaving the GPU almost no idle gap — the core rhythm of a high-throughput inference engine.</p>
+<p>There is of course a cost, a real tradeoff: recording many sizes takes <strong>startup time</strong> (each graph requires running the forward once to record) and eats <strong>memory</strong> (each graph holds its own static buffers). So more buckets isn't strictly better — too dense and startup is slow and memory-hungry; too sparse and padding waste grows.
+This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" tradeoff recurs later: Lesson 33's piecewise graphs let dynamic ops partly enjoy replay, and Lesson 43's speculative decoding must specially consider how to capture the more complex "draft + verify" shapes. Remember this lesson: <strong>a CUDA graph swaps "launch kernels one by one" for "replay the whole forward in one shot", trading static shapes for gone launch overhead</strong>.</p>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① The enemy is launch overhead:</strong> one decode forward launches hundreds of tiny kernels, each launch a fixed CPU fee; decode kernels are so short the fee dominates the step and the GPU waits on the CPU.
+  <strong>② The fix is record-once-replay-whole:</strong> a CUDA graph records the entire forward's kernel sequence into one graph and replays it as a single submission, collapsing hundreds of launches into one.
+  <strong>③ The price is static:</strong> the graph binds shape and address, so you need batch bucketing + padding (<span class="mono">_pad_to_bucket</span>), pre-allocated static buffers, and no data-dependent control flow in the captured region — the very reason <strong>decode is graphed, prefill runs eager</strong>.
+  <strong>④ How SGLang does it:</strong> at startup <span class="mono">BaseCudaGraphRunner.capture</span> records one graph per size (1/2/4/8/…/max); at run time it pads to the nearest bucket then <span class="mono">can_run_graph</span> + replay (Lesson 24).
+  <strong>⑤ Payoff &amp; partner:</strong> big decode throughput, and a perfect match with the overlap scheduler (Lesson 21) — GPU replays, CPU lines up the next step, GPU barely idles; the cost is startup time and memory (piecewise graphs in Lesson 33, speculative in Lesson 43).
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What overhead does a CUDA graph mainly eliminate in the decode forward?</div>
+  <ol class="opts">
+    <li><strong>Per-kernel launch overhead</strong> — one decode forward launches hundreds of tiny kernels, each with a <strong>fixed CPU issue fee</strong>; decode kernels are so short the fee dominates the step and the GPU waits on the CPU. The graph records the whole forward and <strong>replays it as a single submission</strong>, collapsing hundreds of launches into one</li>
+    <li>The floating-point compute (FLOPs) of the matmuls themselves</li>
+    <li>Network bandwidth for transferring tokens</li>
+    <li>The GPU memory used by the KV cache</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Replay doesn't change how much is computed (FLOPs are the same), nor save memory or network; it removes the fixed CPU cost of <strong>launching kernels one by one</strong>. Decode computes just 1 token per request per step with extremely short kernels, so the launch fee dominates and replay pays most — one submission replaces hundreds of launches, and the GPU stops waiting on the CPU for the next kernel.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does SGLang record graphs for a <strong>set of fixed batch sizes</strong> and then <strong>pad</strong> the real batch up to the nearest bucket at run time?</div>
+  <ol class="opts">
+    <li>Because padding improves numerical precision</li>
+    <li>Because a graph binds the <strong>static shapes and memory addresses</strong> from capture, replay only fits the same shape; the real batch can differ every step, so you can't record one per exact size. Hence only a few buckets (1/2/4/8/…/max) are recorded, and the real batch is <strong>rounded up to the nearest bucket</strong> (<code>_pad_to_bucket</code>) before replay — the few padded rows cost far less than the hundreds of launches saved</li>
+    <li>Because the GPU can only process power-of-two batch sizes</li>
+    <li>Because each batch size needs its own GPU</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. A CUDA graph is frozen: shape and address are fixed at capture, so replay can't adapt to arbitrary sizes. Recording one per size is neither worthwhile nor feasible, so bucketing + rounding up trades a little wasted compute for reusing a whole graph. It has nothing to do with power-of-two limits, precision, or hardware count.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why is <strong>decode</strong> graphed while <strong>prefill</strong> mostly isn't, and how does the CUDA graph pair with the <strong>overlap scheduler (Lesson 21)</strong>?</div>
+  <ol class="opts">
+    <li>Decode must run on CPU so it uses a graph; prefill runs on GPU</li>
+    <li>Decode shapes are highly regular (steady batch, sequence growing by 1), fitting fixed buckets naturally; prefill lengths vary, computing hundreds-to-thousands of tokens with a different shape almost every batch, so graphing isn't worthwhile. Pairing: <strong>while the GPU replays the whole graph, the CPU is freed to schedule the next step</strong>, so together the GPU barely idles</li>
+    <li>Prefill doesn't need attention, so no graph</li>
+    <li>The overlap scheduler makes CPU and GPU run the same kernel simultaneously</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Graphs need static shapes: decode is regular and bucketable, prefill is varied and not worthwhile — the root reason for 'decode graphed, prefill eager' (Lesson 24). The overlap scheduler (Lesson 21) lets the CPU line up the next step while the GPU replays, a perfect match leaving almost no GPU idle. Decode doesn't run on CPU, prefill does need attention, and CPU/GPU don't run the same kernel.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'player-piano roll / recorded macro' analogy, fully explain CUDA-graph capture and replay from scratch. Cover: (1) the problem — one decode forward launches hundreds of tiny kernels (per layer: norm, q/k/v, attention, o_proj, gate/up, down…), each with a <strong>fixed CPU launch fee</strong>, and why that fee dominates the step when decode kernels are short, leaving the GPU waiting on the CPU; (2) the fix — how a graph <strong>records</strong> the whole forward's kernel sequence and dependencies once and <strong>replays it as a single submission</strong>; (3) SGLang's engineering — at startup <code>BaseCudaGraphRunner.capture</code> records one graph per size (1/2/4/8/…/max), and at run time <code>_pad_to_bucket</code> rounds up to the nearest bucket and replays once <code>can_run_graph</code> passes (Lesson 24).</li>
+    <li>Centered on the hard constraint 'a graph must be static', explain how it shapes SGLang's design and the resulting tradeoffs. Cover: (1) static shapes → <strong>batch bucketing + padding</strong>; static addresses → <strong>pre-allocated static buffers copied into each step</strong>; <strong>no data-dependent control flow</strong> in the captured region → dynamic ops outside or a piecewise/breakable graph (Lesson 33); (2) why these three together explain '<strong>decode graphed, prefill eager</strong>'; (3) payoff vs cost — big decode throughput and a perfect match with the overlap scheduler (Lesson 21), but recording many sizes costs <strong>startup time</strong> and <strong>memory</strong> (each graph holds its own static buffers), and what goes wrong if buckets are too dense or too sparse; and relate to why speculative decoding (Lesson 43) must specially consider capturing more complex shapes.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="26-writing-a-model.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">写一个模型</span><span class="lang-en">Writing a model</span></div></a><a class="next" href="28-sampler-and-sampling-params.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">采样器与采样参数</span><span class="lang-en">Sampler &amp; sampling params</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

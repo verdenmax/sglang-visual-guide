@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>24 · ModelRunner 与 ForwardBatch / ModelRunner &amp; ForwardBatch - SGLang 图解教程</title>
+<meta name="description" content="第六部分 · 模型执行｜ModelRunner 与 ForwardBatch - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="24 · ModelRunner 与 ForwardBatch / ModelRunner &amp; ForwardBatch - SGLang 图解教程">
+<meta property="og:description" content="第六部分 · 模型执行｜ModelRunner 与 ForwardBatch - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="24 · ModelRunner 与 ForwardBatch / ModelRunner &amp; ForwardBatch - SGLang 图解教程">
+<meta name="twitter:description" content="第六部分 · 模型执行｜ModelRunner 与 ForwardBatch - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></span>
+    <span class="pill">24 / 28</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:85%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></div>
+    <h1><span class="lang-zh">ModelRunner 与 ForwardBatch</span><span class="lang-en">ModelRunner &amp; ForwardBatch</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+第五部分我们一直在讲调度器怎么"<strong>决策</strong>"——收请求、组批、定策略。但它<strong>只决策、不亲手算</strong>。
+真正在 GPU 上把一批 token 跑成 logits 的，是这一课的主角 <span class="inline">ModelRunner</span>。它是
+<strong>"决策"变成"计算"的那道门</strong>：第五部分到此为止是控制流，从这一课起我们走进真正的数学。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 ModelRunner 想成车间里的<strong>机台操作工</strong>：调度器（工头）递来一张<strong>工单</strong>（ForwardBatch：要算哪些 token、
+  是预填充还是解码、KV 放在哪），操作工照单<strong>开动机器</strong>（<span class="mono">model.forward</span>），读出<strong>仪表读数</strong>（logits），
+  再把读数交给<strong>质检员</strong>（Sampler）挑出这一步的产物（下一个 token）。工头从不碰机器，碰机器的只有操作工。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  每个 TP rank 有<strong>一个 ModelRunner</strong>（由 TpWorker 持有），它握着<strong>加载好的模型</strong>（第 25/26 课）和
+  <strong>KV 缓存池</strong>（第 30 课）。一次 <span class="mono">forward(forward_batch)</span> 把一批请求跑出 logits，再由
+  <span class="mono">sample()</span> 交给采样器（第 28 课）出 token。而 <span class="inline">ForwardBatch</span> 就是
+  <strong>ScheduleBatch（第 19 课）的 GPU 视图</strong>——同一批请求，换成 GPU 看得懂的张量与元数据。
+</div>
+
+<h2>run_batch 之后：谁把这一批递到了 ModelRunner 手里</h2>
+<p>先把调用链补全。第 18 课的调度器主循环每一步都会调 <span class="mono">run_batch</span>，但 run_batch 本身其实很<strong>薄</strong>：它把刚组好的 <span class="mono">ScheduleBatch</span> 交给 <strong>TpWorker</strong>，TpWorker 再原样转手喂给它<strong>独占的那一个 ModelRunner</strong>。这条链路之所以要分这么多层，是因为每一层只盯着一件事——调度器只关心"这一步该算哪一批"，TpWorker 只关心"我这个 rank 的边界与跨卡通信"，ModelRunner 只关心"把张量在这张卡上真正算出来"。层与层之间职责清晰、互不越界，正是这套代码能被上千名贡献者协作维护的原因。</p>
+<p>这条链还藏着一个容易忽视却致命的约束：在 8 路 TP 的部署里，8 个 TpWorker 各自的 ModelRunner 必须<strong>严格同步地跑同一批</strong>。它们各算模型的一片（权重按行/列切开，第 25/46 课），层中途要靠 all-reduce / all-gather 把注意力输出和残差拼齐——只要有一个 rank 早走或晚走半步，集合通信就会<strong>整组卡死</strong>。这就是为什么进入前向之前，ScheduleBatch 的内容必须在所有 rank 上<strong>逐字节一致</strong>：同样的 token、同样的形状、同样的 forward_mode。理解了这一点，你就明白第 18 课强调的"调度决策必须确定性、可复现"不是洁癖，而是分布式前向能不死锁的硬前提。</p>
+
+<h2>从 ScheduleBatch 到 ForwardBatch：换一副 GPU 的眼镜</h2>
+<p>先厘清一个常被混淆的层级：<strong>TpWorker</strong> 是张量并行里"一个 rank"的封装，它内部<strong>持有一个 ModelRunner</strong>；
+所以在 8 路 TP 的部署里，有 8 个 TpWorker、8 个 ModelRunner，各自<strong>只算模型的一片</strong>（权重按列/行切开，第 25/46 课），
+再靠集合通信把结果拼起来。调度器（第 18 课）每步调 <span class="mono">run_batch</span>，本质就是把活儿派给这些 ModelRunner。
+记住这条分工：<strong>调度器只有一个大脑、负责决策；ModelRunner 有很多双手、负责把决策算出来</strong>。</p>
+<p>调度器交出来的是 <span class="mono">ScheduleBatch</span>（一堆 Req 的集合，第 19 课）。ModelRunner 要先把它翻译成
+<span class="mono">ForwardBatch</span>——GPU 前向真正需要的那几样东西：<strong>input_ids</strong>（这一步要喂的 token）、
+<strong>positions</strong>（每个 token 的位置，喂给 RoPE）、<strong>forward_mode</strong>（是 EXTEND/预填充还是 DECODE/解码）、
+<strong>注意力元数据</strong>（用哪个 attention 后端、KV 该读写到池子的哪些槽位，第 33 课）、以及指向 <strong>KV 池</strong>的指针。
+一句话：ScheduleBatch 记的是"<strong>谁要算</strong>"，ForwardBatch 记的是"<strong>GPU 具体怎么算这一步</strong>"。
+这层翻译看似琐碎，却是性能关键：positions、注意力元数据、KV 槽位若组织得当，下游的注意力内核（第 33 课）和 CUDA 图（第 27 课）才能跑得又快又稳。</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">ScheduleBatch</div><div class="nd">一批 Req（第 19 课）</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">ForwardBatch</div><div class="nd">GPU 视图：ids/positions/mode/KV</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">model.forward</div><div class="nd">嵌入→层→norm→lm_head</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">logits</div><div class="nd">每条请求的下一词分布</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Sampler</div><div class="nd">挑出下一个 token（第 28 课）</div></div>
+</div>
+
+<table class="t">
+  <tr><th>ForwardBatch 字段</th><th>是什么</th><th>给谁用</th></tr>
+  <tr><td class="mono">input_ids</td><td>这一步要前向的 token id</td><td>嵌入层</td></tr>
+  <tr><td class="mono">positions</td><td>每个 token 的绝对位置</td><td>RoPE / 位置编码（第 36 课）</td></tr>
+  <tr><td class="mono">forward_mode</td><td>EXTEND（预填充）/ DECODE（解码）</td><td>决定走哪条前向路径</td></tr>
+  <tr><td class="mono">attn metadata</td><td>注意力后端 + KV 读写槽位</td><td>attention 内核（第 33 课）</td></tr>
+  <tr><td class="mono">out_cache_loc</td><td>新 token 的 K/V 写到池子哪里</td><td>KV 缓存池（第 30 课）</td></tr>
+</table>
+
+<p>把这张表再往下读一层会更有味道。<strong>positions</strong> 绝不是摆设：它直接喂进 RoPE，决定每个 token 的旋转相位，所以预填充和解码一旦把绝对位置算错，注意力就会"看错"远近关系，输出立刻乱套——这也是分块预填充（第 22 课）必须小心维护 positions 连续性的原因。<strong>forward_mode</strong> 像一个总闸，它一拨下去就决定了后面整条路径：走变长的预填充内核还是规整的解码内核、能不能套 CUDA 图、注意力后端该用哪种 mask。<strong>注意力元数据</strong>则负责把"逻辑上的第 k 个 token"翻译成"物理上 KV 池里的哪一页、哪一个槽位"，它和 <span class="mono">out_cache_loc</span> 配合，明确告诉内核：新算出来的 K/V 写到哪、历史 K/V 又从哪读。可以说，ForwardBatch 这几个字段合起来就是一张"<strong>GPU 寻址表</strong>"，前向里的每一次读写都照着它走；它们组织得好不好，直接决定下游注意力内核（第 33 课）和 CUDA 图（第 27 课）能不能既快又稳。</p>
+
+<h2>ModelRunner.forward：一次前向怎么走</h2>
+<p>核心分两条路：能用 <strong>CUDA Graph</strong>（第 27 课）就<strong>重放</strong>一张录好的图，否则<strong>即时（eager）</strong>地把这一批真算一遍。
+判断的关键是 <span class="mono">can_run_graph</span>——通常<strong>解码步</strong>（形状规整、batch 小）才走图重放，<strong>预填充</strong>因为长度多变多走即时路径
+（或分片预填充的图）。下面是 <span class="mono">_forward_raw</span> 的真实骨架：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/model_runner.py ::ModelRunner.forward</span><span class="ln">前向的分派</span></div>
+  <pre><span class="kw">def</span> _forward_raw(self, forward_batch, pp_proxy_tensors, ...):
+    <span class="cm"># 能否重放解码 CUDA 图：模式匹配 + 有图 + 形状能套</span>
+    can_run_graph = (forward_batch.forward_mode.is_cuda_graph()
+                     <span class="kw">and</span> self.decode_cuda_graph_runner
+                     <span class="kw">and</span> self.decode_cuda_graph_runner.can_run_graph(forward_batch))
+    <span class="kw">if</span> can_run_graph:                          <span class="cm"># 解码：重放录好的图（第 27 课）</span>
+        ret = self.decode_cuda_graph_runner.execute(forward_batch, ...)
+        <span class="kw">return</span> ModelRunnerOutput(logits_output=ret, can_run_graph=True)
+    self._prepare_eager_forward_batch(forward_batch)  <span class="cm"># 即时路径：DP/padding 归一</span>
+    <span class="kw">if</span> forward_batch.forward_mode.is_extend(...):   <span class="cm"># 预填充：真算这一批</span>
+        ...                                       <span class="cm"># 否则解码 eager 兜底</span></pre>
+</div>
+
+<p>不管走哪条路，最终都进到 <span class="mono">model.forward(input_ids, positions, forward_batch)</span>：嵌入 → 一层层
+<strong>解码层</strong>（注意力 + MLP，第 26 课）→ 末尾归一化 → <span class="mono">lm_head</span> 投影出 <strong>logits</strong>。
+ModelRunner 再调 <span class="mono">sample()</span> 把 logits 交给采样器（第 28 课）。</p>
+
+<p>再细看这段分派为什么这么写。第一道判断 <span class="mono">can_run_graph</span> 是三个条件的<strong>与</strong>：模式得是能套图的（解码类）、这张图<strong>确实已经录过</strong>、并且当前 batch 的形状能套进某个录好的桶。三者缺一，就走不了重放——这正是为什么图重放被放在最前面短路返回：它是"快路径"，能走则走、走不了再退而求其次。退下来后先调 <span class="mono">_prepare_eager_forward_batch</span>，它做的是即时路径的<strong>归一化收尾</strong>：补齐数据并行（DP）下各 rank 的 padding、对齐张量形状，让后面的内核能正常跑。归一化之后再按 <span class="mono">is_extend</span> 分叉——预填充就老老实实把这一批真算一遍，否则落到解码的即时兜底。把这段读懂，你就能把"为什么我的解码没走 CUDA 图"这类问题精确定位到三个开关上的某一个，而不是泛泛地猜。</p>
+
+<p>值得多看一眼<strong>注意力层在这里干了什么</strong>：它从 ForwardBatch 拿到 KV 槽位，把当前 token 的 K/V <strong>写进 KV 池</strong>，
+再把当前 Q 和<strong>历史 K/V</strong>（可能是 RadixAttention 复用来的前缀，第 7 课）做注意力。换句话说，第 4–7 课讲的缓存与复用，
+正是在 ModelRunner 跑 forward 的这一刻<strong>真正发生</strong>的——前面几课建立的所有直觉，到这里第一次"通上电"。也正因为前向要频繁读写 KV 池、
+要调用具体硬件的注意力内核，ModelRunner 必须<strong>同时</strong>握住模型、KV 池和注意力后端三样东西，缺一不可。</p>
+
+<p>沿着前向再走细一点。嵌入层把 input_ids 查成词向量后，数据进入一摞结构完全相同的<strong>解码层</strong>。每一层里，先做一次归一化，再进注意力子层：Q/K/V 由线性层投影出来，K/V 顺手按 <span class="mono">out_cache_loc</span> 写进 KV 池，注意力内核再让当前 Q 去看自己以及所有历史 K/V。如果这段前缀此前已被别的请求算过、并被 RadixAttention（第 7 课）挂在基数树上，那么这部分历史 K/V 根本不必重算，<strong>直接复用</strong>——第 4–7 课讲的缓存复用，到这一层才落到具体内核上。注意力输出经残差相加，再进 MLP 子层（又一次归一化 + 两个线性层 + 激活），又一次残差。如此 N 层叠完，做末端归一化，<span class="mono">lm_head</span> 把最后的隐藏向量投影到整个词表维度，得到 <strong>logits</strong>。这里有个常被忽略的优化：解码时其实只需要<strong>每条请求最后一个位置</strong>的 logits（下一个词只看最后一步），所以前向通常先做一次"取最后 token"的切片再投影，省下大量无用的 lm_head 计算。logits 一到手，ModelRunner 立刻调 <span class="mono">sample()</span>，下一课的采样器才正式登场——<strong>整条流水线里 logits→token 的那个转折点，就发生在这里</strong>。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>嵌入 Embed</h4><p>input_ids → 词向量；positions 备好给 RoPE。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>N 层解码层</h4><p>每层：注意力（读写 KV 池）+ MLP + 归一化（第 26 课）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>末端归一 + lm_head</h4><p>最后一层 hidden → 词表维度的 <strong>logits</strong>。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>采样</h4><p><span class="mono">sample()</span> → Sampler 出下一个 token（第 28 课）。</p></div></div>
+</div>
+
+<h2>EXTEND 与 DECODE：同一个 forward，两种性格</h2>
+<p>还记得第 4 课的两阶段吗？它们在 ModelRunner 这里落成两种前向：</p>
+
+<div class="cols">
+  <div class="col"><h4>EXTEND / 预填充前向</h4><p>一次处理<strong>整段提示</strong>的多个 token（变长），<strong>计算密集</strong>、并行度高；
+  形状多变，多走<strong>即时</strong>路径或分片/分块（第 22 课）。它把这批 token 的 K/V <strong>写满</strong>缓存。</p></div>
+  <div class="col"><h4>DECODE / 解码前向</h4><p>每条请求<strong>只算 1 个新 token</strong>，形状规整、batch 固定，正好适合
+  <strong>CUDA Graph 重放</strong>（第 27 课）——把上百个小内核的启动开销一次性抹掉。它给缓存<strong>追加一行</strong>。</p></div>
+</div>
+
+<p>为什么偏偏是<strong>解码</strong>适合 CUDA 图、而预填充不适合？关键在"形状是否稳定"。CUDA 图录制的是一串固定的内核调用和固定的显存地址，录好之后重放时只能套用<strong>同样的张量形状、同样的指针</strong>。解码每步每条请求恰好只产出 1 个新 token，batch 大小在一段时间内不变、序列每步只长 1，形状高度规整，于是可以把不同的实际长度<strong>padding 到几档固定的桶</strong>，每档录一张图反复重放——而解码恰恰是启动开销占比最高的阶段（每步算得少、内核调得多），抹平这部分开销收益最大。预填充则正相反：提示长度千变万化、一次要算几百上千个 token，形状几乎每批都不同，硬要为每种形状录图既不划算也录不过来，所以它更愿意走即时（eager）路径，或采用分块/分片的折中（第 22、27 课）。一句话：<strong>解码是"小而规整、重复千万次"，正好踩在图重放的甜点区</strong>；预填充是"大而多变、各算各的"，让灵活的即时路径来扛更合适。</p>
+
+<p>这两种性格背后其实是两种<strong>瓶颈</strong>。预填充一次要处理几百上千个 token，算术密度高，GPU 的计算单元几乎被喂满，是典型的<strong>计算密集（compute-bound）</strong>——此时启动开销相对算量微不足道，套不套图差别不大，真正的优化方向是把这堆矩阵乘做大做满。解码每步每条请求只算 1 个 token，矩阵又瘦又小，GPU 大量时间其实卡在<strong>搬数据</strong>上（读权重、读 KV），是典型的<strong>访存密集（memory-bound）</strong>；这时候每个内核都很短，启动与调度的固定开销反而成了大头，于是用 CUDA 图把上百次内核启动一次性抹平，收益立竿见影。看懂"预填充缺算力、解码缺带宽"，你就懂了为什么同一个 forward 要分两种路径，也懂了第 27 课为何把图重放主要用在解码上。这条"算力 vs 带宽"的分界线，会在后面讲注意力内核、量化、投机解码时反复出现，是贯穿整个推理优化的一把通用尺子。</p>
+
+<p>这也解释了 ModelRunner 为什么还顺手管着：<strong>CUDA 图运行器</strong>（第 27 课）、<strong>注意力后端</strong>（第 33 课）、
+<strong>KV 池</strong>（第 30 课），以及投机解码时的<strong>草稿模型</strong>（第 43 课）——它是这些 GPU 侧部件的总装车间。
+往后第 25 课讲它手里的模型是<strong>怎么加载</strong>的，第 26 课讲这模型是<strong>怎么写</strong>的。</p>
+
+<p>不妨把 ModelRunner 看作一台 GPU 侧的<strong>总装机</strong>：它把分散的零件拼成一条能跑的流水线。模型给它"算什么"的结构，KV 池给它"历史在哪"的记忆，注意力后端给它"在这块硬件上怎么算注意力"的手艺，CUDA 图运行器给它"解码时怎么跑得更省"的加速档，草稿模型（第 43 课）则在投机解码时给它"先猜几个、再一次性验证"的并行档。这些部件各有各的课，但它们都<strong>挂在 ModelRunner 上、由同一次 forward 串起来</strong>。也正因为零件都集中在这里，调试一次"前向算错/算慢"的问题时，你几乎总是从 ModelRunner 入手：先看 forward_mode 走对了没、再看注意力元数据和 KV 槽位对不对、最后看是不是错误地套用了某张形状不匹配的 CUDA 图。把这台总装机的内部接线图记在脑子里，往后四课就是在逐一拆解它的每一个零件，每拆一个，你对这次 forward 的理解就更立体一分，最终把这条流水线看成一个整体。</p>
+
+<p>把这一课放回整张图：第 1–8 课告诉你"为什么要这样设计"，第 13–17 课讲请求"怎么进来"，第 18–23 课讲调度器"怎么决策"，
+而<strong>这一课是决策落地成算力的那一下</strong>。再往后，Part 6 的其余四课就沿着 ModelRunner 手里的几样东西展开：模型权重怎么<strong>加载</strong>上卡（第 25 课）、
+一个模型文件<strong>怎么写</strong>（第 26 课，以 Llama 为例）、解码为什么能用 <strong>CUDA 图</strong>把启动开销抹平（第 27 课）、
+以及 logits 怎么变成 token 的<strong>采样器</strong>（第 28 课）。带着"<strong>ModelRunner = 决策→计算的边界、每 rank 一个、握着模型+KV池+注意力后端</strong>"
+这把钥匙，后面四课你会读得很顺。</p>
+
+<div class="card key">
+  <div class="tag">📌 本课要点</div>
+  <ul>
+    <li><strong>ModelRunner</strong>：每个 TP rank 一个，是<strong>"决策→计算"的边界</strong>；持有模型 + KV 池，<span class="mono">forward</span>→logits，<span class="mono">sample</span>→token。</li>
+    <li><strong>ForwardBatch</strong>：ScheduleBatch（第 19 课）的 <strong>GPU 视图</strong>——ids/positions/forward_mode/注意力元数据/KV 指针。</li>
+    <li><strong>一次前向</strong>：嵌入 → N 层解码层 → 归一 + lm_head → logits → Sampler。</li>
+    <li><strong>两种前向</strong>：EXTEND（预填充，计算密集，多即时）vs DECODE（解码，形状规整，走 CUDA 图重放，第 27 课）。</li>
+    <li><strong>总装车间</strong>：ModelRunner 还管 CUDA 图、注意力后端、KV 池、草稿模型——Part 6 的其余几课逐一展开。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 SGLang 里，<code>ModelRunner</code> 和调度器（第 18 课）各自的职责边界是什么？</div>
+  <ol class="opts">
+    <li>ModelRunner 负责接收 HTTP 请求并分词，调度器负责前向计算</li>
+    <li>调度器<strong>只决策不计算</strong>（收请求、组批、定策略），每步调 <code>run_batch</code> 把活儿派下去；<strong>ModelRunner 才把一批 token 真正在 GPU 上算成 logits</strong>——它是“决策→计算”的那道边界，<strong>每个 TP rank 一个</strong>，由 TpWorker 持有</li>
+    <li>调度器既决策又亲自跑前向，ModelRunner 只负责采样出 token</li>
+    <li>整个进程共用一个 ModelRunner，所有 TP rank 都调它</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。第五部分讲的都是调度器“怎么决策”，它<strong>从不碰 GPU</strong>；真正把 token 算成 logits 的是 ModelRunner。调用链是 <code>run_batch</code> → TpWorker → 它独占的 ModelRunner，<strong>每个 TP rank 一个</strong>，各算模型一片再靠集合通信拼齐。所以它是“决策变计算”的边界，而不是共享单例，也不管接请求/分词。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <code>ForwardBatch</code> 与 <code>ScheduleBatch</code>（第 19 课）是什么关系？</div>
+  <ol class="opts">
+    <li>ForwardBatch 是采样结果，ScheduleBatch 是输入提示</li>
+    <li>ForwardBatch 是 ScheduleBatch 的 <strong>GPU 视图</strong>——同一批请求换成 GPU 看得懂的张量与元数据：<code>input_ids</code>、<code>positions</code>（喂 RoPE）、<code>forward_mode</code>（选前向路径）、注意力元数据 + <code>out_cache_loc</code>（KV 读写槽位）；ScheduleBatch 记“谁要算”，ForwardBatch 记“GPU 这一步怎么算”</li>
+    <li>两者完全相同，只是改了个名字</li>
+    <li>ScheduleBatch 在 GPU 上、ForwardBatch 在 CPU 上，互为备份</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。ModelRunner 先把调度器给的 ScheduleBatch（一堆 Req）<strong>翻译</strong>成 ForwardBatch——GPU 前向真正需要的那几样：要喂哪些 token、每个 token 的位置、是预填充还是解码、注意力后端与 KV 槽位。一句话：ScheduleBatch=“谁要算”，ForwardBatch=“GPU 具体怎么算这一步”。它不是采样结果，也不是简单改名或 CPU 备份。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么 <strong>解码（DECODE）</strong>前向适合走 CUDA Graph 重放（第 27 课），而<strong>预填充（EXTEND）</strong>多走即时路径？</div>
+  <ol class="opts">
+    <li>因为解码不需要读 KV 缓存，所以可以录图</li>
+    <li>因为预填充必须在 CPU 上跑，无法用 GPU 图</li>
+    <li>因为解码比预填充计算量更大，更值得优化</li>
+    <li>解码每步每条请求只产出 <strong>1 个新 token</strong>，形状<strong>高度规整</strong>（可 padding 到几档固定桶），且每步算得少、内核启动开销占比高，正好让重放<strong>抹平启动开销</strong>；预填充长度千变万化、形状每批都不同、本就计算密集，录图既不划算也录不过来</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。CUDA 图录的是<strong>固定形状、固定地址</strong>的内核序列，重放只能套同样的形状。解码恰好“小而规整、重复千万次”，是访存密集、启动开销占大头的阶段，图重放收益最大；预填充“大而多变、各算各的”，是计算密集阶段，形状几乎每批都不同，更适合灵活的即时路径。解码并非不读 KV，预填充也不在 CPU 跑，解码单步算量也更小。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“车间机台操作工”的类比，完整讲清一次前向在 ModelRunner 里怎么走完。请逐一覆盖：①调用链——第 18 课调度器 <code>run_batch</code> → TpWorker → <strong>每 rank 一个</strong>的 ModelRunner，以及为什么 8 个 rank 必须<strong>步调一致</strong>跑同一批（集合通信会死锁）；②ModelRunner 先把 <code>ScheduleBatch</code> 翻成 <code>ForwardBatch</code>，并说明 <code>positions/forward_mode/</code>注意力元数据/<code>out_cache_loc</code> 各驱动了什么；③前向内部 <strong>嵌入 → N 层解码层（注意力读写 KV 池、命中时复用 RadixAttention 前缀，第 7 课）→ 末端归一 + <code>lm_head</code> → logits</strong>，并指出 <strong>logits→token</strong> 的转折点（<code>sample()</code> 交给第 28 课采样器）发生在哪一步。</li>
+    <li>围绕 <strong>EXTEND vs DECODE</strong> 展开，把“同一个 forward 的两种性格”讲透，并说明它如何决定 Part 6 后续几课的脉络。请说明：①两者在 token 数、形状规整度、瓶颈（预填充<strong>计算密集</strong> vs 解码<strong>访存密集</strong>）上的差异；②为什么解码适合 <strong>CUDA Graph 重放</strong>（第 27 课）而预填充多走即时/分块（第 22 课）；③为什么 ModelRunner 还要<strong>同时</strong>握住模型（第 25/26 课）、KV 池（第 30 课）、注意力后端（第 33 课）乃至草稿模型（第 43 课），并据此说明 Part 6 接下来分别拆解的是哪几样零件。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Part 5 was all about how the scheduler <strong>decides</strong> — receive, batch, set policy. But it
+<strong>only decides; it never computes</strong>. The thing that actually turns a batch of tokens into logits on the
+GPU is this lesson's star, <span class="inline">ModelRunner</span>. It is <strong>the door where "decide" becomes
+"compute"</strong>: Part 5 was control flow; from here we step into the real math.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of ModelRunner as the <strong>machine operator</strong> on the floor: the scheduler (foreman) hands over a
+  <strong>work order</strong> (ForwardBatch: which tokens, prefill or decode, where the KV lives); the operator
+  <strong>runs the machine</strong> (<span class="mono">model.forward</span>), reads the <strong>gauge</strong> (logits), and
+  passes it to the <strong>inspector</strong> (Sampler) who picks this step's output (the next token). The foreman never
+  touches the machine — only the operator does.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  Each TP rank has <strong>one ModelRunner</strong> (owned by the TpWorker); it holds the <strong>loaded model</strong>
+  (Lessons 25/26) and the <strong>KV pool</strong> (Lesson 30). One <span class="mono">forward(forward_batch)</span> runs a
+  batch into logits, and <span class="mono">sample()</span> hands them to the Sampler (Lesson 28) for the token. A
+  <span class="inline">ForwardBatch</span> is <strong>the GPU view of a ScheduleBatch (Lesson 19)</strong> — the same
+  batch, re-expressed as tensors and metadata the GPU understands.
+</div>
+
+<h2>After run_batch: who handed this batch to ModelRunner</h2>
+<p>Let's complete the call chain. The scheduler's main loop (Lesson 18) calls <span class="mono">run_batch</span> every step,
+but run_batch itself is <strong>thin</strong>: it passes the freshly assembled <span class="mono">ScheduleBatch</span> to the
+<strong>TpWorker</strong>, which hands it straight to <strong>the one ModelRunner it owns</strong>. The chain is layered this
+deep because each layer watches exactly one thing — the scheduler cares about "which batch to run this step", the TpWorker
+cares about "my rank's boundary and cross-card communication", and the ModelRunner cares about "actually computing the
+tensors on this card". Clean, non-overlapping responsibilities are precisely what lets thousands of contributors maintain
+this code together.</p>
+<p>The chain also hides a subtle but fatal constraint: in an 8-way TP deployment, the 8 TpWorkers' ModelRunners must run
+the <strong>same batch in strict lockstep</strong>. Each computes a slice of the model (weights split row/column-wise,
+Lessons 25/46), and mid-layer they stitch attention outputs and residuals back together via all-reduce / all-gather — if
+any rank steps even half a beat early or late, the collective <strong>deadlocks the whole group</strong>. That is why,
+before the forward, a ScheduleBatch's contents must be <strong>byte-for-byte identical</strong> across all ranks: same
+tokens, same shapes, same forward_mode. Once you see this, Lesson 18's insistence that scheduling be deterministic and
+reproducible is no fussiness — it is the hard prerequisite for a distributed forward that doesn't hang.</p>
+
+<h2>From ScheduleBatch to ForwardBatch: a GPU pair of glasses</h2>
+<p>The scheduler hands over a <span class="mono">ScheduleBatch</span> (a set of Reqs, Lesson 19). ModelRunner first
+translates it into a <span class="mono">ForwardBatch</span> — exactly what a GPU forward needs: <strong>input_ids</strong>
+(the tokens to feed this step), <strong>positions</strong> (each token's position, for RoPE), <strong>forward_mode</strong>
+(EXTEND/prefill vs DECODE), <strong>attention metadata</strong> (which backend, which KV slots to read/write, Lesson 33),
+and pointers into the <strong>KV pool</strong>. In one line: ScheduleBatch records "<strong>who needs computing</strong>";
+ForwardBatch records "<strong>how the GPU computes this step</strong>".</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">ScheduleBatch</div><div class="nd">a batch of Reqs (L19)</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">ForwardBatch</div><div class="nd">GPU view: ids/positions/mode/KV</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">model.forward</div><div class="nd">embed→layers→norm→lm_head</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">logits</div><div class="nd">next-token dist per request</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Sampler</div><div class="nd">pick the next token (L28)</div></div>
+</div>
+
+<table class="t">
+  <tr><th>ForwardBatch field</th><th>what it is</th><th>used by</th></tr>
+  <tr><td class="mono">input_ids</td><td>token ids to forward this step</td><td>the embedding</td></tr>
+  <tr><td class="mono">positions</td><td>each token's absolute position</td><td>RoPE / pos encoding (L36)</td></tr>
+  <tr><td class="mono">forward_mode</td><td>EXTEND (prefill) / DECODE</td><td>picks the forward path</td></tr>
+  <tr><td class="mono">attn metadata</td><td>attention backend + KV slots</td><td>attention kernel (L33)</td></tr>
+  <tr><td class="mono">out_cache_loc</td><td>where new K/V are written</td><td>KV cache pool (L30)</td></tr>
+</table>
+
+<p>Read that table one level deeper and it gets tastier. <strong>positions</strong> is no decoration: it feeds straight into
+RoPE and sets each token's rotation phase, so the moment prefill or decode gets an absolute position wrong, attention
+"misjudges" near-vs-far relationships and the output goes haywire — that's exactly why chunked prefill (Lesson 22) must
+carefully preserve positional continuity. <strong>forward_mode</strong> is the master switch; one flip decides the whole
+path: variable-length prefill kernel vs regular decode kernel, whether a CUDA graph applies, which mask the attention
+backend uses. The <strong>attention metadata</strong> translates "the logical k-th token" into "which physical page and slot
+in the KV pool", and together with <span class="mono">out_cache_loc</span> it tells the kernel exactly where to write the
+new K/V and where to read the historical K/V. In short, these ForwardBatch fields together form a <strong>GPU addressing
+table</strong> that every read and write in the forward follows; how well they are organized directly decides whether the
+downstream attention kernel (Lesson 33) and CUDA graph (Lesson 27) run fast and stable.</p>
+
+<h2>ModelRunner.forward: how one forward goes</h2>
+<p>It forks two ways: if a <strong>CUDA graph</strong> (Lesson 27) applies, <strong>replay</strong> a recorded graph;
+otherwise run the batch <strong>eagerly</strong>. The key is <span class="mono">can_run_graph</span> — usually only
+<strong>decode steps</strong> (regular shapes, small batch) take graph replay, while <strong>prefill</strong> (variable
+lengths) mostly runs eager (or a piecewise prefill graph). Here is the real skeleton of <span class="mono">_forward_raw</span>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/model_runner.py ::ModelRunner.forward</span><span class="ln">the forward dispatch</span></div>
+  <pre><span class="kw">def</span> _forward_raw(self, forward_batch, pp_proxy_tensors, ...):
+    <span class="cm"># Can we replay the decode CUDA graph: mode matches + graph exists + shape fits</span>
+    can_run_graph = (forward_batch.forward_mode.is_cuda_graph()
+                     <span class="kw">and</span> self.decode_cuda_graph_runner
+                     <span class="kw">and</span> self.decode_cuda_graph_runner.can_run_graph(forward_batch))
+    <span class="kw">if</span> can_run_graph:                          <span class="cm"># decode: replay the recorded graph (L27)</span>
+        ret = self.decode_cuda_graph_runner.execute(forward_batch, ...)
+        <span class="kw">return</span> ModelRunnerOutput(logits_output=ret, can_run_graph=True)
+    self._prepare_eager_forward_batch(forward_batch)  <span class="cm"># eager path: DP/padding normalize</span>
+    <span class="kw">if</span> forward_batch.forward_mode.is_extend(...):   <span class="cm"># prefill: run the batch</span>
+        ...                                       <span class="cm"># else eager decode fallback</span></pre>
+</div>
+
+<p>Either path ends in <span class="mono">model.forward(input_ids, positions, forward_batch)</span>: embed → a stack of
+<strong>decoder layers</strong> (attention + MLP, Lesson 26) → final norm → the <span class="mono">lm_head</span> projecting
+out <strong>logits</strong>. ModelRunner then calls <span class="mono">sample()</span> to hand logits to the Sampler (Lesson 28).</p>
+
+<p>Look closer at why the dispatch is written this way. The first test, <span class="mono">can_run_graph</span>, is an
+<strong>and</strong> of three conditions: the mode must be graph-able (decode-like), the graph must <strong>actually have
+been recorded</strong>, and the current batch shape must fit one of the recorded buckets. Miss any one and replay is off —
+which is why graph replay sits up front and short-circuits: it is the "fast path", taken when possible, otherwise we fall
+back. After falling back, <span class="mono">_prepare_eager_forward_batch</span> does the eager path's <strong>normalization
+cleanup</strong>: padding for data-parallel (DP) across ranks, aligning tensor shapes so the following kernels run cleanly.
+Then it forks on <span class="mono">is_extend</span> — prefill honestly runs the whole batch, otherwise it lands in the
+eager decode fallback. Read this and you can pinpoint a "why didn't my decode use the CUDA graph" question to one of those
+three switches, instead of guessing in the dark.</p>
+
+<p>Worth a closer look at <strong>what the attention layer does here</strong>: it takes the KV slots from ForwardBatch,
+<strong>writes</strong> the current token's K/V <strong>into the KV pool</strong>, then attends the current Q against the
+<strong>historical K/V</strong> (possibly a prefix reused via RadixAttention, Lesson 7). In other words, the caching and
+reuse from Lessons 4–7 <strong>actually happen</strong> at this very moment when ModelRunner runs the forward — every
+intuition built in those earlier lessons gets "powered on" here for the first time. And precisely because the forward
+constantly reads/writes the KV pool and calls hardware-specific attention kernels, ModelRunner must hold model, KV pool,
+and attention backend <strong>all at once</strong> — none optional.</p>
+
+<p>Walk the forward one notch finer. After the embedding looks input_ids up into token vectors, the data enters a stack of
+identically structured <strong>decoder layers</strong>. In each layer comes a norm, then the attention sub-layer: Q/K/V are
+projected by linear layers, K/V are written into the KV pool at <span class="mono">out_cache_loc</span>, and the attention
+kernel lets the current Q look at itself plus all historical K/V. If that prefix was already computed by another request
+and hung on the radix tree by RadixAttention (Lesson 7), those historical K/V need no recompute — they are
+<strong>reused directly</strong>; the cache reuse of Lessons 4–7 only lands on a concrete kernel right here. The attention
+output is residual-added, then through the MLP sub-layer (another norm + two linears + activation), another residual.
+Stack N such layers, do a final norm, and <span class="mono">lm_head</span> projects the last hidden vector to the full
+vocab size to get <strong>logits</strong>. One commonly missed optimization: decode only needs the logits at <strong>each
+request's last position</strong> (the next word only looks at the last step), so the forward usually slices "take the last
+token" before projecting, saving a lot of useless lm_head compute. The moment logits exist, ModelRunner immediately calls
+<span class="mono">sample()</span>, where the next lesson's Sampler enters — <strong>the logits→token turning point of the
+whole pipeline happens right here</strong>.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Embed</h4><p>input_ids → token vectors; positions ready for RoPE.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>N decoder layers</h4><p>each: attention (read/write KV pool) + MLP + norms (Lesson 26).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Final norm + lm_head</h4><p>last hidden → vocab-sized <strong>logits</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Sample</h4><p><span class="mono">sample()</span> → Sampler emits the next token (Lesson 28).</p></div></div>
+</div>
+
+<h2>EXTEND vs DECODE: one forward, two personalities</h2>
+<p>Remember the two phases from Lesson 4? They become two forwards here in ModelRunner:</p>
+
+<div class="cols">
+  <div class="col"><h4>EXTEND / prefill forward</h4><p>Processes many tokens of the <strong>whole prompt</strong> at once (variable
+  length), <strong>compute-bound</strong>, highly parallel; shapes vary, so it mostly runs <strong>eager</strong> or
+  piecewise/chunked (Lesson 22). It <strong>fills</strong> this batch's K/V into the cache.</p></div>
+  <div class="col"><h4>DECODE / decode forward</h4><p>Each request computes <strong>just 1 new token</strong> — regular shapes,
+  fixed batch — perfect for <strong>CUDA graph replay</strong> (Lesson 27), erasing the launch overhead of hundreds of tiny
+  kernels. It <strong>appends one row</strong> to the cache.</p></div>
+</div>
+
+<p>Why is it <strong>decode</strong> that suits CUDA graphs while prefill doesn't? It comes down to "is the shape stable".
+A CUDA graph records a fixed sequence of kernel calls at fixed memory addresses; once recorded, replay can only apply the
+<strong>same tensor shapes and same pointers</strong>. Decode produces exactly 1 new token per request per step, the batch
+size stays fixed for a while, and each sequence grows by just 1 — highly regular shapes — so varying real lengths can be
+<strong>padded into a few fixed buckets</strong>, each recorded once and replayed many times. And decode is precisely the
+phase where launch overhead dominates (little compute per step, lots of kernel dispatch), so erasing it pays the most.
+Prefill is the opposite: prompt lengths vary wildly and hundreds-to-thousands of tokens are computed at once, so shapes
+differ almost every batch; recording a graph per shape is neither worthwhile nor feasible, so prefill prefers the eager
+path or a chunked/piecewise compromise (Lessons 22, 27). In one line: <strong>decode is "small, regular, repeated
+millions of times" — right in the sweet spot of graph replay</strong>; prefill is "big, varied, each its own", better
+carried by the flexible eager path.</p>
+
+<p>These two personalities really reflect two <strong>bottlenecks</strong>. Prefill processes hundreds-to-thousands of
+tokens at once with high arithmetic intensity, nearly saturating the GPU's compute units — classically
+<strong>compute-bound</strong>; here launch overhead is negligible next to the math, graph or not makes little difference,
+and the real optimization is making those matmuls big and full. Decode computes just 1 token per request per step, with
+thin, small matrices, so the GPU spends much of its time <strong>moving data</strong> (reading weights, reading KV) —
+classically <strong>memory-bound</strong>; now each kernel is tiny, and the fixed cost of launch/dispatch becomes the bulk,
+so flattening hundreds of kernel launches with a CUDA graph pays off immediately. Once you see "prefill lacks compute,
+decode lacks bandwidth", you understand why one forward splits into two paths, and why Lesson 27 mostly applies graph
+replay to decode. This "compute vs bandwidth" dividing line reappears again and again when we get to attention kernels,
+quantization, and speculative decoding — a universal yardstick running through the whole of inference optimization.</p>
+
+<p>This also explains why ModelRunner also owns: the <strong>CUDA-graph runner</strong> (Lesson 27), the <strong>attention
+backend</strong> (Lesson 33), the <strong>KV pool</strong> (Lesson 30), and a <strong>draft model</strong> for speculative
+decoding (Lesson 43) — it is the assembly shop for these GPU-side parts. Next, Lesson 25 shows how its model gets
+<strong>loaded</strong>, and Lesson 26 shows how that model is <strong>written</strong>.</p>
+
+<p>Think of ModelRunner as a GPU-side <strong>assembly machine</strong>: it bolts scattered parts into one running pipeline.
+The model gives it the "what to compute" structure, the KV pool gives it the "where history lives" memory, the attention
+backend gives it the "how to do attention on this hardware" craft, the CUDA-graph runner gives it the "how to run decode
+cheaper" overdrive, and the draft model (Lesson 43) gives it the "guess a few, verify in one shot" parallel gear for
+speculative decoding. Each part has its own lesson, but they all <strong>hang on ModelRunner and are strung together by
+the same forward</strong>. Because the parts converge here, debugging a "forward computed wrong / ran slow" issue almost
+always starts at ModelRunner: first check forward_mode went the right way, then check the attention metadata and KV slots,
+finally check whether a shape-mismatched CUDA graph was wrongly applied. Keep this assembly machine's internal wiring in
+your head, and the next four lessons are just taking apart its parts one by one — each one you remove makes your picture of
+this forward more three-dimensional, until you see the whole pipeline as one.</p>
+
+<p>Place this lesson back in the whole map: Lessons 1–8 tell you "why it's designed this way", Lessons 13–17 cover how
+requests "get in", Lessons 18–23 cover how the scheduler "decides" — and <strong>this lesson is the instant where a
+decision lands as compute</strong>. From here, the rest of Part 6 unfolds along the few things in ModelRunner's hands: how
+model weights are <strong>loaded</strong> onto the card (Lesson 25), how a model file is <strong>written</strong> (Lesson 26,
+with Llama as the example), why decode can use a <strong>CUDA graph</strong> to flatten launch overhead (Lesson 27), and the
+<strong>Sampler</strong> turning logits into a token (Lesson 28). Carry the key — "<strong>ModelRunner = the decide→compute
+boundary, one per rank, holding model + KV pool + attention backend</strong>" — and the next four lessons read smoothly.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>ModelRunner</strong>: one per TP rank, the <strong>decide→compute boundary</strong>; holds model + KV pool, <span class="mono">forward</span>→logits, <span class="mono">sample</span>→token.</li>
+    <li><strong>ForwardBatch</strong>: the <strong>GPU view</strong> of a ScheduleBatch (L19) — ids/positions/forward_mode/attn metadata/KV pointers.</li>
+    <li><strong>One forward</strong>: embed → N decoder layers → norm + lm_head → logits → Sampler.</li>
+    <li><strong>Two forwards</strong>: EXTEND (prefill, compute-bound, mostly eager) vs DECODE (regular shapes, CUDA-graph replay, L27).</li>
+    <li><strong>Assembly shop</strong>: ModelRunner also owns the CUDA graph, attention backend, KV pool, draft model — the rest of Part 6 unpacks them.</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In SGLang, what is the responsibility boundary between <code>ModelRunner</code> and the scheduler (Lesson 18)?</div>
+  <ol class="opts">
+    <li>ModelRunner receives HTTP requests and tokenizes; the scheduler does the forward</li>
+    <li>The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpWorker</li>
+    <li>The scheduler both decides and runs the forward itself; ModelRunner only samples the token</li>
+    <li>The whole process shares one ModelRunner that all TP ranks call</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is the relationship between <code>ForwardBatch</code> and <code>ScheduleBatch</code> (Lesson 19)?</div>
+  <ol class="opts">
+    <li>ForwardBatch is the sampling result; ScheduleBatch is the input prompt</li>
+    <li>ForwardBatch is the <strong>GPU view</strong> of a ScheduleBatch — the same batch re-expressed as GPU tensors/metadata: <code>input_ids</code>, <code>positions</code> (for RoPE), <code>forward_mode</code> (picks the path), attention metadata + <code>out_cache_loc</code> (KV read/write slots); ScheduleBatch records 'who needs computing', ForwardBatch records 'how the GPU computes this step'</li>
+    <li>They are identical, just renamed</li>
+    <li>ScheduleBatch lives on GPU and ForwardBatch on CPU, mirroring each other</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. ModelRunner first <strong>translates</strong> the scheduler's ScheduleBatch (a set of Reqs) into a ForwardBatch — exactly what the GPU forward needs: which tokens, each token's position, prefill vs decode, attention backend and KV slots. In short ScheduleBatch='who needs computing', ForwardBatch='how the GPU computes this step'. It is not a sampling result, a mere rename, or a CPU mirror.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does the <strong>DECODE</strong> forward suit CUDA-graph replay (Lesson 27) while <strong>EXTEND</strong>/prefill mostly runs eager?</div>
+  <ol class="opts">
+    <li>Because decode doesn't read the KV cache, it can be graphed</li>
+    <li>Because prefill must run on CPU and can't use a GPU graph</li>
+    <li>Because decode is more compute-heavy than prefill and more worth optimizing</li>
+    <li>Decode emits <strong>just 1 new token</strong> per request per step with <strong>highly regular shapes</strong> (paddable to a few fixed buckets), and with little compute per step the launch overhead dominates, so replay <strong>flattens that overhead</strong>; prefill has wildly varying lengths, different shapes every batch, and is already compute-bound, so recording graphs is neither worthwhile nor feasible</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A CUDA graph records a <strong>fixed-shape, fixed-address</strong> kernel sequence; replay only fits the same shapes. Decode is 'small, regular, repeated millions of times', memory-bound with launch overhead dominating, so replay pays most; prefill is 'big, varied, each its own', compute-bound with shapes differing nearly every batch, better on the eager path. Decode does read KV, prefill doesn't run on CPU, and decode does less compute per step.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.</li>
+    <li>Centered on <strong>EXTEND vs DECODE</strong>, fully explain the 'two personalities of one forward' and how it shapes the rest of Part 6. Explain: (1) their differences in token count, shape regularity, and bottleneck (prefill <strong>compute-bound</strong> vs decode <strong>memory-bound</strong>); (2) why decode suits <strong>CUDA-graph replay</strong> (Lesson 27) while prefill mostly runs eager/chunked (Lesson 22); (3) why ModelRunner must hold the model (Lessons 25/26), KV pool (Lesson 30), attention backend (Lesson 33), and even a draft model (Lesson 43) <strong>all at once</strong>, and from that, which parts the rest of Part 6 takes apart one by one.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="23-dp-controller-and-pp-scheduling.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">DP 控制器与 PP 调度</span><span class="lang-en">DP controller &amp; PP scheduling</span></div></a><a class="next" href="25-model-loading-and-weights.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">模型加载与权重</span><span class="lang-en">Model loading &amp; weights</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

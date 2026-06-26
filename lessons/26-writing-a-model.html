@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>26 · 写一个模型 / Writing a model - SGLang 图解教程</title>
+<meta name="description" content="第六部分 · 模型执行｜写一个模型 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="26 · 写一个模型 / Writing a model - SGLang 图解教程">
+<meta property="og:description" content="第六部分 · 模型执行｜写一个模型 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="26 · 写一个模型 / Writing a model - SGLang 图解教程">
+<meta name="twitter:description" content="第六部分 · 模型执行｜写一个模型 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></span>
+    <span class="pill">26 / 28</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:92%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第六部分 · 模型执行</span><span class="lang-en">Part 6 · Model execution</span></div>
+    <h1><span class="lang-zh">写一个模型</span><span class="lang-en">Writing a model</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">
+上一课我们看了权重<strong>怎么进来</strong>（load_weights，第 25 课）。这一课回答一个更让人好奇的问题：在 SGLang 里
+<strong>"写一个模型"到底要写什么</strong>？答案出乎意料地轻——一个模型文件，本质上就是把 SGLang 早就备好的
+<strong>并行层</strong>像积木一样<strong>搭起来</strong>。你不写注意力内核、不写跨卡通信、不写 KV 管理，只描述<strong>架构</strong>。
+这正是 SGLang "对新模型几乎是 day-0 支持、模型覆盖面极广"背后那个朴素的工程真相。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把写模型想成<strong>用标准乐高积木拼模型</strong>：SGLang 已经把每一种砖块都<strong>注塑成型</strong>了——并行线性层、注意力、归一化、旋转位置编码，
+  全是现成、已调好、能跨卡的零件。你要做的只有两件事：①照图纸把砖块<strong>卡成正确的形状</strong>（架构：用哪些层、维度多大、残差怎么连）；
+  ②给每个零件<strong>贴标签</strong>，说清"磁盘上哪个盒子里的零件该装到这儿"（load_weights 的名字映射）。你<strong>从不需要自己注塑一块砖</strong>——
+  注意力怎么在 GPU 上算、8 张卡怎么把结果拼齐、KV 该写到池子哪一页，都封装在砖块内部，与你无关。
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  一个 SGLang 模型文件就是一组互相嵌套的 PyTorch <span class="mono">nn.Module</span>。以 Llama 为例，四个类<strong>层层套娃</strong>：
+  <span class="mono">LlamaAttention</span>（注意力）→ <span class="mono">LlamaMLP</span>（前馈）→ 二者组成 <span class="mono">LlamaDecoderLayer</span>（一层解码层）→
+  N 层 + 嵌入 + 末端归一组成 <span class="mono">LlamaModel</span> → 再加 <span class="mono">lm_head</span> 与 <span class="mono">forward</span> 就是
+  <span class="mono">LlamaForCausalLM</span>（对外的整模型）。每个类内部用的全是 SGLang 的<strong>可复用层</strong>。所以"加新模型"在绝大多数情况下
+  <strong>就是一次组装</strong>——写一份这样的文件、注册一下，就能上线服务。
+</div>
+
+<h2>四个类，层层套娃：Llama 是怎么搭出来的</h2>
+<p>先把这四层拆开看，你会发现每一层都<strong>只负责一件事</strong>，而且每一件事用的零件都来自 SGLang，而非你手写。最里层是
+<span class="mono">LlamaAttention</span>：它先用一个<strong>列并行线性层</strong> <span class="mono">QKVParallelLinear</span> 把隐藏向量一次投影出 q/k/v
+（三者被打包在一个权重里，正是第 25 课 load_weights 要做融合映射的原因），对 q/k 施加 <strong>RoPE</strong> 旋转位置编码，再把 q 和历史
+k/v 交给 <span class="mono">RadixAttention</span>（注意力层）去算——这一步会<strong>读写 KV 池</strong>，具体用哪个注意力后端、KV 落在池子哪些槽位，
+全由传进来的 <span class="mono">forward_batch</span> 决定（第 33 课）；最后 o_proj 用<strong>行并行线性层</strong> <span class="mono">RowParallelLinear</span>
+把多头输出投影回隐藏维。注意：q/k/v、gate/up 走<strong>列并行</strong>（按输出维切片），o_proj、down_proj 走<strong>行并行</strong>（按输入维切片再 all-reduce），
+这套切法第 46 课会细讲，但模型作者<strong>只是挑用哪种层，切片与通信都在层内部自动发生</strong>。</p>
+<p>外面一层是 <span class="mono">LlamaMLP</span>：gate/up 投影 + <strong>SiLU</strong> 激活（<span class="mono">SiluAndMul</span>）+ down 投影，没有任何花活。再外一层
+<span class="mono">LlamaDecoderLayer</span> 把注意力和 MLP 缝合成一层标准 Transformer 块，关键在<strong>残差结构</strong>：input_norm → 注意力 → 残差相加 →
+post_norm → MLP → 残差相加。<span class="mono">LlamaModel</span> 则是骨架：<span class="mono">embed_tokens</span>（词表并行嵌入，<span class="mono">VocabParallelEmbedding</span>）
+→ N 层解码层 → 末端 <span class="mono">RMSNorm</span>。最外层 <span class="mono">LlamaForCausalLM</span> 才是对运行时暴露的"整模型"：它持有 <span class="mono">model</span>、
+一个 <span class="mono">lm_head</span>（<span class="mono">ParallelLMHead</span>，权重可与嵌入共享 tie_word_embeddings），一个 <span class="mono">forward(input_ids, positions,
+forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</span>（第 25 课）。ModelRunner（第 24 课）握住的就是这个最外层类。</p>
+
+<p>这种"套娃"不是为了好看，而是 PyTorch <span class="mono">nn.Module</span> 组合范式的自然结果：父模块在 <span class="mono">__init__</span> 里把子模块当成普通属性挂上去，<span class="mono">forward</span> 里再按顺序调用它们，于是"注册参数、搬到 GPU、保存 / 加载"这些事 PyTorch 会沿着这棵模块树<strong>自动递归</strong>完成。这也解释了第 25 课的 <span class="mono">load_weights</span> 为什么能按 <span class="mono">model.layers.0.self_attn.qkv_proj</span> 这样的<strong>点分路径</strong>精确定位每个权重——路径就是套娃的层级，名字天然对应模块树上的位置。理解了这一点，你看任何一个 SGLang 模型文件都能一眼分辨"谁套着谁"，进而知道某个权重该塞进哪个子模块。</p>
+
+<p>再看 <span class="mono">LlamaAttention</span> 里一个体现"组装"威力的细节：它要处理<strong>分组查询注意力</strong>（GQA）——查询头多、键值头少。代码里据 <span class="mono">tp_size</span> 把总头数、总 KV 头数分摊到每张卡，当 KV 头数比卡数还少时就<strong>复制</strong>而非切分。这些边界逻辑看着琐碎，但它们只决定"每张卡分到几个头、维度多大"，算出来的 <span class="mono">num_heads</span>、<span class="mono">head_dim</span> 再原样交给 <span class="mono">QKVParallelLinear</span> 和 <span class="mono">RadixAttention</span>。也就是说，连 GQA 这种看似要动注意力实现的特性，在模型文件里也只是<strong>几行维度算术</strong>，真正的注意力计算仍然原封不动地复用库里的那一个算子。</p>
+
+<p>同样的"组装"思路也贯穿 <span class="mono">LlamaMLP</span>：gate 与 up 两个投影被合并成一个 <span class="mono">MergedColumnParallelLinear</span>（磁盘上是分开的两份权重，加载时由 load_weights 拼成一份，第 25 课），<span class="mono">SiluAndMul</span> 则把"对 gate 做 SiLU、再与 up 逐元素相乘"这两步融合进一个算子。你会发现一个反复出现的模式：<strong>凡是能融合的相邻操作，库都提前打包好了</strong>——QKV 合一、gate/up 合一、norm 与残差合一。模型作者只要知道"该用哪个打包好的层"，就自动享受到这些算子级优化，而不必理解它们为什么更快。这种"默认就快"的设计，让一份朴素的模型文件也能跑出接近手工优化的性能。</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">入口</span><span class="name">LlamaForCausalLM</span></div><div class="ld">对运行时暴露的整模型：持有 <span class="mono">model</span> + <span class="mono">lm_head</span>，提供 <span class="mono">forward(...)→logits</span> 与 <span class="mono">load_weights</span>（第 25 课）。</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">骨架</span><span class="name">LlamaModel</span></div><div class="ld"><span class="mono">embed_tokens</span>（词表并行嵌入）→ N× 解码层 → 末端 <span class="mono">RMSNorm</span>。</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">× N</span><span class="name">LlamaDecoderLayer</span></div><div class="ld">一层标准块：input_norm → 注意力 → 残差 → post_norm → MLP → 残差。</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">子层</span><span class="name">LlamaAttention</span></div><div class="ld">QKV 列并行投影 + RoPE + <span class="mono">RadixAttention</span>（读写 KV 池，第 33 课）+ o_proj 行并行。</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">子层</span><span class="name">LlamaMLP</span></div><div class="ld">gate/up 列并行 + <span class="mono">SiLU</span> + down 行并行。</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">出口</span><span class="name">lm_head</span></div><div class="ld">把末端 hidden 投影到词表维，得到 <strong>logits</strong>（可与嵌入共享权重）。</div></div>
+</div>
+
+<h2>一层里发生了什么：跟着残差走一遍</h2>
+<p>值得强调的是，<strong>层的选择本身就编码了并行策略</strong>。当作者把 q/k/v 投影写成 <span class="mono">QKVParallelLinear</span>、把 o_proj 写成 <span class="mono">RowParallelLinear</span> 时，他没有写任何一行通信代码，却已经决定了：这层在张量并行下，权重按输出维切给各卡、各卡先各算一段、再在 o_proj 之后用一次 all-reduce 把结果拼齐（第 46 课）。换句话说，"选哪种并行层"就是在"选这层怎么跨卡分布"。同理，<span class="mono">VocabParallelEmbedding</span> 把词表维切开、<span class="mono">ParallelLMHead</span> 把输出投影切开。作者要操心的只是"维度对不对、切法配不配套"，真正的切片与集合通信全在层内部默默发生——这正是模型文件能保持简短的关键。</p>
+<p>把镜头推进到<strong>单独一层</strong>解码层，你能看清"组装"具体组装出了什么。数据带着上一层的残差进来，先做一次
+<span class="mono">input_layernorm</span>（RMSNorm，第 36 课）；归一化后的向量进注意力子层——投影出 q/k/v、给 q/k 转上 RoPE、当前 k/v
+按 <span class="mono">forward_batch</span> 指定的槽位<strong>写进 KV 池</strong>、再让 q 去看自己与所有历史 k/v（若前缀已被 RadixAttention 缓存就直接复用，第 7 课）；
+注意力输出经 o_proj 回到隐藏维，与残差<strong>相加</strong>。接着 <span class="mono">post_attention_layernorm</span> 再归一化一次，进 MLP，又一次残差相加。
+就这么六步，一层结束，把 <span class="mono">(hidden_states, residual)</span> 交给下一层。N 层叠完做末端归一，<span class="mono">lm_head</span> 投影出 logits。
+注意 <span class="mono">forward_batch</span> 是怎么<strong>一路穿到</strong>每一层注意力的——它就是模型文件与运行时之间的<strong>那道缝</strong>：模型只管"把张量算对"，
+"该读写 KV 池哪些槽位"由运行时通过 forward_batch 告诉它。</p>
+
+<p>这里还藏着一个常被忽略的细节：<span class="mono">residual</span> 是<strong>跨层传递</strong>的。注意看代码里第一层进来时 residual 为 None、于是把输入本身当残差；之后每层都把"归一化前的值"作为残差留到相加时用。SGLang 的 <span class="mono">RMSNorm</span> 还把"归一化 + 残差相加"<strong>融合</strong>成一次调用——<span class="mono">input_layernorm(hidden, residual)</span> 同时返回新 hidden 和更新后的 residual，省去一次显存往返。这种把常见组合"焊死"成单个高效算子的做法，正是底层库替你做掉的优化：你照着调用就行，完全不必关心它内部怎么把两步合一。模型作者眼里只有"先 norm 再 attn 再残差"这条清晰的逻辑，看不到也不需要看到融合内核的存在。</p>
+
+<p>顺带说清一个容易混的点：解码阶段每一步其实只前向<strong>一个</strong>新 token，但它要看<strong>全部历史</strong>的 K/V；预填充阶段则一次前向<strong>整段</strong>提示的多个 token。同一份 <span class="mono">forward</span> 代码两种情形都能跑，靠的就是 <span class="mono">forward_batch</span> 里的 <span class="mono">forward_mode</span> 和注意力元数据替模型把差异吸收掉——模型文件里你看不到 EXTEND / DECODE 的分叉，那都在注意力层与 ModelRunner（第 24 课）里处理了。这进一步印证了本课主线：模型作者描述的是"<strong>静态的架构</strong>"，而"<strong>动态的怎么跑</strong>"由运行时与库层接管。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>对输入做 RMSNorm（第 36 课），保留 residual 备用。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>注意力（读写 KV）</h4><p>QKV 投影 + RoPE；按 <span class="mono">forward_batch</span> 写/读 KV 池，q 看历史 k/v（第 33 课）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>残差相加</h4><p>注意力输出经 o_proj 回隐藏维，与 residual 相加。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>post_norm</h4><p>再做一次 RMSNorm，准备进 MLP。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down，提取非线性特征。</p></div></div>
+  <div class="step"><div class="num">6</div><div class="sc"><h4>残差相加 → 下一层</h4><p>与 residual 相加，交出 <span class="mono">(hidden, residual)</span>。</p></div></div>
+</div>
+
+<h2>谁写、谁给：一张分工表把成本说清</h2>
+<p>现在回到那个核心命题：为什么"加一个模型"在 SGLang 里这么便宜？看下面这张表——四（五）个类各自的职责，<strong>无一例外</strong>
+都是在"挑选并连接"SGLang 现成的层，没有一行是在实现底层算子。把它和右边"你写 vs SGLang 给"的对照一起读，你就明白：模型作者真正
+<strong>新写</strong>的内容只有两类——<strong>架构</strong>（用哪些层、维度多大、残差怎么连）和 <strong>load_weights 的名字映射</strong>（哪个 HF 权重对应内部哪个参数、要不要融合）。
+其余的注意力内核、TP 通信、KV 管理、CUDA 图，全是<strong>白拿</strong>的。这就是"广泛模型支持"成本低的根因。</p>
+
+<table class="t">
+  <tr><th>类</th><th>职责（都在"组装现成层"）</th><th>用到的 SGLang 层</th></tr>
+  <tr><td class="mono">LlamaAttention</td><td>q/k/v 投影 + RoPE + 注意力 + 输出投影</td><td class="mono">QKVParallelLinear / RadixAttention / RowParallelLinear</td></tr>
+  <tr><td class="mono">LlamaMLP</td><td>gate/up + 激活 + down</td><td class="mono">MergedColumnParallelLinear / SiluAndMul</td></tr>
+  <tr><td class="mono">LlamaDecoderLayer</td><td>缝合注意力 + MLP，定义残差结构</td><td class="mono">RMSNorm（×2）</td></tr>
+  <tr><td class="mono">LlamaModel</td><td>嵌入 → N 层 → 末端归一</td><td class="mono">VocabParallelEmbedding / RMSNorm</td></tr>
+  <tr><td class="mono">LlamaForCausalLM</td><td>整模型：forward→logits + load_weights</td><td class="mono">ParallelLMHead / LogitsProcessor</td></tr>
+</table>
+
+<p>把这张表再读深一层会更有体会：凡是带 "Parallel" 字样的层，背后都站着一整套张量并行的切片与通信实现；<span class="mono">RadixAttention</span> 背后是前缀缓存复用（第 7 课）+ 分页 KV + 多种硬件注意力后端（第 33 课）；<span class="mono">RMSNorm</span>、RoPE 背后是手写的融合内核（第 36 课）。这些每一项单独拎出来都是一篇大文章，但对模型作者而言它们只是<strong>一行构造、一次调用</strong>。这就是"复杂度下沉、接口上浮"的威力：把难的东西沉到可复用层里，露在模型文件表面的，只剩下"这个模型长什么样"。</p>
+
+<div class="cols">
+  <div class="col"><h4>你写的（模型文件）</h4><p><strong>架构</strong>：用哪些层、各维度、残差结构、N 层怎么叠；<strong>load_weights</strong>：HF 权重名 → 内部参数名的映射与 q/k/v、gate/up 融合（第 25 课）。仅此而已——一份文件、几百行。</p></div>
+  <div class="col"><h4>SGLang 提供的（白拿）</h4><p>并行线性层（列/行并行，自动切片 + 通信，第 46 课）、<strong>注意力后端</strong>与 KV 管理（第 33 课）、RoPE/RMSNorm（第 36 课）、CUDA 图（第 27 课）、采样（第 28 课）。你<strong>一行都不用碰</strong>。</p></div>
+</div>
+
+<p>反过来想，这套分工也<strong>约束</strong>了模型作者：你能表达的架构，受限于 SGLang 已提供的层。如果一个新模型用了某种全新的注意力变体或激活，而库里还没有对应层，那就需要<strong>先给库添一块新积木</strong>（一个新的可复用层），再在模型文件里组装它。但现实是，主流开源模型的构件高度同质——都是某种线性投影、某种注意力、某种归一化的排列组合，所以绝大多数新模型落地时，库里的积木<strong>早已齐备</strong>，作者真的只需组装。这正是"day-0 支持"在工程上能成立的前提，也是为什么 SGLang 的模型目录能轻松扩张到上百个文件而不失控。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/models/llama.py ::LlamaForCausalLM</span><span class="ln">组装即模型</span></div>
+  <pre><span class="kw">class</span> <span class="st">LlamaDecoderLayer</span>(nn.Module):
+    <span class="kw">def</span> forward(self, positions, hidden_states, forward_batch, residual):
+        <span class="cm"># 一层 = 归一化 → 注意力 → 残差 → 归一化 → MLP → 残差</span>
+        <span class="kw">if</span> residual <span class="kw">is</span> None:
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
+        <span class="kw">else</span>:
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
+        hidden_states = self.self_attn(positions, hidden_states, forward_batch)   <span class="cm"># forward_batch 穿到注意力</span>
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        hidden_states = self.mlp(hidden_states)
+        <span class="kw">return</span> hidden_states, residual
+
+<span class="kw">class</span> <span class="st">LlamaForCausalLM</span>(nn.Module):
+    <span class="kw">def</span> forward(self, input_ids, positions, forward_batch, ...):
+        hidden_states = self.model(input_ids, positions, forward_batch)   <span class="cm"># 嵌入 → N 层 → 末端归一</span>
+        <span class="kw">return</span> self.logits_processor(input_ids, hidden_states, self.lm_head, forward_batch)   <span class="cm"># → logits</span></pre>
+</div>
+
+<p>读这段代码最该记住的是它的<strong>朴素</strong>：<span class="mono">LlamaForCausalLM.forward</span> 几乎什么都没做——把活儿交给
+<span class="mono">self.model</span> 跑出 hidden，再交给 <span class="mono">logits_processor</span> 配合 <span class="mono">lm_head</span> 出 logits；
+<span class="mono">LlamaDecoderLayer.forward</span> 也只是把归一化、注意力、MLP、残差按顺序串起来。没有 CUDA、没有 all-reduce、没有 KV 分页的影子，
+那些复杂度全被关进了它调用的那些层里。这种"模型文件薄、底层库厚"的分工，正是为什么一个新开源模型发布当天，社区往往只要<strong>照葫芦画瓢写一份这样的文件</strong>
+就能让 SGLang 跑起来；多模态（第 49 课）、MoE（第 34 课）这些更复杂的架构，也只是在<strong>同一套脚手架</strong>上多插几种层而已。</p>
+
+<p>最后值得点一句"<strong>注册</strong>"这步。写完模型文件还要把类登记到模型注册表里（按架构名，比如 config 里 <span class="mono">architectures</span> 字段写着 <span class="mono">LlamaForCausalLM</span>），运行时据此从权重目录的 <span class="mono">config.json</span> 找到该用哪个类。这一步通常只是一行映射，却是"配置驱动、自动派发"的关键：用户启动服务时只给一个模型路径，TokenizerManager 与 ModelRunner（第 24 课）顺着 config 的架构名就能找到对应文件、实例化、加载权重、开跑。于是从"社区提交一个模型文件"到"线上能服务这个模型"，中间<strong>不需要改任何调度、批处理或内核代码</strong>——这条干净的边界，才是广泛模型支持真正的工程红利。也正因如此，当你下次想给 SGLang 适配一个新模型时，思路应该是"<strong>先去 models 目录找一个最像的现有文件照着改</strong>"，而不是从零设计——绝大多数时候，你要做的只是调整层的种类与维度、改对 load_weights 的名字映射、再注册一下而已。</p>
+
+<div class="card key">
+  <div class="tag">🔑 本课要点</div>
+  <ul>
+    <li><strong>模型文件 = 组装</strong>：SGLang 模型就是一组嵌套的 <span class="mono">nn.Module</span>，内部全用现成的<strong>并行层</strong>搭成，作者基本不写底层算子。</li>
+    <li><strong>Llama 四（五）类套娃</strong>：<span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>。</li>
+    <li><strong>你只写两样</strong>：架构（哪些层、维度、残差）+ <span class="mono">load_weights</span> 名字映射（第 25 课）；注意力、TP 通信、KV 管理由 SGLang 白给。</li>
+    <li><strong>forward_batch 是那道缝</strong>：它一路穿到每层注意力，告诉模型该读写 KV 池哪些槽位（第 24/33 课）——模型与运行时的边界。</li>
+    <li><strong>所以加模型便宜</strong>：新开源模型常能 day-0 支持，写一份文件、注册即服务；MoE/多模态只是同套脚手架上多插几种层（第 34/49 课）。</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 SGLang 里“写一个模型”（如 Llama），模型作者真正<strong>新写</strong>的主要是什么？</div>
+  <ol class="opts">
+    <li><strong>架构 + load_weights 名字映射</strong>：用哪些层、各维度、残差怎么连，再把 HF 权重名映射到内部参数；注意力内核、TP 通信、KV 管理都用 SGLang 现成的<strong>并行层</strong>，作者不实现底层算子</li>
+    <li>实现自己的 KV 缓存分页与显存分配器</li>
+    <li>从零手写注意力 CUDA 内核和跨卡 all-reduce 通信</li>
+    <li>编写张量并行的权重切分与通信调度逻辑</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。模型文件就是把 SGLang 现成的并行层（<code>QKVParallelLinear</code>、<code>RowParallelLinear</code>、<code>RadixAttention</code>、<code>RMSNorm</code> 等）<strong>组装</strong>起来：作者只描述架构并写 <code>load_weights</code> 的名字映射（第 25 课）。注意力内核、TP 通信、KV 管理、CUDA 图全是白拿的——这正是“加模型便宜、day-0 支持广”的根因。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Llama 的四（五）个类是怎么<strong>层层套娃</strong>的？</div>
+  <ol class="opts">
+    <li>只有一个大类，所有逻辑写在一个 forward 里</li>
+    <li><code>LlamaAttention</code> 和 <code>LlamaMLP</code> 组成 <code>LlamaDecoderLayer</code>；N 层 + 嵌入 + 末端归一组成 <code>LlamaModel</code>；再加 <code>lm_head</code> 与 <code>forward</code> 就是对运行时暴露的 <code>LlamaForCausalLM</code></li>
+    <li>五个类彼此平级，由调度器在运行时按需拼接</li>
+    <li><code>LlamaForCausalLM</code> 最底层，注意力包着整模型</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。套娃关系是 <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>。每个类只负责一件事、内部都用 SGLang 现成层。ModelRunner（第 24 课）握住的是最外层 <code>LlamaForCausalLM</code>，它提供 <code>forward(...)→logits</code> 与 <code>load_weights</code>。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <code>forward_batch</code> 被一路传到每一层注意力，它扮演什么角色？</div>
+  <ol class="opts">
+    <li>它保存模型权重，前向时按需加载到 GPU</li>
+    <li>它是模型文件与运行时之间的<strong>那道缝</strong>：告诉注意力该读/写 KV 池的哪些槽位、用哪个注意力后端（第 24/33 课），模型只管算对张量</li>
+    <li>它只在预填充用到，解码阶段不传</li>
+    <li>它是采样参数容器，决定 temperature/top-p</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。<code>forward_batch</code>（第 24 课）携带 KV 槽位、注意力元数据等，逐层穿到 <code>self_attn</code>，让注意力知道当前 k/v 写到池子哪、历史从哪读（第 33 课）。这正是“模型只管把张量算对、运行时负责 KV 寻址”的分界。它不存权重、不是采样容器，预填充与解码都要传。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用“标准乐高积木拼模型”的类比，完整讲清在 SGLang 里“写一个 Llama”到底写了什么、又白拿了什么。请逐一覆盖：①四（五）个类如何<strong>层层套娃</strong>（<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>）；②每个类用到哪些 SGLang 现成层（<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE）；③一层里“input_norm→注意力(读写 KV)→残差→post_norm→MLP→残差”的结构；④作者真正<strong>新写</strong>的只有架构 + <code>load_weights</code> 映射（第 25 课），而注意力内核、TP 切片/通信（第 46 课）、KV 管理（第 33 课）都是白拿。</li>
+    <li>解释为什么 SGLang 能对新开源模型做到近乎 <strong>day-0 支持</strong>、模型覆盖面极广。请说明：①“模型文件薄、底层库厚”的分工——<code>LlamaForCausalLM.forward</code> 几乎只是把活儿交给 <code>self.model</code> 再交给 <code>logits_processor</code>/<code>lm_head</code>，没有 CUDA/all-reduce/KV 分页的影子；②<code>forward_batch</code> 作为模型与运行时之间的缝，如何让同一份模型文件适配不同注意力后端与并行配置（第 24/33/46 课）；③MoE（第 34 课）、多模态（第 49 课）等更复杂架构为何只是“同套脚手架上多插几种层”，而非推倒重来。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">
+Last lesson covered how weights <strong>get in</strong> (load_weights, Lesson 25). This one answers a more intriguing question: in SGLang,
+what does it actually take to <strong>"write a model"</strong>? The answer is surprisingly light — a model file is essentially just
+<strong>snapping together</strong> the <strong>parallel layers</strong> SGLang already ships, like LEGO. You write no attention kernel, no cross-GPU
+communication, no KV management — only the <strong>architecture</strong>. That is the plain engineering truth behind SGLang's
+"day-0 support for new models, very broad coverage."
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of writing a model as <strong>building with standard LEGO bricks</strong>: SGLang has already <strong>molded every brick</strong> —
+  parallel linear layers, attention, norm, rotary embedding — all ready-made, tuned, and cross-GPU capable. You do just two things:
+  ① snap the bricks <strong>into the right shape</strong> (the architecture: which layers, what dims, how residuals connect); and
+  ② <strong>label</strong> each part — "which box on disk supplies the part that goes here" (load_weights name mapping). You <strong>never mold a brick yourself</strong>:
+  how attention runs on the GPU, how 8 cards stitch results, which KV-pool page to write — all sealed inside the brick, none of your concern.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  A SGLang model file is a set of nested PyTorch <span class="mono">nn.Module</span>s. Take Llama — four classes <strong>nest like dolls</strong>:
+  <span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → both compose <span class="mono">LlamaDecoderLayer</span> (one decoder layer) →
+  N layers + embed + final norm compose <span class="mono">LlamaModel</span> → add <span class="mono">lm_head</span> and <span class="mono">forward</span> and you get
+  <span class="mono">LlamaForCausalLM</span> (the model the runtime sees). Each class internally uses SGLang's <strong>reusable layers</strong>. So "adding a model"
+  is, in the vast majority of cases, <strong>one act of assembly</strong> — write such a file, register it, and it's served.
+</div>
+
+<h2>Four classes nesting: how Llama is built</h2>
+<p>Pull these four layers apart and you'll find each <strong>does just one thing</strong>, and every piece it uses comes from SGLang, not from your hand.
+Innermost is <span class="mono">LlamaAttention</span>: it projects q/k/v in one shot via a <strong>column-parallel</strong> <span class="mono">QKVParallelLinear</span>
+(the three are packed in one weight — exactly why load_weights does fusion mapping, Lesson 25), applies <strong>RoPE</strong> to q/k, then hands q and the
+historical k/v to <span class="mono">RadixAttention</span> (the attention layer) — this step <strong>reads/writes the KV pool</strong>, with the attention backend
+and which pool slots all dictated by the incoming <span class="mono">forward_batch</span> (Lesson 33); finally o_proj projects multi-head output back to
+hidden dim via the <strong>row-parallel</strong> <span class="mono">RowParallelLinear</span>. Note: q/k/v, gate/up go <strong>column-parallel</strong> (split on output dim),
+o_proj/down_proj go <strong>row-parallel</strong> (split on input dim then all-reduce); Lesson 46 details this slicing, but the model author <strong>only picks which
+layer to use — slicing and communication happen inside the layer automatically</strong>.</p>
+<p>One layer out is <span class="mono">LlamaMLP</span>: gate/up projection + <strong>SiLU</strong> (<span class="mono">SiluAndMul</span>) + down projection, nothing fancy.
+Outer still, <span class="mono">LlamaDecoderLayer</span> stitches attention and MLP into one standard Transformer block; the key is the <strong>residual structure</strong>:
+input_norm → attention → residual add → post_norm → MLP → residual add. <span class="mono">LlamaModel</span> is the skeleton: <span class="mono">embed_tokens</span>
+(vocab-parallel embedding, <span class="mono">VocabParallelEmbedding</span>) → N decoder layers → final <span class="mono">RMSNorm</span>. The outermost
+<span class="mono">LlamaForCausalLM</span> is the "whole model" exposed to the runtime: it holds <span class="mono">model</span>, an <span class="mono">lm_head</span>
+(<span class="mono">ParallelLMHead</span>, weight optionally shared with embed via tie_word_embeddings), a <span class="mono">forward(input_ids, positions,
+forward_batch)</span> returning logits, and <span class="mono">load_weights</span> (Lesson 25). ModelRunner (Lesson 24) holds exactly this outermost class.</p>
+
+<p>This "nesting" isn't for looks; it's the natural result of PyTorch's <span class="mono">nn.Module</span> composition: a parent module hangs child modules as ordinary attributes in <span class="mono">__init__</span> and calls them in order in <span class="mono">forward</span>, so "register params, move to GPU, save / load" are done <strong>recursively and automatically</strong> by PyTorch along this module tree. That's also why Lesson 25's <span class="mono">load_weights</span> can pinpoint each weight by a <strong>dotted path</strong> like <span class="mono">model.layers.0.self_attn.qkv_proj</span> — the path is the nesting hierarchy, and the name maps naturally to a position in the module tree. Grasp this and you can tell at a glance "who nests whom" in any SGLang model file, and thus which submodule a given weight belongs in.</p>
+
+<p>Look at one detail in <span class="mono">LlamaAttention</span> that shows the power of "assembly": it handles <strong>grouped-query attention</strong> (GQA) — many query heads, few key-value heads. The code divides total heads and total KV heads across cards by <span class="mono">tp_size</span>, and when KV heads are fewer than cards it <strong>replicates</strong> rather than splits. This boundary logic looks fiddly, but it only decides "how many heads each card gets and what dim," and the resulting <span class="mono">num_heads</span>, <span class="mono">head_dim</span> are handed as-is to <span class="mono">QKVParallelLinear</span> and <span class="mono">RadixAttention</span>. So even a feature like GQA that seems to touch the attention implementation is, in the model file, just <strong>a few lines of dimension arithmetic</strong> — the actual attention compute still reuses that one library op untouched.</p>
+
+<p>The same "assembly" idea runs through <span class="mono">LlamaMLP</span>: the gate and up projections are merged into one <span class="mono">MergedColumnParallelLinear</span> (two separate weights on disk, stitched into one by load_weights at load time, Lesson 25), and <span class="mono">SiluAndMul</span> fuses "SiLU on gate, then element-wise multiply with up" into one op. You'll notice a recurring pattern: <strong>whenever adjacent operations can be fused, the library has pre-packaged them</strong> — QKV into one, gate/up into one, norm with residual into one. The author only needs to know "which packaged layer to use" to automatically enjoy these op-level optimizations, without understanding why they're faster. This "fast by default" design lets even a plain model file run at close to hand-optimized performance.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">entry</span><span class="name">LlamaForCausalLM</span></div><div class="ld">The model the runtime sees: holds <span class="mono">model</span> + <span class="mono">lm_head</span>, offers <span class="mono">forward(...)→logits</span> and <span class="mono">load_weights</span> (Lesson 25).</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">skeleton</span><span class="name">LlamaModel</span></div><div class="ld"><span class="mono">embed_tokens</span> (vocab-parallel) → N× decoder layers → final <span class="mono">RMSNorm</span>.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">× N</span><span class="name">LlamaDecoderLayer</span></div><div class="ld">One standard block: input_norm → attention → residual → post_norm → MLP → residual.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaAttention</span></div><div class="ld">QKV column-parallel proj + RoPE + <span class="mono">RadixAttention</span> (reads/writes KV pool, Lesson 33) + o_proj row-parallel.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaMLP</span></div><div class="ld">gate/up column-parallel + <span class="mono">SiLU</span> + down row-parallel.</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">exit</span><span class="name">lm_head</span></div><div class="ld">Projects final hidden to vocab dim to get <strong>logits</strong> (weight may be shared with embed).</div></div>
+</div>
+
+<h2>What happens in one layer: follow the residual</h2>
+<p>Worth stressing: <strong>the choice of layer itself encodes the parallel strategy</strong>. When the author writes the q/k/v projection as <span class="mono">QKVParallelLinear</span> and o_proj as <span class="mono">RowParallelLinear</span>, they write no line of communication code, yet have already decided: under tensor parallelism this layer's weight is split on the output dim across cards, each card computes a slice, then one all-reduce after o_proj stitches results back (Lesson 46). In other words, "which parallel layer you pick" is "how this layer distributes across GPUs." Likewise <span class="mono">VocabParallelEmbedding</span> splits the vocab dim and <span class="mono">ParallelLMHead</span> splits the output projection. The author only worries about "are the dims right, do the slicing schemes match" — actual slicing and collective comms happen silently inside the layer, which is exactly why a model file stays short.</p>
+<p>Zoom into a <strong>single</strong> decoder layer and you see what "assembly" actually assembles. Data arrives carrying the previous layer's residual, first goes
+through <span class="mono">input_layernorm</span> (RMSNorm, Lesson 36); the normalized vector enters the attention sublayer — project q/k/v, spin RoPE onto q/k,
+<strong>write</strong> the current k/v into the KV pool at slots specified by <span class="mono">forward_batch</span>, then let q attend over itself and all historical k/v
+(if the prefix was cached by RadixAttention, reuse it directly, Lesson 7); attention output goes through o_proj back to hidden dim and is <strong>added to the residual</strong>.
+Then <span class="mono">post_attention_layernorm</span> normalizes again, enters the MLP, another residual add. Six steps, layer done, handing
+<span class="mono">(hidden_states, residual)</span> to the next layer. After N layers, final norm, <span class="mono">lm_head</span> projects out logits.
+Notice how <span class="mono">forward_batch</span> <strong>threads all the way</strong> into each layer's attention — it is <strong>the seam</strong> between the model file and the runtime:
+the model only "computes tensors right," while "which KV-pool slots to read/write" is told to it by the runtime via forward_batch.</p>
+
+<p>One more easily-missed detail: <span class="mono">residual</span> is <strong>passed across layers</strong>. Note in the code that the first layer arrives with residual None, so it treats the input itself as the residual; afterward every layer keeps "the value before norm" as the residual to add later. SGLang's <span class="mono">RMSNorm</span> even <strong>fuses</strong> "normalize + residual-add" into one call — <span class="mono">input_layernorm(hidden, residual)</span> returns both the new hidden and the updated residual, saving a memory round-trip. "Welding" a common combo into a single efficient op is exactly the optimization the underlying library does for you: you just call it, never minding how it merges two steps internally. The author sees only the clean logic "norm then attn then residual," and neither sees nor needs to see the fused kernel.</p>
+
+<p>While we're here, clear up an easily-confused point: in decode each step actually forwards just <strong>one</strong> new token, yet it must attend over <strong>all historical</strong> K/V; in prefill it forwards the <strong>whole</strong> prompt's many tokens at once. The same <span class="mono">forward</span> code runs both cases because <span class="mono">forward_mode</span> and attention metadata inside <span class="mono">forward_batch</span> absorb the difference for the model — you see no EXTEND / DECODE branching in the model file; that's all handled in the attention layer and ModelRunner (Lesson 24). This further confirms the lesson's through-line: the author describes the <strong>static architecture</strong>, while <strong>how it dynamically runs</strong> is taken over by the runtime and library layers.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>RMSNorm the input (Lesson 36), keep residual aside.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Attention (reads/writes KV)</h4><p>QKV proj + RoPE; write/read KV pool per <span class="mono">forward_batch</span>, q attends history (Lesson 33).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Residual add</h4><p>Attention output via o_proj back to hidden dim, add to residual.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>post_norm</h4><p>RMSNorm again, ready for MLP.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down, extract nonlinear features.</p></div></div>
+  <div class="step"><div class="num">6</div><div class="sc"><h4>Residual add → next layer</h4><p>Add to residual, hand off <span class="mono">(hidden, residual)</span>.</p></div></div>
+</div>
+
+<h2>Who writes, who provides: one table makes the cost clear</h2>
+<p>Back to the core claim: why is "adding a model" so cheap in SGLang? Read the table below — the responsibility of each of the four (five) classes is,
+<strong>without exception</strong>, "select and connect" SGLang's ready-made layers; not one line implements a low-level op. Read it together with the right-hand
+"what you write vs what SGLang provides" and it clicks: what a model author truly writes anew is only two kinds of thing — the <strong>architecture</strong>
+(which layers, what dims, how residuals connect) and the <strong>load_weights name mapping</strong> (which HF weight maps to which internal param, whether to fuse).
+Everything else — attention kernels, TP communication, KV management, CUDA graphs — comes <strong>for free</strong>. That is the root cause of cheap "broad model support."</p>
+
+<table class="t">
+  <tr><th>Class</th><th>Responsibility (all "assembling ready layers")</th><th>SGLang layers used</th></tr>
+  <tr><td class="mono">LlamaAttention</td><td>q/k/v proj + RoPE + attention + output proj</td><td class="mono">QKVParallelLinear / RadixAttention / RowParallelLinear</td></tr>
+  <tr><td class="mono">LlamaMLP</td><td>gate/up + activation + down</td><td class="mono">MergedColumnParallelLinear / SiluAndMul</td></tr>
+  <tr><td class="mono">LlamaDecoderLayer</td><td>stitch attention + MLP, define residual structure</td><td class="mono">RMSNorm (×2)</td></tr>
+  <tr><td class="mono">LlamaModel</td><td>embed → N layers → final norm</td><td class="mono">VocabParallelEmbedding / RMSNorm</td></tr>
+  <tr><td class="mono">LlamaForCausalLM</td><td>whole model: forward→logits + load_weights</td><td class="mono">ParallelLMHead / LogitsProcessor</td></tr>
+</table>
+
+<p>Read this table one level deeper and it lands harder: every layer with "Parallel" in its name stands on a whole tensor-parallel slicing-and-communication implementation; behind <span class="mono">RadixAttention</span> sit prefix-cache reuse (Lesson 7) + paged KV + multiple hardware attention backends (Lesson 33); behind <span class="mono">RMSNorm</span> and RoPE sit hand-written fused kernels (Lesson 36). Each of these alone is a long story, yet to the model author they are just <strong>one line of construction, one call</strong>. That's the power of "complexity sinks, interface floats": push the hard things down into reusable layers, and all that's left on the surface of a model file is "what this model looks like."</p>
+
+<div class="cols">
+  <div class="col"><h4>What you write (the model file)</h4><p><strong>Architecture</strong>: which layers, the dims, residual structure, how N layers stack; <strong>load_weights</strong>: HF weight name → internal param mapping and q/k/v, gate/up fusion (Lesson 25). That's all — one file, a few hundred lines.</p></div>
+  <div class="col"><h4>What SGLang provides (for free)</h4><p>Parallel linear layers (column/row-parallel, auto slicing + comms, Lesson 46), the <strong>attention backend</strong> and KV management (Lesson 33), RoPE/RMSNorm (Lesson 36), CUDA graphs (Lesson 27), sampling (Lesson 28). You <strong>touch none of it</strong>.</p></div>
+</div>
+
+<p>Flip it around and this division also <strong>constrains</strong> the author: the architectures you can express are bounded by the layers SGLang already provides. If a new model uses some brand-new attention variant or activation that the library lacks, you must <strong>first add a new brick to the library</strong> (a new reusable layer), then assemble it in the model file. But in reality, mainstream open models are highly homogeneous in their building blocks — all permutations of some linear projection, some attention, some normalization — so for the vast majority of new models the library's bricks are <strong>already complete</strong>, and the author truly just assembles. That is the engineering premise that makes "day-0 support" possible, and why SGLang's model directory can grow comfortably to hundreds of files without losing control.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/models/llama.py ::LlamaForCausalLM</span><span class="ln">assembly is the model</span></div>
+  <pre><span class="kw">class</span> <span class="st">LlamaDecoderLayer</span>(nn.Module):
+    <span class="kw">def</span> forward(self, positions, hidden_states, forward_batch, residual):
+        <span class="cm"># one layer = norm -> attention -> residual -> norm -> MLP -> residual</span>
+        <span class="kw">if</span> residual <span class="kw">is</span> None:
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
+        <span class="kw">else</span>:
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
+        hidden_states = self.self_attn(positions, hidden_states, forward_batch)   <span class="cm"># forward_batch threads to attention</span>
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        hidden_states = self.mlp(hidden_states)
+        <span class="kw">return</span> hidden_states, residual
+
+<span class="kw">class</span> <span class="st">LlamaForCausalLM</span>(nn.Module):
+    <span class="kw">def</span> forward(self, input_ids, positions, forward_batch, ...):
+        hidden_states = self.model(input_ids, positions, forward_batch)   <span class="cm"># embed -> N layers -> final norm</span>
+        <span class="kw">return</span> self.logits_processor(input_ids, hidden_states, self.lm_head, forward_batch)   <span class="cm"># -> logits</span></pre>
+</div>
+
+<p>The thing to remember about this code is its <strong>plainness</strong>: <span class="mono">LlamaForCausalLM.forward</span> does almost nothing — hands work to
+<span class="mono">self.model</span> for hidden, then to <span class="mono">logits_processor</span> with <span class="mono">lm_head</span> for logits;
+<span class="mono">LlamaDecoderLayer.forward</span> just strings norm, attention, MLP, residual in order. No CUDA, no all-reduce, no trace of KV paging —
+all that complexity is sealed inside the layers it calls. This "thin model file, thick underlying library" split is exactly why, the day a new open model drops,
+the community often only needs to <strong>write such a file by the same template</strong> to get SGLang running it; more complex architectures like multimodal (Lesson 49)
+and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffolding</strong>.</p>
+
+<p>One last word on the <strong>registration</strong> step. After writing the model file you register the class in the model registry (by architecture name — e.g. config's <span class="mono">architectures</span> field says <span class="mono">LlamaForCausalLM</span>), and the runtime uses that to find which class to use from the weight directory's <span class="mono">config.json</span>. This step is usually one line of mapping, yet it's the key to "config-driven, automatic dispatch": the user starts the server with just a model path, and TokenizerManager and ModelRunner (Lesson 24) follow config's architecture name to locate the file, instantiate it, load weights, and run. So from "the community submits a model file" to "this model is served in production," <strong>no scheduling, batching, or kernel code needs to change</strong> — that clean boundary is the real engineering dividend of broad model support. That's also why, the next time you want to bring up a new model in SGLang, the mindset should be "<strong>go to the models directory, find the closest existing file, and adapt it</strong>" rather than designing from scratch — in the vast majority of cases, all you do is adjust the kinds and dims of layers, get the load_weights name mapping right, and register it.</p>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <ul>
+    <li><strong>Model file = assembly</strong>: a SGLang model is nested <span class="mono">nn.Module</span>s built entirely from ready-made <strong>parallel layers</strong>; the author barely writes low-level ops.</li>
+    <li><strong>Llama's four (five) nesting classes</strong>: <span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>.</li>
+    <li><strong>You write only two things</strong>: architecture (which layers, dims, residuals) + <span class="mono">load_weights</span> name mapping (Lesson 25); attention, TP comms, KV mgmt come free.</li>
+    <li><strong>forward_batch is the seam</strong>: it threads into every layer's attention, telling the model which KV-pool slots to read/write (Lessons 24/33) — the model/runtime boundary.</li>
+    <li><strong>So adding a model is cheap</strong>: new open models often get day-0 support — write one file, register, served; MoE/multimodal just plug extra layers into the same scaffolding (Lessons 34/49).</li>
+  </ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. When you 'write a model' (e.g. Llama) in SGLang, what does the author mainly write <strong>anew</strong>?</div>
+  <ol class="opts">
+    <li><strong>Architecture + load_weights name mapping</strong>: which layers, what dims, how residuals connect, plus mapping HF weight names to internal params; attention kernels, TP comms, KV mgmt all reuse SGLang's ready <strong>parallel layers</strong> — the author writes no low-level ops</li>
+    <li>Implement its own KV-cache paging and GPU memory allocator</li>
+    <li>Hand-write the attention CUDA kernel and cross-GPU all-reduce from scratch</li>
+    <li>Write the tensor-parallel weight-slicing and communication scheduling logic</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A model file <strong>assembles</strong> SGLang's ready parallel layers (<code>QKVParallelLinear</code>, <code>RowParallelLinear</code>, <code>RadixAttention</code>, <code>RMSNorm</code>, ...): the author only describes the architecture and writes <code>load_weights</code> name mapping (Lesson 25). Attention kernels, TP comms, KV mgmt, CUDA graphs come free — the root reason adding a model is cheap and day-0 support is broad.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. How do Llama's four (five) classes <strong>nest</strong>?</div>
+  <ol class="opts">
+    <li>There is only one big class with all logic in a single forward</li>
+    <li><code>LlamaAttention</code> and <code>LlamaMLP</code> compose <code>LlamaDecoderLayer</code>; N layers + embed + final norm compose <code>LlamaModel</code>; add <code>lm_head</code> and <code>forward</code> and you get <code>LlamaForCausalLM</code>, the class the runtime sees</li>
+    <li>The five classes are siblings, stitched on demand by the scheduler at runtime</li>
+    <li><code>LlamaForCausalLM</code> is innermost; attention wraps the whole model</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The nesting is <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>. Each class does one thing, all using SGLang's ready layers. ModelRunner (Lesson 24) holds the outermost <code>LlamaForCausalLM</code>, which offers <code>forward(...)→logits</code> and <code>load_weights</code>.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <code>forward_batch</code> is threaded into every layer's attention — what role does it play?</div>
+  <ol class="opts">
+    <li>It stores model weights and loads them to the GPU on demand during forward</li>
+    <li>It is <strong>the seam</strong> between model file and runtime: it tells attention which KV-pool slots to read/write and which attention backend to use (Lessons 24/33); the model just computes tensors correctly</li>
+    <li>It is only used in prefill and not passed during decode</li>
+    <li>It is a sampling-params container deciding temperature/top-p</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <code>forward_batch</code> (Lesson 24) carries KV slots and attention metadata, threading layer by layer into <code>self_attn</code> so attention knows where to write current k/v and read history (Lesson 33). That is the boundary 'model computes tensors right, runtime owns KV addressing.' It doesn't store weights, isn't a sampling container, and is passed in both prefill and decode.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'building with standard LEGO bricks' analogy, fully explain what 'writing a Llama' in SGLang actually writes and what it gets for free. Cover each: (1) how the four (five) classes <strong>nest</strong> (<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>); (2) which ready SGLang layers each uses (<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE); (3) the in-layer structure 'input_norm→attention(read/write KV)→residual→post_norm→MLP→residual'; (4) that the author truly writes anew only the architecture + <code>load_weights</code> mapping (Lesson 25), while attention kernels, TP slicing/comms (Lesson 46), KV mgmt (Lesson 33) come free.</li>
+    <li>Explain why SGLang achieves near <strong>day-0 support</strong> for new open models with very broad coverage. Cover: (1) the 'thin model file, thick library' split — <code>LlamaForCausalLM.forward</code> basically just hands work to <code>self.model</code> then <code>logits_processor</code>/<code>lm_head</code>, with no trace of CUDA/all-reduce/KV paging; (2) how <code>forward_batch</code>, as the model/runtime seam, lets one model file adapt to different attention backends and parallel configs (Lessons 24/33/46); (3) why more complex architectures like MoE (Lesson 34) and multimodal (Lesson 49) are just 'plug a few extra layers into the same scaffolding' rather than a rewrite.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="25-model-loading-and-weights.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">模型加载与权重</span><span class="lang-en">Model loading &amp; weights</span></div></a><a class="next" href="27-cuda-graph-capture-and-replay.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">CUDA Graph 捕获与重放</span><span class="lang-en">CUDA graph capture &amp; replay</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

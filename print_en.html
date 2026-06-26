@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 23 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 28 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -359,6 +359,11 @@ details[open] > summary { list-style: none; }
   <li>Zero-overhead overlap scheduler</li>
   <li>Chunked prefill</li>
   <li>DP controller & PP scheduling</li>
+  <li>ModelRunner & ForwardBatch</li>
+  <li>Model loading & weights</li>
+  <li>Writing a model</li>
+  <li>CUDA graph capture & replay</li>
+  <li>Sampler & sampling params</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -4977,6 +4982,1018 @@ and the controller immediately turns to the next. Not one line of matmul, confir
   <ul>
     <li>Using the 'supermarket checkout lanes vs conveyor stations' analogy, fully explain DP vs PP. Cover each: (1) <strong>DP</strong>—why it replicates the <strong>whole runtime</strong> (each replica with its own scheduler+TP+KV+a full model), how <code>DataParallelController</code> <strong>round-robins/fans out</strong> requests via <code>round_robin_scheduler</code> without touching the GPU, and why it is a <strong>throughput multiplier</strong> yet can't rescue a model that 'doesn't fit'; (2) <strong>PP</strong>—why <strong>splitting layers into stages</strong> fits a huge model, why <code>event_loop_pp</code> keeps <strong>multiple micro-batches staggered in flight</strong>, and where the <strong>fill/drain bubble</strong> comes from and how micro-batch count amortizes it.</li>
     <li>Discuss how <strong>TP × PP × DP</strong> compose in a large cluster, and why this lesson belongs to 'scheduling'. Explain: (1) for a 'TP=8, PP=2, DP=4' deployment, what each dimension splits/replicates and how the total card count is computed; (2) why the scheduler orchestrates <strong>DP (controller dispatch) and PP (the pp loop advancing micro-batches)</strong> while <strong>TP is transparent to the scheduler</strong> (hidden in <code>forward</code>, Lessons 24/46); (3) from this, state the selection rule—which parallelism to reach for when the model is too big vs traffic too heavy—and point to the deep dives (Lesson 46 TP/PP/EP/DP, Lesson 47 EPLB).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>ModelRunner & ForwardBatch</h1>
+
+<p class="lead">
+Part 5 was all about how the scheduler <strong>decides</strong> — receive, batch, set policy. But it
+<strong>only decides; it never computes</strong>. The thing that actually turns a batch of tokens into logits on the
+GPU is this lesson's star, <span class="inline">ModelRunner</span>. It is <strong>the door where "decide" becomes
+"compute"</strong>: Part 5 was control flow; from here we step into the real math.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of ModelRunner as the <strong>machine operator</strong> on the floor: the scheduler (foreman) hands over a
+  <strong>work order</strong> (ForwardBatch: which tokens, prefill or decode, where the KV lives); the operator
+  <strong>runs the machine</strong> (<span class="mono">model.forward</span>), reads the <strong>gauge</strong> (logits), and
+  passes it to the <strong>inspector</strong> (Sampler) who picks this step's output (the next token). The foreman never
+  touches the machine — only the operator does.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  Each TP rank has <strong>one ModelRunner</strong> (owned by the TpWorker); it holds the <strong>loaded model</strong>
+  (Lessons 25/26) and the <strong>KV pool</strong> (Lesson 30). One <span class="mono">forward(forward_batch)</span> runs a
+  batch into logits, and <span class="mono">sample()</span> hands them to the Sampler (Lesson 28) for the token. A
+  <span class="inline">ForwardBatch</span> is <strong>the GPU view of a ScheduleBatch (Lesson 19)</strong> — the same
+  batch, re-expressed as tensors and metadata the GPU understands.
+</div>
+
+<h2>After run_batch: who handed this batch to ModelRunner</h2>
+<p>Let's complete the call chain. The scheduler's main loop (Lesson 18) calls <span class="mono">run_batch</span> every step,
+but run_batch itself is <strong>thin</strong>: it passes the freshly assembled <span class="mono">ScheduleBatch</span> to the
+<strong>TpWorker</strong>, which hands it straight to <strong>the one ModelRunner it owns</strong>. The chain is layered this
+deep because each layer watches exactly one thing — the scheduler cares about "which batch to run this step", the TpWorker
+cares about "my rank's boundary and cross-card communication", and the ModelRunner cares about "actually computing the
+tensors on this card". Clean, non-overlapping responsibilities are precisely what lets thousands of contributors maintain
+this code together.</p>
+<p>The chain also hides a subtle but fatal constraint: in an 8-way TP deployment, the 8 TpWorkers' ModelRunners must run
+the <strong>same batch in strict lockstep</strong>. Each computes a slice of the model (weights split row/column-wise,
+Lessons 25/46), and mid-layer they stitch attention outputs and residuals back together via all-reduce / all-gather — if
+any rank steps even half a beat early or late, the collective <strong>deadlocks the whole group</strong>. That is why,
+before the forward, a ScheduleBatch's contents must be <strong>byte-for-byte identical</strong> across all ranks: same
+tokens, same shapes, same forward_mode. Once you see this, Lesson 18's insistence that scheduling be deterministic and
+reproducible is no fussiness — it is the hard prerequisite for a distributed forward that doesn't hang.</p>
+
+<h2>From ScheduleBatch to ForwardBatch: a GPU pair of glasses</h2>
+<p>The scheduler hands over a <span class="mono">ScheduleBatch</span> (a set of Reqs, Lesson 19). ModelRunner first
+translates it into a <span class="mono">ForwardBatch</span> — exactly what a GPU forward needs: <strong>input_ids</strong>
+(the tokens to feed this step), <strong>positions</strong> (each token's position, for RoPE), <strong>forward_mode</strong>
+(EXTEND/prefill vs DECODE), <strong>attention metadata</strong> (which backend, which KV slots to read/write, Lesson 33),
+and pointers into the <strong>KV pool</strong>. In one line: ScheduleBatch records "<strong>who needs computing</strong>";
+ForwardBatch records "<strong>how the GPU computes this step</strong>".</p>
+
+<div class="flow">
+  <div class="node"><div class="nt">ScheduleBatch</div><div class="nd">a batch of Reqs (L19)</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">ForwardBatch</div><div class="nd">GPU view: ids/positions/mode/KV</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">model.forward</div><div class="nd">embed→layers→norm→lm_head</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="nt">logits</div><div class="nd">next-token dist per request</div></div>
+  <div class="arrow">→</div>
+  <div class="node hl"><div class="nt">Sampler</div><div class="nd">pick the next token (L28)</div></div>
+</div>
+
+<table class="t">
+  <tr><th>ForwardBatch field</th><th>what it is</th><th>used by</th></tr>
+  <tr><td class="mono">input_ids</td><td>token ids to forward this step</td><td>the embedding</td></tr>
+  <tr><td class="mono">positions</td><td>each token's absolute position</td><td>RoPE / pos encoding (L36)</td></tr>
+  <tr><td class="mono">forward_mode</td><td>EXTEND (prefill) / DECODE</td><td>picks the forward path</td></tr>
+  <tr><td class="mono">attn metadata</td><td>attention backend + KV slots</td><td>attention kernel (L33)</td></tr>
+  <tr><td class="mono">out_cache_loc</td><td>where new K/V are written</td><td>KV cache pool (L30)</td></tr>
+</table>
+
+<p>Read that table one level deeper and it gets tastier. <strong>positions</strong> is no decoration: it feeds straight into
+RoPE and sets each token's rotation phase, so the moment prefill or decode gets an absolute position wrong, attention
+"misjudges" near-vs-far relationships and the output goes haywire — that's exactly why chunked prefill (Lesson 22) must
+carefully preserve positional continuity. <strong>forward_mode</strong> is the master switch; one flip decides the whole
+path: variable-length prefill kernel vs regular decode kernel, whether a CUDA graph applies, which mask the attention
+backend uses. The <strong>attention metadata</strong> translates "the logical k-th token" into "which physical page and slot
+in the KV pool", and together with <span class="mono">out_cache_loc</span> it tells the kernel exactly where to write the
+new K/V and where to read the historical K/V. In short, these ForwardBatch fields together form a <strong>GPU addressing
+table</strong> that every read and write in the forward follows; how well they are organized directly decides whether the
+downstream attention kernel (Lesson 33) and CUDA graph (Lesson 27) run fast and stable.</p>
+
+<h2>ModelRunner.forward: how one forward goes</h2>
+<p>It forks two ways: if a <strong>CUDA graph</strong> (Lesson 27) applies, <strong>replay</strong> a recorded graph;
+otherwise run the batch <strong>eagerly</strong>. The key is <span class="mono">can_run_graph</span> — usually only
+<strong>decode steps</strong> (regular shapes, small batch) take graph replay, while <strong>prefill</strong> (variable
+lengths) mostly runs eager (or a piecewise prefill graph). Here is the real skeleton of <span class="mono">_forward_raw</span>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/model_runner.py ::ModelRunner.forward</span><span class="ln">the forward dispatch</span></div>
+  <pre><span class="kw">def</span> _forward_raw(self, forward_batch, pp_proxy_tensors, ...):
+    <span class="cm"># Can we replay the decode CUDA graph: mode matches + graph exists + shape fits</span>
+    can_run_graph = (forward_batch.forward_mode.is_cuda_graph()
+                     <span class="kw">and</span> self.decode_cuda_graph_runner
+                     <span class="kw">and</span> self.decode_cuda_graph_runner.can_run_graph(forward_batch))
+    <span class="kw">if</span> can_run_graph:                          <span class="cm"># decode: replay the recorded graph (L27)</span>
+        ret = self.decode_cuda_graph_runner.execute(forward_batch, ...)
+        <span class="kw">return</span> ModelRunnerOutput(logits_output=ret, can_run_graph=True)
+    self._prepare_eager_forward_batch(forward_batch)  <span class="cm"># eager path: DP/padding normalize</span>
+    <span class="kw">if</span> forward_batch.forward_mode.is_extend(...):   <span class="cm"># prefill: run the batch</span>
+        ...                                       <span class="cm"># else eager decode fallback</span></pre>
+</div>
+
+<p>Either path ends in <span class="mono">model.forward(input_ids, positions, forward_batch)</span>: embed → a stack of
+<strong>decoder layers</strong> (attention + MLP, Lesson 26) → final norm → the <span class="mono">lm_head</span> projecting
+out <strong>logits</strong>. ModelRunner then calls <span class="mono">sample()</span> to hand logits to the Sampler (Lesson 28).</p>
+
+<p>Look closer at why the dispatch is written this way. The first test, <span class="mono">can_run_graph</span>, is an
+<strong>and</strong> of three conditions: the mode must be graph-able (decode-like), the graph must <strong>actually have
+been recorded</strong>, and the current batch shape must fit one of the recorded buckets. Miss any one and replay is off —
+which is why graph replay sits up front and short-circuits: it is the "fast path", taken when possible, otherwise we fall
+back. After falling back, <span class="mono">_prepare_eager_forward_batch</span> does the eager path's <strong>normalization
+cleanup</strong>: padding for data-parallel (DP) across ranks, aligning tensor shapes so the following kernels run cleanly.
+Then it forks on <span class="mono">is_extend</span> — prefill honestly runs the whole batch, otherwise it lands in the
+eager decode fallback. Read this and you can pinpoint a "why didn't my decode use the CUDA graph" question to one of those
+three switches, instead of guessing in the dark.</p>
+
+<p>Worth a closer look at <strong>what the attention layer does here</strong>: it takes the KV slots from ForwardBatch,
+<strong>writes</strong> the current token's K/V <strong>into the KV pool</strong>, then attends the current Q against the
+<strong>historical K/V</strong> (possibly a prefix reused via RadixAttention, Lesson 7). In other words, the caching and
+reuse from Lessons 4–7 <strong>actually happen</strong> at this very moment when ModelRunner runs the forward — every
+intuition built in those earlier lessons gets "powered on" here for the first time. And precisely because the forward
+constantly reads/writes the KV pool and calls hardware-specific attention kernels, ModelRunner must hold model, KV pool,
+and attention backend <strong>all at once</strong> — none optional.</p>
+
+<p>Walk the forward one notch finer. After the embedding looks input_ids up into token vectors, the data enters a stack of
+identically structured <strong>decoder layers</strong>. In each layer comes a norm, then the attention sub-layer: Q/K/V are
+projected by linear layers, K/V are written into the KV pool at <span class="mono">out_cache_loc</span>, and the attention
+kernel lets the current Q look at itself plus all historical K/V. If that prefix was already computed by another request
+and hung on the radix tree by RadixAttention (Lesson 7), those historical K/V need no recompute — they are
+<strong>reused directly</strong>; the cache reuse of Lessons 4–7 only lands on a concrete kernel right here. The attention
+output is residual-added, then through the MLP sub-layer (another norm + two linears + activation), another residual.
+Stack N such layers, do a final norm, and <span class="mono">lm_head</span> projects the last hidden vector to the full
+vocab size to get <strong>logits</strong>. One commonly missed optimization: decode only needs the logits at <strong>each
+request's last position</strong> (the next word only looks at the last step), so the forward usually slices "take the last
+token" before projecting, saving a lot of useless lm_head compute. The moment logits exist, ModelRunner immediately calls
+<span class="mono">sample()</span>, where the next lesson's Sampler enters — <strong>the logits→token turning point of the
+whole pipeline happens right here</strong>.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Embed</h4><p>input_ids → token vectors; positions ready for RoPE.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>N decoder layers</h4><p>each: attention (read/write KV pool) + MLP + norms (Lesson 26).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Final norm + lm_head</h4><p>last hidden → vocab-sized <strong>logits</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Sample</h4><p><span class="mono">sample()</span> → Sampler emits the next token (Lesson 28).</p></div></div>
+</div>
+
+<h2>EXTEND vs DECODE: one forward, two personalities</h2>
+<p>Remember the two phases from Lesson 4? They become two forwards here in ModelRunner:</p>
+
+<div class="cols">
+  <div class="col"><h4>EXTEND / prefill forward</h4><p>Processes many tokens of the <strong>whole prompt</strong> at once (variable
+  length), <strong>compute-bound</strong>, highly parallel; shapes vary, so it mostly runs <strong>eager</strong> or
+  piecewise/chunked (Lesson 22). It <strong>fills</strong> this batch's K/V into the cache.</p></div>
+  <div class="col"><h4>DECODE / decode forward</h4><p>Each request computes <strong>just 1 new token</strong> — regular shapes,
+  fixed batch — perfect for <strong>CUDA graph replay</strong> (Lesson 27), erasing the launch overhead of hundreds of tiny
+  kernels. It <strong>appends one row</strong> to the cache.</p></div>
+</div>
+
+<p>Why is it <strong>decode</strong> that suits CUDA graphs while prefill doesn't? It comes down to "is the shape stable".
+A CUDA graph records a fixed sequence of kernel calls at fixed memory addresses; once recorded, replay can only apply the
+<strong>same tensor shapes and same pointers</strong>. Decode produces exactly 1 new token per request per step, the batch
+size stays fixed for a while, and each sequence grows by just 1 — highly regular shapes — so varying real lengths can be
+<strong>padded into a few fixed buckets</strong>, each recorded once and replayed many times. And decode is precisely the
+phase where launch overhead dominates (little compute per step, lots of kernel dispatch), so erasing it pays the most.
+Prefill is the opposite: prompt lengths vary wildly and hundreds-to-thousands of tokens are computed at once, so shapes
+differ almost every batch; recording a graph per shape is neither worthwhile nor feasible, so prefill prefers the eager
+path or a chunked/piecewise compromise (Lessons 22, 27). In one line: <strong>decode is "small, regular, repeated
+millions of times" — right in the sweet spot of graph replay</strong>; prefill is "big, varied, each its own", better
+carried by the flexible eager path.</p>
+
+<p>These two personalities really reflect two <strong>bottlenecks</strong>. Prefill processes hundreds-to-thousands of
+tokens at once with high arithmetic intensity, nearly saturating the GPU's compute units — classically
+<strong>compute-bound</strong>; here launch overhead is negligible next to the math, graph or not makes little difference,
+and the real optimization is making those matmuls big and full. Decode computes just 1 token per request per step, with
+thin, small matrices, so the GPU spends much of its time <strong>moving data</strong> (reading weights, reading KV) —
+classically <strong>memory-bound</strong>; now each kernel is tiny, and the fixed cost of launch/dispatch becomes the bulk,
+so flattening hundreds of kernel launches with a CUDA graph pays off immediately. Once you see "prefill lacks compute,
+decode lacks bandwidth", you understand why one forward splits into two paths, and why Lesson 27 mostly applies graph
+replay to decode. This "compute vs bandwidth" dividing line reappears again and again when we get to attention kernels,
+quantization, and speculative decoding — a universal yardstick running through the whole of inference optimization.</p>
+
+<p>This also explains why ModelRunner also owns: the <strong>CUDA-graph runner</strong> (Lesson 27), the <strong>attention
+backend</strong> (Lesson 33), the <strong>KV pool</strong> (Lesson 30), and a <strong>draft model</strong> for speculative
+decoding (Lesson 43) — it is the assembly shop for these GPU-side parts. Next, Lesson 25 shows how its model gets
+<strong>loaded</strong>, and Lesson 26 shows how that model is <strong>written</strong>.</p>
+
+<p>Think of ModelRunner as a GPU-side <strong>assembly machine</strong>: it bolts scattered parts into one running pipeline.
+The model gives it the "what to compute" structure, the KV pool gives it the "where history lives" memory, the attention
+backend gives it the "how to do attention on this hardware" craft, the CUDA-graph runner gives it the "how to run decode
+cheaper" overdrive, and the draft model (Lesson 43) gives it the "guess a few, verify in one shot" parallel gear for
+speculative decoding. Each part has its own lesson, but they all <strong>hang on ModelRunner and are strung together by
+the same forward</strong>. Because the parts converge here, debugging a "forward computed wrong / ran slow" issue almost
+always starts at ModelRunner: first check forward_mode went the right way, then check the attention metadata and KV slots,
+finally check whether a shape-mismatched CUDA graph was wrongly applied. Keep this assembly machine's internal wiring in
+your head, and the next four lessons are just taking apart its parts one by one — each one you remove makes your picture of
+this forward more three-dimensional, until you see the whole pipeline as one.</p>
+
+<p>Place this lesson back in the whole map: Lessons 1–8 tell you "why it's designed this way", Lessons 13–17 cover how
+requests "get in", Lessons 18–23 cover how the scheduler "decides" — and <strong>this lesson is the instant where a
+decision lands as compute</strong>. From here, the rest of Part 6 unfolds along the few things in ModelRunner's hands: how
+model weights are <strong>loaded</strong> onto the card (Lesson 25), how a model file is <strong>written</strong> (Lesson 26,
+with Llama as the example), why decode can use a <strong>CUDA graph</strong> to flatten launch overhead (Lesson 27), and the
+<strong>Sampler</strong> turning logits into a token (Lesson 28). Carry the key — "<strong>ModelRunner = the decide→compute
+boundary, one per rank, holding model + KV pool + attention backend</strong>" — and the next four lessons read smoothly.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key points</div>
+  <ul>
+    <li><strong>ModelRunner</strong>: one per TP rank, the <strong>decide→compute boundary</strong>; holds model + KV pool, <span class="mono">forward</span>→logits, <span class="mono">sample</span>→token.</li>
+    <li><strong>ForwardBatch</strong>: the <strong>GPU view</strong> of a ScheduleBatch (L19) — ids/positions/forward_mode/attn metadata/KV pointers.</li>
+    <li><strong>One forward</strong>: embed → N decoder layers → norm + lm_head → logits → Sampler.</li>
+    <li><strong>Two forwards</strong>: EXTEND (prefill, compute-bound, mostly eager) vs DECODE (regular shapes, CUDA-graph replay, L27).</li>
+    <li><strong>Assembly shop</strong>: ModelRunner also owns the CUDA graph, attention backend, KV pool, draft model — the rest of Part 6 unpacks them.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In SGLang, what is the responsibility boundary between <code>ModelRunner</code> and the scheduler (Lesson 18)?</div>
+  <ol class="opts">
+    <li>ModelRunner receives HTTP requests and tokenizes; the scheduler does the forward</li>
+    <li>The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpWorker</li>
+    <li>The scheduler both decides and runs the forward itself; ModelRunner only samples the token</li>
+    <li>The whole process shares one ModelRunner that all TP ranks call</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is the relationship between <code>ForwardBatch</code> and <code>ScheduleBatch</code> (Lesson 19)?</div>
+  <ol class="opts">
+    <li>ForwardBatch is the sampling result; ScheduleBatch is the input prompt</li>
+    <li>ForwardBatch is the <strong>GPU view</strong> of a ScheduleBatch — the same batch re-expressed as GPU tensors/metadata: <code>input_ids</code>, <code>positions</code> (for RoPE), <code>forward_mode</code> (picks the path), attention metadata + <code>out_cache_loc</code> (KV read/write slots); ScheduleBatch records 'who needs computing', ForwardBatch records 'how the GPU computes this step'</li>
+    <li>They are identical, just renamed</li>
+    <li>ScheduleBatch lives on GPU and ForwardBatch on CPU, mirroring each other</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. ModelRunner first <strong>translates</strong> the scheduler's ScheduleBatch (a set of Reqs) into a ForwardBatch — exactly what the GPU forward needs: which tokens, each token's position, prefill vs decode, attention backend and KV slots. In short ScheduleBatch='who needs computing', ForwardBatch='how the GPU computes this step'. It is not a sampling result, a mere rename, or a CPU mirror.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does the <strong>DECODE</strong> forward suit CUDA-graph replay (Lesson 27) while <strong>EXTEND</strong>/prefill mostly runs eager?</div>
+  <ol class="opts">
+    <li>Because decode doesn't read the KV cache, it can be graphed</li>
+    <li>Because prefill must run on CPU and can't use a GPU graph</li>
+    <li>Because decode is more compute-heavy than prefill and more worth optimizing</li>
+    <li>Decode emits <strong>just 1 new token</strong> per request per step with <strong>highly regular shapes</strong> (paddable to a few fixed buckets), and with little compute per step the launch overhead dominates, so replay <strong>flattens that overhead</strong>; prefill has wildly varying lengths, different shapes every batch, and is already compute-bound, so recording graphs is neither worthwhile nor feasible</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A CUDA graph records a <strong>fixed-shape, fixed-address</strong> kernel sequence; replay only fits the same shapes. Decode is 'small, regular, repeated millions of times', memory-bound with launch overhead dominating, so replay pays most; prefill is 'big, varied, each its own', compute-bound with shapes differing nearly every batch, better on the eager path. Decode does read KV, prefill doesn't run on CPU, and decode does less compute per step.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.</li>
+    <li>Centered on <strong>EXTEND vs DECODE</strong>, fully explain the 'two personalities of one forward' and how it shapes the rest of Part 6. Explain: (1) their differences in token count, shape regularity, and bottleneck (prefill <strong>compute-bound</strong> vs decode <strong>memory-bound</strong>); (2) why decode suits <strong>CUDA-graph replay</strong> (Lesson 27) while prefill mostly runs eager/chunked (Lesson 22); (3) why ModelRunner must hold the model (Lessons 25/26), KV pool (Lesson 30), attention backend (Lesson 33), and even a draft model (Lesson 43) <strong>all at once</strong>, and from that, which parts the rest of Part 6 takes apart one by one.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Model loading & weights</h1>
+
+<p class="lead">
+Last lesson's <span class="inline">ModelRunner</span> casually asked for "<strong>the loaded model</strong>" — but how does that model
+actually <strong>move from disk onto the GPU</strong>? A 70B's weights are hundreds of GB, scattered across dozens of files, still
+named the HuggingFace way, not matching SGLang's internal modules. This lesson is about the backstage role that turns "<strong>a
+pile of disk files</strong>" into "<strong>tensors in their right place on each card</strong>": <span class="inline">DefaultModelLoader</span>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of loading a model as <strong>furnishing a new home from numbered flat-pack boxes</strong>: first read the <strong>parts
+  list</strong> (the HuggingFace weight names, e.g. <span class="mono">model.layers.0.self_attn.q_proj.weight</span>), match each part
+  to the <strong>right room</strong> (the corresponding SGLang module param), <strong>cut each shelf to fit</strong> when needed (slice
+  it into this rank's share under tensor parallelism), and assemble in the <strong>right finish</strong> (cast to bf16/fp16, or load a
+  quantized format). The key: <strong>don't dump all the boxes into the living room at once</strong> — carry them in <strong>one box at
+  a time, streamed</strong>, or host RAM blows up on the spot. That "claim-by-list, cut-to-fit, stream-assemble" is exactly the Loader's job.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  <span class="mono">DefaultModelLoader.load_model</span> is the <strong>common entry</strong> for almost every model: it first builds an
+  <strong>empty shell</strong> from <span class="mono">model_config</span> (structure present, weights still placeholders), then opens the
+  <strong>safetensors shards</strong> on disk and <strong>streams the tensors in one by one</strong>. The feeding is handled by each
+  model's <strong>own</strong> <span class="mono">load_weights(weights)</span>: it knows which internal param an HF name <strong>maps</strong>
+  to, which weights to <strong>fuse</strong>, and which <strong>slice</strong> this rank takes. Because loading is funneled through this one
+  point, SGLang can support <strong>hundreds of models + many quant formats</strong> under one framework.
+</div>
+
+<h2>load_model: build the shell first, then stream the weights in</h2>
+<p>The whole load path is just two steps, but each hides nuance. <strong>Step one</strong>: within the target device (GPU) and target
+dtype context, <span class="mono">_initialize_model</span> <strong>instantiates the structure</strong> — all the linear layers, attention,
+and embeddings are built, but the params are still <strong>uninitialized placeholder tensors</strong>, taking almost no real GPU memory.
+<strong>Step two</strong>: call <span class="mono">load_weights_and_postprocess</span>, which gets a <strong>weight iterator</strong> from
+<span class="mono">_get_all_weights</span> and hands it to <span class="mono">model.load_weights(weights)</span> to <strong>pour the real values
+in, tensor by tensor</strong>. Note the subtlety: weights are not "read fully into memory then distributed" — they are a
+<span class="mono">(name, tensor)</span> <strong>generator</strong>: read one, load one, drop one, so <strong>host memory stays pinned to a
+small upper bound</strong> even for a hundreds-of-GB model.</p>
+
+<p>Why insist on <strong>streaming</strong>? Picture an 8-GPU box loading a 70B: if you read all weights into host RAM before slicing and
+dispatching, that temporary copy alone could approach or exceed physical memory, and safetensors' zero-copy advantage is wasted.
+Streaming makes "read—map—slice—move-to-card" a <strong>read-and-drop pipeline</strong>: at any instant only the <strong>current tensor</strong>
+(and the target slice being processed) lives in memory, so the bound is <strong>decoupled</strong> from the model's total size. That's why
+the same machine can load a few-GB small model and a hundreds-of-GB large one — memory pressure is nearly <strong>constant</strong>. Once you
+see this, you understand why SGLang defaults to safetensors, and why "slow loading" is usually disk/network bandwidth, not a memory bottleneck.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Locate the checkpoint</h4><p>Find the local or downloaded dir from <span class="mono">model_path</span> (HF / ModelScope).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>safetensors shards</h4><p>Open multiple <span class="mono">*.safetensors</span> by index; zero-copy, readable tensor-by-tensor.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Name mapping</h4><p>HF weight name →(the model's own <span class="mono">load_weights</span>)→ SGLang internal param, often <strong>fusing</strong> q/k/v, gate/up.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Slice for TP</h4><p>Each weight split column/row-wise; this rank <strong>takes only its slice</strong> (Lessons 24/46).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>dtype / quant</h4><p>Cast to bf16/fp16, or load FP8/INT4/AWQ/GPTQ with scales (Lesson 35).</p></div></div>
+  <div class="step"><div class="num">6</div><div class="sc"><h4>Land on GPU</h4><p>Write into the shell model's param slots; once loaded, <span class="mono">model.eval()</span>.</p></div></div>
+</div>
+
+<h2>Name mapping & fusion: matching HF names to SGLang params</h2>
+<p>The on-disk weights use HuggingFace naming, e.g. attention's query projection is <span class="mono">model.layers.0.self_attn.q_proj.weight</span>,
+with keys and values as <span class="mono">k_proj</span> and <span class="mono">v_proj</span>. But for <strong>performance</strong>, SGLang often
+<strong>fuses q/k/v into one packed weight</strong> (one big matmul instead of three small ones) and fuses MLP's <span class="mono">gate_proj</span>
+and <span class="mono">up_proj</span> into <strong>one</strong>. That creates a "mismatch": disk has <strong>three separate parts</strong>, memory wants
+<strong>one merged part</strong>. Resolving it is each model class's own <span class="mono">load_weights(weights)</span> — it carries a built-in
+"<strong>mapping table</strong>" that knows which <strong>offset segment</strong> of the packed weight each of
+<span class="mono">q_proj/k_proj/v_proj</span> goes into, and how to stitch <span class="mono">gate/up</span>.</p>
+
+<p>Handing "mapping" to the <strong>model itself</strong> rather than the Loader is a key division of duties. The Loader only <strong>streams
+tensors out</strong> (it doesn't, and shouldn't, care what a model calls things internally), while "which of my params this name maps to,
+whether to fuse, whether to transpose" is <strong>model-private knowledge</strong>, naturally encapsulated in the model's
+<span class="mono">load_weights</span>. So when adding a new model you <strong>don't touch the Loader</strong> — you just write its
+<span class="mono">load_weights</span> in the model file (Lesson 26). That's why SGLang can support hundreds of architectures relatively easily.
+Mapping and fusion aren't optional details either: fusion directly sets the matmul shapes in the forward, and only when fused correctly can
+the downstream TP slicing and quantization line up cleanly.</p>
+
+<div class="cols">
+  <div class="col"><h4>HF weight names on disk</h4><p>Stored separately: <span class="mono">...self_attn.q_proj.weight</span>, <span class="mono">k_proj.weight</span>,
+  <span class="mono">v_proj.weight</span>; MLP is two parts, <span class="mono">gate_proj</span> and <span class="mono">up_proj</span>. Naming follows
+  HuggingFace, <strong>one part per projection</strong>.</p></div>
+  <div class="col"><h4>SGLang internal params</h4><p>Stored fused: q/k/v packed into <strong>one</strong> <span class="mono">qkv_proj</span>, gate/up into
+  <strong>one</strong> <span class="mono">gate_up_proj</span>. <span class="mono">load_weights</span> writes the separate HF weights <strong>into each
+  segment of the packed param</strong> by offset — one big matmul replaces several small ones.</p></div>
+</div>
+
+<h2>Slice for TP, land by dtype/quant</h2>
+<p>After mapping come two more steps. <strong>First, tensor-parallel (TP) slicing</strong>: in a multi-GPU deployment, each weight is not stored
+whole on every card but <strong>sliced per rank</strong>. Attention's q/k/v and MLP's gate/up go <strong>column-parallel</strong> (split on the
+output dim, each card computes a slice of the output), while attention's <span class="mono">o_proj</span> and MLP's <span class="mono">down_proj</span>
+go <strong>row-parallel</strong> (split on the input dim, each card computes a partial sum, then all-reduce). The Loader/model moves <strong>only
+this rank's slice</strong> onto this card during loading, so each of 8 cards holds <strong>only 1/8 of the weights</strong> (Lessons 24/46). That's
+why loading is itself distributed: every card reads the same files but <strong>takes what it needs and keeps one slice</strong>.</p>
+
+<p><strong>Second, dtype and quantization</strong>. Most commonly, weights are <strong>cast to bf16 or fp16</strong> before going on-card; but if the
+checkpoint is itself a <strong>quantized format</strong> — FP8, INT4, AWQ, GPTQ (Lesson 35) — loading must read in its <strong>scales / zero-points</strong>
+too and arrange them by the quant layout. The forward then either uses <strong>dedicated quantized kernels</strong> directly in low bits, or
+<strong>lazily dequantizes</strong> back to high precision when used. Quantization's point is to <strong>fit a bigger model in less memory</strong>, at the
+cost of correctly handling scales and packing formats — details likewise tucked into each quant method's loading logic, with the Loader just handing it
+the byte stream. Because both "slicing" and "quantization" are arranged here at load time, the upper-level ModelRunner (Lesson 24) receives an
+<strong>out-of-the-box, all-in-place</strong> model.</p>
+
+<table class="t">
+  <tr><th>What loading must handle</th><th>Why it must happen at this step</th></tr>
+  <tr><td>Streaming (read-and-drop)</td><td>Host-memory bound is <strong>decoupled from model size</strong> — hundreds of GB won't blow up RAM</td></tr>
+  <tr><td class="mono">load_weights</td><td>Maps HF names to internal params and <strong>fuses</strong> q/k/v, gate/up</td></tr>
+  <tr><td>Slice for TP</td><td>Each card keeps <strong>only its slice</strong> so the weights fit in memory (Lesson 46)</td></tr>
+  <tr><td>dtype / quant</td><td>Cast bf16/fp16 or load FP8/INT4 + scales, deciding <strong>which kernel</strong> the forward uses (Lesson 35)</td></tr>
+  <tr><td><span class="mono">model.eval()</span></td><td>Switch to inference mode once weights are in place; hand to ModelRunner (Lesson 24)</td></tr>
+</table>
+
+<h2>More than one Loader: DefaultModelLoader is just the common path</h2>
+<p>SGLang actually has a <strong>family</strong> of Loaders for different scenarios, but <span class="mono">DefaultModelLoader</span> is <strong>the most
+common path</strong>. Knowing the others helps you see how "loading" varies across deployments:</p>
+
+<div class="layers">
+  <div class="layer l-core"><div class="lh"><span class="badge">common</span><span class="name">DefaultModelLoader</span></div><div class="ld">Reads safetensors/bin shards from disk and <strong>streams</strong> them to <span class="mono">model.load_weights</span>. Most models, most deployments use it.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">testing</span><span class="name">DummyModelLoader</span></div><div class="ld">Reads no real weights; just fills <strong>random/placeholder</strong> values. For measuring memory, throughput, and structural correctness, not numerics.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">fast start</span><span class="name">ShardedStateLoader</span></div><div class="ld">Loads directly from an <strong>already-TP-sliced</strong> sharded state, skipping re-slicing each time — ideal for repeatedly restarting the same parallelism.</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">low memory</span><span class="name">LayeredModelLoader / remote</span></div><div class="ld">Loads layer by layer, or pulls from a remote instance/object store, to further cut peak memory or speed up distribution.</div></div>
+</div>
+
+<p>Here is the real skeleton of <span class="mono">DefaultModelLoader.load_model</span>. Read it and the "two steps" are clear: <strong>first
+<span class="mono">_initialize_model</span> builds the shell, then the streamed weights go to <span class="mono">model.load_weights</span></strong>. Note
+that <span class="mono">_get_all_weights</span> returns a <strong>generator</strong> — that is the very basis of "streaming".</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_loader/loader.py ::DefaultModelLoader</span><span class="ln">build shell + stream weights</span></div>
+  <pre><span class="kw">def</span> load_model(self, *, model_config, device_config):
+    target_device = torch.device(device_config.device)
+    quant_config = _get_quantization_config(model_config, self.load_config)
+    <span class="kw">with</span> set_default_torch_dtype(model_config.dtype):
+        <span class="kw">with</span> target_device:
+            model = _initialize_model(model_config, self.load_config, quant_config)  <span class="cm"># shell</span>
+        self.load_weights_and_postprocess(
+            model, self._get_all_weights(model_config, model), target_device)        <span class="cm"># streamed weights</span>
+    <span class="kw">return</span> model.eval()
+
+<span class="kw">def</span> load_weights_and_postprocess(model, weights, target_device):
+    ...
+    model.load_weights(weights)   <span class="cm"># pour each (name, tensor) into the model's params</span></pre>
+</div>
+
+<p>Tie this back to the main thread: the "loaded model" that Lesson 24's ModelRunner demanded is exactly what
+<span class="mono">DefaultModelLoader</span> hands over after building the shell, mapping, slicing, quantizing, and streaming the weights in. Next,
+Lesson 26 walks you through <strong>actually writing a model file</strong>, focused on writing its <span class="mono">load_weights</span> (where name
+mapping and fusion land); Lesson 35 covers how <strong>quantized</strong> formats load and compute; Lesson 46 covers how <strong>tensor parallelism</strong>
+slices weights column/row-wise across cards. With the key "<strong>Loader = stream disk files into all-in-place tensors per card</strong>", these
+lessons will read smoothly.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key takeaways</div>
+  <ul>
+    <li><strong>Two steps</strong>: <span class="mono">_initialize_model</span> builds the <strong>shell</strong>, then <span class="mono">model.load_weights</span> <strong>streams</strong> the weights in.</li>
+    <li><strong>Streaming</strong>: weights are a <span class="mono">(name, tensor)</span> generator — read one, load one — so the <strong>host-memory bound is decoupled from model size</strong>.</li>
+    <li><strong>Name mapping + fusion</strong>: HF name →(the model's own <span class="mono">load_weights</span>)→ internal param, often <strong>fusing</strong> q/k/v and gate/up into packed weights.</li>
+    <li><strong>TP slicing</strong>: column-parallel (q/k/v, gate/up) / row-parallel (o_proj, down_proj); each card <strong>keeps only its slice</strong> (Lesson 46).</li>
+    <li><strong>dtype/quant</strong>: cast bf16/fp16, or load FP8/INT4/AWQ/GPTQ + scales (Lesson 35); <span class="mono">DefaultModelLoader</span> is the common path, with dummy/sharded/layered variants.</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why does <code>DefaultModelLoader</code> read weights via <strong>streaming</strong> instead of reading everything into host RAM first and then distributing?</div>
+  <ol class="opts">
+    <li>Because streaming automatically skips unneeded layers, saving compute</li>
+    <li>Because only streaming can place weights on the GPU; a full read can't reach the card</li>
+    <li>Because streaming loads are numerically more accurate than one-shot loads</li>
+    <li>Weights are a <code>(name, tensor)</code> <strong>generator</strong>: read one, load one, drop one, so the <strong>host-memory bound is decoupled from total model size</strong> — even a hundreds-of-GB model keeps only the current tensor in memory at any instant and won't blow up RAM</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. <code>_get_all_weights</code> returns a generator and <code>model.load_weights</code> pours tensors in one by one, so only the current tensor (and its target slice) lives in memory at any instant, the bound <strong>decoupled</strong> from model size. That's why one machine fits both small and hundreds-of-GB models. It has nothing to do with numerical precision, a full read can still reach the card, and nothing auto-skips layers.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Where does the logic that maps HuggingFace weight names to SGLang internal params and <strong>fuses</strong> q/k/v, gate/up live?</div>
+  <ol class="opts">
+    <li>In the safetensors file metadata, applied automatically at load</li>
+    <li>No mapping is needed; HF names and SGLang param names always match one to one</li>
+    <li>In <code>DefaultModelLoader</code>, using one hard-coded mapping table for all models</li>
+    <li>In <strong>each model class's own</strong> <code>load_weights(weights)</code> — it carries a mapping table knowing which offset segment of the packed weight each of <code>q_proj/k_proj/v_proj</code> goes into; the Loader only <strong>streams tensors out</strong> and doesn't care about a model's internal names</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The Loader only streams tensors and <strong>shouldn't</strong> know a model's internals; which param a name maps to and whether to fuse/transpose is model-private, encapsulated in the model's <code>load_weights</code>. So adding a model <strong>needs no Loader change</strong> — just write its <code>load_weights</code> (Lesson 26). q/k/v are three separate parts on disk but one packed param in memory, which is exactly why this mapping is needed.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. In an 8-GPU tensor-parallel (TP) deployment, what weights end up in each card's memory at load time?</div>
+  <ol class="opts">
+    <li>Each card stores a full copy of the weights for redundancy/reliability</li>
+    <li>Weights live in CPU RAM; the GPU copies the needed part each step</li>
+    <li>Only card 0 stores weights; the others request from it each step</li>
+    <li><strong>Only this rank's slice</strong>: q/k/v and gate/up go column-parallel (split on output dim), o_proj and down_proj go row-parallel (split on input dim), each card takes only its 1/8 of weights — loading itself is distributed</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Under TP each weight is <strong>sliced per rank</strong>: column-parallel (q/k/v, gate/up) computes a slice of output per card, row-parallel (o_proj, down_proj) computes partial sums then all-reduce. The Loader/model moves only this rank's slice onto the card, so 8 cards each hold 1/8 of the weights (Lessons 24/46). It is not full redundancy, a single hub card, or CPU-resident weights.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'numbered flat-pack boxes furnishing a home' analogy, fully explain how <code>DefaultModelLoader</code> turns a pile of disk files into 'all-in-place tensors per card'. Cover each: (1) the <strong>two steps</strong> — <code>_initialize_model</code> builds the shell (structure present, params placeholders), then <code>load_weights_and_postprocess</code> hands <code>_get_all_weights</code>'s <strong>generator</strong> to <code>model.load_weights</code> to pour tensors in; (2) why <strong>streaming</strong> is required (host-memory bound decoupled from model size); (3) why <strong>name mapping + fusion</strong> live in the model's own <code>load_weights</code> (Lesson 26), and how q/k/v, gate/up are packed; (4) what <strong>TP slicing</strong> (column/row-parallel, Lesson 46) and <strong>dtype/quantization</strong> (FP8/INT4 + scales, Lesson 35) each do at this step.</li>
+    <li>SGLang has more than one Loader: <code>DefaultModelLoader</code> is the common path, with <code>DummyModelLoader</code>, <code>ShardedStateLoader</code>, <code>LayeredModelLoader</code>/remote variants. Explain: (1) what each suits (testing/memory measurement, fast start from an already-sliced state, layer-by-layer low memory, remote distribution); (2) why 'funneling loading through one point' lets SGLang support hundreds of models + many quant formats under one framework; (3) if you load an <strong>FP8-quantized</strong> checkpoint, what loading does beyond bf16 (read scales, arrange by quant layout, forward uses quantized kernels or lazy dequant, Lesson 35).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Writing a model</h1>
+
+<p class="lead">
+Last lesson covered how weights <strong>get in</strong> (load_weights, Lesson 25). This one answers a more intriguing question: in SGLang,
+what does it actually take to <strong>"write a model"</strong>? The answer is surprisingly light — a model file is essentially just
+<strong>snapping together</strong> the <strong>parallel layers</strong> SGLang already ships, like LEGO. You write no attention kernel, no cross-GPU
+communication, no KV management — only the <strong>architecture</strong>. That is the plain engineering truth behind SGLang's
+"day-0 support for new models, very broad coverage."
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of writing a model as <strong>building with standard LEGO bricks</strong>: SGLang has already <strong>molded every brick</strong> —
+  parallel linear layers, attention, norm, rotary embedding — all ready-made, tuned, and cross-GPU capable. You do just two things:
+  ① snap the bricks <strong>into the right shape</strong> (the architecture: which layers, what dims, how residuals connect); and
+  ② <strong>label</strong> each part — "which box on disk supplies the part that goes here" (load_weights name mapping). You <strong>never mold a brick yourself</strong>:
+  how attention runs on the GPU, how 8 cards stitch results, which KV-pool page to write — all sealed inside the brick, none of your concern.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  A SGLang model file is a set of nested PyTorch <span class="mono">nn.Module</span>s. Take Llama — four classes <strong>nest like dolls</strong>:
+  <span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → both compose <span class="mono">LlamaDecoderLayer</span> (one decoder layer) →
+  N layers + embed + final norm compose <span class="mono">LlamaModel</span> → add <span class="mono">lm_head</span> and <span class="mono">forward</span> and you get
+  <span class="mono">LlamaForCausalLM</span> (the model the runtime sees). Each class internally uses SGLang's <strong>reusable layers</strong>. So "adding a model"
+  is, in the vast majority of cases, <strong>one act of assembly</strong> — write such a file, register it, and it's served.
+</div>
+
+<h2>Four classes nesting: how Llama is built</h2>
+<p>Pull these four layers apart and you'll find each <strong>does just one thing</strong>, and every piece it uses comes from SGLang, not from your hand.
+Innermost is <span class="mono">LlamaAttention</span>: it projects q/k/v in one shot via a <strong>column-parallel</strong> <span class="mono">QKVParallelLinear</span>
+(the three are packed in one weight — exactly why load_weights does fusion mapping, Lesson 25), applies <strong>RoPE</strong> to q/k, then hands q and the
+historical k/v to <span class="mono">RadixAttention</span> (the attention layer) — this step <strong>reads/writes the KV pool</strong>, with the attention backend
+and which pool slots all dictated by the incoming <span class="mono">forward_batch</span> (Lesson 33); finally o_proj projects multi-head output back to
+hidden dim via the <strong>row-parallel</strong> <span class="mono">RowParallelLinear</span>. Note: q/k/v, gate/up go <strong>column-parallel</strong> (split on output dim),
+o_proj/down_proj go <strong>row-parallel</strong> (split on input dim then all-reduce); Lesson 46 details this slicing, but the model author <strong>only picks which
+layer to use — slicing and communication happen inside the layer automatically</strong>.</p>
+<p>One layer out is <span class="mono">LlamaMLP</span>: gate/up projection + <strong>SiLU</strong> (<span class="mono">SiluAndMul</span>) + down projection, nothing fancy.
+Outer still, <span class="mono">LlamaDecoderLayer</span> stitches attention and MLP into one standard Transformer block; the key is the <strong>residual structure</strong>:
+input_norm → attention → residual add → post_norm → MLP → residual add. <span class="mono">LlamaModel</span> is the skeleton: <span class="mono">embed_tokens</span>
+(vocab-parallel embedding, <span class="mono">VocabParallelEmbedding</span>) → N decoder layers → final <span class="mono">RMSNorm</span>. The outermost
+<span class="mono">LlamaForCausalLM</span> is the "whole model" exposed to the runtime: it holds <span class="mono">model</span>, an <span class="mono">lm_head</span>
+(<span class="mono">ParallelLMHead</span>, weight optionally shared with embed via tie_word_embeddings), a <span class="mono">forward(input_ids, positions,
+forward_batch)</span> returning logits, and <span class="mono">load_weights</span> (Lesson 25). ModelRunner (Lesson 24) holds exactly this outermost class.</p>
+
+<p>This "nesting" isn't for looks; it's the natural result of PyTorch's <span class="mono">nn.Module</span> composition: a parent module hangs child modules as ordinary attributes in <span class="mono">__init__</span> and calls them in order in <span class="mono">forward</span>, so "register params, move to GPU, save / load" are done <strong>recursively and automatically</strong> by PyTorch along this module tree. That's also why Lesson 25's <span class="mono">load_weights</span> can pinpoint each weight by a <strong>dotted path</strong> like <span class="mono">model.layers.0.self_attn.qkv_proj</span> — the path is the nesting hierarchy, and the name maps naturally to a position in the module tree. Grasp this and you can tell at a glance "who nests whom" in any SGLang model file, and thus which submodule a given weight belongs in.</p>
+
+<p>Look at one detail in <span class="mono">LlamaAttention</span> that shows the power of "assembly": it handles <strong>grouped-query attention</strong> (GQA) — many query heads, few key-value heads. The code divides total heads and total KV heads across cards by <span class="mono">tp_size</span>, and when KV heads are fewer than cards it <strong>replicates</strong> rather than splits. This boundary logic looks fiddly, but it only decides "how many heads each card gets and what dim," and the resulting <span class="mono">num_heads</span>, <span class="mono">head_dim</span> are handed as-is to <span class="mono">QKVParallelLinear</span> and <span class="mono">RadixAttention</span>. So even a feature like GQA that seems to touch the attention implementation is, in the model file, just <strong>a few lines of dimension arithmetic</strong> — the actual attention compute still reuses that one library op untouched.</p>
+
+<p>The same "assembly" idea runs through <span class="mono">LlamaMLP</span>: the gate and up projections are merged into one <span class="mono">MergedColumnParallelLinear</span> (two separate weights on disk, stitched into one by load_weights at load time, Lesson 25), and <span class="mono">SiluAndMul</span> fuses "SiLU on gate, then element-wise multiply with up" into one op. You'll notice a recurring pattern: <strong>whenever adjacent operations can be fused, the library has pre-packaged them</strong> — QKV into one, gate/up into one, norm with residual into one. The author only needs to know "which packaged layer to use" to automatically enjoy these op-level optimizations, without understanding why they're faster. This "fast by default" design lets even a plain model file run at close to hand-optimized performance.</p>
+
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">entry</span><span class="name">LlamaForCausalLM</span></div><div class="ld">The model the runtime sees: holds <span class="mono">model</span> + <span class="mono">lm_head</span>, offers <span class="mono">forward(...)→logits</span> and <span class="mono">load_weights</span> (Lesson 25).</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">skeleton</span><span class="name">LlamaModel</span></div><div class="ld"><span class="mono">embed_tokens</span> (vocab-parallel) → N× decoder layers → final <span class="mono">RMSNorm</span>.</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">× N</span><span class="name">LlamaDecoderLayer</span></div><div class="ld">One standard block: input_norm → attention → residual → post_norm → MLP → residual.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaAttention</span></div><div class="ld">QKV column-parallel proj + RoPE + <span class="mono">RadixAttention</span> (reads/writes KV pool, Lesson 33) + o_proj row-parallel.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaMLP</span></div><div class="ld">gate/up column-parallel + <span class="mono">SiLU</span> + down row-parallel.</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">exit</span><span class="name">lm_head</span></div><div class="ld">Projects final hidden to vocab dim to get <strong>logits</strong> (weight may be shared with embed).</div></div>
+</div>
+
+<h2>What happens in one layer: follow the residual</h2>
+<p>Worth stressing: <strong>the choice of layer itself encodes the parallel strategy</strong>. When the author writes the q/k/v projection as <span class="mono">QKVParallelLinear</span> and o_proj as <span class="mono">RowParallelLinear</span>, they write no line of communication code, yet have already decided: under tensor parallelism this layer's weight is split on the output dim across cards, each card computes a slice, then one all-reduce after o_proj stitches results back (Lesson 46). In other words, "which parallel layer you pick" is "how this layer distributes across GPUs." Likewise <span class="mono">VocabParallelEmbedding</span> splits the vocab dim and <span class="mono">ParallelLMHead</span> splits the output projection. The author only worries about "are the dims right, do the slicing schemes match" — actual slicing and collective comms happen silently inside the layer, which is exactly why a model file stays short.</p>
+<p>Zoom into a <strong>single</strong> decoder layer and you see what "assembly" actually assembles. Data arrives carrying the previous layer's residual, first goes
+through <span class="mono">input_layernorm</span> (RMSNorm, Lesson 36); the normalized vector enters the attention sublayer — project q/k/v, spin RoPE onto q/k,
+<strong>write</strong> the current k/v into the KV pool at slots specified by <span class="mono">forward_batch</span>, then let q attend over itself and all historical k/v
+(if the prefix was cached by RadixAttention, reuse it directly, Lesson 7); attention output goes through o_proj back to hidden dim and is <strong>added to the residual</strong>.
+Then <span class="mono">post_attention_layernorm</span> normalizes again, enters the MLP, another residual add. Six steps, layer done, handing
+<span class="mono">(hidden_states, residual)</span> to the next layer. After N layers, final norm, <span class="mono">lm_head</span> projects out logits.
+Notice how <span class="mono">forward_batch</span> <strong>threads all the way</strong> into each layer's attention — it is <strong>the seam</strong> between the model file and the runtime:
+the model only "computes tensors right," while "which KV-pool slots to read/write" is told to it by the runtime via forward_batch.</p>
+
+<p>One more easily-missed detail: <span class="mono">residual</span> is <strong>passed across layers</strong>. Note in the code that the first layer arrives with residual None, so it treats the input itself as the residual; afterward every layer keeps "the value before norm" as the residual to add later. SGLang's <span class="mono">RMSNorm</span> even <strong>fuses</strong> "normalize + residual-add" into one call — <span class="mono">input_layernorm(hidden, residual)</span> returns both the new hidden and the updated residual, saving a memory round-trip. "Welding" a common combo into a single efficient op is exactly the optimization the underlying library does for you: you just call it, never minding how it merges two steps internally. The author sees only the clean logic "norm then attn then residual," and neither sees nor needs to see the fused kernel.</p>
+
+<p>While we're here, clear up an easily-confused point: in decode each step actually forwards just <strong>one</strong> new token, yet it must attend over <strong>all historical</strong> K/V; in prefill it forwards the <strong>whole</strong> prompt's many tokens at once. The same <span class="mono">forward</span> code runs both cases because <span class="mono">forward_mode</span> and attention metadata inside <span class="mono">forward_batch</span> absorb the difference for the model — you see no EXTEND / DECODE branching in the model file; that's all handled in the attention layer and ModelRunner (Lesson 24). This further confirms the lesson's through-line: the author describes the <strong>static architecture</strong>, while <strong>how it dynamically runs</strong> is taken over by the runtime and library layers.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>RMSNorm the input (Lesson 36), keep residual aside.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Attention (reads/writes KV)</h4><p>QKV proj + RoPE; write/read KV pool per <span class="mono">forward_batch</span>, q attends history (Lesson 33).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Residual add</h4><p>Attention output via o_proj back to hidden dim, add to residual.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>post_norm</h4><p>RMSNorm again, ready for MLP.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down, extract nonlinear features.</p></div></div>
+  <div class="step"><div class="num">6</div><div class="sc"><h4>Residual add → next layer</h4><p>Add to residual, hand off <span class="mono">(hidden, residual)</span>.</p></div></div>
+</div>
+
+<h2>Who writes, who provides: one table makes the cost clear</h2>
+<p>Back to the core claim: why is "adding a model" so cheap in SGLang? Read the table below — the responsibility of each of the four (five) classes is,
+<strong>without exception</strong>, "select and connect" SGLang's ready-made layers; not one line implements a low-level op. Read it together with the right-hand
+"what you write vs what SGLang provides" and it clicks: what a model author truly writes anew is only two kinds of thing — the <strong>architecture</strong>
+(which layers, what dims, how residuals connect) and the <strong>load_weights name mapping</strong> (which HF weight maps to which internal param, whether to fuse).
+Everything else — attention kernels, TP communication, KV management, CUDA graphs — comes <strong>for free</strong>. That is the root cause of cheap "broad model support."</p>
+
+<table class="t">
+  <tr><th>Class</th><th>Responsibility (all "assembling ready layers")</th><th>SGLang layers used</th></tr>
+  <tr><td class="mono">LlamaAttention</td><td>q/k/v proj + RoPE + attention + output proj</td><td class="mono">QKVParallelLinear / RadixAttention / RowParallelLinear</td></tr>
+  <tr><td class="mono">LlamaMLP</td><td>gate/up + activation + down</td><td class="mono">MergedColumnParallelLinear / SiluAndMul</td></tr>
+  <tr><td class="mono">LlamaDecoderLayer</td><td>stitch attention + MLP, define residual structure</td><td class="mono">RMSNorm (×2)</td></tr>
+  <tr><td class="mono">LlamaModel</td><td>embed → N layers → final norm</td><td class="mono">VocabParallelEmbedding / RMSNorm</td></tr>
+  <tr><td class="mono">LlamaForCausalLM</td><td>whole model: forward→logits + load_weights</td><td class="mono">ParallelLMHead / LogitsProcessor</td></tr>
+</table>
+
+<p>Read this table one level deeper and it lands harder: every layer with "Parallel" in its name stands on a whole tensor-parallel slicing-and-communication implementation; behind <span class="mono">RadixAttention</span> sit prefix-cache reuse (Lesson 7) + paged KV + multiple hardware attention backends (Lesson 33); behind <span class="mono">RMSNorm</span> and RoPE sit hand-written fused kernels (Lesson 36). Each of these alone is a long story, yet to the model author they are just <strong>one line of construction, one call</strong>. That's the power of "complexity sinks, interface floats": push the hard things down into reusable layers, and all that's left on the surface of a model file is "what this model looks like."</p>
+
+<div class="cols">
+  <div class="col"><h4>What you write (the model file)</h4><p><strong>Architecture</strong>: which layers, the dims, residual structure, how N layers stack; <strong>load_weights</strong>: HF weight name → internal param mapping and q/k/v, gate/up fusion (Lesson 25). That's all — one file, a few hundred lines.</p></div>
+  <div class="col"><h4>What SGLang provides (for free)</h4><p>Parallel linear layers (column/row-parallel, auto slicing + comms, Lesson 46), the <strong>attention backend</strong> and KV management (Lesson 33), RoPE/RMSNorm (Lesson 36), CUDA graphs (Lesson 27), sampling (Lesson 28). You <strong>touch none of it</strong>.</p></div>
+</div>
+
+<p>Flip it around and this division also <strong>constrains</strong> the author: the architectures you can express are bounded by the layers SGLang already provides. If a new model uses some brand-new attention variant or activation that the library lacks, you must <strong>first add a new brick to the library</strong> (a new reusable layer), then assemble it in the model file. But in reality, mainstream open models are highly homogeneous in their building blocks — all permutations of some linear projection, some attention, some normalization — so for the vast majority of new models the library's bricks are <strong>already complete</strong>, and the author truly just assembles. That is the engineering premise that makes "day-0 support" possible, and why SGLang's model directory can grow comfortably to hundreds of files without losing control.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/models/llama.py ::LlamaForCausalLM</span><span class="ln">assembly is the model</span></div>
+  <pre><span class="kw">class</span> <span class="st">LlamaDecoderLayer</span>(nn.Module):
+    <span class="kw">def</span> forward(self, positions, hidden_states, forward_batch, residual):
+        <span class="cm"># one layer = norm -> attention -> residual -> norm -> MLP -> residual</span>
+        <span class="kw">if</span> residual <span class="kw">is</span> None:
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
+        <span class="kw">else</span>:
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
+        hidden_states = self.self_attn(positions, hidden_states, forward_batch)   <span class="cm"># forward_batch threads to attention</span>
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        hidden_states = self.mlp(hidden_states)
+        <span class="kw">return</span> hidden_states, residual
+
+<span class="kw">class</span> <span class="st">LlamaForCausalLM</span>(nn.Module):
+    <span class="kw">def</span> forward(self, input_ids, positions, forward_batch, ...):
+        hidden_states = self.model(input_ids, positions, forward_batch)   <span class="cm"># embed -> N layers -> final norm</span>
+        <span class="kw">return</span> self.logits_processor(input_ids, hidden_states, self.lm_head, forward_batch)   <span class="cm"># -> logits</span></pre>
+</div>
+
+<p>The thing to remember about this code is its <strong>plainness</strong>: <span class="mono">LlamaForCausalLM.forward</span> does almost nothing — hands work to
+<span class="mono">self.model</span> for hidden, then to <span class="mono">logits_processor</span> with <span class="mono">lm_head</span> for logits;
+<span class="mono">LlamaDecoderLayer.forward</span> just strings norm, attention, MLP, residual in order. No CUDA, no all-reduce, no trace of KV paging —
+all that complexity is sealed inside the layers it calls. This "thin model file, thick underlying library" split is exactly why, the day a new open model drops,
+the community often only needs to <strong>write such a file by the same template</strong> to get SGLang running it; more complex architectures like multimodal (Lesson 49)
+and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffolding</strong>.</p>
+
+<p>One last word on the <strong>registration</strong> step. After writing the model file you register the class in the model registry (by architecture name — e.g. config's <span class="mono">architectures</span> field says <span class="mono">LlamaForCausalLM</span>), and the runtime uses that to find which class to use from the weight directory's <span class="mono">config.json</span>. This step is usually one line of mapping, yet it's the key to "config-driven, automatic dispatch": the user starts the server with just a model path, and TokenizerManager and ModelRunner (Lesson 24) follow config's architecture name to locate the file, instantiate it, load weights, and run. So from "the community submits a model file" to "this model is served in production," <strong>no scheduling, batching, or kernel code needs to change</strong> — that clean boundary is the real engineering dividend of broad model support. That's also why, the next time you want to bring up a new model in SGLang, the mindset should be "<strong>go to the models directory, find the closest existing file, and adapt it</strong>" rather than designing from scratch — in the vast majority of cases, all you do is adjust the kinds and dims of layers, get the load_weights name mapping right, and register it.</p>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <ul>
+    <li><strong>Model file = assembly</strong>: a SGLang model is nested <span class="mono">nn.Module</span>s built entirely from ready-made <strong>parallel layers</strong>; the author barely writes low-level ops.</li>
+    <li><strong>Llama's four (five) nesting classes</strong>: <span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>.</li>
+    <li><strong>You write only two things</strong>: architecture (which layers, dims, residuals) + <span class="mono">load_weights</span> name mapping (Lesson 25); attention, TP comms, KV mgmt come free.</li>
+    <li><strong>forward_batch is the seam</strong>: it threads into every layer's attention, telling the model which KV-pool slots to read/write (Lessons 24/33) — the model/runtime boundary.</li>
+    <li><strong>So adding a model is cheap</strong>: new open models often get day-0 support — write one file, register, served; MoE/multimodal just plug extra layers into the same scaffolding (Lessons 34/49).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. When you 'write a model' (e.g. Llama) in SGLang, what does the author mainly write <strong>anew</strong>?</div>
+  <ol class="opts">
+    <li><strong>Architecture + load_weights name mapping</strong>: which layers, what dims, how residuals connect, plus mapping HF weight names to internal params; attention kernels, TP comms, KV mgmt all reuse SGLang's ready <strong>parallel layers</strong> — the author writes no low-level ops</li>
+    <li>Implement its own KV-cache paging and GPU memory allocator</li>
+    <li>Hand-write the attention CUDA kernel and cross-GPU all-reduce from scratch</li>
+    <li>Write the tensor-parallel weight-slicing and communication scheduling logic</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A model file <strong>assembles</strong> SGLang's ready parallel layers (<code>QKVParallelLinear</code>, <code>RowParallelLinear</code>, <code>RadixAttention</code>, <code>RMSNorm</code>, ...): the author only describes the architecture and writes <code>load_weights</code> name mapping (Lesson 25). Attention kernels, TP comms, KV mgmt, CUDA graphs come free — the root reason adding a model is cheap and day-0 support is broad.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. How do Llama's four (five) classes <strong>nest</strong>?</div>
+  <ol class="opts">
+    <li>There is only one big class with all logic in a single forward</li>
+    <li><code>LlamaAttention</code> and <code>LlamaMLP</code> compose <code>LlamaDecoderLayer</code>; N layers + embed + final norm compose <code>LlamaModel</code>; add <code>lm_head</code> and <code>forward</code> and you get <code>LlamaForCausalLM</code>, the class the runtime sees</li>
+    <li>The five classes are siblings, stitched on demand by the scheduler at runtime</li>
+    <li><code>LlamaForCausalLM</code> is innermost; attention wraps the whole model</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The nesting is <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>. Each class does one thing, all using SGLang's ready layers. ModelRunner (Lesson 24) holds the outermost <code>LlamaForCausalLM</code>, which offers <code>forward(...)→logits</code> and <code>load_weights</code>.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <code>forward_batch</code> is threaded into every layer's attention — what role does it play?</div>
+  <ol class="opts">
+    <li>It stores model weights and loads them to the GPU on demand during forward</li>
+    <li>It is <strong>the seam</strong> between model file and runtime: it tells attention which KV-pool slots to read/write and which attention backend to use (Lessons 24/33); the model just computes tensors correctly</li>
+    <li>It is only used in prefill and not passed during decode</li>
+    <li>It is a sampling-params container deciding temperature/top-p</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <code>forward_batch</code> (Lesson 24) carries KV slots and attention metadata, threading layer by layer into <code>self_attn</code> so attention knows where to write current k/v and read history (Lesson 33). That is the boundary 'model computes tensors right, runtime owns KV addressing.' It doesn't store weights, isn't a sampling container, and is passed in both prefill and decode.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'building with standard LEGO bricks' analogy, fully explain what 'writing a Llama' in SGLang actually writes and what it gets for free. Cover each: (1) how the four (five) classes <strong>nest</strong> (<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>); (2) which ready SGLang layers each uses (<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE); (3) the in-layer structure 'input_norm→attention(read/write KV)→residual→post_norm→MLP→residual'; (4) that the author truly writes anew only the architecture + <code>load_weights</code> mapping (Lesson 25), while attention kernels, TP slicing/comms (Lesson 46), KV mgmt (Lesson 33) come free.</li>
+    <li>Explain why SGLang achieves near <strong>day-0 support</strong> for new open models with very broad coverage. Cover: (1) the 'thin model file, thick library' split — <code>LlamaForCausalLM.forward</code> basically just hands work to <code>self.model</code> then <code>logits_processor</code>/<code>lm_head</code>, with no trace of CUDA/all-reduce/KV paging; (2) how <code>forward_batch</code>, as the model/runtime seam, lets one model file adapt to different attention backends and parallel configs (Lessons 24/33/46); (3) why more complex architectures like MoE (Lesson 34) and multimodal (Lesson 49) are just 'plug a few extra layers into the same scaffolding' rather than a rewrite.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>CUDA graph capture & replay</h1>
+
+<p class="lead">
+Last lesson's ModelRunner had a decode "fast path": if a CUDA graph is available it <strong>replays</strong> a pre-recorded graph, otherwise it computes eagerly layer by layer. This lesson opens up that fast path.
+One decode forward actually has to <strong>launch hundreds of tiny GPU kernels</strong>, and every launch costs the CPU a fixed "issue fee". When each token computes very little, <strong>that launch fee ends up dominating the step</strong> —
+the GPU finishes one kernel and then just waits for the CPU to hand it the next. CUDA graphs exist to kill exactly this <strong>per-step kernel-launch overhead</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of a forward as playing one fixed song. <strong>Without a graph</strong>, it is like a pianist <strong>pressing each key live</strong> (each press = launching a kernel) — no matter how fast the hands, there's a fixed "lift and drop" delay between notes.
+  A CUDA graph is like a <strong>player-piano roll / a recorded macro</strong>: you <strong>record the whole song once</strong>, then let the roll <strong>play it in one go</strong>, with no human pressing keys one by one.
+  But the roll is <strong>fixed</strong> (static shapes): the holes and length are set, so you <strong>keep one roll per common song length</strong> (batch-size bucket) and <strong>pad shorter songs</strong> up to the nearest roll length to play them.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  A CUDA graph records the <strong>entire forward's kernel sequence and its dependencies</strong> into <strong>one graph</strong>, then <strong>replays it as a single submission</strong>, collapsing hundreds of "CPU launches a kernel" into "one submission".
+  SGLang <strong>captures</strong> graphs <strong>at startup</strong> for a <strong>set of batch sizes</strong> (e.g. 1, 2, 4, 8, …, max) via <span class="mono">BaseCudaGraphRunner.capture</span>; at run time it <strong>pads the real batch up to the nearest captured bucket</strong>
+  and replays that graph (<span class="mono">can_run_graph</span> + execute, Lesson 24). Because decode shapes are regular and prefill lengths vary, <strong>decode is graphed, prefill mostly runs eager</strong>.
+</div>
+
+<h2>The problem: one decode forward launches hundreds of tiny kernels</h2>
+<p>Let's make "overhead" concrete. A Transformer decoder layer is not "one big kernel" but a chain of small ops: input norm, the Q/K/V projections, writing K/V into the cache, attention, the o_proj output projection, another norm, the MLP gate/up, activation, down…
+Stack dozens of layers and one forward becomes <strong>hundreds of kernels queued onto the GPU</strong>. Each launch makes the CPU do a fixed routine: prepare args, configure the launch, enqueue into the CUDA stream — and that cost is <strong>independent of how big the kernel is</strong>; it is a <strong>fixed launch fee</strong>.</p>
+<p>This fee is invisible in <strong>prefill</strong>: it computes hundreds-to-thousands of tokens at once, each kernel is heavy, so the launch fee is negligible against the compute. But in <strong>decode</strong> (Lesson 4), each request computes just <strong>1 new token</strong> per step, the matrices are thin and small, so <strong>every kernel is extremely short</strong> —
+and now the fixed cost of "launching a kernel" becomes the dominant term. Worst case: the GPU finishes a tiny kernel in microseconds, then has to <strong>stop and wait for the CPU</strong> to enqueue the next one. The compute units sit idle while the step is stretched by a string of "wait for CPU". That is the enemy CUDA graphs eliminate.</p>
+
+<div class="cols">
+  <div class="col"><h4>❌ No graph (eager): launch one by one</h4><p>CPU launches kernel ①→GPU runs ①→CPU launches ②→GPU runs ②… hundreds of round-trips. Each launch has a <strong>fixed fee</strong>; decode kernels are so short the GPU often <strong>waits on the CPU</strong>. Launch overhead <strong>dominates</strong>, GPU utilization is low.</p></div>
+  <div class="col"><h4>✅ Graph (replay): one submission</h4><p>At startup the whole forward is <strong>recorded into one graph</strong>; at run time the CPU <strong>submits just once</strong> and the GPU runs the hundreds of kernels <strong>back-to-back</strong> along the graph, never turning back to wait. Launch overhead is nearly <strong>zero</strong>, the GPU is <strong>saturated</strong>.</p></div>
+</div>
+
+<h2>The fix: record once, replay the whole forward</h2>
+<p>A CUDA graph has just two moves: <strong>capture</strong> and <strong>replay</strong>. During capture, the model <strong>runs the forward once</strong> while CUDA records, underneath, <strong>the call order and dependencies of all kernels</strong> into a directed graph — <strong>without actually computing</strong>;
+then at replay, you hand that graph to the GPU as a <strong>single submission</strong> and the hardware runs the whole kernel string <strong>in one shot</strong>, with the CPU never launching anything one by one. One submission replaces hundreds of launches — that is where the overhead vanishes.</p>
+<p>But a graph is <strong>frozen</strong>: it binds the <strong>tensor shapes and memory addresses</strong> from capture time. Real requests have a batch size that may change every step, so you can't record one graph per exact size. SGLang's answer is <strong>bucketing + padding</strong>: at startup it records a graph for only <strong>a few fixed batch sizes</strong> (1, 2, 4, 8, …, max) — <span class="mono">capture</span> iterates over these sizes recording each;
+at run time it takes the real batch, <strong>rounds it up to the nearest bucket</strong> (<span class="mono">_pad_to_bucket</span>), pads the tensors to that size, and replays the matching graph. E.g. a real batch of 5 pads up to the bucket-8 graph — the cost of 3 extra padded rows is far smaller than the hundreds of kernel launches it saves.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Startup · capture</h4><p>Run the forward once while CUDA <strong>records the whole kernel sequence and dependencies into a graph</strong> (no real compute).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>One graph per size</h4><p>Iterate batch buckets 1/2/4/8/…/max, record a graph for each, kept alongside its <strong>static buffers</strong>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Run time · pad</h4><p>Round the real batch up to the <strong>nearest captured bucket</strong> (<span class="mono">_pad_to_bucket</span>); pad tensors to that size.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p><span class="mono">can_run_graph</span> passes → <strong>one submission</strong> replays that graph (Lesson 24); slice out the real rows' logits.</p></div></div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">capture &amp; bucket padding</span></div>
+  <pre><span class="kw">class</span> BaseCudaGraphRunner(BaseRunner):
+    <span class="cm"># record the whole forward at startup; pad to a bucket and replay at run time</span>
+    buffers: ForwardInputBuffers       <span class="cm"># pre-allocated static input buffers (fixed addrs)</span>
+    backend: BaseCudaGraphBackend      <span class="cm"># owns the capture / replay mechanics</span>
+
+    <span class="kw">@staticmethod</span>
+    <span class="kw">def</span> _pad_to_bucket(raw_size, buckets):
+        <span class="cm"># round the real batch up to the nearest captured bucket</span>
+        <span class="kw">assert</span> raw_size &lt;= buckets[-1]     <span class="cm"># over max bucket -> can_run_graph should reject</span>
+        index = bisect.bisect_left(buckets, raw_size)
+        <span class="kw">return</span> buckets[index]
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> capture(self):                  <span class="cm"># one-time: iterate all batch sizes, record a graph each</span>
+        ...                            <span class="cm"># each size calls capture_one_shape to record one graph</span></pre>
+</div>
+
+<h2>Constraints: why the graph must be "static"</h2>
+<p>The replay payoff has a price: the graph demands <strong>static shapes and addresses</strong>. This hard constraint directly drives three of SGLang's engineering choices. First, <strong>shapes must be fixed</strong>, hence <strong>bucketing + padding</strong> — the batch can't vary freely.
+Second, <strong>addresses must be fixed</strong>, so the runner pre-allocates a set of <strong>static input/output buffers</strong> (the <span class="mono">buffers</span> in the code above) and each step <strong>copies</strong> the real data into those fixed buffers before replay, instead of allocating anew.
+Third, <strong>no data-dependent control flow inside the captured region</strong> — a graph records one fixed path, it can't "take the if this step, the else next step". So some ops must <strong>stay outside</strong> the graph, or a "piecewise / breakable" graph <strong>splits out</strong> the dynamic ops and records the rest (covered in Lesson 33 on attention backends).</p>
+<p>Chain these three together and last lesson's line "<strong>decode is graphed, prefill runs eager</strong>" is fully explained: decode shapes are highly regular each step (batch steady for a while, sequence growing by 1), so they fit fixed buckets naturally; prefill lengths vary wildly, computing hundreds-to-thousands of tokens at once with a different shape almost every batch, so recording a graph per shape is neither worthwhile nor feasible — it prefers the flexible eager path.</p>
+
+<table class="t">
+  <tr><th>Constraint</th><th>Why</th><th>SGLang's response</th></tr>
+  <tr><td>Shapes must be static</td><td>Graph binds capture-time tensor shapes</td><td>Bucket the batch + pad up</td></tr>
+  <tr><td class="mono">Addresses must be static</td><td>Graph binds capture-time memory pointers</td><td>Pre-allocate static buffers, copy in each step</td></tr>
+  <tr><td>No data-dependent control flow</td><td>A graph is one fixed path, no if/else</td><td>Dynamic ops outside / piecewise graph (Lesson 33)</td></tr>
+  <tr><td>Buckets have a max</td><td>Can't record a graph for any size</td><td>Batch over max is rejected, falls back to eager</td></tr>
+</table>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>batch-size buckets + padding</b>: only these sizes are recorded; a real batch of 5 <strong>rounds up to the bucket-8</strong> graph for replay (highlighted)</div>
+  <div class="cells"><span class="lab">buckets</span><span class="cell">1</span><span class="sep">·</span><span class="cell">2</span><span class="sep">·</span><span class="cell">4</span><span class="sep">·</span><span class="cell hl">8</span><span class="sep">·</span><span class="cell">16</span><span class="sep">·</span><span class="cell">…</span><span class="sep">·</span><span class="cell">max</span></div>
+  <div class="cells"><span class="lab">real=5</span><span class="cell">5 real rows</span><span class="sep">+</span><span class="cell">3 padding rows</span><span class="sep">→</span><span class="cell hl">use bucket-8 graph</span><span class="sep">→</span><span class="cell q">after replay keep first 5 rows' logits</span></div>
+</div>
+
+<h2>The payoff: big decode throughput, and a perfect match with the overlap scheduler</h2>
+<p>Having killed the hundreds of launches per step, <strong>decode throughput usually gains a lot</strong> — most of all on small models, short kernels, large concurrency, where launch overhead is the highest share. Even better, it is a <strong>perfect match for the overlap scheduler (Lesson 21)</strong>:
+while a graph replays, the GPU just powers through the whole graph and barely turns back to the CPU; meanwhile the CPU is freed to <strong>schedule the next step</strong> (sampling, building the next batch). Stack the two and <strong>the GPU replays while the CPU lines up the next step</strong>, leaving the GPU almost no idle gap — the core rhythm of a high-throughput inference engine.</p>
+<p>There is of course a cost, a real tradeoff: recording many sizes takes <strong>startup time</strong> (each graph requires running the forward once to record) and eats <strong>memory</strong> (each graph holds its own static buffers). So more buckets isn't strictly better — too dense and startup is slow and memory-hungry; too sparse and padding waste grows.
+This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" tradeoff recurs later: Lesson 33's piecewise graphs let dynamic ops partly enjoy replay, and Lesson 43's speculative decoding must specially consider how to capture the more complex "draft + verify" shapes. Remember this lesson: <strong>a CUDA graph swaps "launch kernels one by one" for "replay the whole forward in one shot", trading static shapes for gone launch overhead</strong>.</p>
+
+<div class="card key">
+  <div class="tag">🔑 Key takeaways</div>
+  <strong>① The enemy is launch overhead:</strong> one decode forward launches hundreds of tiny kernels, each launch a fixed CPU fee; decode kernels are so short the fee dominates the step and the GPU waits on the CPU.
+  <strong>② The fix is record-once-replay-whole:</strong> a CUDA graph records the entire forward's kernel sequence into one graph and replays it as a single submission, collapsing hundreds of launches into one.
+  <strong>③ The price is static:</strong> the graph binds shape and address, so you need batch bucketing + padding (<span class="mono">_pad_to_bucket</span>), pre-allocated static buffers, and no data-dependent control flow in the captured region — the very reason <strong>decode is graphed, prefill runs eager</strong>.
+  <strong>④ How SGLang does it:</strong> at startup <span class="mono">BaseCudaGraphRunner.capture</span> records one graph per size (1/2/4/8/…/max); at run time it pads to the nearest bucket then <span class="mono">can_run_graph</span> + replay (Lesson 24).
+  <strong>⑤ Payoff &amp; partner:</strong> big decode throughput, and a perfect match with the overlap scheduler (Lesson 21) — GPU replays, CPU lines up the next step, GPU barely idles; the cost is startup time and memory (piecewise graphs in Lesson 33, speculative in Lesson 43).
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What overhead does a CUDA graph mainly eliminate in the decode forward?</div>
+  <ol class="opts">
+    <li><strong>Per-kernel launch overhead</strong> — one decode forward launches hundreds of tiny kernels, each with a <strong>fixed CPU issue fee</strong>; decode kernels are so short the fee dominates the step and the GPU waits on the CPU. The graph records the whole forward and <strong>replays it as a single submission</strong>, collapsing hundreds of launches into one</li>
+    <li>The floating-point compute (FLOPs) of the matmuls themselves</li>
+    <li>Network bandwidth for transferring tokens</li>
+    <li>The GPU memory used by the KV cache</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Replay doesn't change how much is computed (FLOPs are the same), nor save memory or network; it removes the fixed CPU cost of <strong>launching kernels one by one</strong>. Decode computes just 1 token per request per step with extremely short kernels, so the launch fee dominates and replay pays most — one submission replaces hundreds of launches, and the GPU stops waiting on the CPU for the next kernel.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does SGLang record graphs for a <strong>set of fixed batch sizes</strong> and then <strong>pad</strong> the real batch up to the nearest bucket at run time?</div>
+  <ol class="opts">
+    <li>Because padding improves numerical precision</li>
+    <li>Because a graph binds the <strong>static shapes and memory addresses</strong> from capture, replay only fits the same shape; the real batch can differ every step, so you can't record one per exact size. Hence only a few buckets (1/2/4/8/…/max) are recorded, and the real batch is <strong>rounded up to the nearest bucket</strong> (<code>_pad_to_bucket</code>) before replay — the few padded rows cost far less than the hundreds of launches saved</li>
+    <li>Because the GPU can only process power-of-two batch sizes</li>
+    <li>Because each batch size needs its own GPU</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. A CUDA graph is frozen: shape and address are fixed at capture, so replay can't adapt to arbitrary sizes. Recording one per size is neither worthwhile nor feasible, so bucketing + rounding up trades a little wasted compute for reusing a whole graph. It has nothing to do with power-of-two limits, precision, or hardware count.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why is <strong>decode</strong> graphed while <strong>prefill</strong> mostly isn't, and how does the CUDA graph pair with the <strong>overlap scheduler (Lesson 21)</strong>?</div>
+  <ol class="opts">
+    <li>Decode must run on CPU so it uses a graph; prefill runs on GPU</li>
+    <li>Decode shapes are highly regular (steady batch, sequence growing by 1), fitting fixed buckets naturally; prefill lengths vary, computing hundreds-to-thousands of tokens with a different shape almost every batch, so graphing isn't worthwhile. Pairing: <strong>while the GPU replays the whole graph, the CPU is freed to schedule the next step</strong>, so together the GPU barely idles</li>
+    <li>Prefill doesn't need attention, so no graph</li>
+    <li>The overlap scheduler makes CPU and GPU run the same kernel simultaneously</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Graphs need static shapes: decode is regular and bucketable, prefill is varied and not worthwhile — the root reason for 'decode graphed, prefill eager' (Lesson 24). The overlap scheduler (Lesson 21) lets the CPU line up the next step while the GPU replays, a perfect match leaving almost no GPU idle. Decode doesn't run on CPU, prefill does need attention, and CPU/GPU don't run the same kernel.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'player-piano roll / recorded macro' analogy, fully explain CUDA-graph capture and replay from scratch. Cover: (1) the problem — one decode forward launches hundreds of tiny kernels (per layer: norm, q/k/v, attention, o_proj, gate/up, down…), each with a <strong>fixed CPU launch fee</strong>, and why that fee dominates the step when decode kernels are short, leaving the GPU waiting on the CPU; (2) the fix — how a graph <strong>records</strong> the whole forward's kernel sequence and dependencies once and <strong>replays it as a single submission</strong>; (3) SGLang's engineering — at startup <code>BaseCudaGraphRunner.capture</code> records one graph per size (1/2/4/8/…/max), and at run time <code>_pad_to_bucket</code> rounds up to the nearest bucket and replays once <code>can_run_graph</code> passes (Lesson 24).</li>
+    <li>Centered on the hard constraint 'a graph must be static', explain how it shapes SGLang's design and the resulting tradeoffs. Cover: (1) static shapes → <strong>batch bucketing + padding</strong>; static addresses → <strong>pre-allocated static buffers copied into each step</strong>; <strong>no data-dependent control flow</strong> in the captured region → dynamic ops outside or a piecewise/breakable graph (Lesson 33); (2) why these three together explain '<strong>decode graphed, prefill eager</strong>'; (3) payoff vs cost — big decode throughput and a perfect match with the overlap scheduler (Lesson 21), but recording many sizes costs <strong>startup time</strong> and <strong>memory</strong> (each graph holds its own static buffers), and what goes wrong if buckets are too dense or too sparse; and relate to why speculative decoding (Lesson 43) must specially consider capturing more complex shapes.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Sampler & sampling params</h1>
+
+<p class="lead">
+The ModelRunner of Lesson 24 turned a batch of tokens into <strong>logits</strong> — one score per vocabulary token. But a score isn't an answer;
+<strong>the next token is the answer</strong>. Picking "which token do we emit this step" out of a row of tens of thousands of scores is exactly what this lesson's star, the <span class="inline">Sampler</span>, does.
+It closes Part 6, and it is <strong>step 4</strong> of the request loop (Lesson 18): <strong>logits → the next token</strong>.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of sampling as a <strong>weighted lottery over the vocabulary</strong>: every token is a ticket and the logits set its <strong>odds</strong>.
+  <strong>Temperature</strong> reshapes how lopsided the odds are — cold (low T) almost always draws the favorite; hot (high T) lets wild cards win.
+  <strong>top-k / top-p</strong> first <strong>throw the no-hope tickets out of the box</strong>, so you can never draw garbage.
+  And <strong>greedy</strong> skips the draw entirely and just takes the heaviest ticket.
+</div>
+
+<div class="card macro">
+  <div class="tag">🌍 The big picture</div>
+  The <span class="inline">Sampler</span> is an <span class="mono">nn.Module</span>; its input is the logits from <span class="mono">model.forward</span>,
+  its output is <strong>the next token id for each request</strong>. Its other input is <span class="mono">SamplingBatchInfo</span>: the per-request params
+  <strong>packed into tensors</strong>, so <strong>different requests in ONE batch can use different params</strong> (temperature, top_p…) in one vectorized pass.
+  Each request's knob set comes from the user's <span class="mono">SamplingParams</span> (Lesson 53).
+</div>
+
+<h2>From a row of scores to one token: the sampling pipeline</h2>
+<p>logits can't be the answer directly — they're just <strong>unnormalized preferences</strong>. The Sampler reshapes them <strong>step by step</strong>, then rolls a single die.
+The full pipeline (done in parallel per request): first <strong>penalties</strong> (repetition / frequency / presence — discourage words already produced, kill the parrot),
+then <strong>temperature</strong> scaling (divide the logits by T: &lt;1 sharpens and steadies, &gt;1 flattens and dares, =0 collapses to greedy argmax),
+then three <strong>truncation gates</strong> — <strong>top-k</strong> (keep the k highest), <strong>top-p / nucleus</strong> (sort by prob descending and keep the smallest set summing to p),
+<strong>min-p</strong> (drop every token below "max prob × a fraction") — finally <strong>softmax</strong> renormalizes the survivors and a <strong>multinomial sample</strong> rolls the die.
+If the whole request is greedy, all that is skipped and it's just <span class="mono">argmax</span>.</p>
+
+<p>The order is worth a second thought. <strong>Penalties come first</strong> because they edit the "raw preference" — you must fold in "this word was just said, dock points" before any reshaping counts.
+<strong>Temperature is next</strong>; it's the only knob that <strong>reshapes the steepness of the whole curve</strong>: it never changes the <strong>ranking</strong> of who's higher, only how <strong>lopsided</strong> the gaps are, so it must run before truncation.
+<strong>top-k / top-p / min-p draw the candidate circle</strong>: none of them changes relative probabilities, they only decide "which tokens are still eligible", chopping off the hopeless tail — blocking garbage while leaving room for the genuinely reasonable few.
+Only then softmax + sample — <strong>shape, then circle, then roll</strong>, each step doing one thing, which is why this code stays clean.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>raw scores from model.forward: <strong>one score per token</strong> in the vocabulary (Lesson 24).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>penalties</h4><p>repetition / frequency / presence — push down words already produced, <strong>anti-parrot</strong>.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>temperature</h4><p>logits ÷ T: &lt;1 sharper and steadier, &gt;1 flatter and wilder, <strong>=0 ⇒ greedy</strong>.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>top-k / top-p / min-p</h4><p>three gates <strong>draw the candidate circle</strong>: chop off the hopeless tail.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>softmax → sample</h4><p>renormalize to probs, <strong>roll a multinomial die</strong> for the next token (or argmax if greedy).</p></div></div>
+</div>
+
+<h2>What each of the four knobs does</h2>
+<p>The user only gets a handful of knobs, but each has a different temperament — mix them up and the output goes "too dull" or "too wild". One-line memory: <strong>temperature sets lopsidedness, top-k caps the count, top-p caps the cumulative, min-p sets a floor, penalties fight repetition</strong>.
+Temperature is a <strong>continuous</strong> master valve for randomness; top-k is a <strong>hard cap</strong> that keeps exactly k no matter how flat the distribution; top-p is <strong>adaptive</strong> — it may keep 1–2 tokens when the distribution is sharp and several when it's flat, automating "be decisive when you should, diverge when you should";
+min-p uses "a fraction of the max" as a threshold, more robust than a fixed top-k. They're often <strong>stacked</strong> (top-k then top-p then min-p), narrowing the candidate set in layers.</p>
+
+<table class="t">
+  <tr><th>Param</th><th>What it does</th></tr>
+  <tr><td class="mono">temperature</td><td>divide logits by it: &lt;1 sharpens (more deterministic), &gt;1 flattens (more random), <strong>=0 collapses to greedy argmax</strong></td></tr>
+  <tr><td class="mono">top_k</td><td>keep only the <strong>k highest-scoring</strong> tokens, discard the rest (a hard count cap)</td></tr>
+  <tr><td class="mono">top_p</td><td>sort by prob descending, keep the smallest set <strong>summing to p</strong> (nucleus, adaptive size)</td></tr>
+  <tr><td class="mono">min_p</td><td>drop every token below "<strong>max prob × min_p</strong>" (a relative floor)</td></tr>
+  <tr><td class="mono">penalties</td><td>repetition / frequency / presence — <strong>push down words already seen</strong>, suppress repeats</td></tr>
+</table>
+
+<p>Read the table live: temperature=0 is a special, common setting — it makes output <strong>fully deterministic</strong>, the same input always yields the same output, which is what you want for evals, unit tests, reproducibility.
+For creative writing, chat, or anything needing diversity, you raise temperature to 0.7–1.0 and add a truncation like top_p≈0.9, letting it "<strong>roam freely within a sane range</strong>".
+Once you understand each knob, you can translate "output too rigid" or "model rambling" into "which param to turn" instead of guessing.</p>
+
+<h2>Greedy vs sampling: determinism, or diversity</h2>
+<p>The final roll has only two temperaments. <strong>Greedy</strong> takes the highest-prob token every step — <strong>deterministic, reproducible, but dull and repetition-prone</strong>;
+<strong>sampling</strong> <strong>rolls a die</strong> by probability — <strong>random, diverse, more human</strong>, but occasionally draws a suboptimal word.
+In code it's a crisp two-way branch: if <span class="mono">is_all_greedy</span>, do <span class="mono">argmax</span> and finish; otherwise take the full "temperature → softmax → top-k/top-p/min-p → multinomial" path.</p>
+
+<div class="cols">
+  <div class="col"><h4>Greedy (argmax)</h4><p>take the <strong>highest</strong>-prob token each step; <strong>deterministic, reproducible</strong>, the default for evals/tests/stable scenarios.
+  Cost: output is <strong>dull, prone to repeats</strong>, low diversity. Equivalent to temperature=0 — no die rolled at all.</p></div>
+  <div class="col"><h4>Sampling (multinomial)</h4><p>draw a token <strong>at random</strong> by probability; <strong>diverse, creative, more natural</strong>.
+  temperature/top-k/top-p/min-p <strong>control how much and how wide</strong> the randomness is. Cost: <strong>not reproducible</strong> (unless RNG is pinned), occasionally suboptimal.</p></div>
+</div>
+
+<p>A common misconception: "sampling = uncontrollable". In fact the randomness is <strong>tightly fenced</strong> by those knobs — top-k/top-p first kick every hopeless word out of the candidate set,
+so when you roll the die <strong>there are no garbage tickets in the box</strong>; however random, you can't draw nonsense. Temperature then decides "how boldly to gamble among these sane candidates".
+In other words, <strong>truncation governs quality, temperature governs diversity</strong>; together they keep output neither dull nor unhinged.</p>
+
+<h2>The hooks before sampling: constraints, bias, determinism</h2>
+<p>Sampling isn't an isolated roll; it's where many features <strong>hook in</strong>, and most of them act "on the logits, before softmax". The most important is <strong>structured output</strong> (Lesson 48):
+when you require the model to emit <strong>valid</strong> JSON, or match a regex/grammar, the constraint engine sets the logit of every "grammar-disallowed-right-now" token to <strong>−∞</strong> (masks it) before sampling,
+so after softmax their probability is exactly 0 and <strong>sampling can never pick them</strong> — guaranteeing grammar-valid output by mechanism, not by validating afterward and retrying on failure.</p>
+
+<p>The same spot carries other hooks: <strong>logit-bias</strong> lets the user manually add/subtract on specific tokens (encourage or ban words); <strong>min_tokens / EOS suppression</strong> pushes the EOS logit to −∞
+while the generation length hasn't been met, forcing the model <strong>not to stop yet</strong>; <strong>deterministic inference</strong> <strong>pins the RNG</strong> seed (derived per position from positions),
+making the inherently random act of "sampling" reproducible token by token. These features each have their own lesson, but they all act on <strong>the same logits, before this one roll</strong> — which is why the Sampler is a hub.</p>
+
+<div class="cellgroup">
+  <div class="cg-cap"><b>top-p truncation</b> (p=0.9): probs sorted descending, <strong>accumulate</strong> until just ≥ 0.9, then <strong>keep that prefix (highlighted), drop the rest</strong></div>
+  <div class="cells"><span class="lab">sorted probs</span><span class="cell hl">0.50</span><span class="sep">+</span><span class="cell hl">0.30</span><span class="sep">+</span><span class="cell hl">0.12</span><span class="sep">|</span><span class="cell">0.05</span><span class="sep">+</span><span class="cell">0.03</span></div>
+  <div class="cells"><span class="lab">running sum</span><span class="cell">0.50</span><span class="sep">→</span><span class="cell">0.80</span><span class="sep">→</span><span class="cell hl">0.92 ✓ stop</span><span class="sep">→</span><span class="cell q">the trailing 0.05/0.03 are cut, never sampled</span></div>
+</div>
+
+<h2>A look at the real code</h2>
+<p>Here is the real skeleton of <span class="mono">Sampler.forward</span> (class ~line 68, forward ~line 93). Note the crisp <strong>greedy vs sampling</strong> branch,
+and on the standard path the "<strong>temperature → softmax → truncate+sample</strong>" order — matching the pipeline above one-to-one:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/sampler.py ::Sampler</span><span class="ln">logits → the next token</span></div>
+  <pre><span class="kw">def</span> forward(self, logits_output, sampling_info, ...):
+    logits = logits_output.next_token_logits
+    logits = self._preprocess_logits(logits, sampling_info)   <span class="cm"># custom processors + NaN cleanup</span>
+    <span class="kw">if</span> sampling_info.is_all_greedy:                           <span class="cm"># whole batch greedy: take the max</span>
+        batch_next_token_ids = torch.argmax(logits, -1)
+    <span class="kw">else</span>:
+        logits.div_(sampling_info.temperatures)               <span class="cm"># 1) temperature scale (per-request, vectorized)</span>
+        logits[:] = torch.softmax(logits, dim=-1)             <span class="cm"># 2) turn into probabilities</span>
+        probs = logits
+        batch_next_token_ids = self._sample_from_probs(       <span class="cm"># 3) top-k/top-p/min-p + multinomial sample</span>
+            probs, sampling_info, positions, simple_sampling_case)
+    <span class="kw">return</span> batch_next_token_ids</pre>
+</div>
+
+<p>Note the details: <span class="mono">sampling_info.temperatures</span> is <strong>a whole tensor</strong> — one temperature per request, so <span class="mono">div_</span> is per-request vectorized,
+exactly how "<strong>different requests in one batch use different params</strong>" looks in code. <span class="mono">is_all_greedy</span> is a batch-level shortcut: only when the batch is <strong>entirely</strong> greedy does it take the argmax fast path,
+otherwise everything goes the sampling route (greedy requests still get equivalent results there via their own temperature/params). <span class="mono">_sample_from_probs</span> is where top-k/top-p/min-p kernels and the multinomial sample actually run.</p>
+
+<p>Tie it back to the main line: this is <strong>step 4</strong> of the request loop (Lesson 18). model.forward (Lesson 24) produces logits, the Sampler turns them into the next token,
+which is <strong>appended back to the Req</strong> and fed into the model next step — exactly the <strong>autoregression</strong> (Lesson 4) loop of "emit one, append, emit again".
+Part 6 closes here: Lesson 24 was the ModelRunner "decide → compute" door, Lessons 25/26 how the model loads and is written, Lesson 27 why decode can use CUDA graphs,
+and this lesson adds the last link — <strong>how the computed logits actually become the token on your screen</strong>.</p>
+
+<div class="card key">
+  <div class="tag">📌 Key takeaways</div>
+  <ul>
+    <li><strong>Sampler</strong>: an <span class="mono">nn.Module</span> turning <strong>logits → next token id</strong>; reads <span class="mono">SamplingBatchInfo</span> (per-request params packed into tensors).</li>
+    <li><strong>Pipeline</strong>: penalties → temperature (÷T; &lt;1 sharp, &gt;1 flat, =0 greedy) → top-k / top-p / min-p truncation → softmax → multinomial sample.</li>
+    <li><strong>Knobs</strong>: <span class="mono">SamplingParams</span> sets temperature/top_p/top_k/min_p/penalties per request; <strong>different requests in one batch can use different params</strong> (vectorized).</li>
+    <li><strong>Greedy vs sampling</strong>: argmax is deterministic/reproducible vs multinomial is random/diverse; truncation governs quality, temperature governs diversity.</li>
+    <li><strong>Hooks</strong>: structured output (Lesson 48) sets disallowed-token logits to −∞ before sampling; logit-bias, min_tokens/EOS suppression, deterministic RNG all hook here. It is step 4 of the request loop (Lesson 18), one turn of autoregression (Lesson 4).</li>
+  </ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In the sampling pipeline, what does <strong>temperature</strong> actually change?</div>
+  <ol class="opts">
+    <li>It directly deletes the lowest-probability tokens</li>
+    <li>It <strong>divides the logits by T</strong> to reshape the distribution's <strong>steepness</strong>: T&lt;1 sharpens it (more deterministic, the favorite is steadier), T&gt;1 flattens it (more random, longshots get a chance), <strong>T=0 collapses to greedy argmax</strong>. It <strong>does not change the ranking</strong> of tokens, only how lopsided the gaps are</li>
+    <li>It decides how many tokens to generate at once</li>
+    <li>It penalizes already-seen words to suppress repetition</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Temperature is the only knob that reshapes curve steepness: dividing by T changes the gaps, not the ranking, and T=0 equals greedy. Deleting low-prob tokens is top-k/top-p/min-p's job, penalizing is penalties' job, and how many tokens is max_new_tokens — don't conflate them.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. How does <strong>structured output</strong> (e.g. forcing valid JSON, Lesson 48) hook into sampling to guarantee grammar-valid output?</div>
+  <ol class="opts">
+    <li>It sets temperature to 0 to force greedy</li>
+    <li>It trains a dedicated model that only outputs JSON</li>
+    <li>It checks the token after sampling and resamples if invalid</li>
+    <li><strong>Before sampling</strong>, the constraint engine sets the logit of every “grammar-disallowed-right-now” token to <strong>−∞</strong> (masks it); after softmax their probability is exactly 0, so <strong>sampling can never pick them</strong>. Validity is guaranteed by mechanism, not by validating afterward and retrying on failure</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The key is acting on logits before sampling: set violating tokens to −∞ and after softmax their prob is 0, so they're mechanically unselectable — more efficient and certain than validate-then-retry. It's unrelated to temperature or a dedicated model; logit-bias and min_tokens/EOS suppression hook at the same pre-sampling spot.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. About <strong>multiple requests in the same batch</strong>, which statement is correct?</div>
+  <ol class="opts">
+    <li>Each request must run the Sampler separately one at a time</li>
+    <li>Only the first request's params in the batch take effect</li>
+    <li>The whole batch must share one set of sampling params</li>
+    <li>They can each use <strong>their own sampling params</strong>: every request's <span class='mono'>SamplingParams</span> is packed into <span class='mono'>SamplingBatchInfo</span> tensors (e.g. <span class='mono'>temperatures</span> is a whole tensor), and the Sampler processes them <strong>per-request, vectorized</strong> — request A greedy, B at temperature 0.9, C at top_p=0.8 can all be computed together in one step</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. SamplingBatchInfo packs per-request params into tensors, so ops like div_(temperatures) are inherently per-request vectorized: params can differ across the batch and are computed in one pass. No per-request looping, no shared-only or first-only behavior — this is key to high-throughput batching.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'weighted lottery over the vocabulary' analogy, fully explain the sampling pipeline from scratch. Cover: (1) the start — model.forward (Lesson 24) yields logits, one score per vocab token, and why that isn't the answer yet; (2) the pipeline order — penalties (repetition/frequency/presence, anti-parrot) → temperature (÷T: &lt;1 sharp, &gt;1 flat, =0 greedy, and it only changes lopsidedness not ranking) → top-k (caps count) / top-p (caps cumulative prob) / min-p (relative floor) gates → softmax → multinomial sample, explaining why each step sits where it does; (3) greedy vs sampling (deterministic/reproducible vs random/diverse), and what 'truncation governs quality, temperature governs diversity' means.</li>
+    <li>Explain why the Sampler is a <strong>hub where many features hook in</strong>, and how it ties back to the main line. Cover: (1) how structured output (Lesson 48) sets violating tokens' logits to −∞ before sampling, guaranteeing grammar validity by mechanism; (2) what other hooks live at the same spot — logit-bias, min_tokens/EOS suppression, deterministic inference (pinning the RNG seed); (3) why 'different requests in one batch can use different params' matters in practice (SamplingBatchInfo packs params into tensors, vectorized); (4) tie sampling back to step 4 of the request loop (Lesson 18) and autoregression (Lesson 4): the sampled token is appended to the Req and fed into the next step.</li>
   </ul>
 </div>
 </div>
