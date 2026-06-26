@@ -2771,8 +2771,8 @@ QUIZZES = {
                 },
                 "opts": [
                     {
-                        "zh": "<strong>注册胶水 <span class='mono'>common_extension.cc</span> 用 <span class='mono'>TORCH_LIBRARY</span> 把每个 kernel 注册成 PyTorch 自定义算子，挂在 <span class='mono'>torch.ops.sgl_kernel.*</span> 命名空间下，Python 由此直接调入原生代码</strong>",
-                        "en": "<strong>The registration glue <span class='mono'>common_extension.cc</span> uses <span class='mono'>TORCH_LIBRARY</span> to register each kernel as a PyTorch custom op under the <span class='mono'>torch.ops.sgl_kernel.*</span> namespace, through which Python calls straight into native code</strong>",
+                        "zh": "<strong>注册胶水 <span class='mono'>common_extension.cc</span> 用 <span class='mono'>TORCH_LIBRARY_FRAGMENT</span> 把每个 kernel 注册成 PyTorch 自定义算子，挂在 <span class='mono'>torch.ops.sgl_kernel.*</span> 命名空间下，Python 由此直接调入原生代码</strong>",
+                        "en": "<strong>The registration glue <span class='mono'>common_extension.cc</span> uses <span class='mono'>TORCH_LIBRARY_FRAGMENT</span> to register each kernel as a PyTorch custom op under the <span class='mono'>torch.ops.sgl_kernel.*</span> namespace, through which Python calls straight into native code</strong>",
                     },
                     {"zh": "通过 HTTP 请求把张量发到一个本地 GPU 服务进程", "en": "By sending tensors over HTTP to a local GPU service process"},
                     {"zh": "通过把 Python 代码翻译成 CUDA 源码再编译", "en": "By transpiling the Python code into CUDA source and compiling it"},
@@ -2780,8 +2780,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "kernel 经 <span class='mono'>common_extension.cc</span>(及 rocm/musa 变体)用 <span class='mono'>TORCH_LIBRARY</span> 注册成 <span class='mono'>torch.ops.sgl_kernel.*</span>,这是 Python 进入原生代码的标准门。它不走 HTTP,不在运行时翻译 Python,也不绕开 PyTorch 裸 dlopen。",
-                    "en": "Kernels are registered via <span class='mono'>common_extension.cc</span> (and rocm/musa variants) using <span class='mono'>TORCH_LIBRARY</span> as <span class='mono'>torch.ops.sgl_kernel.*</span>, the standard door from Python into native code. It is not HTTP, not runtime transpilation of Python, and not a bare dlopen bypassing PyTorch.",
+                    "zh": "kernel 经 <span class='mono'>common_extension.cc</span>(及 rocm/musa 变体)用 <span class='mono'>TORCH_LIBRARY_FRAGMENT</span> 注册成 <span class='mono'>torch.ops.sgl_kernel.*</span>,这是 Python 进入原生代码的标准门。它不走 HTTP,不在运行时翻译 Python,也不绕开 PyTorch 裸 dlopen。",
+                    "en": "Kernels are registered via <span class='mono'>common_extension.cc</span> (and rocm/musa variants) using <span class='mono'>TORCH_LIBRARY_FRAGMENT</span> as <span class='mono'>torch.ops.sgl_kernel.*</span>, the standard door from Python into native code. It is not HTTP, not runtime transpilation of Python, and not a bare dlopen bypassing PyTorch.",
                 },
             },
         ],

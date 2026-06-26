@@ -391,8 +391,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>把上面所有概念落到一段真实代码上，我们看 DeepSeek 风格的 <strong>MLA</strong>（多头潜在注意力）的 decode 核函数。MLA 有个现实中的小皱褶：它的 KV 不是普通地存成「每个头一份 K、一份 V」，而是存成一个<strong>压缩潜变量</strong>（latent，<span class="mono">D_latent=512</span>）外加一小段 <strong>rope（旋转位置编码）部分</strong>（<span class="mono">D_rope=64</span>），合起来每个位置 576 维。核函数通过 page_table 从 <span class="mono">kv_c_and_k_pe_cache</span> 里读出这份压缩 KV，再把头数<strong>补齐</strong>到核函数的瓦片宽度 <span class="mono">MAX_HEADS=128</span>，然后把活儿派发给编译好的 CUDA 核函数。下面这段 Python 就是这层「准备数据 + 派发」的封装，真正的乘加发生在 <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span> 背后的编译核函数里：</p>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/attention.py ::cutlass_mla_decode</span><span class="ln">按 page_table 收集分页 KV → 分块 Q·Kᵀ → 在线 softmax → ·V</span></div><pre>def cutlass_mla_decode(
-    q_nope, q_pe,                 # query: compressed (nope) + rope parts
-    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope, one entry per page
+    q_nope, q_pe,                 # query: no-pos-emb part (nope, dim 512) + rope part
+    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope; middle dim is PAGE_SIZE
     seq_lens, page_table,         # page_table[b] -&gt; the KV page ids for sequence b
     workspace, sm_scale, num_kv_splits=1,
 ):
@@ -524,8 +524,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>To ground all of this in real code, look at the DeepSeek-style <strong>MLA</strong> (multi-head latent attention) decode kernel. MLA has a real-world wrinkle: its KV is not stored plainly as "one K, one V per head," but as a <strong>compressed latent</strong> (<span class="mono">D_latent=512</span>) plus a small <strong>rope part</strong> (<span class="mono">D_rope=64</span>), 576 dims per position together. The kernel reads this compressed KV from <span class="mono">kv_c_and_k_pe_cache</span> via the page_table, <strong>pads</strong> the head count up to the kernel's tile width <span class="mono">MAX_HEADS=128</span>, then dispatches to the compiled CUDA kernel. The Python below is that "prepare data + dispatch" wrapper; the real multiply-accumulate happens inside the compiled kernel behind <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span>:</p>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/attention.py ::cutlass_mla_decode</span><span class="ln">gather paged KV via page_table → tiled Q·Kᵀ → online softmax → ·V</span></div><pre>def cutlass_mla_decode(
-    q_nope, q_pe,                 # query: compressed (nope) + rope parts
-    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope, one entry per page
+    q_nope, q_pe,                 # query: no-pos-emb part (nope, dim 512) + rope part
+    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope; middle dim is PAGE_SIZE
     seq_lens, page_table,         # page_table[b] -&gt; the KV page ids for sequence b
     workspace, sm_scale, num_kv_splits=1,
 ):

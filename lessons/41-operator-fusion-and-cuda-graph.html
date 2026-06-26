@@ -382,7 +382,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>四、把它们落到一段真实代码上</h2>
 <p>下面这段是 SGLang 中 <span class="mono">SiluAndMul</span> 的浓缩版。请重点对比两个前向：<span class="mono">forward_native</span> 是"<strong>两趟 + 临时张量</strong>"的参考实现，<span class="mono">forward_cuda</span> 是"<strong>一个 kernel 同时做 silu 与乘</strong>"的融合实现。后者写出的 <span class="mono">out</span> 只在最后落一次显存，silu 的中间结果全程留在寄存器，因此访存更少、启动更少，且形状固定——正好是 CUDA Graph 喜欢的样子。</p>
-<p>注意 <span class="mono">forward_native</span> 里那行 <span class="mono">F.silu(x[..., :d]) * x[..., d:]</span>：它把张量从隐藏维的中点切成前后两半，前半是门控（gate）、后半是上投影（up）。表达式先算 silu，PyTorch 会为这个中间结果分配一块显存并写入，随后乘法再把它读回来——这就是那一次多余的临时张量往返。而 <span class="mono">forward_cuda</span> 先用 <span class="mono">torch.empty</span> 备好输出缓冲，再调用 <span class="mono">silu_and_mul(x, out)</span> 这个自定义算子，它最终落到 <span class="mono">torch.ops.sgl_kernel.silu_and_mul</span>，在 GPU 上以单趟方式同时完成切分、silu 与逐元素乘。输出缓冲尺寸只依赖于隐藏维的一半 <span class="mono">d</span>，是个静态值，因此这个内核在解码时形状固定、可以被安心地捕获进图反复重放。</p>
+<p>注意 <span class="mono">forward_native</span> 里那行 <span class="mono">F.silu(x[..., :d]) * x[..., d:]</span>：它把张量从隐藏维的中点切成前后两半，前半是门控（gate）、后半是上投影（up）。表达式先算 silu，PyTorch 会为这个中间结果分配一块显存并写入，随后乘法再把它读回来——这就是那一次多余的临时张量往返。而 <span class="mono">forward_cuda</span> 先用 <span class="mono">torch.empty</span> 备好输出缓冲，再调用 <span class="mono">silu_and_mul(x, out)</span> 这个融合算子：在 CUDA 上它由 <span class="mono">sglang.jit_kernel.activation</span> 提供的 JIT 融合内核完成（ROCm/XPU 等路径则改用 AOT 的 <span class="mono">torch.ops.sgl_kernel.silu_and_mul</span>），无论走哪条路，都在 GPU 上以单趟方式同时完成切分、silu 与逐元素乘。输出缓冲尺寸只依赖于隐藏维的一半 <span class="mono">d</span>，是个静态值，因此这个内核在解码时形状固定、可以被安心地捕获进图反复重放。</p>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>融合 Fuse</h4><p class="mono">SiluAndMul</p><p>把多个小算子合成一个 kernel，消除临时张量与多次启动。</p></div></div>
@@ -401,7 +401,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     def forward_cuda(self, x):          # FUSED: one kernel does silu AND mul
         d = x.shape[-1] // 2
         out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
-        silu_and_mul(x, out)            # -&gt; torch.ops.sgl_kernel.silu_and_mul
+        silu_and_mul(x, out)            # -&gt; fused JIT silu+mul kernel (jit_kernel.activation)
         return out</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
@@ -513,7 +513,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     def forward_cuda(self, x):          # FUSED: one kernel does silu AND mul
         d = x.shape[-1] // 2
         out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
-        silu_and_mul(x, out)            # -&gt; torch.ops.sgl_kernel.silu_and_mul
+        silu_and_mul(x, out)            # -&gt; fused JIT silu+mul kernel (jit_kernel.activation)
         return out</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
