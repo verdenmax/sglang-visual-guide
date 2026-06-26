@@ -5457,7 +5457,7 @@ ModelRunner 再调 <span class="mono">sample()</span> 把 logits 交给采样器
 
 <h2>load_model：先搭空壳，再流式灌权重</h2>
 <p>整条加载路径其实只有两步，但每一步都暗藏讲究。<strong>第一步</strong>，在目标设备（GPU）和目标 dtype 的上下文里，用 <span class="mono">_initialize_model</span>
-按配置<strong>实例化模型结构</strong>——这时各层的线性层、注意力、嵌入都建好了，但参数还是<strong>未初始化的占位张量</strong>，几乎不占有效显存。<strong>第二步</strong>，
+按配置<strong>实例化模型结构</strong>——这时各层的线性层、注意力、嵌入都建好了，但参数还是<strong>未初始化的占位张量</strong>（已在 GPU 上按全尺寸开好，只是尚未填入真值）。<strong>第二步</strong>，
 调 <span class="mono">load_weights_and_postprocess</span>，它从 <span class="mono">_get_all_weights</span> 拿到一个<strong>权重迭代器</strong>，再交给
 <span class="mono">model.load_weights(weights)</span> 把真值<strong>逐张量灌进去</strong>。注意这里的精妙：权重不是"先全读进内存再分发"，而是一个 <span class="mono">(name, tensor)</span>
 的<strong>生成器</strong>——读一个、灌一个、丢一个，<strong>主机内存占用被牢牢卡在一个很小的上界</strong>，哪怕模型有几百 GB 也不会把内存撑爆。这也意味着加载是<strong>可被流水线化</strong>的：当一个张量正在被映射、切片、搬卡时，下一个张量可以同时从磁盘预读，磁盘 I/O 与 CPU/GPU 处理彼此重叠，整体加载时间被进一步压短。</p>
@@ -5996,7 +5996,7 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   <span class="inline">Sampler</span> 是一个 <span class="mono">nn.Module</span>，输入是 <span class="mono">model.forward</span> 出的 logits，
   输出是<strong>每条请求的下一个 token id</strong>。它读的另一份输入叫 <span class="mono">SamplingBatchInfo</span>：把整批请求的采样参数
   <strong>打包成张量</strong>，于是<strong>同一个 batch 里的不同请求可以用各自不同的参数</strong>（温度、top_p…），一次向量化算完。
-  而每条请求的那套旋钮，源头是用户随请求发来的 <span class="mono">SamplingParams</span>（第 53 课）。
+  而每条请求的那套旋钮，源头是用户随请求发来的 <span class="mono">SamplingParams</span>（由 TokenizerManager 在入站时构建，第 14 课）。
 </div>
 
 <h2>从一排分数到一个字：采样流水线</h2>

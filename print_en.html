@@ -5287,7 +5287,7 @@ pile of disk files</strong>" into "<strong>tensors in their right place on each 
 <h2>load_model: build the shell first, then stream the weights in</h2>
 <p>The whole load path is just two steps, but each hides nuance. <strong>Step one</strong>: within the target device (GPU) and target
 dtype context, <span class="mono">_initialize_model</span> <strong>instantiates the structure</strong> — all the linear layers, attention,
-and embeddings are built, but the params are still <strong>uninitialized placeholder tensors</strong>, taking almost no real GPU memory.
+and embeddings are built, but the params are still <strong>uninitialized placeholder tensors</strong> (already allocated at full size on the GPU, just not yet filled with real values).
 <strong>Step two</strong>: call <span class="mono">load_weights_and_postprocess</span>, which gets a <strong>weight iterator</strong> from
 <span class="mono">_get_all_weights</span> and hands it to <span class="mono">model.load_weights(weights)</span> to <strong>pour the real values
 in, tensor by tensor</strong>. Note the subtlety: weights are not "read fully into memory then distributed" — they are a
@@ -5835,7 +5835,7 @@ It closes Part 6, and it is <strong>step 4</strong> of the request loop (Lesson 
   The <span class="inline">Sampler</span> is an <span class="mono">nn.Module</span>; its input is the logits from <span class="mono">model.forward</span>,
   its output is <strong>the next token id for each request</strong>. Its other input is <span class="mono">SamplingBatchInfo</span>: the per-request params
   <strong>packed into tensors</strong>, so <strong>different requests in ONE batch can use different params</strong> (temperature, top_p…) in one vectorized pass.
-  Each request's knob set comes from the user's <span class="mono">SamplingParams</span> (Lesson 53).
+  Each request's knob set comes from the user's <span class="mono">SamplingParams</span> (built by the TokenizerManager on intake, Lesson 14).
 </div>
 
 <h2>From a row of scores to one token: the sampling pipeline</h2>
