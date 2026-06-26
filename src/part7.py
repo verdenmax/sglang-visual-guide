@@ -95,7 +95,7 @@ LESSON_29 = {"zh": r"""
 <p>真实代码里，下行循环与分裂就长这样——注意 <span class="mono">prefix_len &lt; len(child.key)</span> 这个判断，正是"只匹配了半条边、必须分裂"的那一刻：</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">下行匹配与按需分裂</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache._match_prefix_helper</span><span class="ln">下行匹配与按需分裂</span></div>
   <pre><span class="kw">def</span> _match_prefix_helper(self, node, key):
     child_key = key.child_key(self.page_size)   <span class="cm"># 用当前 token 首 id 作索引</span>
     value = []
@@ -229,7 +229,7 @@ not planned ahead. <span class="mono">match_prefix</span> ultimately returns two
 <p>In the real code, the walk-down loop and the split look like this — note the <span class="mono">prefix_len &lt; len(child.key)</span> test, which is exactly the moment "only half the edge matched, must split":</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">walk-down match and on-demand split</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/radix_cache.py ::RadixCache._match_prefix_helper</span><span class="ln">walk-down match and on-demand split</span></div>
   <pre><span class="kw">def</span> _match_prefix_helper(self, node, key):
     child_key = key.child_key(self.page_size)   <span class="cm"># index by current token's first id</span>
     value = []
@@ -891,7 +891,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
   <strong>② 清谁由 EvictionStrategy 排序</strong>：默认 LRU（<span class="mono">get_priority = last_access_time</span>，最久未访问先走），另有 LFU / FIFO / MRU；<strong>只有叶子可驱逐</strong>，回收从叶往根。
   <strong>③ 铁律：lock_ref&gt;0 永不驱逐</strong>——在飞的前向正读那段 KV，回收即崩坏；inc/dec_lock_ref 在可驱逐集与受保护集之间搬节点（第 29 课）。
   <strong>④ 命中率是回报指标</strong>：从缓存白拿的 token 占比，由高共享（第 7/29 课）+ 缓存感知调度（第 20 课）抬高 → 少重算 → 高吞吐（第 8 课）；HiCache（第 31 课）抬高有效命中率。
-  <strong>⑤ 核心取舍：驱逐later重算 vs 留在 HBM</strong>——留占显存挤掉并发，驱省显存赔上重算；整个内存部分都在把这笔取舍做好。
+  <strong>⑤ 核心取舍：驱逐后重算 vs 留在 HBM</strong>——留占显存挤掉并发，驱省显存赔上重算；整个内存部分都在把这笔取舍做好。
 </div>
 """,
              "en": r"""
