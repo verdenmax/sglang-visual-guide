@@ -3092,6 +3092,450 @@ QUIZZES = {
             },
         ],
     },
+    "43-speculative-decoding-overview.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "投机解码的核心分工是怎样的？",
+                    "en": "What is the core division of labor in speculative decoding?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>便宜的 draft 模型先提议 k 个 token，昂贵的 target 模型一次前向并行验完这 k 个</strong>",
+                        "en": "<strong>A cheap draft model proposes k tokens, and the expensive target model verifies all k in one parallel forward</strong>",
+                    },
+                    {"zh": "target 模型逐个 token 提议，draft 模型逐个验证", "en": "The target proposes tokens one by one and the draft verifies them one by one"},
+                    {"zh": "两个同样大的模型轮流生成 token", "en": "Two equally large models take turns generating tokens"},
+                    {"zh": "draft 模型既提议又最终决定输出，target 只做缓存", "en": "The draft both proposes and decides the final output while the target only caches"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "投机解码让便宜的 <span class='mono'>draft</span> 自回归提议 k 个候选，再由昂贵的 <span class='mono'>target</span> 在<strong>一次前向</strong>里并行给所有 k 个位置打分验证；这样一次昂贵前向就能定下多个 token。其余选项颠倒了大小模型的职责。",
+                    "en": "Speculative decoding has the cheap <span class='mono'>draft</span> autoregressively propose k candidates, then the expensive <span class='mono'>target</span> verify all k positions in parallel in <strong>one forward</strong>; one expensive forward thus pins down many tokens. The other options invert the roles of the small and big models.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么说投机解码是<strong>无损</strong>的，且最坏情况也不会更慢？",
+                    "en": "Why is speculative decoding <strong>lossless</strong>, and never slower even in the worst case?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>接受/拒绝判据与 target 采样数学等价，输出分布相同；又因总会吐一个 bonus_token，每步至少产出 1 个 token</strong>",
+                        "en": "<strong>The accept/reject criterion is mathematically equivalent to target sampling, so the distribution is identical; and since a bonus_token is always emitted, every step yields at least 1 token</strong>",
+                    },
+                    {"zh": "因为 draft 模型经过特殊微调，永远猜对", "en": "Because the draft model is specially fine-tuned to always guess correctly"},
+                    {"zh": "因为它跳过了 target 的前向计算", "en": "Because it skips the target's forward computation"},
+                    {"zh": "因为它把输出量化成 FP8 来加速", "en": "Because it quantizes the output to FP8 to speed up"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>accept</span>/拒绝采用与 target 采样等价的判据，故输出分布<strong>可证明无损</strong>；即便 <span class='mono'>accept_rate</span> 很低、所有草稿都被拒，target 仍在分歧点补出一个一定吐的 <span class='mono'>bonus_token</span>，于是退化成普通自回归而非更慢。它既不跳过 target 前向，也与量化无关。",
+                    "en": "<span class='mono'>accept</span>/reject uses a criterion equivalent to target sampling, so the distribution is <strong>provably lossless</strong>; even if <span class='mono'>accept_rate</span> is low and every draft is rejected, the target still emits one always-produced <span class='mono'>bonus_token</span> at the divergence point, degrading to plain autoregression rather than being slower. It neither skips the target forward nor relates to quantization.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于 <span class='mono'>accept_rate</span>(α) 与 <span class='mono'>accept_length</span>(τ)，下面哪项正确？",
+                    "en": "Regarding <span class='mono'>accept_rate</span>(α) and <span class='mono'>accept_length</span>(τ), which is correct?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>α = correct_drafts / proposed_drafts，不含 bonus；τ = 每验证步平均吐出 token 数，含 bonus</strong>",
+                        "en": "<strong>α = correct_drafts / proposed_drafts, excluding the bonus; τ = avg tokens emitted per verify step, including the bonus</strong>",
+                    },
+                    {"zh": "α 和 τ 是同一个量的两种写法", "en": "α and τ are two notations for the same quantity"},
+                    {"zh": "α 含 bonus 而 τ 不含 bonus", "en": "α includes the bonus while τ excludes it"},
+                    {"zh": "两者越小代表加速越大", "en": "Smaller values of both mean more speedup"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>accept_rate</span> 衡量单个草稿 token 被接受的概率，<strong>排除</strong> bonus；<span class='mono'>accept_length</span> 衡量每次验证平均产出几个 token，<strong>包含</strong>那个一定吐的 bonus。二者不是同一量，且都<strong>越大越快</strong>。",
+                    "en": "<span class='mono'>accept_rate</span> measures the acceptance probability of a single draft token and <strong>excludes</strong> the bonus; <span class='mono'>accept_length</span> measures how many tokens each verify step yields on average and <strong>includes</strong> the always-emitted bonus. They are not the same quantity, and larger is faster for both.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话描述投机解码的一整轮循环：<span class='mono'>draft</span> 提议 k 个、<span class='mono'>target</span> 一次前向并行验证、<span class='mono'>accept</span> 最长正确前缀并补 <span class='mono'>bonus_token</span>、再向前滚动。并解释为什么这能攻击第4课所讲的<strong>带宽受限</strong>瓶颈：一次昂贵的“全权重搬运”如何被摊薄到多个 token 上。",
+                "en": "In your own words, describe one full round of speculative decoding: the <span class='mono'>draft</span> proposes k, the <span class='mono'>target</span> verifies in one parallel forward, we <span class='mono'>accept</span> the longest correct prefix plus a <span class='mono'>bonus_token</span>, then roll forward. Then explain why this attacks the <strong>bandwidth-bound</strong> bottleneck from Lesson 4: how one expensive 'full weight haul' is amortized across many tokens.",
+            },
+            {
+                "zh": "解释 <span class='mono'>accept_rate</span>(α) 与 <span class='mono'>accept_length</span>(τ) 的区别（谁含 bonus、谁不含），以及它们如何共同决定加速比；并说明 SGLang 为何用 <span class='mono'>SpeculativeAlgorithm</span> 枚举（EAGLE、EAGLE3、NGRAM、STANDALONE、DFLASH、FROZEN_KV_MTP、NONE）让“出草稿的方法”可插拔，而 <span class='mono'>BaseSpecWorker</span> 又如何用 <span class='mono'>target_worker</span> 与 <span class='mono'>draft_worker</span> 统一编排提议与验证（EAGLE 详见第44课，验证复用第28课采样器）。",
+                "en": "Explain the difference between <span class='mono'>accept_rate</span>(α) and <span class='mono'>accept_length</span>(τ) (which includes the bonus, which excludes it) and how together they determine the speedup; then explain why SGLang uses the <span class='mono'>SpeculativeAlgorithm</span> enum (EAGLE, EAGLE3, NGRAM, STANDALONE, DFLASH, FROZEN_KV_MTP, NONE) to make 'how to draft' pluggable, and how <span class='mono'>BaseSpecWorker</span> orchestrates proposing and verifying via <span class='mono'>target_worker</span> and <span class='mono'>draft_worker</span> (EAGLE is Lesson 44, verification reuses the Lesson 28 sampler).",
+            },
+        ],
+    },
+    "44-eagle-and-next-gen.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "EAGLE 的“特征级起草”具体指什么？",
+                    "en": "What exactly is EAGLE's 'feature-level drafting'?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>复用 target 模型最后的隐藏状态 + 上一个采样 token，去预测下一个特征，草稿头很小且与 target 天然对齐</strong>",
+                        "en": "<strong>It reuses the target model's last hidden state + the previously sampled token to predict the next feature, so the draft head is tiny and naturally aligned with the target</strong>",
+                    },
+                    {"zh": "训练一个和 target 一样大的独立草稿模型从头生成", "en": "Training a separate draft model as large as the target to generate from scratch"},
+                    {"zh": "把 target 的权重量化成 FP8 再起草", "en": "Quantizing the target's weights to FP8 before drafting"},
+                    {"zh": "直接复制 target 上一步的输出 token 作为草稿", "en": "Directly copying the target's previous output token as the draft"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "EAGLE 不另起一个完整模型，而是在<strong>特征层面</strong>续写：用 target 的<span class='mono'>隐藏状态</span>（第8课）加上一个采样 token 预测下一个特征，草稿头很小且与 target 高度对齐，<span class='mono'>accept_rate</span>(α) 因此更高。",
+                    "en": "EAGLE does not raise a full second model; it continues at the <strong>feature level</strong>: using the target's <span class='mono'>hidden state</span> (Lesson 8) plus the previously sampled token to predict the next feature. The draft head is tiny and highly aligned with the target, so <span class='mono'>accept_rate</span>(α) is higher.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 EAGLE 提议一棵 token <strong>树</strong>能比朴素的<strong>链</strong>接受更多 token？",
+                    "en": "Why does EAGLE proposing a token <strong>tree</strong> accept more tokens than a naive <strong>chain</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>链只押一条续写，中途错则后续全废；树每步保留 topk 分支，一次目标前向并行考察多条续写，接受最长合法路径</strong>",
+                        "en": "<strong>A chain bets on one continuation and wastes the rest if it errs midway; a tree keeps topk branches per step, examines many continuations in parallel in one target forward, and accepts the longest valid path</strong>",
+                    },
+                    {"zh": "树会多跑几次 target 前向，所以接受更多", "en": "A tree runs several more target forwards, so it accepts more"},
+                    {"zh": "树把草稿模型换成了更大的模型", "en": "A tree swaps the draft model for a larger one"},
+                    {"zh": "树跳过了验证步骤直接接受所有节点", "en": "A tree skips verification and accepts all nodes directly"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "语言天生分叉，链只赌一条路；EAGLE 在 <span class='mono'>spec_steps</span> 步里每步留 <span class='mono'>topk</span> 分支组成树，<strong>同样的目标前向次数</strong>下并行覆盖更多续写，接受其中最长合法路径，<span class='mono'>accept_length</span> 因而更高。它并没有增加 target 前向次数。",
+                    "en": "Language naturally branches and a chain bets on one path; EAGLE keeps <span class='mono'>topk</span> branches per step across <span class='mono'>spec_steps</span> to form a tree, covering more continuations in parallel under the <strong>same number of target forwards</strong> and accepting the longest valid path, so <span class='mono'>accept_length</span> rises. It does not add target forwards.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 <span class='mono'>EagleVerifyInput</span> 里，哪一项让结构成为「树」而非「链」，整棵树又靠什么一次验证？",
+                    "en": "In <span class='mono'>EagleVerifyInput</span>, which field makes the structure a 'tree' not a 'chain', and what verifies the whole tree at once?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>retrieve_next_sibling 的兄弟链接造就了树；custom_mask 树注意力让每个节点只看祖先，一次目标前向验完整棵树</strong>",
+                        "en": "<strong>retrieve_next_sibling's sibling links make it a tree; the custom_mask tree attention lets each node see only its ancestors, verifying the whole tree in one target forward</strong>",
+                    },
+                    {"zh": "draft_token 决定树形，验证靠逐个 token 串行前向", "en": "draft_token defines the shape, and verification is serial token-by-token forwards"},
+                    {"zh": "spec_steps 造就了树，验证靠跳过注意力掩码", "en": "spec_steps makes the tree, and verification skips the attention mask"},
+                    {"zh": "topk 造就了树，验证由 draft 模型自己完成", "en": "topk makes the tree, and the draft model verifies itself"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>retrieve_next_sibling</span> 的<strong>兄弟链接</strong>正是「树而非链」的关键（配合 <span class='mono'>retrieve_index</span> / <span class='mono'>retrieve_next_token</span> 编码树）；<span class='mono'>custom_mask</span> 实现<strong>树注意力</strong>，让每个节点只看见祖先，于是每条根→节点路径像普通序列被独立打分，<strong>一次</strong>目标前向即可验完整棵树，接受最长合法路径 + <span class='mono'>bonus_token</span>。",
+                    "en": "<span class='mono'>retrieve_next_sibling</span>'s <strong>sibling links</strong> are exactly what makes it a tree not a chain (together with <span class='mono'>retrieve_index</span> / <span class='mono'>retrieve_next_token</span> encoding the tree); <span class='mono'>custom_mask</span> implements <strong>tree attention</strong> so each node sees only its ancestors, letting every root→node path be scored independently like a normal sequence, verifying the whole tree in <strong>one</strong> target forward and accepting the longest valid path + <span class='mono'>bonus_token</span>.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释 EAGLE 的两大改进：(1) 为什么<strong>特征级起草</strong>（复用第8课的隐藏状态 + 上一个 token）能让草稿头很小却与 target 对齐、从而抬高 <span class='mono'>accept_rate</span>(α)；(2) 为什么<strong>树状草稿</strong>在不增加目标前向次数的前提下能抬高 <span class='mono'>accept_length</span>(τ，含 bonus)。",
+                "en": "In your own words, explain EAGLE's two improvements: (1) why <strong>feature-level drafting</strong> (reusing the Lesson 8 hidden state + previous token) makes the draft head tiny yet aligned with the target, raising <span class='mono'>accept_rate</span>(α); and (2) why <strong>tree drafting</strong> raises <span class='mono'>accept_length</span>(τ, including the bonus) without adding target forwards.",
+            },
+            {
+                "zh": "描述 <span class='mono'>EagleVerifyInput</span> 如何用 <span class='mono'>custom_mask</span> 与 <span class='mono'>retrieve_index</span> / <span class='mono'>retrieve_next_token</span> / <span class='mono'>retrieve_next_sibling</span> 编码一棵 token 树，并解释一次目标前向里<strong>树注意力</strong>如何把每条根→节点路径当作正常序列打分、接受最长合法路径再补 <span class='mono'>bonus_token</span>；再说明第33课的注意力<strong>后端</strong>在其中扮演什么角色，以及为什么命名要用 <span class='mono'>accept</span>/<span class='mono'>bonus_token</span> 而非 <span class='mono'>accepted</span>/<span class='mono'>verified_id</span>。",
+                "en": "Describe how <span class='mono'>EagleVerifyInput</span> encodes a token tree using <span class='mono'>custom_mask</span> and <span class='mono'>retrieve_index</span> / <span class='mono'>retrieve_next_token</span> / <span class='mono'>retrieve_next_sibling</span>, and explain how, in one target forward, <strong>tree attention</strong> scores every root→node path like a normal sequence, accepts the longest valid path, then appends a <span class='mono'>bonus_token</span>; then explain the role of the Lesson 33 attention <strong>backend</strong> here, and why the naming uses <span class='mono'>accept</span>/<span class='mono'>bonus_token</span> rather than <span class='mono'>accepted</span>/<span class='mono'>verified_id</span>.",
+            },
+        ],
+    },
+    "45-pd-disaggregation.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "为什么要把 prefill 和 decode 拆到不同的 GPU 池？",
+                    "en": "Why split prefill and decode into separate GPU pools?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>两阶段资源画像相反：prefill 是算力受限的一次大并行，decode 是带宽受限的逐 token 生成，同卡共存会在 TTFT 与 ITL 间互相干扰</strong>",
+                        "en": "<strong>The two phases have opposite resource profiles: prefill is a compute-bound parallel pass, decode is bandwidth-bound token-by-token generation, and co-locating them makes TTFT and ITL interfere</strong>",
+                    },
+                    {"zh": "因为 decode 比 prefill 需要更大的批所以必须分开", "en": "Because decode needs larger batches than prefill so they must be separated"},
+                    {"zh": "为了把模型权重量化成 FP8 再服务", "en": "To quantize the model weights to FP8 before serving"},
+                    {"zh": "分开后就不再需要 KV 缓存了", "en": "After splitting, the KV cache is no longer needed"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "回忆第4课：<strong>prefill</strong> 把整段 prompt 一次并行算完，打满算力（compute-bound）；<strong>decode</strong> 每步只出 1 个 token 却要重读权重 + KV，卡在带宽（bandwidth-bound）。同卡共存时长 prefill 会顶高 decode 的 <span class='mono'>ITL</span>，这就是 TTFT vs ITL 的张力，chunked prefill（第22课）只能缓解。分池后各自吃饱自己的瓶颈、独立调优。",
+                    "en": "Recall Lesson 4: <strong>prefill</strong> computes the whole prompt in one parallel pass and saturates compute (compute-bound); <strong>decode</strong> emits 1 token per step yet re-reads weights + KV, stuck on bandwidth (bandwidth-bound). Co-located, a long prefill raises decode's <span class='mono'>ITL</span>—the TTFT vs ITL tension that chunked prefill (Lesson 22) only mitigates. Split into pools, each saturates its own bottleneck and is tuned independently.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "PD 分离时，prefill 完成后到底有什么东西被传到 decode GPU？",
+                    "en": "In PD disaggregation, what exactly is transferred to the decode GPU after prefill finishes?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>请求的 KV 缓存（第30课的分页 KV）经 RDMA / NVLink 搬到 decode GPU，再开始流式吐 token</strong>",
+                        "en": "<strong>The request's KV cache (Lesson 30's paged KV) is shipped over RDMA / NVLink to the decode GPU, which then streams tokens</strong>",
+                    },
+                    {"zh": "整套模型权重被复制过去", "en": "The entire set of model weights is copied over"},
+                    {"zh": "只把已生成的最后一个 token 传过去", "en": "Only the last generated token is sent over"},
+                    {"zh": "把 prefill GPU 的梯度传过去", "en": "The prefill GPU's gradients are transferred"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "被搬运的是请求算好的 <strong>KV 缓存</strong>——以页为单位存放（第30课分页 KV）。传输走 <span class='mono'>RDMA</span> / <span class='mono'>NVLink</span> 高速互联，目标是让传输时间远小于省下的重复计算；KV 落地后 decode 池才开始逐 token 流式生成。",
+                    "en": "What's shipped is the request's computed <strong>KV cache</strong>—stored page by page (Lesson 30's paged KV). The transfer rides <span class='mono'>RDMA</span> / <span class='mono'>NVLink</span> so transfer time stays far below the recomputation it saves; once the KV lands, the decode pool begins streaming tokens one at a time.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于 <span class='mono'>BaseKVSender</span> 的 <span class='mono'>poll()</span> 契约，下面哪句对？",
+                    "en": "About <span class='mono'>BaseKVSender</span>'s <span class='mono'>poll()</span> contract, which is correct?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>poll 非阻塞，返回 KVPoll 状态（Bootstrapping / WaitingForInput / Transferring / Success / Failed），Success 即 KV 送达、decode 起步</strong>",
+                        "en": "<strong>poll is non-blocking and returns a KVPoll status (Bootstrapping / WaitingForInput / Transferring / Success / Failed); Success means KV arrived and decode starts</strong>",
+                    },
+                    {"zh": "poll 会阻塞直到传输完成才返回", "en": "poll blocks until the transfer completes before returning"},
+                    {"zh": "poll 负责真正推送 KV 页，send 只是宣告", "en": "poll actually pushes the KV pages while send only announces"},
+                    {"zh": "poll 由 decode 侧独有，prefill 侧没有", "en": "poll exists only on the decode side, not on prefill"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "发送方接口很克制：<span class='mono'>init</span> 宣告要搬多少页，<span class='mono'>send</span> 推送 KV 页，<span class='mono'>poll</span> <strong>非阻塞</strong>返回 <span class='mono'>KVPoll</span> 状态，<span class='mono'>get_transfer_metric</span> 给出 <span class='mono'>KVTransferMetric</span>。decode 侧 <span class='mono'>BaseKVReceiver</span> 对称（init + receive + poll）。poll 返回 <strong>Success</strong> 表示 KV 已落地，decode 可开吐 token；后端可换 Mooncake / NIXL / ascend。",
+                    "en": "The sender interface is spare: <span class='mono'>init</span> announces how many pages move, <span class='mono'>send</span> pushes the KV pages, <span class='mono'>poll</span> returns a <strong>non-blocking</strong> <span class='mono'>KVPoll</span> status, and <span class='mono'>get_transfer_metric</span> yields a <span class='mono'>KVTransferMetric</span>. The decode-side <span class='mono'>BaseKVReceiver</span> is symmetric (init + receive + poll). poll returning <strong>Success</strong> means the KV has landed and decode can begin; backends are swappable: Mooncake / NIXL / ascend.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释 PD 分离要解决的核心冲突：为什么 <strong>prefill</strong>（算力受限）和 <strong>decode</strong>（带宽受限）放同一张 GPU 上会在 <span class='mono'>TTFT</span> 与 <span class='mono'>ITL</span> 之间互相拖累（联系第4课、第8/22课），以及分成 prefill 池 + decode 池后为什么每个池都能独立调优、各自吃饱自己的瓶颈。",
+                "en": "In your own words, explain the core conflict PD disaggregation solves: why putting <strong>prefill</strong> (compute-bound) and <strong>decode</strong> (bandwidth-bound) on the same GPU makes them drag each other between <span class='mono'>TTFT</span> and <span class='mono'>ITL</span> (link to Lessons 4 and 8/22), and why splitting into a prefill pool + decode pool lets each pool be tuned independently and saturate its own bottleneck.",
+            },
+            {
+                "zh": "描述一次成功的 KV 搬运在 SGLang 抽象下的完整流程：从 prefill 侧 <span class='mono'>BaseKVSender</span> 的 <span class='mono'>init → send → poll(KVPoll)</span> 到 decode 侧镜像的 <span class='mono'>BaseKVReceiver</span>（init + receive + poll），说明 <span class='mono'>poll</span> 为什么必须非阻塞、Success 意味着什么，被搬运的对象（第30课分页 KV）走什么互联，以及路由器（第13课）在其中如何为请求配对 prefill / decode worker；并前瞻第46/47课分离 + 大规模 EP。",
+                "en": "Describe the full flow of one successful KV transfer under SGLang's abstraction: from the prefill-side <span class='mono'>BaseKVSender</span>'s <span class='mono'>init → send → poll(KVPoll)</span> to the mirrored decode-side <span class='mono'>BaseKVReceiver</span> (init + receive + poll); explain why <span class='mono'>poll</span> must be non-blocking, what Success means, which interconnect the transferred object (Lesson 30's paged KV) rides, and how the router (Lesson 13) pairs a prefill / decode worker per request; then forward-ref Lessons 46/47's disaggregation + large-scale EP.",
+            },
+        ],
+    },
+    "46-tp-pp-ep-dp-parallelism.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "下面哪一项最准确地概括了四种并行各自“切”的对象？",
+                    "en": "Which option most accurately summarizes what each of the four parallelisms splits?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>TP 切一层之内的权重矩阵；PP 切层成连续阶段；EP 切 MoE 的专家集合；DP 复制模型、切请求</strong>",
+                        "en": "<strong>TP splits the weight matrices within a layer; PP splits layers into consecutive stages; EP splits the MoE expert set; DP replicates the model and splits requests</strong>",
+                    },
+                    {"zh": "四种都在切请求，只是粒度不同", "en": "All four split requests, just at different granularities"},
+                    {"zh": "TP 切层、PP 切矩阵、EP 切请求、DP 切专家", "en": "TP splits layers, PP splits matrices, EP splits requests, DP splits experts"},
+                    {"zh": "它们都把模型量化成 FP8 后再分发", "en": "They all quantize the model to FP8 before distributing it"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "记住两类问题：<strong>TP/PP/EP</strong> 切<strong>模型本身</strong>——TP 切一层内的权重矩阵（第25/37课 q/k/v、MLP 列、词表），PP 切层与层的边界成阶段（第23课），EP 切 MoE 的专家（第34课）；<strong>DP</strong> 不切模型而是<strong>复制模型、切请求</strong>（第23课 dp-controller）。前三种分担一份模型的体积与算力，DP 分担吞吐。",
+                    "en": "Two kinds of question: <strong>TP/PP/EP</strong> split the <strong>model itself</strong>—TP the weight matrices within a layer (Lessons 25/37 q/k/v, MLP columns, vocab), PP the layer boundaries into stages (Lesson 23), EP the MoE experts (Lesson 34); <strong>DP</strong> doesn't split the model but <strong>replicates it and splits requests</strong> (Lesson 23 dp-controller). The first three share one model's size and compute; DP shares throughput.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于“每一步通信什么”，下面哪句对应正确？",
+                    "en": "About \"what each communicates per step\", which mapping is correct?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>TP 每层一次 all-reduce/all-gather；PP 仅阶段交界 send/recv 激活；EP 每步两次 all-to-all 路由 token；DP 每步近乎零通信</strong>",
+                        "en": "<strong>TP does an all-reduce/all-gather per layer; PP only send/recv activations at boundaries; EP does two all-to-all per step to route tokens; DP communicates near-zero per step</strong>",
+                    },
+                    {"zh": "TP 近乎零通信，DP 每层都要 all-reduce", "en": "TP communicates near-zero while DP all-reduces every layer"},
+                    {"zh": "EP 只在阶段交界 send/recv，PP 每步两次 all-to-all", "en": "EP only send/recv at boundaries while PP does two all-to-all per step"},
+                    {"zh": "四种并行每步都做一次完全相同的 all-reduce", "en": "All four do an identical all-reduce every step"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<strong>TP</strong> 把单层切片，每层都要把部分和合并，故每层一次 <span class='mono'>all_reduce</span>（或词表并行的 <span class='mono'>all_gather</span>），通信最频繁、需 NVLink。<strong>PP</strong> 只在阶段交界 <span class='mono'>send</span>/<span class='mono'>recv</span> 激活，链路便宜。<strong>EP</strong> 每步两次 <span class='mono'>all_to_all</span>（送去专家、再送回），随 token×top-k 增长。<strong>DP</strong> 副本独立，推理时每步近乎零通信。",
+                    "en": "<strong>TP</strong> shards a single layer and must merge partial sums, so one <span class='mono'>all_reduce</span> per layer (or <span class='mono'>all_gather</span> for vocab parallel)—most frequent, needs NVLink. <strong>PP</strong> only <span class='mono'>send</span>/<span class='mono'>recv</span> activations at boundaries—cheap link. <strong>EP</strong> does two <span class='mono'>all_to_all</span> per step (to experts and back), growing with token×top-k. <strong>DP</strong> replicas are independent, near-zero communication per step at inference.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SGLang 如何用代码统一表达 TP/PP/EP/DP，使它们可以组合（如 TP=8 × PP=2 × DP=4）？",
+                    "en": "How does SGLang express TP/PP/EP/DP in code so they compose (e.g. TP=8 × PP=2 × DP=4)?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>四者都是同一个 GroupCoordinator（带 rank/ranks/world_size/rank_in_group，暴露 all_reduce/all_gather/all_to_all_single/next_rank/prev_rank）的不同实例，建立在不同 rank 布局上</strong>",
+                        "en": "<strong>All four are different instances of the same GroupCoordinator (carrying rank/ranks/world_size/rank_in_group, exposing all_reduce/all_gather/all_to_all_single/next_rank/prev_rank) over different rank layouts</strong>",
+                    },
+                    {"zh": "为每种并行各写一套独立的进程组类，互不复用", "en": "A separate, non-reusable process-group class is written for each parallelism"},
+                    {"zh": "靠一个全局变量记录当前并行模式，一次只能开一种", "en": "A global variable records the current mode and only one parallelism can run at a time"},
+                    {"zh": "把四种并行编译成不同的 CUDA kernel 选择", "en": "The four are compiled into different CUDA kernel choices"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键统一在 <span class='mono'>parallel_state.py</span> 的 <span class='mono'>GroupCoordinator</span>：它就是“一个进程组”，带 <span class='mono'>rank</span>/<span class='mono'>ranks</span>/<span class='mono'>world_size</span>/<span class='mono'>rank_in_group</span>，暴露 <span class='mono'>all_reduce</span>/<span class='mono'>all_gather</span>/<span class='mono'>all_to_all_single</span>/<span class='mono'>next_rank</span>/<span class='mono'>prev_rank</span>。TP/PP/EP/DP 只是它在不同 rank 布局上的实例，每张卡可同时属于多个组，于是天然可叠乘组合成 TP=8 × PP=2 × DP=4。",
+                    "en": "The unification lives in <span class='mono'>parallel_state.py</span>'s <span class='mono'>GroupCoordinator</span>: it is \"one process group\" carrying <span class='mono'>rank</span>/<span class='mono'>ranks</span>/<span class='mono'>world_size</span>/<span class='mono'>rank_in_group</span> and exposing <span class='mono'>all_reduce</span>/<span class='mono'>all_gather</span>/<span class='mono'>all_to_all_single</span>/<span class='mono'>next_rank</span>/<span class='mono'>prev_rank</span>. TP/PP/EP/DP are just its instances over different rank layouts; each card can belong to several groups at once, so they compose into TP=8 × PP=2 × DP=4.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话区分 TP 与 PP：为什么说 TP 是“横向切一层的宽度”（把一层的权重矩阵分片，每层都要 all-reduce 合并、需 NVLink、通常单机内，联系第25/37课），而 PP 是“纵向切层的深度”（把层分成连续阶段、只在交界 send/recv 激活、链路便宜但有流水线气泡、靠微批次填满，联系第23课）；并说明二者为什么可以同时使用。",
+                "en": "In your own words, distinguish TP from PP: why TP \"splits the width of a layer\" (sharding a layer's weight matrices, all-reducing every layer, needing NVLink, usually single node; link Lessons 25/37) while PP \"splits the depth of the stack\" (layers into consecutive stages, send/recv activations only at boundaries, cheap link but pipeline bubbles filled by micro-batches; link Lesson 23); and explain why the two can be used together.",
+            },
+            {
+                "zh": "描述 EP 在一个 MoE 步中的完整数据流（第34课）：路由器选 top-k 专家后，第一次 all-to-all 把每个 token 送到拥有其专家的 rank、专家计算、第二次 all-to-all 送回，并说明通信量为何随 token×top-k 增长；再解释 SGLang 的 Attention-DP 如何把“注意力 DP + 专家 EP”组合起来，以及为什么所有这些最终都落在同一个 GroupCoordinator 抽象上；前瞻第47课大规模 EP + EPLB。",
+                "en": "Describe EP's full dataflow in one MoE step (Lesson 34): after the router picks top-k experts, a first all-to-all sends each token to the rank owning its expert, experts compute, a second all-to-all sends results back; explain why communication grows with token×top-k. Then explain how SGLang's Attention-DP combines \"attention DP + expert EP\", and why all of this ultimately rests on the same GroupCoordinator abstraction; forward-ref Lesson 47's large-scale EP + EPLB.",
+            },
+        ],
+    },
+    "47-large-scale-ep-and-eplb.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在大规模 EP 下，为什么少数“热点专家”会拖垮整步的吞吐？",
+                    "en": "Under large-scale EP, why do a few \"hot experts\" drag down the whole step's throughput?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>EP 每步的 all-to-all 是同步墙，整步耗时由最忙的 rank 决定；热点专家所在 GPU 处理的 token 远多于平均，其它 GPU 只能干等</strong>",
+                        "en": "<strong>EP's per-step all-to-all is a sync wall; the step time is set by the busiest rank, so the GPU holding hot experts processes far more tokens than average while the others just wait</strong>",
+                    },
+                    {"zh": "热点专家会占用更多显存，导致其它专家被换出", "en": "Hot experts use more VRAM, forcing other experts to be swapped out"},
+                    {"zh": "路由器在热点专家上算得更慢，因为它的权重更大", "en": "The router computes slower on hot experts because their weights are larger"},
+                    {"zh": "热点专家需要 FP8 量化，而冷门专家用 FP16", "en": "Hot experts require FP8 quantization while cold experts use FP16"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "EP 的一步 all-to-all 是一道<strong>集合同步</strong>（接第46课）：所有 rank 必须在同一屏障会合，整步墙时间由<strong>最忙的 rank</strong>决定。MoE 路由天然倾斜（接第34课），热点专家被大量 token 选中，若它们集中在某几张卡，这些卡每步处理的 token 远超平均，其余 GPU 空转。裸 EP 因此浪费算力。",
+                    "en": "EP's per-step all-to-all is a <strong>collective synchronization</strong> (ties to Lesson 46): all ranks must meet at the same barrier, so the step's wall time is set by the <strong>busiest rank</strong>. MoE routing is inherently skewed (Lesson 34); hot experts are chosen by many tokens, and if they cluster on a few cards, those cards process far more tokens per step than average while the rest spin idle. Raw EP thus wastes compute.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "EPLB（专家并行负载均衡器）周期性地测量和重排的分别是什么？",
+                    "en": "What does EPLB (Expert-Parallel Load Balancer) periodically measure and rebalance?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>测量每个专家收到的 token 数（每专家负载），再解一个新的专家→GPU 放置方案把负载摊平，必要时复制热门专家</strong>",
+                        "en": "<strong>Measures how many tokens each expert received (per-expert load), then solves a new expert→GPU placement that flattens load, replicating hot experts when needed</strong>",
+                    },
+                    {"zh": "测量每张 GPU 的温度，再降低热点卡的频率", "en": "Measures each GPU's temperature, then throttles the hot card's clock"},
+                    {"zh": "测量每个 token 的长度，再重排 KV cache 的分页", "en": "Measures each token's length, then rearranges KV-cache paging"},
+                    {"zh": "测量路由器的权重梯度，再微调模型参数", "en": "Measures the router's weight gradients, then fine-tunes model parameters"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "EPLB 做两件事：<strong>测量</strong>每个专家在最近一段时间实际收到多少 token（由专家分布记录器累加），与<strong>重排</strong>——基于统计解一个新的<strong>专家→GPU 放置</strong>，让每张卡每步处理的 token 数尽量相等。武器有二：在 GPU 间迁移专家、以及把太热的专家<strong>复制到多张卡</strong>分摊流量。",
+                    "en": "EPLB does two things: <strong>measure</strong> how many tokens each expert actually received over a recent window (accumulated by the expert-distribution recorder), and <strong>rebalance</strong>—solving from that statistic a new <strong>expert→GPU placement</strong> so each card processes roughly equal tokens per step. Its two weapons: migrate experts between GPUs, and <strong>replicate</strong> a too-hot expert onto several cards to split its traffic.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SGLang 的 <span class='mono'>EPLBManager</span> 用哪两个钩子实现“高频采集 + 低频重排”的循环？",
+                    "en": "Which two hooks of SGLang's <span class='mono'>EPLBManager</span> implement the \"high-frequency collect + low-frequency rebalance\" loop?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong><span class='mono'>on_forward_pass_end()</span> 每次前向后累加每专家负载统计；<span class='mono'>rebalance()</span> 周期性解新放置并更新 <span class='mono'>expert_location</span></strong>",
+                        "en": "<strong><span class='mono'>on_forward_pass_end()</span> accumulates per-expert load after each forward; <span class='mono'>rebalance()</span> periodically solves a new placement and updates <span class='mono'>expert_location</span></strong>",
+                    },
+                    {"zh": "<span class='mono'>on_token_start()</span> 与 <span class='mono'>flush_kv()</span>", "en": "<span class='mono'>on_token_start()</span> and <span class='mono'>flush_kv()</span>"},
+                    {"zh": "<span class='mono'>compile()</span> 与 <span class='mono'>capture_graph()</span>", "en": "<span class='mono'>compile()</span> and <span class='mono'>capture_graph()</span>"},
+                    {"zh": "<span class='mono'>quantize()</span> 与 <span class='mono'>dequantize()</span>", "en": "<span class='mono'>quantize()</span> and <span class='mono'>dequantize()</span>"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>EPLBManager</span> 挂在 <span class='mono'>ModelRunner</span> 上：<span class='mono'>on_forward_pass_end()</span> 在<strong>每一次前向之后</strong>被调用，把这一步各专家命中的 token 数累加进统计（高频、轻量）；<span class='mono'>rebalance()</span> <strong>周期性</strong>触发，解出新放置（热点可能被复制）并更新 <span class='mono'>expert_location</span>（专家→GPU 映射，低频、较重）。二者解耦，既跟上负载变化又不淹没正常推理。",
+                    "en": "<span class='mono'>EPLBManager</span> hangs off the <span class='mono'>ModelRunner</span>: <span class='mono'>on_forward_pass_end()</span> is called <strong>after every forward</strong> to accumulate this step's per-expert token counts (high-frequency, lightweight); <span class='mono'>rebalance()</span> is triggered <strong>periodically</strong> to solve a new placement (hot experts may be replicated) and update <span class='mono'>expert_location</span> (the expert→GPU map; low-frequency, heavier). Decoupling them tracks load changes without drowning out normal inference.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话解释为什么裸 EP 会浪费算力：MoE 路由的长尾分布（第34课）如何制造热点专家，而 EP 的 all-to-all 同步墙（第46课）如何让整步耗时由最忙的 rank 决定；再说明为什么仅仅“把专家在 GPU 间换位置”不足以解决问题，而必须<strong>复制热门专家</strong>才能把一个不可分割的热点切成可并行的多份。",
+                "en": "In your own words, explain why raw EP wastes compute: how MoE routing's long-tail distribution (Lesson 34) creates hot experts, and how EP's all-to-all sync wall (Lesson 46) makes the step time depend on the busiest rank; then explain why merely \"swapping experts between GPUs\" is not enough and why <strong>replicating hot experts</strong> is necessary to cut an indivisible hotspot into parallelizable copies.",
+            },
+            {
+                "zh": "描述 <span class='mono'>EPLBManager</span> 的完整循环：<span class='mono'>on_forward_pass_end()</span> 如何经由专家分布记录器累加每专家负载、<span class='mono'>rebalance()</span> 如何周期性求解新的专家→GPU 放置并写回 <span class='mono'>expert_location</span>、后续步骤如何按这张新地图路由；解释为什么把“高频轻量的采集”与“低频较重的重排”解耦很关键，并前瞻第61/62课“可插拔、为规模而设计”的主题。",
+                "en": "Describe the full <span class='mono'>EPLBManager</span> loop: how <span class='mono'>on_forward_pass_end()</span> accumulates per-expert load via the expert-distribution recorder, how <span class='mono'>rebalance()</span> periodically solves a new expert→GPU placement and writes it back to <span class='mono'>expert_location</span>, and how subsequent steps route against this new map; explain why decoupling \"high-frequency lightweight collection\" from \"low-frequency heavier rebalancing\" is essential, and forward-ref Lessons 61/62's \"pluggable, designed-for-scale\" themes.",
+            },
+        ],
+    },
+    "48-structured-outputs-and-jump-forward.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "受限解码究竟在“哪一步、对什么”动手，才能保证输出永远合法？",
+                    "en": "Where exactly, and on what, does constrained decoding act to guarantee always-valid output?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>在采样之前，对 logits（第37课）盖一层词表掩码，把所有会破坏语法的 token 设为 −∞，于是采样器（第28课）无论怎么选都合法</strong>",
+                        "en": "<strong>Before sampling, it overlays a vocab mask on the logits (Lesson 37), setting every grammar-breaking token to −∞, so whatever the sampler (Lesson 28) picks stays valid</strong>",
+                    },
+                    {"zh": "在采样之后丢弃非法 token 并重试，直到碰巧得到合法结果", "en": "After sampling, discard illegal tokens and retry until a valid result happens to appear"},
+                    {"zh": "修改采样算法本身，让 top-p 只在合法 token 上归一化", "en": "Rewrite the sampling algorithm so top-p normalizes only over legal tokens"},
+                    {"zh": "对模型权重做微调，让它学会只输出 JSON", "en": "Fine-tune the model weights so it learns to emit only JSON"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "SGLang 把约束编译成 FSM，在每个解码步、<strong>采样之前</strong>向 FSM 要“允许集合”，据此构造词表掩码并把非法 token 的 logit 设为 <span class='mono'>−∞</span>（接第37课）。softmax 后这些 token 概率为零，采样器（第28课）无论用贪心还是 top-p 都选不到。因为改的是 logits 而非采样算法，故能与各种采样策略叠加。",
+                    "en": "SGLang compiles the constraint into an FSM and, at each decode step <strong>before sampling</strong>, asks the FSM for the allowed set, builds a vocab mask, and sets illegal tokens' logits to <span class='mono'>−∞</span> (Lesson 37). After softmax those probabilities are zero, so the sampler (Lesson 28)—greedy or top-p—cannot pick them. Editing logits rather than the sampler lets it stack with any sampling strategy.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "“跳跃前进（压缩 FSM）”节省的是什么开销？",
+                    "en": "What overhead does \"jump-forward (compressed FSM)\" save?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>当语法在某段只有唯一续接（如 JSON 强制键名 <span class='mono'>\"name\":</span>），直接拼接整段并让 FSM 一次跳过，省掉这些被钉死 token 的模型前向</strong>",
+                        "en": "<strong>When the grammar has a unique continuation over a span (e.g. the forced JSON key <span class='mono'>\"name\":</span>), it splices the whole span and jumps the FSM ahead at once, skipping the model forwards for those nailed-down tokens</strong>",
+                    },
+                    {"zh": "省掉构造词表掩码的显存分配", "en": "Saves the VRAM allocation for building the vocab mask"},
+                    {"zh": "省掉把 logits 从 GPU 拷回 CPU 的传输", "en": "Saves transferring logits from GPU back to CPU"},
+                    {"zh": "省掉对采样结果做 JSON 解析的校验", "en": "Saves running JSON parsing to validate the sampled result"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "很多时候 FSM 在一段连续状态里“允许集合”都只有一个 token——文法完全确定，没有自由度。逐 token 解码仍会为这些被钉死的 token 逐个跑模型前向，纯属浪费。<span class='mono'>OutlinesJumpForwardMap.jump_forward_symbol(state)</span> 返回该段强制字符串，直接 splice 进输出并让 FSM 一次性前跳：既更快，又因模型不必预测样板而质量更好。",
+                    "en": "Often the FSM's allowed set is a single token across a run of states—the grammar is fully deterministic with no freedom. Per-token decode still runs a forward for each nailed-down token, pure waste. <span class='mono'>OutlinesJumpForwardMap.jump_forward_symbol(state)</span> returns that forced string, splices it in, and jumps the FSM ahead at once: faster, and better quality since the model needn't predict boilerplate.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么投机解码（第43课）需要语法对象提供 <span class='mono'>rollback(k)</span>？",
+                    "en": "Why does speculative decoding (Lesson 43) need the grammar object's <span class='mono'>rollback(k)</span>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>草稿模型一次提出多个 token，FSM 先假定全部接受而前进；当验证拒绝其中后几个，必须 <span class='mono'>rollback(k)</span> 精确退回，让 FSM 状态与真正被接受的序列一致</strong>",
+                        "en": "<strong>The draft model proposes several tokens at once and the FSM advances assuming all are accepted; when verification rejects the trailing ones, it must <span class='mono'>rollback(k)</span> to keep the FSM state consistent with the truly accepted sequence</strong>",
+                    },
+                    {"zh": "为了在生成结束后撤销整段输出并重新开始", "en": "To undo the whole output after generation and restart"},
+                    {"zh": "为了把 FSM 状态保存到磁盘以便断点续传", "en": "To checkpoint the FSM state to disk for resuming later"},
+                    {"zh": "为了在温度过高时回退到贪心采样", "en": "To fall back to greedy sampling when temperature is too high"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "投机解码里草稿模型一口气给出若干候选，目标模型并行验证，常只接受前几个。FSM 在验证前必须假定全部接受并据此前进；一旦后几个被拒，就要用 <span class='mono'>rollback(k)</span> 把多走的 k 步退回，确保 FSM 状态与真正被接受的序列严格一致，否则后续掩码会基于错误状态构造、约束失效。",
+                    "en": "In speculative decoding the draft model emits several candidates that the target verifies in parallel, often accepting only the first few. The FSM must advance assuming all are accepted; once the trailing ones are rejected it uses <span class='mono'>rollback(k)</span> to undo the extra k steps so the FSM state matches the truly accepted sequence—otherwise later masks build on a wrong state and the constraint breaks.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话讲清受限解码为什么能<strong>保证</strong>输出合法而不只是“大概率合法”：把 JSON-Schema/正则/EBNF 编译成 FSM 后，<span class='mono'>fill_vocab_mask</span> 如何在每步采样前把非法 token 的 logit（第37课）设为 −∞，使采样器（第28课）无论策略如何都选不到；再说明这与“生成后校验+重试”相比的根本差别。",
+                "en": "In your own words, explain why constrained decoding <strong>guarantees</strong> valid output rather than just \"probably valid\": after compiling JSON-Schema/regex/EBNF into an FSM, how <span class='mono'>fill_vocab_mask</span> sets illegal tokens' logits (Lesson 37) to −∞ before each sampling step so the sampler (Lesson 28) cannot pick them regardless of strategy; then contrast this with \"generate then validate and retry.\"",
+            },
+            {
+                "zh": "描述跳跃前进的完整收益与机制：压缩 FSM 如何识别“确定性跨度”，<span class='mono'>jump_forward_symbol(state)</span> 如何吐出被钉死的字符串并让 FSM 一次前跳从而省去模型前向；解释为什么它<strong>既更快又质量更好</strong>，并结合 <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> 说明整台每请求 FSM 如何把推进、掩码、跳跃、终止拼成一个闭环。",
+                "en": "Describe jump-forward's full payoff and mechanism: how the compressed FSM identifies \"deterministic spans,\" how <span class='mono'>jump_forward_symbol(state)</span> emits the nailed-down string and jumps the FSM ahead to skip model forwards; explain why it is <strong>both faster and higher quality</strong>, and use <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> to show how the per-request FSM closes the loop of advance, mask, jump, and terminate.",
+            },
+        ],
+    },
 }
 
 

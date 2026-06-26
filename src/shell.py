@@ -131,6 +131,18 @@ PAGES = [
      "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
     ("42-multi-hardware-backends.html", "多硬件后端", "Multi-hardware backends",
      "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
+    ("43-speculative-decoding-overview.html", "投机解码总览", "Speculative decoding overview",
+     "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
+    ("44-eagle-and-next-gen.html", "EAGLE 与下一代", "EAGLE & next-gen",
+     "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
+    ("45-pd-disaggregation.html", "PD 分离", "Prefill–decode disaggregation",
+     "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
+    ("46-tp-pp-ep-dp-parallelism.html", "四种并行 TP/PP/EP/DP", "TP/PP/EP/DP parallelism",
+     "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
+    ("47-large-scale-ep-and-eplb.html", "大规模 EP 与 EPLB", "Large-scale EP & EPLB",
+     "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
+    ("48-structured-outputs-and-jump-forward.html", "结构化输出与跳跃前进", "Structured outputs & jump-forward",
+     "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
 ]
 
 
@@ -664,6 +676,18 @@ SUBTITLES = {
                                                "fused ops save HBM round-trips · static shapes suit graph capture · together near-zero overhead"),
     "42-multi-hardware-backends.html": ("一套引擎多种芯片 · 平台抽象 + 各芯片内核 · 上层硬件无关",
                                         "one engine many chips · platform abstraction + per-chip kernels · upper layers hardware-agnostic"),
+    "43-speculative-decoding-overview.html": ("草稿模型猜 k 个 · 目标模型一次验完 · 接受率即加速",
+                                              "a draft proposes k · the target verifies in one pass · accept rate is the speedup"),
+    "44-eagle-and-next-gen.html": ("复用隐藏态草拟 · 树状候选 + 树注意力 · 比链更高接受长度",
+                                   "draft from reused hidden states · a token tree + tree attention · higher accept length than a chain"),
+    "45-pd-disaggregation.html": ("prefill 与 decode 分机 · KV 跨机传输 · 各自吃满不互相拖累",
+                                  "split prefill and decode across pools · transfer the KV across · each saturates without interfering"),
+    "46-tp-pp-ep-dp-parallelism.html": ("张量/流水/专家/数据四种切法 · 统一 GroupCoordinator · 可组合",
+                                        "tensor/pipeline/expert/data — four splits · one GroupCoordinator · composable"),
+    "47-large-scale-ep-and-eplb.html": ("专家负载会偏斜 · EPLB 周期性重平衡放置 · 大 MoE 必备",
+                                        "expert load gets skewed · EPLB periodically rebalances placement · essential for big MoE"),
+    "48-structured-outputs-and-jump-forward.html": ("语法 FSM 屏蔽 logits 保证合法 · 确定段跳跃前进 · 免调模型",
+                                                    "a grammar FSM masks logits to stay valid · jump-forward over fixed spans · skip the model"),
 }
 
 

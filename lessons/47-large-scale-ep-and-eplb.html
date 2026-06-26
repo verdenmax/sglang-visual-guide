@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>47 · 大规模 EP 与 EPLB / Large-scale EP &amp; EPLB - SGLang 图解教程</title>
+<meta name="description" content="第十部分 · 性能创新专题｜大规模 EP 与 EPLB - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="47 · 大规模 EP 与 EPLB / Large-scale EP &amp; EPLB - SGLang 图解教程">
+<meta property="og:description" content="第十部分 · 性能创新专题｜大规模 EP 与 EPLB - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="47 · 大规模 EP 与 EPLB / Large-scale EP &amp; EPLB - SGLang 图解教程">
+<meta name="twitter:description" content="第十部分 · 性能创新专题｜大规模 EP 与 EPLB - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></span>
+    <span class="pill">47 / 48</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:97%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></div>
+    <h1><span class="lang-zh">大规模 EP 与 EPLB</span><span class="lang-en">Large-scale EP &amp; EPLB</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">在第34课我们认识了 MoE：路由器为每个 token 挑选 top-k 个专家；在第46课我们看到专家并行（EP）把成百上千个专家分散到许多张 GPU 上。但真实流量并不是均匀的——有的专家天天爆满，有的几乎闲置。本课要讲的，就是当 EP 遇到"忙闲不均"时会发生什么，以及 SGLang 用 <span class="mono">EPLBManager</span>（专家并行负载均衡器）如何把这块"塞车"的瓶颈拉平。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象一座大型连锁餐厅有 256 个窗口（专家），分布在 8 个厨房（GPU）里，每个厨房放 32 个窗口。顾客（token）进门后，门口的引导员（路由器）按菜品把每位顾客指派给最合适的 top-k 个窗口。问题是：网红爆款"麻辣烫窗口"门口排起长龙，而"白粥窗口"几乎没人。偏偏餐厅有个铁规矩——<strong>所有厨房必须同时上齐菜，最慢的那个厨房没出完，全场都得干等</strong>。于是只要某个厨房里挤着一个爆款窗口，其余 7 个厨房的厨师全都袖手旁观，整体吞吐被这一个热点活活拖垮。</p>
+<p>聪明的店长会怎么做？他每隔一段时间统计各窗口的实际客流，然后<strong>重新安排窗口到厨房的摆放</strong>：把冷门窗口挪走腾地方，把爆款窗口<strong>复制成好几份</strong>分到不同厨房，让排队的人分流到各处。这样每个厨房每一轮接待的顾客数量就拉平了，最慢厨房不再拖后腿。这位"店长"就是 EPLB。</p>
+<p>这个类比里有三个细节值得记住。其一，店长<strong>不能只靠开业那天的预测</strong>排座位——今天火的菜明天可能就凉了，所以他必须持续盯客流、动态调整。其二，<strong>光是互换窗口位置救不了真正的爆款</strong>：如果"麻辣烫"一家就占了全店四成客流，无论它坐哪个厨房，那个厨房都会爆，唯一的解法是开分店（复制）。其三，<strong>调整本身有成本</strong>——搬窗口、布置新厨房都要停工片刻，所以店长不会每分钟都重排，而是攒够一段时间的客流数据、确认格局真的变了才动手。这三点，恰好对应 EPLB 的"周期性测量、复制热点、低频重排"。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>EP 解决的是"专家太多放不下一张卡"的容量问题，但它本身不解决"负载倾斜"的效率问题。EP 的一步 all-to-all 是一道同步墙：<strong>必须等最忙的那张卡算完，这一步才能结束</strong>。只要负载倾斜，少数热点专家所在的 GPU 就成为木桶最短的那块板，其它 GPU 白白空转。EPLB 的核心思想是：负载不是固定的，但可以被<strong>测量</strong>和<strong>重新放置</strong>。它周期性地量出每个专家收到多少 token，再解一个新的"专家→GPU"摆放方案把负载摊平——必要时复制热门专家。对 DeepSeek 这种几百专家规模的 MoE 服务，这一步不是锦上添花，而是能不能跑得起来的关键。</p>
+<p>把这三课串起来看会更清楚：第34课讲的是 MoE 与 FusedMoE 路由——"一个 token 该交给哪些专家"；第46课讲的是 EP 与 all-to-all——"专家放在不同 GPU 上、token 该怎么跨卡传送"；本课要补上的，是"当传送的负载不均时，怎么把它重新摊平"。三者层层递进：有了 MoE 才有专家，有了 EP 才需要跨卡，有了倾斜才需要均衡。EPLB 站在最上层，把前两课搭好的舞台真正用满。理解了这条线，你就明白为什么大规模 MoE 推理是"路由 + 并行 + 均衡"三件事缺一不可的系统工程。</p>
+</div>
+
+<h2>为什么 EP 的负载天然倾斜？</h2>
+<p>MoE 的路由器是学出来的，不是均匀分配的。训练让某些专家专精于高频模式（比如常见的语法结构、热门话题），这些专家在推理时自然会被更多 token 选中，形成"热点专家"；而另一些专家对应罕见模式，长期处于半闲置状态。这种<strong>长尾分布</strong>是 MoE 的固有特性，而非偶然。当我们用 EP 把专家平摊到各 GPU 时，热点专家恰好可能集中落在某几张卡上，于是这几张卡每一步要处理的 token 数远超平均值。</p>
+<p>不妨用一组具体数字感受这种倾斜。假设一个 MoE 层有 256 个专家、top-k 取 8，一个批次里有 4096 个 token，那么这一层总共要分发 4096×8 = 32768 次专家调用。如果负载完全均匀，每个专家应当收到 128 次；可现实里排名最靠前的几个专家往往各收到上千次，而尾部的几十个专家加起来都不到几百次。把这 256 个专家按 EP 平摊到 8 张卡，每卡 32 个专家——只要排名前几的热点恰好落在同一张卡，这张卡这一步就要扛起好几倍于均值的计算量。倾斜不是"略微不均"，而常常是数量级的差距。</p>
+<p>关键在于 EP 的执行模型：每一步前向都包含一次 all-to-all 通信——把各 token 发往它们各自专家所在的 GPU，算完再收回来。这是一道<strong>集合同步</strong>：所有 rank 必须在同一个屏障处会合。于是整步的耗时由<strong>最忙的那个 rank</strong>决定。如果 8 张卡里有 7 张处理 1000 个 token、1 张处理 4000 个 token，那么这一步的墙钟时间就按 4000 个算，前 7 张卡有 75% 的时间在等待。裸 EP 因此浪费了大量算力。</p>
+<p>还有一个常被忽视的细节：负载倾斜不是静止的，它会<strong>随时间和输入分布漂移</strong>。同一个模型，面对代码生成、对话聊天、长文档摘要这三类请求，被激活的热点专家可能完全不同；甚至在同一段对话里，话题一变，热点也跟着迁移。这意味着任何"一次性算好、永久固定"的专家摆放都会很快过时。倾斜既是固有的，又是流动的——这正是为什么解决方案必须是<strong>周期性测量、动态调整</strong>，而不能是部署时拍一次脑袋定下来的静态配置。</p>
+
+<h2>EPLB 到底测量和重排了什么？</h2>
+<p>EPLB（Expert-Parallel Load Balancer，专家并行负载均衡器）做两件事：<strong>测量</strong>与<strong>重排</strong>。测量指的是统计每个专家在最近一段时间里实际收到了多少 token——这份"每专家负载"统计由专家分布记录器（expert-distribution recorder）在每次前向后累加。重排指的是基于这份统计，解一个新的<strong>专家→GPU 放置方案</strong>，目标是让每张 GPU 每步处理的 token 数尽量相等。</p>
+<p>重排有两件武器。第一是<strong>迁移</strong>：把专家在 GPU 之间搬家，让冷热专家搭配摆放，避免热点扎堆。第二是<strong>复制热门专家</strong>：当某个专家实在太热、单卡装不下它的流量时，EPLB 会把它<strong>复制到多张 GPU 上</strong>，让指向它的 token 分摊到这几份副本中。复制是 EPLB 区别于简单"换位置"的精髓——它把一个不可分割的热点切成了可并行的多份。重排完成后，新的放置写回到 <span class="mono">expert_location</span>（专家→GPU 映射），后续的步骤就按这张新地图来路由。</p>
+<p>为什么"换位置"不够、非得"复制"？设想最极端的情形：某一个专家独自就吃掉了全系统四成的 token。无论你把它放到哪张卡，那张卡都会爆满，其它卡再闲也帮不上忙——因为一个专家在物理上不可分割。这时唯一的出路就是把它做成多份副本，分散到多张卡上，让原本指向它的洪流被几条河道分流。可以把迁移理解为"重新洗牌座位"，把复制理解为"给热门窗口加开分店"：前者解决分布不均，后者解决单点过热。两者配合，才能真正把每张卡每步的 token 数压到接近平均。</p>
+<p>这里也有取舍。复制热门专家要占用额外显存（多存一份专家权重），重排本身也要在 GPU 间搬运参数、有不小的开销。所以 EPLB 不会每一步都重排，而是<strong>攒一段时间的统计、确认负载格局确实变了，才动手</strong>。它在"跟得上负载漂移"与"别让重排开销盖过收益"之间取平衡，这也解释了为什么采集要高频而重排要低频。换句话说，复制的份数也不是越多越好：副本太少压不住热点，副本太多又白白吃掉本可留给 KV 缓存或更多并发的显存。EPLB 求解放置时，正是在"让每张卡负载尽量均衡"和"别为此付出过多显存与搬运代价"这两个目标之间找一个折中点。</p>
+
+<h2>EPLBManager 的运转循环</h2>
+<p>SGLang 用 <span class="mono">EPLBManager</span> 把上面的思想落地成一个清晰的循环。它挂在 <span class="mono">ModelRunner</span> 上，借助专家分布记录器持续采样。核心是两个钩子：<span class="mono">on_forward_pass_end()</span> 在<strong>每一次前向之后</strong>被调用，把"这一步每个专家命中了多少 token"累加进统计；<span class="mono">rebalance()</span> 则<strong>周期性</strong>地被触发，解出新的专家放置方案（热点可能被复制），然后更新 <span class="mono">expert_location</span>。注意分工：采集是高频、轻量的（每步都做），重排是低频、较重的（隔一段时间做一次），二者解耦，既能跟上负载变化，又不会让重排开销淹没正常推理。</p>
+<p>为什么采集要做成"每步一次、极轻量"？因为只有把统计的颗粒度压到每一步，EPLB 才能看清负载的真实形状，而不是被某个瞬间的抖动误导。<span class="mono">on_forward_pass_end()</span> 做的事很克制：它不在前向的关键路径里做任何重活，只是把这一步各专家命中的计数累加到记录器里——一次简单的加法。正因为它足够便宜，才敢每步都做。这份持续累积的统计，就是 <span class="mono">rebalance()</span> 求解新放置时的唯一依据。</p>
+<p>这条循环是有状态的、自适应的：负载在变，统计在累积，放置在周期性刷新。它把"静态的专家摆放"变成了"随流量演化的动态摆放"。对大规模 MoE 服务而言，这正是把裸 EP 的理论吞吐变成实际吞吐的关键一环。</p>
+<p>把整个机制再压成一句话：EPLB 让专家的物理位置"跟着流量走"。它不改动模型一个参数、不改变路由器的选择逻辑，只是不断回答一个朴素的问题——"既然这些 token 注定要去这些专家，那把专家摆在哪些 GPU 上、各放几份，才能让每张卡每步的活儿一样多？"答案随流量变化而变化，于是放置也随之刷新。这种"测量—求解—放置—再测量"的闭环，本质上是一个轻量级的在线优化器，嵌在推理主循环的缝隙里默默工作。</p>
+<p>从工程视角看，这套设计的优雅之处在于<strong>关注点分离</strong>。模型的前向逻辑完全不需要知道 EPLB 的存在——它只管按当前的 <span class="mono">expert_location</span> 路由 token；而 <span class="mono">EPLBManager</span> 像一个旁挂的观察者，安静地在每步结束时记一笔账，隔一阵子悄悄把地图换新。前向与均衡两条线解耦，使得均衡策略可以独立演进、甚至替换成不同的求解算法，而不必改动模型代码。这种"可插拔、为规模而设计"的思路，正是 SGLang 整体架构的底色，我们会在第61、62课进一步展开。简言之，模型只负责算，均衡只负责摆，二者各司其职、互不打扰。</p>
+<p>最后值得强调的是规模效应：专家越多、GPU 越多，负载倾斜带来的浪费就越严重，EPLB 的价值也就越大。在几十张卡、几百个专家的 DeepSeek 级部署里，没有负载均衡的裸 EP 几乎无法把硬件喂满；而有了周期性重平衡，整个集群的算力利用率才能真正逼近理论上限。EPLB 不是可有可无的优化，而是大规模 MoE 推理能否经济地跑起来的前提。</p>
+
+<div class="flow"><div class="node">路由 token 到 top-k 专家</div><div class="arrow">→</div><div class="node">测量每专家负载</div><div class="arrow">→</div><div class="node">重排放置（复制热点）</div><div class="arrow">→</div><div class="node">更平坦的 GPU 负载</div></div>
+
+<div class="cols"><div class="col"><strong>倾斜（裸 EP）</strong><br>8 张卡，1 个热点专家挤在 GPU0。这一步必须等 GPU0 处理完 4000 个 token，其余 7 张卡各 1000 个，处理完只能干等。<span class="mono">最忙者决定整步耗时</span>，75% 算力在空转。</div><div class="col"><strong>平衡（EPLB 之后）</strong><br>热点专家被复制到 3 张卡上分流，冷热专家重新搭配摆放。每张 GPU 每步约 1500 个 token，墙时间由 4000 降到 1500。同步墙不再被单个热点卡住。</div></div>
+
+<table class="t"><tr><th>EPLBManager 钩子</th><th>它做什么</th></tr><tr><td><span class="mono">on_forward_pass_end()</span></td><td>每次前向后调用：把这一步各专家命中的 token 数累加进负载统计（经由专家分布记录器）。高频、轻量。</td></tr><tr><td><span class="mono">rebalance()</span></td><td>周期性调用：解一个新的专家→GPU 放置方案把负载摊平，热点专家可能被复制。低频、较重。</td></tr><tr><td><span class="mono">expert_location</span></td><td>专家→GPU 映射表：被 rebalance 更新，后续步骤按这张新地图路由。</td></tr></table>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>采集统计</h4><p><span class="mono">on_forward_pass_end()</span> 每步把各专家命中的 token 数累加进负载统计（经由专家分布记录器）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>求解放置</h4><p><span class="mono">rebalance()</span> 周期性解一个新的专家→GPU 方案把负载摊平，热点专家可能被复制成多份。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>更新地图</h4><p>把新放置写回 <span class="mono">expert_location</span>（专家→GPU 映射），后续步骤按这张新地图路由。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>重复</h4><p>负载随流量持续演化，统计继续累积，放置周期性刷新——回到第 1 步。</p></div></div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">采集专家负载 + 周期性重平衡放置</span></div><pre>class EPLBManager:
+    def __init__(self, model_runner):
+        self.model_runner = model_runner
+        # tracks per-expert token counts via the expert-distribution recorder
+        ...
+    def on_forward_pass_end(self):
+        # after each forward: accumulate how many tokens hit each expert
+        ...
+    def rebalance(self):
+        # periodically: solve a new expert -&gt; GPU placement that flattens load
+        # (hot experts may be replicated), then update expert_location
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li>MoE 路由天然倾斜：少数热点专家被大量 token 选中，长尾分布是固有特性（接第34课 FusedMoE 路由）。</li>
+<li>EP 的 all-to-all 是同步墙：整步耗时由<strong>最忙的 rank</strong>决定，热点专家所在 GPU 拖垮全场（接第46课 EP/all-to-all）。</li>
+<li><strong>EPLB</strong> 周期性<strong>测量</strong>每专家负载，再<strong>重排</strong>专家→GPU 放置把负载摊平，必要时<strong>复制热门专家</strong>分流。</li>
+<li>SGLang 的 <span class="mono">EPLBManager</span>：<span class="mono">on_forward_pass_end()</span> 每步累加统计，<span class="mono">rebalance()</span> 周期性解新放置并更新 <span class="mono">expert_location</span>。</li>
+<li>这是 DeepSeek 级 MoE 服务跑得起来的关键；其"可插拔、为规模而设计"的思路在第61/62课会继续展开。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在大规模 EP 下，为什么少数“热点专家”会拖垮整步的吞吐？</div>
+  <ol class="opts">
+    <li>路由器在热点专家上算得更慢，因为它的权重更大</li>
+    <li><strong>EP 每步的 all-to-all 是同步墙，整步耗时由最忙的 rank 决定；热点专家所在 GPU 处理的 token 远多于平均，其它 GPU 只能干等</strong></li>
+    <li>热点专家会占用更多显存，导致其它专家被换出</li>
+    <li>热点专家需要 FP8 量化，而冷门专家用 FP16</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。EP 的一步 all-to-all 是一道<strong>集合同步</strong>（接第46课）：所有 rank 必须在同一屏障会合，整步墙时间由<strong>最忙的 rank</strong>决定。MoE 路由天然倾斜（接第34课），热点专家被大量 token 选中，若它们集中在某几张卡，这些卡每步处理的 token 远超平均，其余 GPU 空转。裸 EP 因此浪费算力。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. EPLB（专家并行负载均衡器）周期性地测量和重排的分别是什么？</div>
+  <ol class="opts">
+    <li>测量每张 GPU 的温度，再降低热点卡的频率</li>
+    <li>测量每个 token 的长度，再重排 KV cache 的分页</li>
+    <li><strong>测量每个专家收到的 token 数（每专家负载），再解一个新的专家→GPU 放置方案把负载摊平，必要时复制热门专家</strong></li>
+    <li>测量路由器的权重梯度，再微调模型参数</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。EPLB 做两件事：<strong>测量</strong>每个专家在最近一段时间实际收到多少 token（由专家分布记录器累加），与<strong>重排</strong>——基于统计解一个新的<strong>专家→GPU 放置</strong>，让每张卡每步处理的 token 数尽量相等。武器有二：在 GPU 间迁移专家、以及把太热的专家<strong>复制到多张卡</strong>分摊流量。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. SGLang 的 <span class='mono'>EPLBManager</span> 用哪两个钩子实现“高频采集 + 低频重排”的循环？</div>
+  <ol class="opts">
+    <li><strong><span class='mono'>on_forward_pass_end()</span> 每次前向后累加每专家负载统计；<span class='mono'>rebalance()</span> 周期性解新放置并更新 <span class='mono'>expert_location</span></strong></li>
+    <li><span class='mono'>compile()</span> 与 <span class='mono'>capture_graph()</span></li>
+    <li><span class='mono'>quantize()</span> 与 <span class='mono'>dequantize()</span></li>
+    <li><span class='mono'>on_token_start()</span> 与 <span class='mono'>flush_kv()</span></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<span class='mono'>EPLBManager</span> 挂在 <span class='mono'>ModelRunner</span> 上：<span class='mono'>on_forward_pass_end()</span> 在<strong>每一次前向之后</strong>被调用，把这一步各专家命中的 token 数累加进统计（高频、轻量）；<span class='mono'>rebalance()</span> <strong>周期性</strong>触发，解出新放置（热点可能被复制）并更新 <span class='mono'>expert_location</span>（专家→GPU 映射，低频、较重）。二者解耦，既跟上负载变化又不淹没正常推理。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话解释为什么裸 EP 会浪费算力：MoE 路由的长尾分布（第34课）如何制造热点专家，而 EP 的 all-to-all 同步墙（第46课）如何让整步耗时由最忙的 rank 决定；再说明为什么仅仅“把专家在 GPU 间换位置”不足以解决问题，而必须<strong>复制热门专家</strong>才能把一个不可分割的热点切成可并行的多份。</li>
+    <li>描述 <span class='mono'>EPLBManager</span> 的完整循环：<span class='mono'>on_forward_pass_end()</span> 如何经由专家分布记录器累加每专家负载、<span class='mono'>rebalance()</span> 如何周期性求解新的专家→GPU 放置并写回 <span class='mono'>expert_location</span>、后续步骤如何按这张新地图路由；解释为什么把“高频轻量的采集”与“低频较重的重排”解耦很关键，并前瞻第61/62课“可插拔、为规模而设计”的主题。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">In Lesson 34 we met MoE: the router picks top-k experts for each token; in Lesson 46 we saw expert parallelism (EP) spread hundreds of experts across many GPUs. But real traffic is not uniform—some experts are slammed every day, others sit nearly idle. This lesson is about what happens when EP meets that imbalance, and how SGLang's <span class="mono">EPLBManager</span> (Expert-Parallel Load Balancer) flattens that traffic-jam bottleneck.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a huge restaurant chain with 256 counters (experts) spread across 8 kitchens (GPUs), 32 counters per kitchen. Customers (tokens) walk in and a host (the router) assigns each to the most suitable top-k counters by dish. The problem: the viral "spicy hotpot" counter has a line out the door, while the "plain congee" counter sees almost no one. And the restaurant has an iron rule—<strong>all kitchens must serve their dishes at the same time; until the slowest kitchen is done, the whole floor waits</strong>. So if one kitchen happens to hold a viral counter, the cooks in the other 7 kitchens stand idle, and overall throughput is dragged down by that single hotspot.</p>
+<p>What would a clever manager do? Every so often he tallies each counter's actual foot traffic, then <strong>rearranges which counters sit in which kitchen</strong>: move idle counters aside to make room, and <strong>replicate the viral counter into several copies</strong> spread across kitchens so the line splits up. Now every kitchen serves about the same number of customers per round, and the slowest kitchen no longer holds everyone back. That "manager" is EPLB.</p>
+<p>Three details in this analogy are worth remembering. First, the manager <strong>cannot rely on opening-day forecasts alone</strong>—today's hot dish may go cold tomorrow, so he must keep watching traffic and adjust dynamically. Second, <strong>merely swapping counter positions cannot save a true blockbuster</strong>: if "spicy hotpot" alone draws 40% of all traffic, whichever kitchen it sits in will overflow, and the only fix is to open branches (replicate). Third, <strong>adjusting has a cost</strong>—moving counters and setting up a new kitchen means a brief pause, so the manager doesn't rebalance every minute but waits until enough traffic data confirms the landscape truly shifted. These three points map exactly onto EPLB's "periodic measurement, replicate hotspots, low-frequency rebalancing."</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>EP solves the capacity problem—too many experts to fit on one card—but it does not by itself solve the efficiency problem of load skew. EP's per-step all-to-all is a synchronization wall: <strong>the step cannot finish until the busiest card finishes</strong>. Whenever load is skewed, the GPUs holding the few hot experts become the shortest stave of the barrel, and the other GPUs spin idle. EPLB's core idea is that load is not fixed—it can be <strong>measured</strong> and <strong>re-placed</strong>. It periodically measures how many tokens each expert received, then solves a new expert→GPU placement that flattens the load—replicating hot experts when needed. For DeepSeek-scale MoE serving with hundreds of experts, this is not a nice-to-have; it is what makes serving feasible at all.</p>
+<p>Stringing the three lessons together makes it clearer: Lesson 34 is about MoE and FusedMoE routing—"which experts should a token go to"; Lesson 46 is about EP and all-to-all—"experts live on different GPUs, so how do tokens travel across cards"; this lesson adds the missing piece—"when the transported load is uneven, how do we flatten it back out." The three build on each other: MoE gives us experts, EP makes cross-card transport necessary, and skew makes balancing necessary. EPLB sits at the top, finally making full use of the stage the first two lessons set up. Grasp this line and you see why large-scale MoE inference is a systems effort where routing + parallelism + balancing are all indispensable.</p>
+</div>
+
+<h2>Why is EP load inherently skewed?</h2>
+<p>The MoE router is learned, not a uniform splitter. Training makes some experts specialize in high-frequency patterns (common grammatical structures, popular topics), so at inference those experts are naturally chosen by more tokens, becoming "hot experts"; other experts handle rare patterns and stay half-idle for long stretches. This <strong>long-tail distribution</strong> is an intrinsic property of MoE, not an accident. When EP spreads experts evenly across GPUs, the hot experts may happen to land on just a few cards, so those cards must process far more tokens than average each step.</p>
+<p>Some concrete numbers convey the skew. Suppose a MoE layer has 256 experts with top-k = 8, and a batch holds 4096 tokens; that layer dispatches 4096×8 = 32768 expert invocations in all. If load were perfectly uniform, each expert would receive 128; but in reality the top few experts often receive thousands each, while dozens of tail experts together add up to barely a few hundred. Spread those 256 experts across 8 cards by EP, 32 per card—if the top hotspots happen to land on the same card, that card must shoulder several times the average compute this step. Skew is not "slightly uneven"; it is often an order-of-magnitude gap.</p>
+<p>The key is EP's execution model: every forward step contains an all-to-all—sending each token to the GPU holding its expert, then collecting results back. This is a <strong>collective synchronization</strong>: all ranks must meet at the same barrier. So the step's wall-clock time is set by the <strong>busiest rank</strong>. If 7 of 8 cards each handle 1000 tokens while 1 handles 4000, the step costs as much as 4000, and the first 7 cards spend 75% of the time waiting. Raw EP thus wastes a great deal of compute.</p>
+<p>One often-overlooked detail: load skew is not static—it <strong>drifts over time and with the input distribution</strong>. The same model, facing code generation, chit-chat, and long-document summarization, may activate completely different hot experts; even within one conversation, when the topic shifts, the hotspots migrate with it. This means any "compute once, fix forever" expert placement quickly goes stale. Skew is both intrinsic and fluid—which is precisely why the solution must be <strong>periodic measurement and dynamic adjustment</strong>, not a static config decided once at deploy time.</p>
+
+<h2>What exactly does EPLB measure and rebalance?</h2>
+<p>EPLB (Expert-Parallel Load Balancer) does two things: <strong>measure</strong> and <strong>rebalance</strong>. Measuring means counting how many tokens each expert actually received over a recent window—this per-expert load statistic is accumulated by an expert-distribution recorder after every forward. Rebalancing means solving, from that statistic, a new <strong>expert→GPU placement</strong> whose goal is to make each GPU process roughly the same number of tokens per step.</p>
+<p>Rebalancing has two weapons. First is <strong>migration</strong>: moving experts between GPUs so hot and cold experts are paired up and hotspots stop clustering. Second is <strong>replicating hot experts</strong>: when an expert is so hot that one card cannot carry its traffic, EPLB <strong>replicates it onto several GPUs</strong>, so tokens pointing to it split across those copies. Replication is what sets EPLB apart from a simple "swap positions"—it cuts an indivisible hotspot into parallelizable copies. Once rebalancing is done, the new placement is written back to <span class="mono">expert_location</span> (the expert→GPU map), and subsequent steps route against this new map.</p>
+<p>Why isn't "swapping positions" enough—why must we replicate? Picture the extreme case: a single expert alone eats 40% of the whole system's tokens. No matter which card you place it on, that card overflows, and idle cards cannot help—because one expert is physically indivisible. The only way out is to make multiple copies of it, spread across several cards, so the flood that pointed to it is split into several channels. Think of migration as "reshuffling the seating" and replication as "opening branch stores for the popular counter": the former fixes uneven distribution, the latter fixes single-point overheating. Only together can they truly push each card's per-step token count close to the average.</p>
+<p>There are trade-offs here. Replicating a hot expert costs extra VRAM (storing another copy of its weights), and rebalancing itself moves parameters between GPUs at non-trivial cost. So EPLB does not rebalance every step; instead it <strong>accumulates statistics over a window and acts only once it confirms the load landscape has truly shifted</strong>. It balances "keeping up with load drift" against "not letting rebalancing overhead outweigh the gain"—which is exactly why collection is high-frequency while rebalancing is low-frequency. In other words, more replicas is not always better: too few cannot tame the hotspot, while too many needlessly eat VRAM that could have gone to KV cache or more concurrency. When EPLB solves a placement, it is precisely seeking a compromise between "balance each card's load as much as possible" and "don't pay too much VRAM and movement cost for it."</p>
+
+<h2>The EPLBManager loop</h2>
+<p>SGLang lands the ideas above as a clean loop in <span class="mono">EPLBManager</span>. It hangs off the <span class="mono">ModelRunner</span> and samples continuously via the expert-distribution recorder. Two hooks are central: <span class="mono">on_forward_pass_end()</span> is called <strong>after every forward</strong> to accumulate "how many tokens hit each expert this step" into the statistic; <span class="mono">rebalance()</span> is triggered <strong>periodically</strong> to solve a new expert placement (hot experts may be replicated) and then update <span class="mono">expert_location</span>. Note the division of labor: collection is high-frequency and lightweight (every step), rebalancing is low-frequency and heavier (every so often); decoupling them lets the system track load changes without letting rebalancing overhead drown out normal inference.</p>
+<p>Why make collection "once per step, ultra-light"? Because only by pushing the statistic's granularity down to every step can EPLB see the true shape of the load instead of being misled by a single instant's jitter. <span class="mono">on_forward_pass_end()</span> is deliberately restrained: it does no heavy work on the forward critical path, just adds this step's per-expert counts into the recorder—a simple addition. Precisely because it is cheap enough, it can afford to run every step. This continuously accumulated statistic is the sole basis on which <span class="mono">rebalance()</span> solves a new placement.</p>
+<p>This loop is stateful and adaptive: load shifts, statistics accumulate, placement refreshes periodically. It turns a "static expert layout" into a "dynamic layout that evolves with traffic." For large-scale MoE serving, this is exactly the piece that converts raw EP's theoretical throughput into real throughput.</p>
+<p>To compress the whole mechanism into one sentence: EPLB lets experts' physical locations "follow the traffic." It changes not a single model parameter and not the router's selection logic; it merely keeps answering a plain question—"given that these tokens are bound for these experts, on which GPUs and in how many copies should we place the experts so that every card does equal work each step?" The answer changes as traffic changes, so the placement refreshes accordingly. This "measure–solve–place–measure-again" closed loop is essentially a lightweight online optimizer, working quietly in the gaps of the inference main loop.</p>
+<p>From an engineering standpoint, the elegance of this design is its <strong>separation of concerns</strong>. The model's forward logic need not know EPLB exists at all—it merely routes tokens according to the current <span class="mono">expert_location</span>; meanwhile <span class="mono">EPLBManager</span> acts as a side-attached observer, quietly jotting a note at the end of each step and, every so often, swapping in a fresh map. Decoupling the forward path from balancing lets the balancing strategy evolve independently—even be replaced with a different solver—without touching model code. This "pluggable, designed-for-scale" mindset is the backbone of SGLang's overall architecture, which we expand on in Lessons 61 and 62. In short, the model only computes and the balancer only places—each minds its own job without disturbing the other.</p>
+<p>Finally, it is worth stressing the scale effect: the more experts and the more GPUs, the more severe the waste from load skew, and the greater EPLB's value. In a DeepSeek-scale deployment with dozens of cards and hundreds of experts, raw EP without load balancing can barely keep the hardware fed; only with periodic rebalancing can the whole cluster's compute utilization truly approach its theoretical ceiling. EPLB is not an optional optimization but a precondition for running large-scale MoE inference economically.</p>
+
+<div class="flow"><div class="node">route tokens to top-k experts</div><div class="arrow">→</div><div class="node">measure per-expert load</div><div class="arrow">→</div><div class="node">rebalance placement (replicate hot)</div><div class="arrow">→</div><div class="node">flatter GPU load</div></div>
+
+<div class="cols"><div class="col"><strong>Skewed (raw EP)</strong><br>8 cards, 1 hot expert crammed onto GPU0. This step must wait for GPU0 to process 4000 tokens; the other 7 cards handle 1000 each and then just wait. <span class="mono">The busiest sets the step time</span>; 75% of compute spins idle.</div><div class="col"><strong>Balanced (after EPLB)</strong><br>The hot expert is replicated onto 3 cards to split traffic, and hot/cold experts are re-paired. Each GPU now handles ~1500 tokens per step; wall time drops from 4000 to 1500. The sync wall is no longer stalled by a single hot card.</div></div>
+
+<table class="t"><tr><th>EPLBManager hook</th><th>What it does</th></tr><tr><td><span class="mono">on_forward_pass_end()</span></td><td>Called after each forward: accumulate the token count each expert hit this step into the load statistic (via the expert-distribution recorder). High-frequency, lightweight.</td></tr><tr><td><span class="mono">rebalance()</span></td><td>Called periodically: solve a new expert→GPU placement that flattens load; hot experts may be replicated. Low-frequency, heavier.</td></tr><tr><td><span class="mono">expert_location</span></td><td>The expert→GPU map: updated by rebalance, and subsequent steps route against this new map.</td></tr></table>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Collect stats</h4><p><span class="mono">on_forward_pass_end()</span> accumulates each expert's token count into the load statistic every step (via the expert-distribution recorder).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Solve placement</h4><p><span class="mono">rebalance()</span> periodically solves a new expert→GPU plan that flattens load; hot experts may be replicated into several copies.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Update the map</h4><p>Write the new placement back to <span class="mono">expert_location</span> (the expert→GPU map); subsequent steps route against this new map.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Repeat</h4><p>Load keeps evolving with traffic, stats keep accumulating, placement refreshes periodically — back to step 1.</p></div></div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">gather expert load + periodically rebalance placement</span></div><pre>class EPLBManager:
+    def __init__(self, model_runner):
+        self.model_runner = model_runner
+        # tracks per-expert token counts via the expert-distribution recorder
+        ...
+    def on_forward_pass_end(self):
+        # after each forward: accumulate how many tokens hit each expert
+        ...
+    def rebalance(self):
+        # periodically: solve a new expert -&gt; GPU placement that flattens load
+        # (hot experts may be replicated), then update expert_location
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li>MoE routing is inherently skewed: a few hot experts are chosen by many tokens; the long-tail distribution is intrinsic (ties to Lesson 34 FusedMoE routing).</li>
+<li>EP's all-to-all is a sync wall: the step time is set by the <strong>busiest rank</strong>, and the GPU holding hot experts drags down the whole floor (ties to Lesson 46 EP/all-to-all).</li>
+<li><strong>EPLB</strong> periodically <strong>measures</strong> per-expert load, then <strong>rebalances</strong> the expert→GPU placement to flatten load, <strong>replicating hot experts</strong> to split traffic when needed.</li>
+<li>SGLang's <span class="mono">EPLBManager</span>: <span class="mono">on_forward_pass_end()</span> accumulates stats each step; <span class="mono">rebalance()</span> periodically solves a new placement and updates <span class="mono">expert_location</span>.</li>
+<li>This is what makes DeepSeek-scale MoE serving feasible; its "pluggable, designed-for-scale" themes continue in Lessons 61/62.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Under large-scale EP, why do a few "hot experts" drag down the whole step's throughput?</div>
+  <ol class="opts">
+    <li>The router computes slower on hot experts because their weights are larger</li>
+    <li><strong>EP's per-step all-to-all is a sync wall; the step time is set by the busiest rank, so the GPU holding hot experts processes far more tokens than average while the others just wait</strong></li>
+    <li>Hot experts use more VRAM, forcing other experts to be swapped out</li>
+    <li>Hot experts require FP8 quantization while cold experts use FP16</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. EP's per-step all-to-all is a <strong>collective synchronization</strong> (ties to Lesson 46): all ranks must meet at the same barrier, so the step's wall time is set by the <strong>busiest rank</strong>. MoE routing is inherently skewed (Lesson 34); hot experts are chosen by many tokens, and if they cluster on a few cards, those cards process far more tokens per step than average while the rest spin idle. Raw EP thus wastes compute.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What does EPLB (Expert-Parallel Load Balancer) periodically measure and rebalance?</div>
+  <ol class="opts">
+    <li>Measures each GPU's temperature, then throttles the hot card's clock</li>
+    <li>Measures each token's length, then rearranges KV-cache paging</li>
+    <li><strong>Measures how many tokens each expert received (per-expert load), then solves a new expert→GPU placement that flattens load, replicating hot experts when needed</strong></li>
+    <li>Measures the router's weight gradients, then fine-tunes model parameters</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. EPLB does two things: <strong>measure</strong> how many tokens each expert actually received over a recent window (accumulated by the expert-distribution recorder), and <strong>rebalance</strong>—solving from that statistic a new <strong>expert→GPU placement</strong> so each card processes roughly equal tokens per step. Its two weapons: migrate experts between GPUs, and <strong>replicate</strong> a too-hot expert onto several cards to split its traffic.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which two hooks of SGLang's <span class='mono'>EPLBManager</span> implement the "high-frequency collect + low-frequency rebalance" loop?</div>
+  <ol class="opts">
+    <li><strong><span class='mono'>on_forward_pass_end()</span> accumulates per-expert load after each forward; <span class='mono'>rebalance()</span> periodically solves a new placement and updates <span class='mono'>expert_location</span></strong></li>
+    <li><span class='mono'>compile()</span> and <span class='mono'>capture_graph()</span></li>
+    <li><span class='mono'>quantize()</span> and <span class='mono'>dequantize()</span></li>
+    <li><span class='mono'>on_token_start()</span> and <span class='mono'>flush_kv()</span></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <span class='mono'>EPLBManager</span> hangs off the <span class='mono'>ModelRunner</span>: <span class='mono'>on_forward_pass_end()</span> is called <strong>after every forward</strong> to accumulate this step's per-expert token counts (high-frequency, lightweight); <span class='mono'>rebalance()</span> is triggered <strong>periodically</strong> to solve a new placement (hot experts may be replicated) and update <span class='mono'>expert_location</span> (the expert→GPU map; low-frequency, heavier). Decoupling them tracks load changes without drowning out normal inference.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why raw EP wastes compute: how MoE routing's long-tail distribution (Lesson 34) creates hot experts, and how EP's all-to-all sync wall (Lesson 46) makes the step time depend on the busiest rank; then explain why merely "swapping experts between GPUs" is not enough and why <strong>replicating hot experts</strong> is necessary to cut an indivisible hotspot into parallelizable copies.</li>
+    <li>Describe the full <span class='mono'>EPLBManager</span> loop: how <span class='mono'>on_forward_pass_end()</span> accumulates per-expert load via the expert-distribution recorder, how <span class='mono'>rebalance()</span> periodically solves a new expert→GPU placement and writes it back to <span class='mono'>expert_location</span>, and how subsequent steps route against this new map; explain why decoupling "high-frequency lightweight collection" from "low-frequency heavier rebalancing" is essential, and forward-ref Lessons 61/62's "pluggable, designed-for-scale" themes.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="46-tp-pp-ep-dp-parallelism.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">四种并行 TP/PP/EP/DP</span><span class="lang-en">TP/PP/EP/DP parallelism</span></div></a><a class="next" href="48-structured-outputs-and-jump-forward.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">结构化输出与跳跃前进</span><span class="lang-en">Structured outputs &amp; jump-forward</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

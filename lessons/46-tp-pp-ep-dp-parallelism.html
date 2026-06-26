@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>46 · 四种并行 TP/PP/EP/DP / TP/PP/EP/DP parallelism - SGLang 图解教程</title>
+<meta name="description" content="第十部分 · 性能创新专题｜四种并行 TP/PP/EP/DP - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="46 · 四种并行 TP/PP/EP/DP / TP/PP/EP/DP parallelism - SGLang 图解教程">
+<meta property="og:description" content="第十部分 · 性能创新专题｜四种并行 TP/PP/EP/DP - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="46 · 四种并行 TP/PP/EP/DP / TP/PP/EP/DP parallelism - SGLang 图解教程">
+<meta name="twitter:description" content="第十部分 · 性能创新专题｜四种并行 TP/PP/EP/DP - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></span>
+    <span class="pill">46 / 48</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:95%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></div>
+    <h1><span class="lang-zh">四种并行 TP/PP/EP/DP</span><span class="lang-en">TP/PP/EP/DP parallelism</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">一块 GPU 放不下、也算不动一个超大模型时，我们就要把"模型"或"请求"摊到许多张 GPU 上。摊开的方式只有四种主轴：<strong>TP（张量并行）</strong>、<strong>PP（流水线并行）</strong>、<strong>EP（专家并行）</strong>、<strong>DP（数据并行）</strong>。这一课把这四种并行讲清楚：各自切的是什么、每一步要通信什么、对网络链路有什么要求；最后揭示 SGLang 的一个关键统一——它们都只是同一个 <span class="mono">GroupCoordinator</span> 抽象在不同 rank 布局上的实例，并且可以彼此<strong>组合</strong>。理解了这四根主轴与它们的组合，你就能看懂任何一份 SGLang 部署命令里 <span class="mono">tp_size</span>、<span class="mono">pp_size</span>、<span class="mono">ep_size</span>、<span class="mono">dp_size</span> 这几个数字究竟在切什么、又各自付出了什么代价。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>把推理想象成一家要处理海量订单的大工厂。扩张产能有四种思路：</p>
+<p><strong>TP</strong> 像在<strong>同一条流水线内</strong>把"组装一台机器"这件事拆给并排的四个工人同时拧不同的螺丝——每个人只做一部分，最后必须把零件<strong>合并</strong>成完整成品（这一步就是 all-reduce）。合并很频繁，所以四个人要肩并肩坐（NVLink 这种高速近邻链路）。</p>
+<p><strong>PP</strong> 像把整条产线拆成<strong>前后衔接的几个车间</strong>：车间一做底盘，做完<strong>传给</strong>车间二装外壳，再传给车间三质检。只有车间交界处才搬运半成品，链路便宜也行；但开工时前几个车间在等料、收尾时后几个车间空着，这就是"流水线气泡"。</p>
+<p><strong>EP</strong> 像有很多<strong>专科师傅</strong>（专家），每张订单只需要其中两位师傅。系统先把每张订单<strong>派送</strong>到拥有对应师傅的车间（all-to-all），做完再<strong>送回</strong>（第二次 all-to-all）。师傅越多、每单要找的师傅越多，搬运量越大。</p>
+<p><strong>DP</strong> 像直接<strong>复制</strong>一整座工厂，再把订单平均分给每座工厂各自独立处理——几乎不用互相搬运，但每座工厂都得备齐全套设备（整份模型权重）。</p>
+<p>现实里这四招往往<strong>同时用上</strong>：先把一座超大工厂复制成好几座（DP），每座工厂内部把产线拆成前后衔接的车间（PP），每个车间里再让并排的工人分担同一道工序（TP），而众多专科师傅则按工种集中到各自的房间（EP）。于是<strong>同一名工人同时隶属好几种编队</strong>——他的"并排组""车间组""复制组"各管各的搬运。能这样自由叠用，正是本课最后要点出的"可组合"。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>四种并行回答的是两个不同的问题。<strong>TP / PP / EP</strong> 在切<strong>模型本身</strong>：TP 切一层之内的权重矩阵（第25、37课的列/行切分与词表切分），PP 切层与层之间的边界（第23课），EP 切 MoE 的专家集合（第34课）。<strong>DP</strong> 不切模型而是切<strong>数据（请求）</strong>：复制模型、分摊请求（第23课的 dp-controller）。一句话：前三种"分担一份模型的体积与算力"，DP"分担吞吐"。SGLang 还有一个变体叫 <strong>Attention-DP</strong>：对注意力做 DP 切分、对专家做 EP 切分，二者并存。真正优雅的是：这四种并行在代码里没有四套实现，而是同一个 <span class="mono">GroupCoordinator</span> 在不同的 rank 分组上跑不同的集合通信，于是它们天然可以叠乘组合，例如 TP=8 × PP=2 × DP=4。</p>
+<p>那么什么时候用哪一招？可以顺着"瓶颈是什么"来判断：模型大到<strong>一张卡装不下</strong>，先上 TP 把每一层切薄；单机的卡数还不够，再叠 PP 把层分到更多机器上。模型是<strong>专家众多的 MoE</strong>、总参数把显存撑爆，就上 EP 把专家摊开。模型本来就<strong>装得下</strong>、只是想要<strong>更高吞吐</strong>，那就上 DP 多复制几份、把请求分摊出去。绝大多数真实部署都不是单选题，而是按这套优先级把几招叠起来用：TP 吃满单机内的高速链路，PP 跨机扩展模型规模，EP 摊开专家，DP 复制换吞吐。</p>
+</div>
+
+<h2>TP 张量并行：切开"一层之内"的矩阵</h2>
+<p><strong>TP（tensor parallel）</strong>把每一层的<strong>权重矩阵</strong>沿某个维度切成若干片，分给同组的各个 rank。最典型的就是第25课讲的注意力 q/k/v 投影按列切、第37课讲的 MLP 上投影按列切、词表（vocab）按行切。每个 rank 只持有矩阵的一片，于是只算出<strong>部分结果</strong>；要得到完整的层输出，就必须把各 rank 的部分和<strong>合并</strong>——列切+行切的组合用一次 <span class="mono">all_reduce</span> 求和，词表并行的 logits 则用 <span class="mono">all_gather</span> 拼接。</p>
+<p>TP 的特点是：它把<strong>单层的算力和显存</strong>都摊薄了，一张卡装不下的大矩阵被切成几片分别存放、分别计算。代价是<strong>每一层</strong>都要通信一次（前向一次、反向再一次），通信极其频繁。因此 TP 组内的 GPU 必须用<strong>高速近邻链路</strong>（NVLink / NVSwitch），通常局限在<strong>单机之内</strong>；跨机做 TP 会被慢链路拖垮。</p>
+<div class="layers"><div class="layer">Rank0：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank1：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank2：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank3：每一层都只持有该层权重的 1/4 切片</div></div>
+<p>注意上图：TP 下<strong>每个 rank 都"纵向"贯穿了所有层</strong>，只是每层都只拿到一小条。这正是 TP 与 PP 的根本区别——TP 横向切一层的宽度，PP 纵向切层的深度。</p>
+<p>举个具体的数：一个 70B 模型的单层权重动辄上百 MB，配成 TP=8 时每张卡只存其中 1/8、也只算 1/8，但<strong>每过一层</strong>就要做一次覆盖这 8 张卡的 <span class="mono">all_reduce</span> 把部分和加起来。正因为通信如此密集，TP 的并行度通常<strong>不超过单机的卡数</strong>（例如 8）；再往上扩就该换成 PP 或 DP，否则频繁的跨机 all_reduce 会让通信时间盖过省下来的计算时间。一句话记住 TP 的取舍：它同时摊薄了"单层算力"和"单层显存"两样东西，代价是"每层都要通信、通信最贵、必须近邻高速链路"。</p>
+
+<h2>PP 流水线并行：把"层"切成前后接力的阶段</h2>
+<p><strong>PP（pipeline parallel）</strong>把模型的<strong>层</strong>按顺序分成几个连续的<strong>阶段（stage）</strong>，放在不同 GPU 上。第 1～k 层在 rank0，第 k+1～2k 层在 rank1，依此类推。前向时，激活值从一个阶段<strong>流向</strong>下一个阶段（向 <span class="mono">next_rank</span> 发送、从 <span class="mono">prev_rank</span> 接收，第23课）；反向时梯度沿相反方向回传。</p>
+<p>PP 只在<strong>阶段交界处</strong>通信，通信量远小于 TP，普通链路（甚至跨机）都能胜任。但它有个固有问题：若只送一个批次进去，前面的阶段算完就得干等后面阶段，利用率很低。解决办法是把一个大批次拆成许多<strong>微批次（micro-batch）</strong>像流水线一样连续灌入，让所有阶段同时有活干；即便如此，开头和结尾仍有阶段空转，这段浪费叫<strong>流水线气泡（bubble）</strong>。PP 摊薄的是<strong>层数带来的显存</strong>（每张卡只放一部分层），而不是单层的算力。</p>
+<p>气泡占比大致正比于<strong>阶段数 ÷ 微批次数</strong>：阶段越多、微批次越少，开头收尾的空转占比就越高；把微批次开多，就能把这段浪费摊薄到可以接受。PP 的最大好处是<strong>只在交界处搬一份激活</strong>，搬运量只与隐藏维度（以及 batch、序列长度）成正比、与层数无关，因此特别适合"模型层数太多、单机装不下、机器之间又只有较慢链路"的场景——先用 PP 把模型<strong>纵向</strong>铺到多台机器上，再在每台机器内部用 TP 做<strong>横向</strong>细切，两者刚好互补。</p>
+
+<h2>EP 专家并行：把 MoE 的"专家"摊到不同 rank</h2>
+<p><strong>EP（expert parallel）</strong>专为 MoE 而生（第34课）。MoE 层里有很多专家（FFN），但每个 token 的路由器只挑选其中 top-k 个去计算。EP 把不同的<strong>专家</strong>放在不同 rank 上：每一步，先用一次 <span class="mono">all_to_all</span> 把<strong>每个 token</strong> 送到"它选中的专家所在"的那个 rank，专家算完后再用第二次 <span class="mono">all_to_all</span> 把结果送回原来的 rank。</p>
+<p>为什么 EP 用 <span class="mono">all_to_all</span> 而不是 TP 那样的 <span class="mono">all_reduce</span>？因为每个 token 要去的目的地<strong>各不相同</strong>——token A 选了专家3、token B 选了专家7，这是一种"点对点重排"而非"全体求和"。<span class="mono">all_to_all</span> 正是为这种"各发各的、各收各的"而设计的集合通信：每个 rank 同时向所有其它 rank 发送一份不同的数据、也从所有 rank 各收一份，恰好对应"把 token 按所选专家分发到对应 rank"这件事。</p>
+<p>EP 摊薄的是<strong>专家的显存</strong>——成百上千个专家分散存放，单卡放不下的总参数被分摊。它的通信量随 <strong>token 数 × top-k</strong> 增长：批次越大、每个 token 选的专家越多，all-to-all 搬运的数据越多。SGLang 的 Attention-DP 常与 EP 搭配：注意力部分按 DP 复制分流、专家部分按 EP 分片，二者在同一部署中并存。这又是一个"不同 GroupCoordinator 各司其职"的实例。大规模 EP 以及专家负载均衡（EPLB）会在<strong>第47课</strong>展开。</p>
+<p>EP 与 TP 还有一个关键差别在于<strong>通信量是否随负载浮动</strong>：TP 每层 all_reduce 的大小是固定的（只取决于隐藏维度），而 EP 的 all_to_all 大小随<strong>实际 token 数 × top-k</strong> 变化，batch 越大、每个 token 选的专家越多，搬运的数据越多。更棘手的是<strong>专家负载常常不均</strong>——某些热门专家被大量 token 选中、某些专家几乎闲置，持有热门专家的那个 rank 就会成为整步的瓶颈。如何把专家在 rank 间重新摆放、让负载尽量均衡，正是第47课 EPLB 要解决的问题。</p>
+
+<h2>DP 数据并行 + 统一抽象 GroupCoordinator</h2>
+<p><strong>DP（data parallel）</strong>最简单：<strong>复制</strong>整份模型到每个副本，把<strong>请求</strong>分给不同副本各自独立处理（第23课的 dp-controller 负责分发）。每一步几乎<strong>零通信</strong>（仅训练时才需在反向后同步梯度，推理服务里副本间近乎独立），代价是每个副本都要装下<strong>整份模型</strong>，省不了显存只换吞吐。</p>
+<p>SGLang 的 <strong>Attention-DP</strong> 值得单独点一句：在大规模 MoE 部署里，注意力部分参数小、却最怕 KV 缓存被重复占用与冗余计算，于是按 DP 分流让每个副本各管一批请求的注意力；而专家部分参数巨大、必须摊开显存，于是按 EP 分片。两种切法在<strong>同一份模型</strong>里各管一段——注意力走 DP、FFN/专家走 EP，互不冲突。这本质上又是"不同的 GroupCoordinator 在不同 rank 布局上各司其职"，只不过这次把 DP 和 EP 拼在了一个模型的不同子模块上。</p>
+<table class="t"><tr><th>并行轴</th><th>切什么</th><th>每步通信什么</th><th>链路需求</th></tr>
+<tr><td><span class="mono">TP</span></td><td>每层的权重矩阵（一层之内）</td><td>每层一次 all-reduce / all-gather</td><td>很高，需 NVLink，通常单机内</td></tr>
+<tr><td><span class="mono">PP</span></td><td>模型的层（分成连续阶段）</td><td>仅阶段交界 send / recv 激活</td><td>低，普通链路即可，可跨机</td></tr>
+<tr><td><span class="mono">EP</span></td><td>MoE 的专家集合</td><td>两次 all-to-all（按 token×top-k）</td><td>中高，随 token 量增长</td></tr>
+<tr><td><span class="mono">DP</span></td><td>请求（模型整份复制）</td><td>每步近乎零（仅训练同步梯度）</td><td>很低</td></tr></table>
+<p>真正的关键统一在这里：SGLang 不为四种并行写四套通信代码，而是用<strong>同一个抽象</strong> <span class="mono">GroupCoordinator</span> 表达全部。一个 <span class="mono">GroupCoordinator</span> 就是"一个进程组"，带着 <span class="mono">rank</span>（本进程全局编号）、<span class="mono">ranks</span>（属于本组的全局 rank 列表）、<span class="mono">world_size</span>（本组大小）、<span class="mono">rank_in_group</span>（组内位置），并暴露 <span class="mono">all_reduce</span> / <span class="mono">all_gather</span> / <span class="mono">all_to_all_single</span> / <span class="mono">next_rank</span> / <span class="mono">prev_rank</span> 这些方法。</p>
+<div class="cols"><div class="col"><strong>切"权重"（TP / PP / EP）</strong><br/>把一份模型的矩阵、层、专家分散到多卡，每卡只持有一部分参数；省显存、省单卡算力，但要靠集合通信把结果拼回来。</div><div class="col"><strong>切"数据"（DP）</strong><br/>把整份模型复制到每个副本，按请求分流；每副本独立、几乎不通信，省不了显存只提吞吐。</div></div>
+<p>于是 <span class="mono">TP</span>、<span class="mono">PP</span>、<span class="mono">EP</span>、<span class="mono">DP</span> 只是<strong>同一个类的不同实例</strong>，分别建立在不同的 rank 布局上：TP 组把单机 8 卡编为一组、PP 组把跨机的对应 rank 串成阶段、EP 组覆盖所有专家 rank、DP 组把若干副本编为一组。它们因此天然<strong>可组合</strong>——一个部署完全可以是 TP=8 × PP=2 × DP=4，每张卡同时属于多个 GroupCoordinator，在不同的组里走不同的集合通信。</p>
+<p>把四招合起来看一个具体例子：假设手上有 64 张 GPU，配成 <strong>TP=8 × PP=2 × DP=4</strong>。每 8 张卡（一台机器内）组成一个 TP 组，靠 NVLink 做每层一次的高频 all_reduce；相邻两个 TP 组首尾相接组成 2 个 PP 阶段，跨机只在阶段交界 send/recv 激活——这样 16 张卡才拼出<strong>一份完整模型副本</strong>；再把这样的副本复制 4 份组成 DP，请求由第23课的 dp-controller 分发给这 4 份副本。于是<strong>同一张卡同时身处三个 GroupCoordinator</strong>：它的 TP 组、它的 PP 组、它的 DP 组，每个组各跑各的集合通信，互不干扰。8×2×4=64，恰好用满全部 GPU。</p>
+<p>挑选组合时的取舍始终绕着四件事：<strong>通信量</strong>（TP 最高、DP 最低）、<strong>链路要求</strong>（TP 要 NVLink，PP/DP 普通链路即可）、<strong>流水线气泡</strong>（只有 PP 有，靠微批次缓解）、<strong>显存</strong>（TP/PP/EP 都省显存，DP 不省只换吞吐）。一般经验法则就是：先用 TP 吃满单机内的高速链路，再用 PP 跨机扩展模型规模，MoE 用 EP 把专家摊开，最后用 DP 复制整套换吞吐——四个 GroupCoordinator 各司其职，又彼此叠乘成一套完整的部署拓扑。</p>
+<div class="flow"><div class="node">TP 部分层输出</div><div class="arrow">→</div><div class="node">all_reduce 求和</div><div class="arrow">→</div><div class="node">完整层输出</div></div>
+<div class="flow"><div class="node">EP token 批</div><div class="arrow">→</div><div class="node">all_to_all 路由到专家</div><div class="arrow">→</div><div class="node">汇总结果</div></div>
+<div class="flow"><div class="node">PP 阶段 i 激活</div><div class="arrow">→</div><div class="node">send / recv 给下一阶段</div><div class="arrow">→</div><div class="node">阶段 i+1 继续</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">一个统一抽象：TP/PP/EP/DP 都是它在不同 rank 布局上的实例</span></div><pre>class GroupCoordinator:
+    # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
+    rank: int             # this process's global rank
+    ranks: list           # the global ranks that belong to THIS group
+    world_size: int       # number of ranks in this group
+    rank_in_group: int    # position within the group
+
+    def all_reduce(self, input_):              # TP: sum each rank's partial layer output
+        ...
+    def all_gather(self, input_, dim=-1):      # gather shards (e.g. vocab-parallel logits)
+        ...
+    def all_to_all_single(self, output, input):  # EP: route tokens to their expert owners
+        ...
+    def next_rank(self):   # PP: the downstream pipeline stage (send activations here)
+        ...
+    def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>TP</strong> 切<strong>一层之内的权重矩阵</strong>（q/k/v、MLP 列、词表，第25/37课），每层用 <span class="mono">all_reduce</span>/<span class="mono">all_gather</span> 合并；通信最频繁，需 NVLink、通常单机内。</li>
+<li><strong>PP</strong> 切<strong>层</strong>成连续阶段（第23课），只在阶段交界 <span class="mono">send</span>/<span class="mono">recv</span> 激活；链路便宜，但有流水线气泡，靠微批次填满。</li>
+<li><strong>EP</strong> 切 MoE 的<strong>专家</strong>（第34课），每步两次 <span class="mono">all_to_all</span> 把 token 路由到专家再送回；通信随 token×top-k 增长，第47课接续大规模 EP + EPLB。</li>
+<li><strong>DP</strong> <strong>复制模型、切请求</strong>（第23课 dp-controller），每步近乎零通信但每副本要装整份模型；Attention-DP 是"注意力 DP + 专家 EP"的组合变体。</li>
+<li><strong>统一与组合</strong>：四者都是同一个 <span class="mono">GroupCoordinator</span>（带 <span class="mono">rank</span>/<span class="mono">ranks</span>/<span class="mono">world_size</span>/<span class="mono">rank_in_group</span>）的不同实例，可叠乘组合成 TP=8 × PP=2 × DP=4。</li>
+<li><strong>怎么选</strong>：装不下→先 TP（单机内）再 PP（跨机）；MoE 专家撑爆显存→EP；装得下只想要更高吞吐→DP。真实部署常按这套优先级把几招叠起来用。</li>
+<li><strong>取舍四要素</strong>：通信量、链路要求、流水线气泡、显存占用。TP 通信最贵但省单层算力与显存，DP 通信最省但每副本占整份显存，PP 链路便宜却有气泡，EP 通信随 token×top-k 浮动且要防负载不均。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 下面哪一项最准确地概括了四种并行各自“切”的对象？</div>
+  <ol class="opts">
+    <li><strong>TP 切一层之内的权重矩阵；PP 切层成连续阶段；EP 切 MoE 的专家集合；DP 复制模型、切请求</strong></li>
+    <li>四种都在切请求，只是粒度不同</li>
+    <li>它们都把模型量化成 FP8 后再分发</li>
+    <li>TP 切层、PP 切矩阵、EP 切请求、DP 切专家</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。记住两类问题：<strong>TP/PP/EP</strong> 切<strong>模型本身</strong>——TP 切一层内的权重矩阵（第25/37课 q/k/v、MLP 列、词表），PP 切层与层的边界成阶段（第23课），EP 切 MoE 的专家（第34课）；<strong>DP</strong> 不切模型而是<strong>复制模型、切请求</strong>（第23课 dp-controller）。前三种分担一份模型的体积与算力，DP 分担吞吐。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 关于“每一步通信什么”，下面哪句对应正确？</div>
+  <ol class="opts">
+    <li><strong>TP 每层一次 all-reduce/all-gather；PP 仅阶段交界 send/recv 激活；EP 每步两次 all-to-all 路由 token；DP 每步近乎零通信</strong></li>
+    <li>EP 只在阶段交界 send/recv，PP 每步两次 all-to-all</li>
+    <li>TP 近乎零通信，DP 每层都要 all-reduce</li>
+    <li>四种并行每步都做一次完全相同的 all-reduce</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<strong>TP</strong> 把单层切片，每层都要把部分和合并，故每层一次 <span class='mono'>all_reduce</span>（或词表并行的 <span class='mono'>all_gather</span>），通信最频繁、需 NVLink。<strong>PP</strong> 只在阶段交界 <span class='mono'>send</span>/<span class='mono'>recv</span> 激活，链路便宜。<strong>EP</strong> 每步两次 <span class='mono'>all_to_all</span>（送去专家、再送回），随 token×top-k 增长。<strong>DP</strong> 副本独立，推理时每步近乎零通信。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. SGLang 如何用代码统一表达 TP/PP/EP/DP，使它们可以组合（如 TP=8 × PP=2 × DP=4）？</div>
+  <ol class="opts">
+    <li><strong>四者都是同一个 GroupCoordinator（带 rank/ranks/world_size/rank_in_group，暴露 all_reduce/all_gather/all_to_all_single/next_rank/prev_rank）的不同实例，建立在不同 rank 布局上</strong></li>
+    <li>把四种并行编译成不同的 CUDA kernel 选择</li>
+    <li>为每种并行各写一套独立的进程组类，互不复用</li>
+    <li>靠一个全局变量记录当前并行模式，一次只能开一种</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。关键统一在 <span class='mono'>parallel_state.py</span> 的 <span class='mono'>GroupCoordinator</span>：它就是“一个进程组”，带 <span class='mono'>rank</span>/<span class='mono'>ranks</span>/<span class='mono'>world_size</span>/<span class='mono'>rank_in_group</span>，暴露 <span class='mono'>all_reduce</span>/<span class='mono'>all_gather</span>/<span class='mono'>all_to_all_single</span>/<span class='mono'>next_rank</span>/<span class='mono'>prev_rank</span>。TP/PP/EP/DP 只是它在不同 rank 布局上的实例，每张卡可同时属于多个组，于是天然可叠乘组合成 TP=8 × PP=2 × DP=4。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话区分 TP 与 PP：为什么说 TP 是“横向切一层的宽度”（把一层的权重矩阵分片，每层都要 all-reduce 合并、需 NVLink、通常单机内，联系第25/37课），而 PP 是“纵向切层的深度”（把层分成连续阶段、只在交界 send/recv 激活、链路便宜但有流水线气泡、靠微批次填满，联系第23课）；并说明二者为什么可以同时使用。</li>
+    <li>描述 EP 在一个 MoE 步中的完整数据流（第34课）：路由器选 top-k 专家后，第一次 all-to-all 把每个 token 送到拥有其专家的 rank、专家计算、第二次 all-to-all 送回，并说明通信量为何随 token×top-k 增长；再解释 SGLang 的 Attention-DP 如何把“注意力 DP + 专家 EP”组合起来，以及为什么所有这些最终都落在同一个 GroupCoordinator 抽象上；前瞻第47课大规模 EP + EPLB。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">When a model is too big to fit—or too heavy to compute—on a single GPU, we spread the "model" or the "requests" across many GPUs. There are exactly four axes to spread along: <strong>TP (tensor parallel)</strong>, <strong>PP (pipeline parallel)</strong>, <strong>EP (expert parallel)</strong>, and <strong>DP (data parallel)</strong>. This lesson makes all four clear: what each one splits, what it must communicate every step, and what link it demands. Finally it reveals SGLang's key unification—all four are just instances of the same <span class="mono">GroupCoordinator</span> abstraction over different rank layouts, and they <strong>compose</strong>. Once you grasp these four axes and how they combine, you can read any SGLang deployment command and tell exactly what its <span class="mono">tp_size</span>, <span class="mono">pp_size</span>, <span class="mono">ep_size</span>, and <span class="mono">dp_size</span> numbers are splitting and what each one costs.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture inference as a factory handling a flood of orders. There are four ways to scale capacity:</p>
+<p><strong>TP</strong> is like having four workers <strong>on one assembly line</strong> each tighten different screws on "building one machine" at the same time—each does a slice, and the parts must be <strong>merged</strong> into a finished product (that merge is all-reduce). Merging is frequent, so the four must sit shoulder to shoulder (a fast neighbor link like NVLink).</p>
+<p><strong>PP</strong> is like splitting the whole line into <strong>consecutive workshops</strong>: workshop one builds the chassis, then <strong>hands off</strong> to workshop two for the shell, then to workshop three for QC. Only half-products cross workshop boundaries, so a cheap link is fine; but at startup the later shops wait, and at the end the earlier shops idle—that idle waste is the "pipeline bubble".</p>
+<p><strong>EP</strong> is like having many <strong>specialist masters</strong> (experts); each order needs only two of them. The system first <strong>dispatches</strong> each order to the workshop holding its chosen masters (all-to-all), and after they finish <strong>sends it back</strong> (a second all-to-all). The more masters, and the more each order needs, the more shuttling.</p>
+<p><strong>DP</strong> is like simply <strong>replicating</strong> the whole factory and splitting orders evenly so each factory works independently—almost no shuttling, but every factory must own the full set of equipment (the whole model's weights).</p>
+<p>In practice all four are usually used <strong>at once</strong>: replicate one huge factory into several (DP), inside each factory split the line into consecutive workshops (PP), inside each workshop let neighboring workers share one operation (TP), and gather the many specialist masters into rooms by trade (EP). A single worker thus <strong>belongs to several teams at the same time</strong>—his "neighbor team", "workshop team", and "replica team" each handle their own shuttling. This freedom to stack them is exactly the "composability" the lesson ends on.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>The four parallelisms answer two different questions. <strong>TP / PP / EP</strong> split the <strong>model itself</strong>: TP splits the weight matrices within a layer (the column/row and vocab splits of lessons 25 & 37), PP splits the boundaries between layers (lesson 23), EP splits the set of MoE experts (lesson 34). <strong>DP</strong> doesn't split the model but the <strong>data (requests)</strong>: replicate the model, share out requests (the dp-controller of lesson 23). In a sentence: the first three "share one model's size and compute", while DP "shares throughput". SGLang also has a twist called <strong>Attention-DP</strong>: DP-shard the attention and EP-shard the experts, both at once. The elegant part: these four are not four separate implementations—they are the same <span class="mono">GroupCoordinator</span> running different collectives over different rank groups, so they naturally compose, e.g. TP=8 × PP=2 × DP=4.</p>
+<p>So when do you reach for which? Follow the bottleneck: if the model is <strong>too big to fit on one card</strong>, first apply TP to thin each layer; if a single node doesn't have enough cards, add PP to spread layers across more machines. If it is a <strong>many-expert MoE</strong> whose total parameters blow past memory, apply EP to scatter the experts. If the model already <strong>fits</strong> and you just want <strong>more throughput</strong>, apply DP to replicate it and share out requests. Almost every real deployment is not single-choice but stacks several by this priority: TP saturates the fast intra-node link, PP scales model size across nodes, EP spreads experts, DP replicates for throughput.</p>
+</div>
+
+<h2>TP tensor parallel: split the matrices "within a layer"</h2>
+<p><strong>TP (tensor parallel)</strong> shards each layer's <strong>weight matrices</strong> along some dimension across the ranks of a group. The classic cases: the q/k/v projections column-split (lesson 25), the MLP up-projection column-split (lesson 37), and the vocab row-split. Each rank holds only one slice of the matrix, so it computes only a <strong>partial result</strong>; to get the full layer output the partial sums must be <strong>merged</strong>—a column+row combo uses one <span class="mono">all_reduce</span> sum, while vocab-parallel logits use <span class="mono">all_gather</span> to concatenate.</p>
+<p>TP's signature is that it thins out both the <strong>compute and memory of a single layer</strong>: a giant matrix that won't fit on one card is split into slices, stored and computed separately. The price is that <strong>every layer</strong> communicates (once forward, once backward)—extremely frequent. So GPUs in a TP group must use a <strong>fast neighbor link</strong> (NVLink / NVSwitch) and usually stay <strong>within one node</strong>; doing TP across machines gets choked by slow links.</p>
+<div class="layers"><div class="layer">Rank0: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank1: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank2: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank3: holds a 1/4 slice of every layer's weights</div></div>
+<p>Note the diagram: under TP <strong>every rank runs "vertically" through all layers</strong>, just holding a thin strip of each. This is the fundamental difference from PP—TP splits the width of a layer, PP splits the depth of the stack.</p>
+<p>Concrete numbers help: a 70B model's per-layer weights are easily hundreds of MB; at TP=8 each card stores only 1/8 and computes only 1/8, but <strong>every single layer</strong> must run an <span class="mono">all_reduce</span> across those 8 cards to sum the partial results. Because the communication is so dense, TP's degree usually <strong>does not exceed the number of cards in one node</strong> (e.g. 8); to scale further you switch to PP or DP, otherwise frequent cross-node all_reduce would outweigh the compute it saves. Remember TP's trade-off in one line: it thins both "per-layer compute" and "per-layer memory", at the cost of "communicating every layer—the most expensive—over a fast neighbor link".</p>
+
+<h2>PP pipeline parallel: split "layers" into a relay of stages</h2>
+<p><strong>PP (pipeline parallel)</strong> splits the model's <strong>layers</strong> in order into consecutive <strong>stages</strong>, placed on different GPUs. Layers 1…k on rank0, k+1…2k on rank1, and so on. In the forward pass activations <strong>flow</strong> from one stage to the next (send to <span class="mono">next_rank</span>, receive from <span class="mono">prev_rank</span>, lesson 23); in the backward pass gradients flow the opposite way.</p>
+<p>PP communicates only at <strong>stage boundaries</strong>, far less than TP, so an ordinary link (even cross-node) suffices. But it has an inherent problem: if you feed only one batch, the earlier stages finish and idle while waiting for the later ones—low utilization. The fix is to split a large batch into many <strong>micro-batches</strong> streamed in continuously like a pipeline, keeping all stages busy; even so, the start and end leave stages idle—this waste is the <strong>pipeline bubble</strong>. PP thins out the <strong>memory from layer count</strong> (each card holds only some layers), not the compute of a single layer.</p>
+<p>The bubble's share is roughly proportional to <strong>number of stages ÷ number of micro-batches</strong>: more stages or fewer micro-batches mean a larger idle fraction at the start and end; cranking up the micro-batch count thins that waste to an acceptable level. PP's biggest advantage is that it <strong>moves one copy of activations only at boundaries</strong>—the volume scales with the hidden dimension (plus batch and sequence length), not with layer count—so it fits the case of "too many layers to fit in one node, and only slow links between machines": use PP to lay the model out <strong>vertically</strong> across machines, then TP for the <strong>horizontal</strong> fine split inside each machine. The two are exactly complementary.</p>
+
+<h2>EP expert parallel: spread MoE "experts" across ranks</h2>
+<p><strong>EP (expert parallel)</strong> is made for MoE (lesson 34). An MoE layer has many experts (FFNs), but each token's router picks only top-k of them to compute. EP places different <strong>experts</strong> on different ranks: each step, a first <span class="mono">all_to_all</span> sends <strong>every token</strong> to the rank that owns "the expert it chose", and after the experts compute, a second <span class="mono">all_to_all</span> brings the results back to the original rank.</p>
+<p>Why does EP use <span class="mono">all_to_all</span> rather than TP's <span class="mono">all_reduce</span>? Because each token's destination is <strong>different</strong>—token A picked expert 3, token B picked expert 7—it is a "point-to-point reshuffle", not an "everyone-sum". <span class="mono">all_to_all</span> is the collective built precisely for "each sends its own, each receives its own": every rank simultaneously sends a different chunk to all other ranks and receives a chunk from each, which is exactly "dispatch each token to the rank owning its chosen expert".</p>
+<p>EP thins out the <strong>experts' memory</strong>—hundreds or thousands of experts stored across ranks, sharing total parameters that won't fit on one card. Its communication grows with <strong>tokens × top-k</strong>: the larger the batch and the more experts each token picks, the more the all-to-all shuttles. SGLang's Attention-DP often pairs with EP: the attention part DP-replicated, the expert part EP-sharded, both in one deployment—yet another instance of "different GroupCoordinators each doing their job". Large-scale EP and expert load balancing (EPLB) are covered in <strong>lesson 47</strong>.</p>
+<p>Another key difference between EP and TP is <strong>whether the communication volume floats with load</strong>: TP's per-layer all_reduce has a fixed size (it depends only on the hidden dimension), whereas EP's all_to_all size varies with the <strong>actual tokens × top-k</strong>—the larger the batch and the more experts each token picks, the more data moves. Trickier still, <strong>expert load is often uneven</strong>—some popular experts are chosen by many tokens while others sit nearly idle, so the rank holding a hot expert becomes the bottleneck for the whole step. Reshuffling experts across ranks to balance load is exactly what lesson 47's EPLB tackles.</p>
+
+<h2>DP data parallel + the unified GroupCoordinator</h2>
+<p><strong>DP (data parallel)</strong> is the simplest: <strong>replicate</strong> the whole model to each replica and split the <strong>requests</strong> across replicas to be handled independently (the dp-controller of lesson 23 dispatches them). Each step is nearly <strong>zero communication</strong> (only training needs a gradient sync after backward; in serving the replicas are nearly independent), at the price that every replica must hold the <strong>whole model</strong>—it buys throughput, not memory savings.</p>
+<p>SGLang's <strong>Attention-DP</strong> deserves its own note: in large MoE deployments the attention part has few parameters but most fears redundant KV-cache use and duplicated compute, so it is DP-sharded—each replica handles the attention of its own batch of requests; the expert part is huge and must spread its memory, so it is EP-sharded. The two splits each govern a portion of <strong>one model</strong>—attention goes DP, FFN/experts go EP—without conflict. This is again "different GroupCoordinators each doing their job over different rank layouts", only this time DP and EP are combined on different submodules of one model.</p>
+<table class="t"><tr><th>Axis</th><th>Splits what</th><th>Communicates per step</th><th>Link need</th></tr>
+<tr><td><span class="mono">TP</span></td><td>Each layer's weight matrices (within a layer)</td><td>One all-reduce / all-gather per layer</td><td>Very high, NVLink, usually single node</td></tr>
+<tr><td><span class="mono">PP</span></td><td>The model's layers (consecutive stages)</td><td>Only send / recv activations at boundaries</td><td>Low, ordinary link, can cross nodes</td></tr>
+<tr><td><span class="mono">EP</span></td><td>The set of MoE experts</td><td>Two all-to-all (by token×top-k)</td><td>Mid-high, grows with token count</td></tr>
+<tr><td><span class="mono">DP</span></td><td>Requests (full model replicated)</td><td>Near zero per step (only training grad sync)</td><td>Very low</td></tr></table>
+<p>Here is the real unification: SGLang does not write four separate communication codepaths—it expresses all four with <strong>one abstraction</strong>, <span class="mono">GroupCoordinator</span>. A <span class="mono">GroupCoordinator</span> is "one process group" carrying <span class="mono">rank</span> (this process's global id), <span class="mono">ranks</span> (the global ranks belonging to this group), <span class="mono">world_size</span> (the group's size), <span class="mono">rank_in_group</span> (position within the group), and exposing <span class="mono">all_reduce</span> / <span class="mono">all_gather</span> / <span class="mono">all_to_all_single</span> / <span class="mono">next_rank</span> / <span class="mono">prev_rank</span>.</p>
+<div class="cols"><div class="col"><strong>Split the "weights" (TP / PP / EP)</strong><br/>Scatter one model's matrices, layers, or experts across cards, each holding only part of the parameters; saves memory and per-card compute, but collectives must stitch results back.</div><div class="col"><strong>Split the "data" (DP)</strong><br/>Replicate the whole model to each replica and split by request; each replica independent with almost no communication—buys throughput, not memory.</div></div>
+<p>So <span class="mono">TP</span>, <span class="mono">PP</span>, <span class="mono">EP</span>, <span class="mono">DP</span> are just <strong>different instances of the same class</strong>, each built over a different rank layout: a TP group bundles 8 cards in a node, a PP group strings corresponding ranks across nodes into stages, an EP group spans all expert ranks, a DP group bundles several replicas. They are therefore naturally <strong>composable</strong>—a deployment can be TP=8 × PP=2 × DP=4, where each card belongs to several GroupCoordinators at once, running different collectives in different groups.</p>
+<p>Put all four together in a concrete example: say you have 64 GPUs configured as <strong>TP=8 × PP=2 × DP=4</strong>. Every 8 cards (within one machine) form a TP group doing the per-layer all_reduce over NVLink; two adjacent TP groups chained head-to-tail form 2 PP stages, sending/receiving activations across machines only at the boundary—so 16 cards together make <strong>one full model replica</strong>; then replicate that 4 times to form DP, with the lesson-23 dp-controller dispatching requests to the 4 replicas. Thus <strong>one card sits inside three GroupCoordinators at once</strong>: its TP group, its PP group, and its DP group, each running its own collectives without interfering. 8×2×4=64, exactly filling all the GPUs.</p>
+<p>Choosing a combination always revolves around four things: <strong>communication volume</strong> (TP highest, DP lowest), <strong>link requirement</strong> (TP needs NVLink, PP/DP an ordinary link), <strong>pipeline bubble</strong> (only PP has it, eased by micro-batches), and <strong>memory</strong> (TP/PP/EP all save memory, DP does not—it only buys throughput). The rule of thumb: first use TP to saturate the fast intra-node link, then PP to scale model size across nodes, EP to spread MoE experts, and finally DP to replicate the whole thing for throughput—four GroupCoordinators each doing their job, stacking into one complete deployment topology.</p>
+<div class="flow"><div class="node">TP partial layer output</div><div class="arrow">→</div><div class="node">all_reduce sum</div><div class="arrow">→</div><div class="node">full layer output</div></div>
+<div class="flow"><div class="node">EP token batch</div><div class="arrow">→</div><div class="node">all_to_all route to experts</div><div class="arrow">→</div><div class="node">gathered result</div></div>
+<div class="flow"><div class="node">PP stage i activations</div><div class="arrow">→</div><div class="node">send / recv to next stage</div><div class="arrow">→</div><div class="node">stage i+1 continues</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">one unified abstraction: TP/PP/EP/DP are all instances over different rank layouts</span></div><pre>class GroupCoordinator:
+    # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
+    rank: int             # this process's global rank
+    ranks: list           # the global ranks that belong to THIS group
+    world_size: int       # number of ranks in this group
+    rank_in_group: int    # position within the group
+
+    def all_reduce(self, input_):              # TP: sum each rank's partial layer output
+        ...
+    def all_gather(self, input_, dim=-1):      # gather shards (e.g. vocab-parallel logits)
+        ...
+    def all_to_all_single(self, output, input):  # EP: route tokens to their expert owners
+        ...
+    def next_rank(self):   # PP: the downstream pipeline stage (send activations here)
+        ...
+    def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>TP</strong> splits the <strong>weight matrices within a layer</strong> (q/k/v, MLP columns, vocab; lessons 25/37), merging each layer with <span class="mono">all_reduce</span>/<span class="mono">all_gather</span>; the most frequent communication, needs NVLink, usually single node.</li>
+<li><strong>PP</strong> splits <strong>layers</strong> into consecutive stages (lesson 23), only <span class="mono">send</span>/<span class="mono">recv</span> activations at boundaries; cheap link, but has pipeline bubbles filled by micro-batches.</li>
+<li><strong>EP</strong> splits MoE <strong>experts</strong> (lesson 34), two <span class="mono">all_to_all</span> per step to route tokens to experts and back; communication grows with token×top-k, continued by large-scale EP + EPLB in lesson 47.</li>
+<li><strong>DP</strong> <strong>replicates the model and splits requests</strong> (dp-controller, lesson 23), near-zero per-step communication but every replica holds the whole model; Attention-DP is the "attention DP + expert EP" combined twist.</li>
+<li><strong>Unification & composition</strong>: all four are different instances of the same <span class="mono">GroupCoordinator</span> (carrying <span class="mono">rank</span>/<span class="mono">ranks</span>/<span class="mono">world_size</span>/<span class="mono">rank_in_group</span>), composable into TP=8 × PP=2 × DP=4.</li>
+<li><strong>How to choose</strong>: won't fit → TP first (intra-node) then PP (cross-node); MoE experts blow past memory → EP; fits but you just want more throughput → DP. Real deployments stack several by this priority.</li>
+<li><strong>Four trade-off factors</strong>: communication volume, link requirement, pipeline bubble, memory footprint. TP communicates the most but saves per-layer compute and memory; DP communicates the least but each replica holds the whole model; PP has a cheap link but a bubble; EP's communication floats with token×top-k and must guard against load imbalance.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which option most accurately summarizes what each of the four parallelisms splits?</div>
+  <ol class="opts">
+    <li><strong>TP splits the weight matrices within a layer; PP splits layers into consecutive stages; EP splits the MoE expert set; DP replicates the model and splits requests</strong></li>
+    <li>All four split requests, just at different granularities</li>
+    <li>They all quantize the model to FP8 before distributing it</li>
+    <li>TP splits layers, PP splits matrices, EP splits requests, DP splits experts</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two kinds of question: <strong>TP/PP/EP</strong> split the <strong>model itself</strong>—TP the weight matrices within a layer (Lessons 25/37 q/k/v, MLP columns, vocab), PP the layer boundaries into stages (Lesson 23), EP the MoE experts (Lesson 34); <strong>DP</strong> doesn't split the model but <strong>replicates it and splits requests</strong> (Lesson 23 dp-controller). The first three share one model's size and compute; DP shares throughput.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. About "what each communicates per step", which mapping is correct?</div>
+  <ol class="opts">
+    <li><strong>TP does an all-reduce/all-gather per layer; PP only send/recv activations at boundaries; EP does two all-to-all per step to route tokens; DP communicates near-zero per step</strong></li>
+    <li>EP only send/recv at boundaries while PP does two all-to-all per step</li>
+    <li>TP communicates near-zero while DP all-reduces every layer</li>
+    <li>All four do an identical all-reduce every step</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <strong>TP</strong> shards a single layer and must merge partial sums, so one <span class='mono'>all_reduce</span> per layer (or <span class='mono'>all_gather</span> for vocab parallel)—most frequent, needs NVLink. <strong>PP</strong> only <span class='mono'>send</span>/<span class='mono'>recv</span> activations at boundaries—cheap link. <strong>EP</strong> does two <span class='mono'>all_to_all</span> per step (to experts and back), growing with token×top-k. <strong>DP</strong> replicas are independent, near-zero communication per step at inference.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does SGLang express TP/PP/EP/DP in code so they compose (e.g. TP=8 × PP=2 × DP=4)?</div>
+  <ol class="opts">
+    <li><strong>All four are different instances of the same GroupCoordinator (carrying rank/ranks/world_size/rank_in_group, exposing all_reduce/all_gather/all_to_all_single/next_rank/prev_rank) over different rank layouts</strong></li>
+    <li>The four are compiled into different CUDA kernel choices</li>
+    <li>A separate, non-reusable process-group class is written for each parallelism</li>
+    <li>A global variable records the current mode and only one parallelism can run at a time</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The unification lives in <span class='mono'>parallel_state.py</span>'s <span class='mono'>GroupCoordinator</span>: it is "one process group" carrying <span class='mono'>rank</span>/<span class='mono'>ranks</span>/<span class='mono'>world_size</span>/<span class='mono'>rank_in_group</span> and exposing <span class='mono'>all_reduce</span>/<span class='mono'>all_gather</span>/<span class='mono'>all_to_all_single</span>/<span class='mono'>next_rank</span>/<span class='mono'>prev_rank</span>. TP/PP/EP/DP are just its instances over different rank layouts; each card can belong to several groups at once, so they compose into TP=8 × PP=2 × DP=4.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, distinguish TP from PP: why TP "splits the width of a layer" (sharding a layer's weight matrices, all-reducing every layer, needing NVLink, usually single node; link Lessons 25/37) while PP "splits the depth of the stack" (layers into consecutive stages, send/recv activations only at boundaries, cheap link but pipeline bubbles filled by micro-batches; link Lesson 23); and explain why the two can be used together.</li>
+    <li>Describe EP's full dataflow in one MoE step (Lesson 34): after the router picks top-k experts, a first all-to-all sends each token to the rank owning its expert, experts compute, a second all-to-all sends results back; explain why communication grows with token×top-k. Then explain how SGLang's Attention-DP combines "attention DP + expert EP", and why all of this ultimately rests on the same GroupCoordinator abstraction; forward-ref Lesson 47's large-scale EP + EPLB.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="45-pd-disaggregation.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">PD 分离</span><span class="lang-en">Prefill–decode disaggregation</span></div></a><a class="next" href="47-large-scale-ep-and-eplb.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">大规模 EP 与 EPLB</span><span class="lang-en">Large-scale EP &amp; EPLB</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

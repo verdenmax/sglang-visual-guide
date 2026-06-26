@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>48 · 结构化输出与跳跃前进 / Structured outputs &amp; jump-forward - SGLang 图解教程</title>
+<meta name="description" content="第十部分 · 性能创新专题｜结构化输出与跳跃前进 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="48 · 结构化输出与跳跃前进 / Structured outputs &amp; jump-forward - SGLang 图解教程">
+<meta property="og:description" content="第十部分 · 性能创新专题｜结构化输出与跳跃前进 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="48 · 结构化输出与跳跃前进 / Structured outputs &amp; jump-forward - SGLang 图解教程">
+<meta name="twitter:description" content="第十部分 · 性能创新专题｜结构化输出与跳跃前进 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></span>
+    <span class="pill">48 / 48</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></div>
+    <h1><span class="lang-zh">结构化输出与跳跃前进</span><span class="lang-en">Structured outputs &amp; jump-forward</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">很多真实应用并不满足于模型"大致说对"，而是要求输出<strong>严格合法</strong>：必须是能被解析的 JSON、必须匹配某个正则、必须符合一套语法（grammar）。SGLang 用<strong>受限解码（constrained decoding）</strong>从根上保证这件事——它把约束编译成一台有限状态机（FSM），在每一步采样<strong>之前</strong>就把不合法的 token 从 logits（<span class="inline">第37课</span>）上抹成 <span class="mono">−∞</span>，于是不管采样器（<span class="inline">第28课</span>）怎么掷骰子，输出永远是良构的。本课把这条链路讲透，并介绍它最漂亮的优化：<strong>跳跃前进（jump-forward）</strong>。这也是第十部分的收官一课。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div><p>想象你在机场填一张报关单。表格上每个空格都印好了边框与提示：姓名栏只能写字母，日期栏只能写数字，国籍栏只能从下拉列表里挑一项。哪怕你手再抖、笔再随意，也不可能把出生日期写进姓名栏——因为表格的"模具"在你落笔<strong>之前</strong>就限定了此处合法的选项。受限解码就是给模型套上这样一张"会发光的模具"：每生成一个 token 之前，它先算出"此刻哪些 token 是合法的"，把其余全部划掉变暗，模型只能在亮着的格子里挑。而跳跃前进则像表格里那些"系统已自动填好"的固定字段——既然某一段只有唯一可能的答案，何必再让你一笔一画地照抄一遍？直接替你填好，光标往后一跳即可。</p></div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div><p>把这件事放回整条推理流水线来看：模型前向算出 logits（<span class="inline">第37课</span>），采样器据此挑 token（<span class="inline">第28课</span>）。受限解码不另起炉灶，而是<strong>恰好嵌在两者之间</strong>——在 logits 已出、采样未发生的那一瞬，往 logits 上盖一层"词表掩码（vocab mask）"，只放行能让输出继续合法的 token。正因为它改的是 logits 而不是改采样算法，所以它和贪心、温度、top-p、束搜索乃至投机解码（<span class="inline">第43课</span>）都能无缝叠加。掌握这一课，你就理解了 SGLang 如何在"自由生成"与"严格结构"之间取得既正确又高效的平衡。</p></div>
+
+<h2>为什么需要受限解码</h2>
+<p>大语言模型本质是一台概率机器：它对下一个 token 给出一整张概率分布，再由采样器抽取。这套机制擅长流畅表达，却<strong>天生不保证结构</strong>。如果你的下游是一个函数调用、一段需要 <span class="mono">json.loads</span> 的配置、或一个要喂进数据库的字段，模型偶尔漏个引号、多个逗号、把数字写成中文，整条管线就会崩。传统做法是"生成后校验、失败就重试"，但重试既慢又烧钱，而且并不能<strong>保证</strong>最终一定合法。设想一个三层嵌套的 JSON，模型在最后一个字段漏了个引号，整次生成全部作废、从头再来；若运气不好连续几次都在不同位置出错，延迟与成本会成倍膨胀，对在线服务尤其致命。</p>
+<p>受限解码换了一个思路：与其事后补救，不如<strong>从生成的每一步就杜绝非法</strong>。它要求用户先给出一份"形状说明"——可以是 JSON-Schema、一段正则表达式、或一份 EBNF 文法。SGLang 通过可插拔的语法后端（xgrammar / outlines / llguidance）把这份说明<strong>编译</strong>成一台有限状态机：FSM 的每个状态都精确知道"在当前位置，接下来哪些 token 是被允许的"。于是在每个解码步，SGLang 先问 FSM 要一张"允许集合"，据此构造词表掩码，把不在允许集合里的所有 token 的 logit 直接设为 <span class="mono">−∞</span>。被设成负无穷的 token 经过 softmax 后概率为零，采样器无论用什么策略都不可能选中它们。换言之，<strong>合法性不再是采样器的运气，而是掩码的铁律</strong>。</p>
+<p>这里有必要把"职责边界"讲清楚。语法后端并不决定<strong>该选哪一个</strong>合法 token——那仍然是采样器的活，由温度、top-p 等参数掌控；语法后端只决定<strong>哪些 token 有资格被纳入候选</strong>。正是这种关注点分离，让受限解码能够如此干净地与其它机制组合：它本质上是对候选集合的一道纯粹的"前置过滤"，丝毫不触碰挑选这一创造性动作。于是模型在文法允许自由的地方依旧自由表达，只在文法要求严格的地方被圈起来。也正因如此，同一个采样器、同一套温度与 top-p 配置，套上不同 schema 就能产出不同形状却同样合法的结果，无需为每种格式各写一套生成逻辑。</p>
+
+<div class="flow"><div class="node">logits（第37课）</div><div class="arrow">→</div><div class="node">词表掩码：FSM 只放行合法 token，其余设 −∞</div><div class="arrow">→</div><div class="node">采样器（第28课）只能采到合法 token</div><div class="arrow">→</div><div class="node">accept_token：FSM 前进一步</div></div>
+
+<h2>每请求一台 FSM：BaseGrammarObject</h2>
+<p>结构约束是<strong>逐请求</strong>的：不同请求可能带着不同的 schema，而且每个请求的解码进度各不相同。因此 SGLang 为每个请求维护一个属于它自己的语法对象，抽象基类就是 <span class="mono">BaseGrammarObject</span>。可以把它想成"这一条请求当前走到了 FSM 的哪个状态"的随身记录本，每生成一个 token 就翻一页。它对外暴露的接口非常精简，却覆盖了受限解码的全部需求。之所以采用"每请求一个对象"的设计，是因为受限解码的状态<strong>无法在请求之间共享</strong>：哪怕两条请求用的是同一份 schema，它们也可能停在 FSM 的不同状态上，需要各自独立的进度、各自独立的回退历史。把状态封装进对象，调度器就能在一个批次里同时驱动几十上百条处于不同进度的请求，互不干扰。</p>
+<p>第一组是<strong>推进</strong>：当采样器最终选定一个 token，调度器调用 <span class="mono">accept_token(token)</span>，让 FSM 根据这个 token 转移到下一个状态——下一步的"允许集合"也随之更新。第二组是<strong>掩码构造</strong>：<span class="mono">allocate_vocab_mask(...)</span> 先按词表大小、批大小、设备分配一块掩码缓冲区，<span class="mono">fill_vocab_mask(vocab_mask, idx)</span> 再把"此刻哪些 token 合法"标记进去（idx 指明这是批里的第几条请求）。这块掩码随后被叠加到 logits 上。第三组是<strong>回退</strong>：<span class="mono">rollback(k)</span> 让 FSM 倒退 k 步，这在两种场景下至关重要——一是需要回溯（backtracking）的语法，二是投机解码（<span class="inline">第43课</span>）里草稿模型一次提出多个候选 token，但其中部分被验证拒绝，那么 FSM 必须把"已经按这些被拒 token 前进过"的状态精确退回去。最后是<strong>终止判断</strong>：<span class="mono">is_terminated()</span> 检查 FSM 是否已抵达接受状态（accept state），即结构是否已经完整闭合，可以收尾。这四组接口看似简单，却恰好对应了一台 FSM 在解码过程中会经历的全部生命周期事件：前进、查询当前可行集、必要时倒带、以及判断是否抵达终点。掌握了它们，你就掌握了 SGLang 受限解码对外的全部契约。</p>
+
+<div class="cellgroup"><div class="cell">S0 <span class="mono">{</span></div><div class="cell sc">S1 <span class="mono">"name"</span> 强制</div><div class="cell sc">S2 <span class="mono">:</span> 强制</div><div class="cell">S3 值：自由采样</div><div class="cell"><span class="mono">}</span> 接受</div></div>
+
+<table class="t"><tr><th>BaseGrammarObject 方法</th><th>角色</th></tr><tr><td><span class="mono">accept_token(token)</span></td><td>用采样到的 token 推进 FSM 到下一状态</td></tr><tr><td><span class="mono">allocate_vocab_mask(...)</span></td><td>按词表/批/设备分配一块掩码缓冲区</td></tr><tr><td><span class="mono">fill_vocab_mask(mask, idx)</span></td><td>标记当前哪些 token 能让输出保持合法</td></tr><tr><td><span class="mono">rollback(k)</span></td><td>回退 k 步（回溯 / 投机解码被拒）</td></tr><tr><td><span class="mono">is_terminated()</span></td><td>FSM 是否已到达接受状态</td></tr></table>
+
+<h2>跳跃前进：跳过被语法"钉死"的 token</h2>
+<p>到这里，受限解码已经能保证<strong>正确</strong>，但还不够<strong>快</strong>。观察一个常见现象：很多时候 FSM 在某个状态下的"允许集合"里<strong>只有一个</strong> token，而且下一个状态又只有一个，再下一个还是只有一个……换句话说，文法在这一段是<strong>完全确定</strong>的，没有任何自由度。最典型的就是 JSON-Schema 里的固定键名：一旦写下 <span class="mono">{</span>，schema 强制接下来必须是 <span class="mono">"name":</span> 这串字符，模型在这里根本没有选择权。可是按部就班的做法，仍然要为这串被"钉死"的 token <strong>逐个调用模型前向</strong>去"预测"它们——这纯属浪费算力，因为答案早已注定。这种被钉死的片段在结构化输出里其实占了相当大的比重：花括号、引号、冒号、逗号、固定的字段名、枚举值的前缀，全都是文法强加的样板，它们的数量往往比真正自由的内容字段还要多。</p>
+<p>SGLang 的优化叫<strong>跳跃前进（jump-forward），底层是压缩 FSM（compressed FSM）</strong>。它在编译阶段就识别出这些"确定性跨度"：凡是只有唯一续接的连续 token 段，都被预先压缩、记录下来。运行时一旦 FSM 走到这样的状态，SGLang 不再请模型前向，而是<strong>直接把这整段强制字符串拼接进输出</strong>，并让 FSM 一次性向前跳过对应的若干步。具体落地在 <span class="mono">OutlinesJumpForwardMap.jump_forward_symbol(state)</span>：传入当前状态，它返回该状态起被文法钉死的那段字符串，供调度器直接 splice 进去。这一跳带来双重收益：其一是<strong>更快</strong>——省掉了一连串无意义的前向，结构化生成显著提速；其二是<strong>质量更好</strong>——模型不必再分心去"预测"那些样板字符（boilerplate），可以把注意力集中在真正需要它判断的自由字段上。这一优化为第十部分画上句号。值得一提的是，确定性跨度越长、越频繁，跳跃前进的收益就越大——对那些字段众多、键名固定的复杂 schema，省下的前向次数相当可观，端到端时延可观地下降。</p>
+
+<div class="cols"><div class="col"><strong>逐 token 解码</strong><br>对被钉死的 <span class="mono">" n a m e " :</span> 每个字符都老老实实跑一次模型前向去"预测"，明明只有唯一答案，却步步耗算力。</div><div class="col"><strong>跳跃前进</strong><br>检测到唯一续接，<span class="mono">jump_forward_symbol</span> 直接吐出整段 <span class="mono">"name":</span>，FSM 一次跳过这些步，<strong>不调用模型</strong>，更快也更稳。</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/base_grammar_backend.py ::BaseGrammarObject</span><span class="ln">每请求一个语法 FSM：屏蔽 logits 保证合法 + 可回滚</span></div><pre>class BaseGrammarObject:                 # one per request: the compiled grammar FSM
+    def accept_token(self, token):
+        ...                              # advance the FSM by the sampled token
+    def allocate_vocab_mask(self, vocab_size, batch_size, device):
+        ...                              # make a [vocab] mask buffer
+    def fill_vocab_mask(self, vocab_mask, idx):
+        ...                              # mark which tokens keep the output grammar-valid
+    def rollback(self, k):
+        ...                              # back up k steps (backtracking / spec-decode reject)
+    def is_terminated(self):
+        ...                              # has the grammar reached an accept state?
+# jump-forward lives in constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</pre></div>
+
+<h2>回滚、终止与投机解码的配合</h2>
+<p>最后看三个易被忽略却很关键的细节。其一，<strong>回滚不是可有可无的</strong>。在投机解码里，草稿模型一口气提出若干 token，目标模型并行验证，常常只接受前几个、拒绝后几个。语法 FSM 在验证前必须假定这些 token 都被接受、据此前进；一旦验证拒绝，就得用 <span class="mono">rollback(k)</span> 把多走的 k 步精确退回，保证 FSM 状态与真正被接受的序列严格一致——否则后续掩码就会基于错误状态构造，约束随之失效。其二，<strong>终止判断决定何时收尾</strong>：<span class="mono">is_terminated()</span> 返回真，意味着结构已经完整闭合（例如 JSON 的最外层大括号已配平），可以安全停止生成，避免画蛇添足。其三，<strong>掩码构造要高效</strong>：<span class="mono">allocate_vocab_mask</span> 与 <span class="mono">fill_vocab_mask</span> 被设计成可在 GPU 上按批处理的形态，让受限解码的额外开销尽量被前向计算掩盖，从而几乎不拖慢吞吐。这一点尤其重要：受限解码若实现得笨拙，每步都在 CPU 上逐个 token 判断合法性、再同步回 GPU，开销会轻易吃掉它省下的算力。SGLang 的做法是把"判断合法"尽量提前到编译期完成，运行期只剩一次轻量的掩码填充与一次张量相加，于是它能在保证严格结构的同时几乎不付出吞吐代价。把推进、掩码、回滚、终止这四件事拼在一起，就是 SGLang 受限解码完整而稳固的骨架。</p>
+<p>还有一条设计层面的经验值得点出：SGLang 刻意把上述一切都收敛到同一个抽象基类之后，让具体的语法引擎成为<strong>可插拔</strong>的部件。无论底层编译器是 xgrammar、outlines 还是 llguidance，调度器只与 <span class="mono">BaseGrammarObject</span> 这套接口打交道——推进、掩码、回滚、终止。这意味着将来出现更快、更具表达力的语法引擎，可以直接替换进来而不必改动解码主循环，甚至不同请求类型可以并存使用不同引擎。让掩码高效的那套工程纪律，同样让整个子系统具备面向未来的弹性：这正是 SGLang 架构里反复出现的"为规模而设计、内部可替换"的理念。把它和前面几课的投机解码、PD 分离、并行与 EPLB 放在一起看，你会发现它们共享同一种工程审美——用清晰的接口隔离复杂度，再在接口背后追求极致性能。</p>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>受限解码保证结构合法</strong>：把 JSON-Schema / 正则 / EBNF 编译成 FSM，在采样前用词表掩码把非法 token 的 logits 设为 −∞，从源头杜绝非法。</li>
+<li><strong>恰嵌在 logits 与采样器之间</strong>：改的是 logits（<span class="inline">第37课</span>）而非采样算法（<span class="inline">第28课</span>），因此与各种采样策略可叠加。</li>
+<li><strong>BaseGrammarObject 是每请求的 FSM</strong>：<span class="mono">accept_token</span> 推进、<span class="mono">fill_vocab_mask</span> 建掩码、<span class="mono">rollback</span> 回退、<span class="mono">is_terminated</span> 判终止。</li>
+<li><strong>跳跃前进省掉被钉死 token 的前向</strong>：压缩 FSM 用 <span class="mono">jump_forward_symbol</span> 直接吐出强制字符串，既更快又让模型更专注，质量更好，跨度越长收益越大。</li>
+<li><strong>回滚支撑投机解码</strong>：被拒草稿 token 需要 <span class="mono">rollback(k)</span> 精确还原 FSM 状态，保证后续掩码不被污染（<span class="inline">第43课</span>）。</li>
+</ul></div>
+
+<div class="card"><div class="tag">🏁 第十部分小结</div><p>第十部分围绕"如何把 SGLang 推向大规模、高性能"展开：投机解码用草稿+验证把多 token 一次落地，EAGLE 进一步用特征级草稿提升接受率；PD 分离把预填充与解码拆到不同实例，各自吃满算力与显存带宽；张量/流水线/数据/专家四种并行让超大模型横跨众多 GPU；EPLB 在 MoE 场景里动态均衡专家负载、消除热点；而本课的结构化输出与跳跃前进，则在保证输出严格合法的同时省去无谓前向。这些技术看似各管一摊，实则共同回答同一个问题——<strong>在不牺牲正确性的前提下，把每一分算力都用在刀刃上</strong>，从而把 SGLang 稳稳推到大规模、高性能的生产水位。至此，第十部分的拼图全部归位：从"算得更快"到"算得更省"，再到"算得既对又稳"，SGLang 用一组彼此咬合的机制，回应了把大模型搬上真实生产的全部核心挑战。</p></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 受限解码究竟在“哪一步、对什么”动手，才能保证输出永远合法？</div>
+  <ol class="opts">
+    <li><strong>在采样之前，对 logits（第37课）盖一层词表掩码，把所有会破坏语法的 token 设为 −∞，于是采样器（第28课）无论怎么选都合法</strong></li>
+    <li>在采样之后丢弃非法 token 并重试，直到碰巧得到合法结果</li>
+    <li>对模型权重做微调，让它学会只输出 JSON</li>
+    <li>修改采样算法本身，让 top-p 只在合法 token 上归一化</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。SGLang 把约束编译成 FSM，在每个解码步、<strong>采样之前</strong>向 FSM 要“允许集合”，据此构造词表掩码并把非法 token 的 logit 设为 <span class='mono'>−∞</span>（接第37课）。softmax 后这些 token 概率为零，采样器（第28课）无论用贪心还是 top-p 都选不到。因为改的是 logits 而非采样算法，故能与各种采样策略叠加。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. “跳跃前进（压缩 FSM）”节省的是什么开销？</div>
+  <ol class="opts">
+    <li>省掉对采样结果做 JSON 解析的校验</li>
+    <li><strong>当语法在某段只有唯一续接（如 JSON 强制键名 <span class='mono'>"name":</span>），直接拼接整段并让 FSM 一次跳过，省掉这些被钉死 token 的模型前向</strong></li>
+    <li>省掉把 logits 从 GPU 拷回 CPU 的传输</li>
+    <li>省掉构造词表掩码的显存分配</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。很多时候 FSM 在一段连续状态里“允许集合”都只有一个 token——文法完全确定，没有自由度。逐 token 解码仍会为这些被钉死的 token 逐个跑模型前向，纯属浪费。<span class='mono'>OutlinesJumpForwardMap.jump_forward_symbol(state)</span> 返回该段强制字符串，直接 splice 进输出并让 FSM 一次性前跳：既更快，又因模型不必预测样板而质量更好。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么投机解码（第43课）需要语法对象提供 <span class='mono'>rollback(k)</span>？</div>
+  <ol class="opts">
+    <li>为了在温度过高时回退到贪心采样</li>
+    <li>为了在生成结束后撤销整段输出并重新开始</li>
+    <li>为了把 FSM 状态保存到磁盘以便断点续传</li>
+    <li><strong>草稿模型一次提出多个 token，FSM 先假定全部接受而前进；当验证拒绝其中后几个，必须 <span class='mono'>rollback(k)</span> 精确退回，让 FSM 状态与真正被接受的序列一致</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。投机解码里草稿模型一口气给出若干候选，目标模型并行验证，常只接受前几个。FSM 在验证前必须假定全部接受并据此前进；一旦后几个被拒，就要用 <span class='mono'>rollback(k)</span> 把多走的 k 步退回，确保 FSM 状态与真正被接受的序列严格一致，否则后续掩码会基于错误状态构造、约束失效。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话讲清受限解码为什么能<strong>保证</strong>输出合法而不只是“大概率合法”：把 JSON-Schema/正则/EBNF 编译成 FSM 后，<span class='mono'>fill_vocab_mask</span> 如何在每步采样前把非法 token 的 logit（第37课）设为 −∞，使采样器（第28课）无论策略如何都选不到；再说明这与“生成后校验+重试”相比的根本差别。</li>
+    <li>描述跳跃前进的完整收益与机制：压缩 FSM 如何识别“确定性跨度”，<span class='mono'>jump_forward_symbol(state)</span> 如何吐出被钉死的字符串并让 FSM 一次前跳从而省去模型前向；解释为什么它<strong>既更快又质量更好</strong>，并结合 <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> 说明整台每请求 FSM 如何把推进、掩码、跳跃、终止拼成一个闭环。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">Many real applications are not satisfied with a model being "roughly right"—they demand output that is <strong>strictly valid</strong>: it must be parseable JSON, must match a regex, or must follow a grammar. SGLang guarantees this at the root with <strong>constrained decoding</strong>: it compiles the constraint into a finite-state machine (FSM) and, <strong>before</strong> sampling at every step, sets the logits (<span class="inline">Lesson 37</span>) of every illegal token to <span class="mono">−∞</span>. So no matter how the sampler (<span class="inline">Lesson 28</span>) rolls the dice, the output is always well-formed. This lesson walks the whole pipeline and presents its most elegant optimization: <strong>jump-forward</strong>. It also closes Part 10.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div><p>Picture filling out a customs form at the airport. Every box is pre-printed with borders and hints: the name box accepts only letters, the date box only digits, the nationality box only an option from a dropdown. No matter how shaky your hand, you simply cannot write a birth date into the name box—because the form's "mold" fixes the legal options <strong>before</strong> your pen touches paper. Constrained decoding fits the model with exactly such a "glowing mold": before producing each token it computes "which tokens are legal right now," dims out the rest, and the model may only pick from the lit boxes. Jump-forward is like those "auto-filled" fixed fields on the form—if a span has only one possible answer, why make you copy it character by character? Just fill it in and jump the cursor ahead.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div><p>Place this back in the inference pipeline: the forward pass produces logits (<span class="inline">Lesson 37</span>), and the sampler picks a token from them (<span class="inline">Lesson 28</span>). Constrained decoding does not reinvent anything—it sits <strong>exactly between the two</strong>. In the instant after logits exist but before sampling happens, it overlays a "vocab mask" on the logits, allowing only tokens that keep the output legal. Because it edits logits rather than the sampling algorithm, it stacks seamlessly with greedy, temperature, top-p, beam search, and even speculative decoding (<span class="inline">Lesson 43</span>). Master this lesson and you understand how SGLang balances "free generation" against "strict structure"—correctly and efficiently.</p></div>
+
+<h2>Why constrained decoding is needed</h2>
+<p>A large language model is fundamentally a probability machine: it outputs a full distribution over the next token, and the sampler draws from it. This excels at fluent expression but <strong>guarantees nothing structurally</strong>. If your downstream is a function call, a config that must pass <span class="mono">json.loads</span>, or a field bound for a database, an occasional missing quote, an extra comma, or a number written as a word will break the entire pipeline. The traditional fix is "generate, validate, retry on failure," but retrying is slow and costly—and it still cannot <strong>guarantee</strong> the final result is valid. Imagine a three-level nested JSON where the model drops a quote in the very last field: the whole generation is voided and restarts from scratch; if you are unlucky enough to fail repeatedly at different spots, latency and cost balloon, which is especially fatal for online serving.</p>
+<p>Constrained decoding takes a different stance: rather than patching up afterward, <strong>forbid illegality at every step of generation</strong>. It asks the user for a "shape spec"—a JSON-Schema, a regular expression, or an EBNF grammar. Through a pluggable grammar backend (xgrammar / outlines / llguidance), SGLang <strong>compiles</strong> that spec into a finite-state machine: each FSM state knows precisely "at this position, which tokens are allowed." At each decode step SGLang asks the FSM for the "allowed set," builds a vocab mask from it, and sets the logit of every token outside the allowed set to <span class="mono">−∞</span>. After softmax those tokens have probability zero, so the sampler—whatever strategy it uses—can never pick them. In other words, <strong>validity is no longer the sampler's luck but the mask's iron law</strong>.</p>
+<p>It is worth stressing where the boundary of responsibility lies. The grammar backend does not decide <strong>which</strong> legal token to emit—that remains the sampler's job, governed by temperature, top-p, and the rest. The backend only decides <strong>which tokens are even allowed to be considered</strong>. This separation of concerns is precisely why constrained decoding composes so cleanly: it is a pure pre-filter on the candidate set, leaving the creative act of selection untouched. The model still expresses itself freely wherever the grammar permits freedom, and is merely fenced in wherever the grammar demands rigidity.</p>
+
+<div class="flow"><div class="node">logits (Lesson 37)</div><div class="arrow">→</div><div class="node">vocab mask: FSM allows only valid tokens, rest set to −∞</div><div class="arrow">→</div><div class="node">sampler (Lesson 28) can only pick a valid token</div><div class="arrow">→</div><div class="node">accept_token: FSM advances one step</div></div>
+
+<h2>One FSM per request: BaseGrammarObject</h2>
+<p>Structural constraints are <strong>per-request</strong>: different requests may carry different schemas, and each request's decode progress differs. SGLang therefore keeps a grammar object that belongs to each request, with the abstract base class <span class="mono">BaseGrammarObject</span>. Think of it as a personal notebook recording "where this request currently stands in the FSM." Its interface is tiny yet covers everything constrained decoding needs. The "one object per request" design exists because constrained-decoding state <strong>cannot be shared across requests</strong>: even two requests using the same schema may sit at different FSM states, each needing its own progress and its own rollback history. Encapsulating state in an object lets the scheduler drive dozens or hundreds of requests at different progress points within one batch without interference.</p>
+<p>The first group is <strong>advancing</strong>: once the sampler finally chooses a token, the scheduler calls <span class="mono">accept_token(token)</span>, transitioning the FSM to the next state—and the next step's "allowed set" updates accordingly. The second group is <strong>mask construction</strong>: <span class="mono">allocate_vocab_mask(...)</span> first allocates a mask buffer sized by vocab, batch, and device, then <span class="mono">fill_vocab_mask(vocab_mask, idx)</span> marks "which tokens are legal now" (idx says which request in the batch). That mask is then added onto the logits. The third group is <strong>rollback</strong>: <span class="mono">rollback(k)</span> backs the FSM up k steps, which is crucial in two scenarios—grammars that need backtracking, and speculative decoding (<span class="inline">Lesson 43</span>), where the draft model proposes several candidate tokens at once but some are rejected by verification, so the FSM must precisely undo the states it advanced through for those rejected tokens. Finally, <strong>termination</strong>: <span class="mono">is_terminated()</span> checks whether the FSM has reached an accept state—whether the structure is fully closed and generation can wrap up. These four groups look simple but map exactly onto every lifecycle event an FSM goes through during decoding: advance, query the current feasible set, rewind when needed, and check whether the end has been reached. Master them and you have grasped the entire outward contract of SGLang's constrained decoding.</p>
+
+<div class="cellgroup"><div class="cell">S0 <span class="mono">{</span></div><div class="cell sc">S1 <span class="mono">"name"</span> forced</div><div class="cell sc">S2 <span class="mono">:</span> forced</div><div class="cell">S3 value: free sampling</div><div class="cell"><span class="mono">}</span> accept</div></div>
+
+<table class="t"><tr><th>BaseGrammarObject method</th><th>Role</th></tr><tr><td><span class="mono">accept_token(token)</span></td><td>advance the FSM by the sampled token to the next state</td></tr><tr><td><span class="mono">allocate_vocab_mask(...)</span></td><td>allocate a mask buffer by vocab/batch/device</td></tr><tr><td><span class="mono">fill_vocab_mask(mask, idx)</span></td><td>mark which tokens keep the output legal now</td></tr><tr><td><span class="mono">rollback(k)</span></td><td>back up k steps (backtracking / spec-decode reject)</td></tr><tr><td><span class="mono">is_terminated()</span></td><td>has the FSM reached an accept state?</td></tr></table>
+
+<h2>Jump-forward: skip tokens the grammar nails down</h2>
+<p>So far constrained decoding guarantees <strong>correctness</strong> but is not yet <strong>fast</strong>. Observe a common phenomenon: often the FSM's "allowed set" in some state contains <strong>exactly one</strong> token, and the next state again only one, and the one after that still only one... In other words, the grammar is <strong>fully deterministic</strong> over this span, with no freedom at all. The classic case is a fixed key name in a JSON-Schema: once <span class="mono">{</span> is written, the schema forces the string <span class="mono">"name":</span> next, and the model has no choice here. Yet the step-by-step approach still <strong>calls the model forward for each</strong> of these nailed-down tokens to "predict" them—pure wasted compute, since the answer is predetermined. Such nailed-down fragments actually make up a large share of structured output: braces, quotes, colons, commas, fixed field names, and enum prefixes are all boilerplate the grammar imposes, and they often outnumber the genuinely free content fields.</p>
+<p>SGLang's optimization is called <strong>jump-forward, backed by a compressed FSM</strong>. At compile time it identifies these "deterministic spans": any run of tokens with a unique continuation is pre-compressed and recorded. At runtime, once the FSM reaches such a state, SGLang no longer runs the model forward but <strong>splices the whole forced string directly into the output</strong> and jumps the FSM ahead by the corresponding steps at once. Concretely this lives in <span class="mono">OutlinesJumpForwardMap.jump_forward_symbol(state)</span>: given the current state, it returns the string the grammar nails down from there for the scheduler to splice in. This jump brings a double payoff: it is <strong>faster</strong>—skipping a run of meaningless forwards visibly speeds up structured generation; and it yields <strong>better quality</strong>—the model no longer gets distracted predicting boilerplate and can focus on the free fields that truly need its judgment. This optimization closes Part 10. Notably, the longer and more frequent the deterministic spans, the greater jump-forward's payoff—for complex schemas with many fields and fixed key names, the saved forwards are substantial and end-to-end latency drops noticeably.</p>
+
+<div class="cols"><div class="col"><strong>Plain per-token decode</strong><br>For the nailed-down <span class="mono">" n a m e " :</span> it dutifully runs a model forward to "predict" each character—burning compute step by step even though there is only one answer.</div><div class="col"><strong>Jump-forward</strong><br>Detecting the unique continuation, <span class="mono">jump_forward_symbol</span> emits the whole <span class="mono">"name":</span> directly; the FSM jumps over these steps <strong>without calling the model</strong>—faster and steadier.</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/base_grammar_backend.py ::BaseGrammarObject</span><span class="ln">one grammar FSM per request: mask logits to stay valid + rollback</span></div><pre>class BaseGrammarObject:                 # one per request: the compiled grammar FSM
+    def accept_token(self, token):
+        ...                              # advance the FSM by the sampled token
+    def allocate_vocab_mask(self, vocab_size, batch_size, device):
+        ...                              # make a [vocab] mask buffer
+    def fill_vocab_mask(self, vocab_mask, idx):
+        ...                              # mark which tokens keep the output grammar-valid
+    def rollback(self, k):
+        ...                              # back up k steps (backtracking / spec-decode reject)
+    def is_terminated(self):
+        ...                              # has the grammar reached an accept state?
+# jump-forward lives in constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</pre></div>
+
+<h2>Rollback, termination, and the speculative-decoding interplay</h2>
+<p>Finally, three easily overlooked yet crucial details. First, <strong>rollback is not optional</strong>. In speculative decoding the draft model proposes several tokens at once and the target model verifies them in parallel, often accepting only the first few and rejecting the rest. The grammar FSM must assume all are accepted and advance accordingly before verification; once some are rejected it must use <span class="mono">rollback(k)</span> to precisely undo the extra k steps, keeping the FSM state strictly consistent with the truly accepted sequence—otherwise subsequent masks would be built from a wrong state and the constraint would fail. Second, <strong>termination decides when to stop</strong>: when <span class="mono">is_terminated()</span> returns true the structure is fully closed (e.g. the outermost JSON braces are balanced) and generation can safely stop without adding noise. Third, <strong>mask construction must be efficient</strong>: <span class="mono">allocate_vocab_mask</span> and <span class="mono">fill_vocab_mask</span> are designed to be batched on the GPU so that constrained decoding's overhead is largely hidden behind the forward compute, barely slowing throughput. This matters especially: if constrained decoding were implemented clumsily—judging each token's legality on the CPU every step and syncing back to the GPU—the overhead would easily eat the compute it saves. SGLang instead pushes "deciding legality" into compile time as much as possible, leaving the runtime with just one lightweight mask fill and one tensor add, so it guarantees strict structure at almost no throughput cost. Stitch advancing, masking, rollback, and termination together and you get the complete, sturdy skeleton of SGLang's constrained decoding.</p>
+<p>One more design lesson is worth drawing out: SGLang deliberately abstracts all of this behind a single base class so that the concrete grammar engine is <strong>pluggable</strong>. Whether the underlying compiler is xgrammar, outlines, or llguidance, the scheduler talks only to the <span class="mono">BaseGrammarObject</span> interface—advance, mask, rollback, terminate. This means a faster or more expressive grammar engine can be dropped in without touching the decode loop, and different engines can even coexist for different request types. The same discipline that makes the masking efficient also makes the whole subsystem future-proof, which is exactly the kind of "designed-for-scale, swappable internals" philosophy that recurs throughout SGLang's architecture.</p>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Constrained decoding guarantees valid structure</strong>: compile JSON-Schema / regex / EBNF into an FSM and, before sampling, use a vocab mask to set illegal tokens' logits to −∞.</li>
+<li><strong>It sits exactly between logits and the sampler</strong>: it edits logits (<span class="inline">Lesson 37</span>), not the sampling algorithm (<span class="inline">Lesson 28</span>), so it stacks with any sampling strategy.</li>
+<li><strong>BaseGrammarObject is the per-request FSM</strong>: <span class="mono">accept_token</span> advances, <span class="mono">fill_vocab_mask</span> builds the mask, <span class="mono">rollback</span> backs up, <span class="mono">is_terminated</span> checks the accept state.</li>
+<li><strong>Jump-forward skips forced tokens' forwards</strong>: the compressed FSM uses <span class="mono">jump_forward_symbol</span> to emit the forced string directly—faster, and the model stays focused for better quality.</li>
+<li><strong>Rollback underpins speculative decoding</strong>: rejected draft tokens need <span class="mono">rollback(k)</span> to precisely restore the FSM state (<span class="inline">Lesson 43</span>).</li>
+</ul></div>
+
+<div class="card"><div class="tag">🏁 Part 10 wrap-up</div><p>Part 10 centered on "how to push SGLang toward large scale and high performance": speculative decoding lands multiple tokens at once via draft+verify, and EAGLE further raises acceptance with feature-level drafting; PD disaggregation splits prefill and decode onto separate instances so each saturates compute and memory bandwidth; tensor/pipeline/data/expert parallelism lets giant models span many GPUs; EPLB dynamically balances expert load in MoE to erase hotspots; and this lesson's structured outputs with jump-forward guarantees strictly valid output while skipping pointless forwards. These techniques look like separate concerns but jointly answer one question—<strong>spend every bit of compute where it matters without sacrificing correctness</strong>—and thereby push SGLang steadily to a large-scale, high-performance production level. With that, Part 10's puzzle is fully assembled: from "compute faster" to "compute cheaper" to "compute both correctly and stably," SGLang answers, with a set of interlocking mechanisms, every core challenge of bringing large models into real production.</p></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Where exactly, and on what, does constrained decoding act to guarantee always-valid output?</div>
+  <ol class="opts">
+    <li><strong>Before sampling, it overlays a vocab mask on the logits (Lesson 37), setting every grammar-breaking token to −∞, so whatever the sampler (Lesson 28) picks stays valid</strong></li>
+    <li>After sampling, discard illegal tokens and retry until a valid result happens to appear</li>
+    <li>Fine-tune the model weights so it learns to emit only JSON</li>
+    <li>Rewrite the sampling algorithm so top-p normalizes only over legal tokens</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. SGLang compiles the constraint into an FSM and, at each decode step <strong>before sampling</strong>, asks the FSM for the allowed set, builds a vocab mask, and sets illegal tokens' logits to <span class='mono'>−∞</span> (Lesson 37). After softmax those probabilities are zero, so the sampler (Lesson 28)—greedy or top-p—cannot pick them. Editing logits rather than the sampler lets it stack with any sampling strategy.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What overhead does "jump-forward (compressed FSM)" save?</div>
+  <ol class="opts">
+    <li>Saves running JSON parsing to validate the sampled result</li>
+    <li><strong>When the grammar has a unique continuation over a span (e.g. the forced JSON key <span class='mono'>"name":</span>), it splices the whole span and jumps the FSM ahead at once, skipping the model forwards for those nailed-down tokens</strong></li>
+    <li>Saves transferring logits from GPU back to CPU</li>
+    <li>Saves the VRAM allocation for building the vocab mask</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Often the FSM's allowed set is a single token across a run of states—the grammar is fully deterministic with no freedom. Per-token decode still runs a forward for each nailed-down token, pure waste. <span class='mono'>OutlinesJumpForwardMap.jump_forward_symbol(state)</span> returns that forced string, splices it in, and jumps the FSM ahead at once: faster, and better quality since the model needn't predict boilerplate.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does speculative decoding (Lesson 43) need the grammar object's <span class='mono'>rollback(k)</span>?</div>
+  <ol class="opts">
+    <li>To fall back to greedy sampling when temperature is too high</li>
+    <li>To undo the whole output after generation and restart</li>
+    <li>To checkpoint the FSM state to disk for resuming later</li>
+    <li><strong>The draft model proposes several tokens at once and the FSM advances assuming all are accepted; when verification rejects the trailing ones, it must <span class='mono'>rollback(k)</span> to keep the FSM state consistent with the truly accepted sequence</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. In speculative decoding the draft model emits several candidates that the target verifies in parallel, often accepting only the first few. The FSM must advance assuming all are accepted; once the trailing ones are rejected it uses <span class='mono'>rollback(k)</span> to undo the extra k steps so the FSM state matches the truly accepted sequence—otherwise later masks build on a wrong state and the constraint breaks.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why constrained decoding <strong>guarantees</strong> valid output rather than just "probably valid": after compiling JSON-Schema/regex/EBNF into an FSM, how <span class='mono'>fill_vocab_mask</span> sets illegal tokens' logits (Lesson 37) to −∞ before each sampling step so the sampler (Lesson 28) cannot pick them regardless of strategy; then contrast this with "generate then validate and retry."</li>
+    <li>Describe jump-forward's full payoff and mechanism: how the compressed FSM identifies "deterministic spans," how <span class='mono'>jump_forward_symbol(state)</span> emits the nailed-down string and jumps the FSM ahead to skip model forwards; explain why it is <strong>both faster and higher quality</strong>, and use <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> to show how the per-request FSM closes the loop of advance, mask, jump, and terminate.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="47-large-scale-ep-and-eplb.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">大规模 EP 与 EPLB</span><span class="lang-en">Large-scale EP &amp; EPLB</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>43 · 投机解码总览 / Speculative decoding overview - SGLang 图解教程</title>
+<meta name="description" content="第十部分 · 性能创新专题｜投机解码总览 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="43 · 投机解码总览 / Speculative decoding overview - SGLang 图解教程">
+<meta property="og:description" content="第十部分 · 性能创新专题｜投机解码总览 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="43 · 投机解码总览 / Speculative decoding overview - SGLang 图解教程">
+<meta name="twitter:description" content="第十部分 · 性能创新专题｜投机解码总览 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></span>
+    <span class="pill">43 / 48</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:89%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十部分 · 性能创新专题</span><span class="lang-en">Part 10 · Performance innovations</span></div>
+    <h1><span class="lang-zh">投机解码总览</span><span class="lang-en">Speculative decoding overview</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">普通自回归一次目标前向只吐<strong>一个</strong> token，而解码阶段是<strong>带宽受限</strong>的（第4课）：每一步都要把全部权重和 KV 从 HBM 重新读一遍，算力被活活饿着。投机解码（Speculative decoding）打破"一次前向一个 token"的天花板——让一个便宜的<span class="mono">draft</span>草稿模型先猜 k 个，再让昂贵的<span class="mono">target</span>目标模型<strong>一次前向</strong>把这 k 个全部验完，从而在一步里吐出多个 token，且输出分布与原始目标采样<strong>完全一致</strong>（无损）。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>把目标模型想成一位<strong>资深主编</strong>：他逐字逐句亲自写稿又快又准，但每写一个字都要把整本风格手册翻一遍，慢得让人心疼。于是请来一位<strong>实习生（草稿模型）</strong>，让他凭直觉飞快地先写出一整句草稿（k 个词）。主编不再一个字一个字写，而是把这一整句草稿<strong>一眼扫过去做"批改"</strong>：从头读，只要和他心里想的一致就打勾，直到遇到第一个不对的字为止——前面打勾的部分全部采纳，再由主编<strong>顺手补上一个他自己确定的字</strong>（bonus_token）。实习生猜得越准，主编一次批改就能定下越多的字；可万一实习生跑题，主编也只是从分歧点重写，<strong>绝不会让质量打折</strong>。这就是"便宜的人狂猜、昂贵的人一次验完"的分工。</p>
+<p>这个类比里有三处和真实算法严丝合缝的细节值得点出。其一，主编"一眼扫过去批改"对应目标模型把 k 个位置塞进<strong>同一次前向</strong>并行打分——他读完整句草稿花的力气，和只读一个字差不多，这正是加速的来源。其二，"遇到第一个不对的字就停、前面全采纳、后面全作废"对应只保留<strong>最长正确前缀</strong>：因为后面的字都是顺着那个错字往下写的，地基歪了，上面盖的全得拆。其三，"主编顺手补一个自己确定的字"对应那个雷打不动的 <span class="mono">bonus_token</span>：哪怕实习生整句都跑偏、一个字没被采纳，主编也总归落下了一个字，所以这套流程<strong>永远不会比主编自己一个字一个字写更慢</strong>，只会更快或持平。</p></div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>解码慢的根因不是算力不够，而是<strong>每步只产出一个 token</strong>却要把整套权重搬一遍，GPU 在等内存。投机解码的全部威力都来自一个朴素的事实：<strong>验证 k 个 token 几乎和验证 1 个 token 一样便宜</strong>，因为目标模型可以把 k 个位置<strong>并行打分</strong>放进同一次前向里。于是只要草稿够准，我们就用"一次前向 + 多个被接受的 token"摊薄了那次昂贵的权重搬运。SGLang 把这件事做成<strong>可插拔</strong>的：用一个 <span class="mono">SpeculativeAlgorithm</span> 枚举来选"怎么出草稿"，用一个 <span class="mono">BaseSpecWorker</span> 来统一编排"谁提议、谁验证"。算得快不快，最终只看两个数：接受率和接受长度。</p>
+<p>还要破除一个常见误解：投机解码<strong>不是用小模型的质量去近似大模型</strong>，最终每一个吐出的 token 都经过目标模型的把关，质量与纯目标采样无异。草稿模型在这里扮演的只是一个"<strong>大胆的猜测器</strong>"，它猜错没有任何质量代价，只有"这次猜白费了、得重新搬一次权重"的速度代价。因此选草稿模型的标准和选生成模型完全不同：我们不在乎它单独用时输出好不好，只在乎它与目标模型"<strong>想法有多合拍</strong>"——合拍即高 α。这也是为什么 EAGLE 这类方法要直接复用目标模型的隐藏态来训练草稿头（第44课）：让草稿"读到"目标的内部状态，才能猜得格外像目标。</p></div>
+
+<h2>一、为什么自回归会被带宽卡住</h2>
+<p>回忆第4课：在解码阶段，每生成一个 token，GPU 都要把模型的<strong>全部权重</strong>外加不断增长的 <span class="mono">KV cache</span> 从 HBM 读进片上，做完一次矩阵乘，再吐出<strong>恰好一个</strong> token。这一步的算术强度极低——搬进来的字节远多于要做的浮点运算，于是瓶颈是<strong>显存带宽</strong>而非算力，GPU 的张量核心大部分时间在空转等数据。换句话说，<strong>每个 token 都要付一次"全权重搬运"的固定成本</strong>，而这次搬运里真正干的活（一个 token 的前向）少得可怜。如果能在<strong>同一次搬运</strong>里多产出几个 token，单位 token 的成本就被摊薄了，这正是投机解码瞄准的命门。</p>
+<p>这里有个容易被忽视却至关重要的不对称性：<strong>前向的成本几乎不随一次喂入多少个 token 而线性增长</strong>。预填充（prefill）阶段之所以高效，正是因为它把一整段 prompt 的所有位置塞进同一次前向并行算完；而解码之所以低效，是因为它被迫一次只算一个新位置。投机解码本质上是在<strong>把"解码"重新变回"小批 prefill"</strong>：用草稿先猜出未来的 k 个位置，让目标模型像处理 prompt 那样把这 k 个位置一口气并行算掉。只要这 k 个位置里有相当一部分能被接受，我们就用<strong>一次前向的代价换来了多个 token 的产出</strong>，带宽这道墙就被绕了过去。值得强调的是，加速的上限并不取决于草稿模型有多快（它本来就便宜），而取决于<strong>草稿猜得有多准</strong>——准，才能让昂贵的目标前向不白跑。</p>
+
+<h2>二、草稿提议 + 目标验证：一次前向多个 token</h2>
+<p>投机解码引入两个模型：一个便宜的 <span class="mono">draft</span>（草稿/小模型）和一个昂贵的 <span class="mono">target</span>（目标/大模型）。流程是：草稿模型先<strong>自回归地提议 k 个 token</strong>（它很小，连跑 k 步也便宜）；接着目标模型把"原始上下文 + 这 k 个草稿"拼在一起，<strong>一次前向</strong>就对所有 k 个位置并行打分。然后从头开始<strong>逐个比对</strong>：草稿 token 落在目标分布里就<span class="mono">accept</span>接受，直到遇到第一个被拒的位置；我们保留<strong>最长的正确前缀</strong>，并且无论如何都由目标模型在分歧点（或全部接受后的下一位）补出<strong>一个一定会吐的</strong> <span class="mono">bonus_token</span>。当草稿质量高时，一次目标前向就能产出"若干被接受的草稿 + 1 个 bonus"，速度倍增；而由于接受/拒绝采用了与目标采样数学等价的判据，<strong>最终输出分布与直接用目标模型采样逐位生成完全相同——这是可证明的无损</strong>。</p>
+<p>这里"逐个比对"的判据值得展开。对每个草稿位置，目标模型给出它自己的概率分布，把草稿提议 token 在该分布下的概率与草稿模型当初给它的概率相比：若目标更"认可"这个 token 就接受，否则以一定概率拒绝，并从一个经过精心构造的<strong>残差分布</strong>里重采一个 token 顶替——正是这个残差校正保证了整体分布与纯目标采样毫厘不差。一旦某个位置被拒，<strong>它之后的所有草稿 token 都必须丢弃</strong>（因为它们建立在一个错误的前缀之上），这也解释了为什么我们只能保留"最长正确前缀"。无论这一步接受了 0 个还是 k 个草稿，目标模型都会在末尾免费追加一个由它自己采出的 <span class="mono">bonus_token</span>，所以哪怕草稿全军覆没，这一步也至少前进 1 个 token，绝不比普通自回归慢。</p>
+
+<div class="flow"><div class="node">draft 提议 k 个 token</div><div class="arrow">→</div><div class="node">target 一次前向并行验完 k 个</div><div class="arrow">→</div><div class="node">接受最长正确前缀 + 补 bonus_token</div></div>
+
+<h2>三、两个核心指标：accept_rate(α) 与 accept_length(τ)</h2>
+<p>衡量投机解码好坏，论文里用两个术语，务必分清楚。<strong>accept_rate</strong>（接受率 α）= <span class="mono">correct_drafts / proposed_drafts</span>，即<strong>每个草稿 token</strong>被接受的概率，它<strong>不包含</strong>那个白送的 bonus_token——它衡量草稿模型"猜得准不准"。<strong>accept_length</strong>（接受长度 τ）= <strong>每个验证步平均吐出的 token 数</strong>，它<strong>包含</strong>那个一定会吐的 bonus_token——它衡量"一次目标前向到底能产出几个 token"。两者都越大越好：α 越高说明草稿越靠谱，τ 越大说明每次昂贵前向摊到的 token 越多、加速越猛。直觉上 τ 随 α 单调上升，但因为有 bonus，<strong>即使 α 很低，τ 也至少为 1</strong>（最坏情况退化成普通自回归，绝不更慢）。</p>
+<p>把这两个指标和成本放在一起，就能估算加速比。设草稿一次提议 k 个，则每个验证步的<strong>收益</strong>是 τ 个 token，而<strong>代价</strong>主要是一次目标前向加上草稿模型跑 k 步的小开销。粗略地说，理想加速比约等于 τ 除以"一次目标前向 + 草稿开销"折算出的等效前向数；当草稿很小、几乎免费时，加速比就近似正比于 τ。这也揭示了一个实践权衡：<strong>k 不是越大越好</strong>。k 太小，τ 的上限被压低，省不了多少；k 太大，靠后的草稿位置因为前缀更长、越来越难猜中，α 会下滑，被拒后白白浪费草稿算力，还增大了一次验证的张量规模。因此真实系统会围绕模型对、任务难度去调 k，让 α 和 τ 的乘积效应落在最甜的点上。一个常被引用的经验是：<strong>α 决定了 τ 的天花板，而 bonus 决定了 τ 的地板</strong>。在实践中，人们会把这两个指标连同端到端吞吐一起打点观测：α 偏低往往提示草稿模型与目标不够合拍、需要换草稿方法或重训草稿头；τ 上不去则提示 k 设得太保守或接受太苛刻。把它们当成<strong>投机解码的体温计</strong>，调参时就有了明确的抓手。</p>
+
+<div class="cols"><div class="col"><strong>基线（普通自回归）</strong><br/>每次目标前向 = <span class="mono">1</span> 个 token<br/>付一次全权重搬运只换一个 token<br/>带宽受限、算力空转</div><div class="col"><strong>投机解码</strong><br/>每次目标前向 = <span class="mono">m</span> 个 token（被接受前缀 + bonus）<br/>同一次搬运摊薄到多个 token<br/>m 由 accept_length(τ) 决定</div></div>
+
+<h2>四、SGLang 把"出草稿的方法"做成可插拔</h2>
+<p>不同的"怎么提议草稿"对应不同算法，SGLang 用一个 <span class="mono">SpeculativeAlgorithm</span> 枚举来选择，成员包括 <span class="mono">EAGLE</span>、<span class="mono">EAGLE3</span>、<span class="mono">NGRAM</span>、<span class="mono">STANDALONE</span>、<span class="mono">DFLASH</span>、<span class="mono">FROZEN_KV_MTP</span>、<span class="mono">NONE</span>。它们共享同一套"提议→验证→接受"骨架，只在"草稿从哪来"上不同：有的训练一个轻量草稿头复用目标的隐藏态（EAGLE 系列，详见<strong>第44课</strong>），有的直接用 n-gram 命中历史文本，有的挂一个独立小模型。编排这一切的是 <span class="mono">BaseSpecWorker</span>：它持有一个 <span class="mono">target_worker</span>（大模型，负责一次验完 k 个）和一个 <span class="mono">draft_worker</span>（小模型，负责提议 k 个），并暴露 <span class="mono">clear_cache_pool</span> 在多次运行之间重置草稿/目标的 KV 池。验证这一步本身复用了第28课的<strong>采样器</strong>——接受/拒绝判据就是在采样层面比对目标分布。</p>
+<p>把"出草稿"和"验证编排"解耦带来巨大的工程红利：无论草稿来自训练好的 EAGLE 头、廉价的 n-gram 命中，还是一个独立小模型，<span class="mono">BaseSpecWorker</span> 看到的都是同一组接口——拿到 k 个候选、组织一次目标前向、按统一判据接受、追加 bonus、清理缓存池进入下一轮。于是研究者要发明新的草稿方法，只需往 <span class="mono">SpeculativeAlgorithm</span> 枚举里加一个成员并实现对应的 <span class="mono">draft_worker</span>，<strong>验证侧的无损性证明、批处理与缓存管理统统不必重写</strong>。这也呼应了 SGLang 反复出现的设计哲学：把"会变的部分"（怎么猜）和"不该变的部分"（怎么无损地验）清晰隔开。<span class="mono">NONE</span> 成员则是这条谱系的退化端点——选它就等于关掉投机解码、回到第4课那个老老实实一次一个 token 的世界，方便在草稿收益不划算时一键回退。</p>
+
+<table class="t"><tr><th>SpeculativeAlgorithm 取值</th><th>出草稿的思路</th></tr>
+<tr><td><span class="mono">EAGLE / EAGLE3</span></td><td>训练轻量草稿头，复用目标隐藏态自回归提议（第44课）</td></tr>
+<tr><td><span class="mono">NGRAM</span></td><td>用 n-gram 从已生成/提示文本里直接命中候选，零额外模型</td></tr>
+<tr><td><span class="mono">STANDALONE</span></td><td>挂一个独立的小草稿模型来提议</td></tr>
+<tr><td><span class="mono">DFLASH / FROZEN_KV_MTP</span></td><td>多 token 预测类方案，复用/冻结 KV 来高效出多个草稿</td></tr>
+<tr><td><span class="mono">NONE</span></td><td>关闭投机解码，退化为普通自回归</td></tr></table>
+
+<p>把一整轮看成一个循环：草稿提议、目标一次验证、接受最长正确前缀并补 bonus、然后带着新接受的 token 向前滚动，进入下一轮。循环里真正昂贵的只有那<strong>一次</strong>目标前向，而它一口气定下了 m 个 token。</p>
+<p>最后强调一点工程上的取舍：投机解码省的是<strong>时间</strong>，花的是<strong>计算与显存</strong>。每一步都要额外跑一遍草稿模型，目标前向也要为 k 个草稿位置多算一些（被拒的那部分纯属浪费），还要为草稿/目标各自维护 KV 池，这正是 <span class="mono">clear_cache_pool</span> 存在的原因。所以在<strong>请求稀疏、GPU 本就闲着</strong>（低延迟、强带宽受限）的场景里，投机解码收益最大——反正算力空着，拿去赌草稿很划算；而在<strong>高并发、GPU 已被大批次喂饱</strong>（算力受限）的场景里，多出来的草稿计算可能挤占本就紧张的算力，收益变薄甚至为负。因此它不是无脑全开的开关，而是要结合负载、模型对和 α/τ 实测来决定——这也正是 SGLang 把它做成<strong>可插拔、可一键退回 <span class="mono">NONE</span></strong> 的现实理由。</p>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>propose 提议</h4><p class="mono">draft_worker</p><p>草稿模型自回归地提议 k 个草稿 token。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>verify 验证</h4><p class="mono">target_worker</p><p>目标模型一次前向并行给 k 个位置打分。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>accept 接受</h4><p class="mono">correct_drafts + bonus_token</p><p>保留最长正确前缀，并一定补出一个 bonus_token。</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>roll forward 滚动</h4><p class="mono">next round</p><p>带着新接受的 token 进入下一轮提议。</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/base_spec_worker.py ::BaseSpecWorker</span><span class="ln">草稿 worker 提议 + 目标 worker 一次验完</span></div><pre>class BaseSpecWorker(ABC):
+    # owns two model workers: a cheap draft + the expensive target
+
+    @property
+    @abstractmethod
+    def target_worker(self):     # the big model — verifies k drafts in ONE forward
+        ...
+    @property
+    @abstractmethod
+    def draft_worker(self):      # the small model — proposes k draft tokens
+        ...
+    @abstractmethod
+    def clear_cache_pool(self):  # reset the draft/target KV pools between runs
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li>普通自回归一次前向只吐 1 个 token，且解码<strong>带宽受限</strong>（第4课）：每步重读全部权重 + KV，GPU 在等内存。</li>
+<li>投机解码用便宜 <span class="mono">draft</span> 提议 k 个、昂贵 <span class="mono">target</span> <strong>一次前向并行验完</strong>，<span class="mono">accept</span> 最长正确前缀再加一个一定吐的 <span class="mono">bonus_token</span>，输出分布<strong>可证明无损</strong>。</li>
+<li><strong>accept_rate</strong>(α) = <span class="mono">correct_drafts / proposed_drafts</span>，<strong>不含</strong> bonus；<strong>accept_length</strong>(τ) = 每验证步平均吐出 token 数，<strong>含</strong> bonus；两者越大越快。</li>
+<li>SGLang 用 <span class="mono">SpeculativeAlgorithm</span> 枚举（EAGLE、EAGLE3、NGRAM、STANDALONE、DFLASH、FROZEN_KV_MTP、NONE）选草稿方法；<span class="mono">BaseSpecWorker</span> 持有 <span class="mono">target_worker</span> 与 <span class="mono">draft_worker</span>。</li>
+<li>命名约定：用 <span class="mono">accept</span> / <span class="mono">bonus_token</span> / <span class="mono">correct_drafts</span>；EAGLE 详见第44课，验证复用第28课采样器，攻击的瓶颈来自第4课。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 投机解码的核心分工是怎样的？</div>
+  <ol class="opts">
+    <li>两个同样大的模型轮流生成 token</li>
+    <li><strong>便宜的 draft 模型先提议 k 个 token，昂贵的 target 模型一次前向并行验完这 k 个</strong></li>
+    <li>draft 模型既提议又最终决定输出，target 只做缓存</li>
+    <li>target 模型逐个 token 提议，draft 模型逐个验证</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。投机解码让便宜的 <span class='mono'>draft</span> 自回归提议 k 个候选，再由昂贵的 <span class='mono'>target</span> 在<strong>一次前向</strong>里并行给所有 k 个位置打分验证；这样一次昂贵前向就能定下多个 token。其余选项颠倒了大小模型的职责。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么说投机解码是<strong>无损</strong>的，且最坏情况也不会更慢？</div>
+  <ol class="opts">
+    <li><strong>接受/拒绝判据与 target 采样数学等价，输出分布相同；又因总会吐一个 bonus_token，每步至少产出 1 个 token</strong></li>
+    <li>因为它把输出量化成 FP8 来加速</li>
+    <li>因为 draft 模型经过特殊微调，永远猜对</li>
+    <li>因为它跳过了 target 的前向计算</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<span class='mono'>accept</span>/拒绝采用与 target 采样等价的判据，故输出分布<strong>可证明无损</strong>；即便 <span class='mono'>accept_rate</span> 很低、所有草稿都被拒，target 仍在分歧点补出一个一定吐的 <span class='mono'>bonus_token</span>，于是退化成普通自回归而非更慢。它既不跳过 target 前向，也与量化无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 关于 <span class='mono'>accept_rate</span>(α) 与 <span class='mono'>accept_length</span>(τ)，下面哪项正确？</div>
+  <ol class="opts">
+    <li>两者越小代表加速越大</li>
+    <li><strong>α = correct_drafts / proposed_drafts，不含 bonus；τ = 每验证步平均吐出 token 数，含 bonus</strong></li>
+    <li>α 和 τ 是同一个量的两种写法</li>
+    <li>α 含 bonus 而 τ 不含 bonus</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。<span class='mono'>accept_rate</span> 衡量单个草稿 token 被接受的概率，<strong>排除</strong> bonus；<span class='mono'>accept_length</span> 衡量每次验证平均产出几个 token，<strong>包含</strong>那个一定吐的 bonus。二者不是同一量，且都<strong>越大越快</strong>。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话描述投机解码的一整轮循环：<span class='mono'>draft</span> 提议 k 个、<span class='mono'>target</span> 一次前向并行验证、<span class='mono'>accept</span> 最长正确前缀并补 <span class='mono'>bonus_token</span>、再向前滚动。并解释为什么这能攻击第4课所讲的<strong>带宽受限</strong>瓶颈：一次昂贵的“全权重搬运”如何被摊薄到多个 token 上。</li>
+    <li>解释 <span class='mono'>accept_rate</span>(α) 与 <span class='mono'>accept_length</span>(τ) 的区别（谁含 bonus、谁不含），以及它们如何共同决定加速比；并说明 SGLang 为何用 <span class='mono'>SpeculativeAlgorithm</span> 枚举（EAGLE、EAGLE3、NGRAM、STANDALONE、DFLASH、FROZEN_KV_MTP、NONE）让“出草稿的方法”可插拔，而 <span class='mono'>BaseSpecWorker</span> 又如何用 <span class='mono'>target_worker</span> 与 <span class='mono'>draft_worker</span> 统一编排提议与验证（EAGLE 详见第44课，验证复用第28课采样器）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">Plain autoregression emits exactly <strong>one</strong> token per target forward, and decode is <strong>bandwidth-bound</strong> (Lesson 4): every step re-reads all weights and the KV cache from HBM, so the compute units sit starved. Speculative decoding breaks the "one token per forward" ceiling — a cheap <span class="mono">draft</span> model first guesses k tokens, then the expensive <span class="mono">target</span> model <strong>verifies all k in ONE forward</strong>, so a single step can emit several tokens while the output distribution stays <strong>provably identical</strong> to plain target sampling (lossless).</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Think of the target model as a <strong>senior editor</strong>: writing every word personally is fast and accurate, but each word forces a full re-read of the style manual — painfully slow. So we hire an <strong>intern (the draft model)</strong> who blasts out a whole draft sentence (k words) from intuition. Instead of writing word by word, the editor <strong>skims the whole draft to "mark it up"</strong>: reading from the start, ticking each word that matches what they had in mind, until the first wrong word. Everything ticked is kept, and the editor <strong>appends one word they are sure of</strong> (the bonus_token). The better the intern guesses, the more words get fixed in one pass; and if the intern goes off-topic, the editor simply rewrites from the divergence point — <strong>never compromising quality</strong>. That is the "cheap guesser, expensive single-pass verifier" division of labor.</p>
+<p>Three details of this analogy map exactly onto the real algorithm. First, the editor "skimming the whole draft to mark it up" corresponds to the target packing k positions into <strong>one forward</strong> to score in parallel — reading the whole draft sentence costs about as much as reading a single word, and that is the source of the speedup. Second, "stop at the first wrong word, keep everything before it, void everything after" corresponds to keeping only the <strong>longest correct prefix</strong>: every later word was written following that wrong word, so once the foundation is crooked, everything built on top must be torn down. Third, the editor "appending one word they are sure of" corresponds to the unbreakable <span class="mono">bonus_token</span>: even if the intern's whole sentence goes off-topic and not a single word is kept, the editor still lays down one word, so the process is <strong>never slower than the editor writing word by word</strong> — only faster or tied.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Slow decode is not a compute shortage — it is producing <strong>one token per step</strong> while hauling the entire weight set, so the GPU waits on memory. The whole power of speculative decoding rests on one plain fact: <strong>verifying k tokens is almost as cheap as verifying 1</strong>, because the target can <strong>score k positions in parallel</strong> inside the same forward. So as long as the draft is accurate, we amortize that expensive weight haul across "one forward + many accepted tokens." SGLang makes this <strong>pluggable</strong>: a <span class="mono">SpeculativeAlgorithm</span> enum picks "how to draft," and a <span class="mono">BaseSpecWorker</span> orchestrates "who proposes, who verifies." How fast it runs comes down to two numbers: acceptance rate and acceptance length.</p>
+<p>One common misconception must be dispelled: speculative decoding <strong>does not approximate the big model with the small model's quality</strong> — every emitted token is vetted by the target model, so quality is indistinguishable from pure target sampling. The draft model plays only the role of a "<strong>bold guesser</strong>": a wrong guess carries no quality cost, only the speed cost of "this guess was wasted, we must haul the weights again." The criteria for picking a draft model are therefore entirely different from picking a generation model: we do not care how good its standalone output is, only how "<strong>aligned its thinking is</strong>" with the target — alignment means high α. That is why methods like EAGLE train the draft head by directly reusing the target's hidden states (Lesson 44): letting the draft "read" the target's internal state is what makes it guess so much like the target.</p></div>
+
+<h2>1. Why autoregression is bandwidth-bound</h2>
+<p>Recall Lesson 4: during decode, generating one token forces the GPU to read the model's <strong>entire weights</strong> plus the ever-growing <span class="mono">KV cache</span> from HBM into the chip, do one matmul, and emit <strong>exactly one</strong> token. The arithmetic intensity is tiny — far more bytes moved than flops done — so the bottleneck is <strong>memory bandwidth</strong>, not compute, and the tensor cores idle waiting for data. In other words, <strong>every token pays a fixed "full weight haul" cost</strong>, yet that haul does pitifully little work (one token's forward). If we could produce several tokens within the <strong>same haul</strong>, the per-token cost drops — exactly the weak spot speculative decoding attacks.</p>
+<p>There is an easily overlooked but crucial asymmetry here: <strong>a forward's cost barely grows with how many tokens you feed it at once</strong>. Prefill is efficient precisely because it stuffs all positions of a whole prompt into one parallel forward; decode is inefficient because it is forced to compute one new position at a time. Speculative decoding essentially <strong>turns "decode" back into "mini-prefill"</strong>: the draft guesses the next k future positions, and the target computes those k positions in parallel just like it would a prompt. As long as a good fraction of those k positions get accepted, we have <strong>traded the cost of one forward for the output of many tokens</strong>, sidestepping the bandwidth wall. Worth stressing: the speedup ceiling does not hinge on how fast the draft model is (it is cheap by construction), but on <strong>how accurately the draft guesses</strong> — accuracy is what keeps the expensive target forward from being wasted.</p>
+
+<h2>2. Draft proposes + target verifies: many tokens per forward</h2>
+<p>Speculative decoding uses two models: a cheap <span class="mono">draft</span> (small) and an expensive <span class="mono">target</span> (big). The procedure: the draft model <strong>autoregressively proposes k tokens</strong> (it is small, so even k steps are cheap); the target then concatenates "original context + those k drafts" and <strong>scores all k positions in parallel in ONE forward</strong>. Next we <strong>compare from the start</strong>: a draft token that lands in the target distribution is <span class="mono">accept</span>ed, until the first rejected position; we keep the <strong>longest correct prefix</strong>, and in all cases the target emits one <strong>always-produced</strong> <span class="mono">bonus_token</span> at the divergence point (or right after a full accept). When draft quality is high, one target forward yields "several accepted drafts + 1 bonus," a big speedup; and because accept/reject uses a criterion mathematically equivalent to target sampling, <strong>the final output distribution is exactly the same as sampling token-by-token from the target — provably lossless</strong>.</p>
+<p>The "compare from the start" criterion deserves unpacking. At each draft position the target produces its own probability distribution; we compare the draft token's probability under the target distribution against the probability the draft model originally assigned it: if the target "endorses" the token more, accept it; otherwise reject it with some probability and resample a replacement from a carefully constructed <strong>residual distribution</strong> — it is exactly this residual correction that guarantees the overall distribution matches pure target sampling to the letter. Once a position is rejected, <strong>all draft tokens after it must be discarded</strong> (they were built on a wrong prefix), which is why we can only keep the "longest correct prefix." Regardless of whether this step accepted 0 or k drafts, the target appends one free <span class="mono">bonus_token</span> sampled by itself at the end, so even if every draft is wiped out, the step still advances at least 1 token — never slower than plain autoregression.</p>
+
+<div class="flow"><div class="node">draft proposes k tokens</div><div class="arrow">→</div><div class="node">target verifies all k in ONE forward</div><div class="arrow">→</div><div class="node">accept longest correct prefix + bonus_token</div></div>
+
+<h2>3. Two core metrics: accept_rate(α) and accept_length(τ)</h2>
+<p>To judge speculative decoding, the papers use two terms — keep them straight. <strong>accept_rate</strong> (α) = <span class="mono">correct_drafts / proposed_drafts</span>, the probability that <strong>a single draft token</strong> is accepted; it <strong>excludes</strong> the free bonus_token — it measures how accurately the draft guesses. <strong>accept_length</strong> (τ) = <strong>the average number of tokens emitted per verify step</strong>; it <strong>includes</strong> the always-emitted bonus_token — it measures how many tokens one target forward actually produces. Both are better when larger: higher α means a more reliable draft, larger τ means more tokens amortizing each expensive forward, i.e. more speedup. Intuitively τ rises monotonically with α, but thanks to the bonus, <strong>even if α is very low, τ is at least 1</strong> (the worst case degrades to plain autoregression — never slower).</p>
+<p>Put these two metrics together with cost and you can estimate the speedup. If the draft proposes k per round, the <strong>gain</strong> per verify step is τ tokens, while the <strong>cost</strong> is mainly one target forward plus the small overhead of running the draft for k steps. Roughly, the ideal speedup is about τ divided by the effective number of forwards that "one target forward + draft overhead" amounts to; when the draft is tiny and nearly free, the speedup is approximately proportional to τ. This reveals a practical trade-off: <strong>bigger k is not always better</strong>. Too small a k caps τ low and saves little; too large a k makes the later draft positions — sitting on longer prefixes — harder to guess, so α drops, rejected drafts waste compute, and the verify forward grows larger. Real systems therefore tune k around the model pair and task difficulty to land the α·τ product at the sweet spot. A frequently cited rule of thumb: <strong>α sets the ceiling of τ, while the bonus sets the floor of τ</strong>. In practice people instrument both metrics alongside end-to-end throughput: a low α usually signals that the draft is poorly aligned with the target and the drafting method should be swapped or the draft head retrained; a τ that will not climb signals that k is set too conservatively or acceptance is too strict. Treat them as the <strong>thermometer of speculative decoding</strong> and tuning gains a concrete handle.</p>
+
+<div class="cols"><div class="col"><strong>Baseline (plain autoregression)</strong><br/>per target forward = <span class="mono">1</span> token<br/>one full weight haul buys one token<br/>bandwidth-bound, compute idle</div><div class="col"><strong>Speculative decoding</strong><br/>per target forward = <span class="mono">m</span> tokens (accepted prefix + bonus)<br/>same haul amortized over many tokens<br/>m is governed by accept_length(τ)</div></div>
+
+<h2>4. SGLang makes "how to draft" pluggable</h2>
+<p>Different ways to "propose drafts" map to different algorithms, which SGLang selects via a <span class="mono">SpeculativeAlgorithm</span> enum whose members include <span class="mono">EAGLE</span>, <span class="mono">EAGLE3</span>, <span class="mono">NGRAM</span>, <span class="mono">STANDALONE</span>, <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">NONE</span>. They share one "propose→verify→accept" skeleton and differ only in "where the draft comes from": some train a lightweight draft head reusing the target's hidden states (the EAGLE family, see <strong>Lesson 44</strong>), some hit history text with n-grams, some attach an independent small model. Orchestrating all this is <span class="mono">BaseSpecWorker</span>: it holds a <span class="mono">target_worker</span> (the big model, verifies k in one forward) and a <span class="mono">draft_worker</span> (the small model, proposes k), and exposes <span class="mono">clear_cache_pool</span> to reset the draft/target KV pools between runs. Verification itself reuses the <strong>sampler</strong> from Lesson 28 — the accept/reject criterion compares against the target distribution at the sampling layer.</p>
+<p>Decoupling "drafting" from "verification orchestration" pays a huge engineering dividend: whether the draft comes from a trained EAGLE head, cheap n-gram hits, or an independent small model, <span class="mono">BaseSpecWorker</span> sees the same set of interfaces — obtain k candidates, organize one target forward, accept under a uniform criterion, append the bonus, clear the cache pool, and move to the next round. So a researcher inventing a new drafting method only needs to add a member to the <span class="mono">SpeculativeAlgorithm</span> enum and implement the corresponding <span class="mono">draft_worker</span>; <strong>the losslessness proof on the verify side, plus batching and cache management, never need rewriting</strong>. This echoes a recurring SGLang design philosophy: cleanly separate "what changes" (how to guess) from "what must not change" (how to verify losslessly). The <span class="mono">NONE</span> member is the degenerate endpoint of this family — selecting it turns speculative decoding off and returns to the Lesson 4 world of honestly emitting one token at a time, a one-switch fallback for when drafting is not worth its cost.</p>
+
+<table class="t"><tr><th>SpeculativeAlgorithm value</th><th>Drafting idea</th></tr>
+<tr><td><span class="mono">EAGLE / EAGLE3</span></td><td>train a lightweight draft head, reuse target hidden states to propose autoregressively (Lesson 44)</td></tr>
+<tr><td><span class="mono">NGRAM</span></td><td>hit candidates directly from generated/prompt text via n-grams, zero extra model</td></tr>
+<tr><td><span class="mono">STANDALONE</span></td><td>attach an independent small draft model to propose</td></tr>
+<tr><td><span class="mono">DFLASH / FROZEN_KV_MTP</span></td><td>multi-token-prediction schemes, reuse/freeze KV to emit many drafts efficiently</td></tr>
+<tr><td><span class="mono">NONE</span></td><td>disable speculative decoding, degrade to plain autoregression</td></tr></table>
+
+<p>View a full round as a loop: the draft proposes, the target verifies in one pass, we accept the longest correct prefix plus the bonus, then roll forward with the newly accepted tokens into the next round. The only truly expensive part of the loop is that <strong>one</strong> target forward — and it pins down m tokens at once.</p>
+<p>One final engineering trade-off to stress: speculative decoding saves <strong>time</strong> by spending <strong>compute and memory</strong>. Each step runs the draft model extra, the target forward computes a bit more for the k draft positions (the rejected ones being pure waste), and KV pools must be maintained for both draft and target — which is exactly why <span class="mono">clear_cache_pool</span> exists. So in scenarios with <strong>sparse requests where the GPU is already idle</strong> (low latency, strongly bandwidth-bound), speculative decoding pays off the most — the compute is sitting free anyway, so betting it on drafts is a bargain; whereas in <strong>high-concurrency scenarios where the GPU is already saturated by large batches</strong> (compute-bound), the extra draft compute can crowd out already-scarce compute, thinning the benefit or even making it negative. It is therefore not a switch to blindly leave on, but one to decide based on load, the model pair, and measured α/τ — which is precisely the practical reason SGLang makes it <strong>pluggable, with a one-switch fallback to <span class="mono">NONE</span></strong>.</p>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>propose</h4><p class="mono">draft_worker</p><p>the draft autoregressively proposes k draft tokens.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>verify</h4><p class="mono">target_worker</p><p>the target scores all k positions in one forward.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>accept</h4><p class="mono">correct_drafts + bonus_token</p><p>keep the longest correct prefix and always emit a bonus_token.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>roll forward</h4><p class="mono">next round</p><p>carry the newly accepted tokens into the next propose.</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/base_spec_worker.py ::BaseSpecWorker</span><span class="ln">the draft worker proposes, the target worker verifies in one pass</span></div><pre>class BaseSpecWorker(ABC):
+    # owns two model workers: a cheap draft + the expensive target
+
+    @property
+    @abstractmethod
+    def target_worker(self):     # the big model — verifies k drafts in ONE forward
+        ...
+    @property
+    @abstractmethod
+    def draft_worker(self):      # the small model — proposes k draft tokens
+        ...
+    @abstractmethod
+    def clear_cache_pool(self):  # reset the draft/target KV pools between runs
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li>Plain autoregression emits 1 token per forward and decode is <strong>bandwidth-bound</strong> (Lesson 4): every step re-reads all weights + KV, so the GPU waits on memory.</li>
+<li>Speculative decoding has a cheap <span class="mono">draft</span> propose k and an expensive <span class="mono">target</span> <strong>verify all k in ONE forward</strong>, <span class="mono">accept</span> the longest correct prefix plus one always-emitted <span class="mono">bonus_token</span>; the output distribution is <strong>provably lossless</strong>.</li>
+<li><strong>accept_rate</strong>(α) = <span class="mono">correct_drafts / proposed_drafts</span>, <strong>excludes</strong> the bonus; <strong>accept_length</strong>(τ) = avg tokens emitted per verify step, <strong>includes</strong> the bonus; larger is faster for both.</li>
+<li>SGLang selects the drafting method via the <span class="mono">SpeculativeAlgorithm</span> enum (EAGLE, EAGLE3, NGRAM, STANDALONE, DFLASH, FROZEN_KV_MTP, NONE); <span class="mono">BaseSpecWorker</span> owns a <span class="mono">target_worker</span> and a <span class="mono">draft_worker</span>.</li>
+<li>Naming: use <span class="mono">accept</span> / <span class="mono">bonus_token</span> / <span class="mono">correct_drafts</span>; EAGLE is Lesson 44, verification reuses the Lesson 28 sampler, and the bottleneck it attacks comes from Lesson 4.</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the core division of labor in speculative decoding?</div>
+  <ol class="opts">
+    <li>Two equally large models take turns generating tokens</li>
+    <li><strong>A cheap draft model proposes k tokens, and the expensive target model verifies all k in one parallel forward</strong></li>
+    <li>The draft both proposes and decides the final output while the target only caches</li>
+    <li>The target proposes tokens one by one and the draft verifies them one by one</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Speculative decoding has the cheap <span class='mono'>draft</span> autoregressively propose k candidates, then the expensive <span class='mono'>target</span> verify all k positions in parallel in <strong>one forward</strong>; one expensive forward thus pins down many tokens. The other options invert the roles of the small and big models.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is speculative decoding <strong>lossless</strong>, and never slower even in the worst case?</div>
+  <ol class="opts">
+    <li><strong>The accept/reject criterion is mathematically equivalent to target sampling, so the distribution is identical; and since a bonus_token is always emitted, every step yields at least 1 token</strong></li>
+    <li>Because it quantizes the output to FP8 to speed up</li>
+    <li>Because the draft model is specially fine-tuned to always guess correctly</li>
+    <li>Because it skips the target's forward computation</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <span class='mono'>accept</span>/reject uses a criterion equivalent to target sampling, so the distribution is <strong>provably lossless</strong>; even if <span class='mono'>accept_rate</span> is low and every draft is rejected, the target still emits one always-produced <span class='mono'>bonus_token</span> at the divergence point, degrading to plain autoregression rather than being slower. It neither skips the target forward nor relates to quantization.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Regarding <span class='mono'>accept_rate</span>(α) and <span class='mono'>accept_length</span>(τ), which is correct?</div>
+  <ol class="opts">
+    <li>Smaller values of both mean more speedup</li>
+    <li><strong>α = correct_drafts / proposed_drafts, excluding the bonus; τ = avg tokens emitted per verify step, including the bonus</strong></li>
+    <li>α and τ are two notations for the same quantity</li>
+    <li>α includes the bonus while τ excludes it</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <span class='mono'>accept_rate</span> measures the acceptance probability of a single draft token and <strong>excludes</strong> the bonus; <span class='mono'>accept_length</span> measures how many tokens each verify step yields on average and <strong>includes</strong> the always-emitted bonus. They are not the same quantity, and larger is faster for both.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, describe one full round of speculative decoding: the <span class='mono'>draft</span> proposes k, the <span class='mono'>target</span> verifies in one parallel forward, we <span class='mono'>accept</span> the longest correct prefix plus a <span class='mono'>bonus_token</span>, then roll forward. Then explain why this attacks the <strong>bandwidth-bound</strong> bottleneck from Lesson 4: how one expensive 'full weight haul' is amortized across many tokens.</li>
+    <li>Explain the difference between <span class='mono'>accept_rate</span>(α) and <span class='mono'>accept_length</span>(τ) (which includes the bonus, which excludes it) and how together they determine the speedup; then explain why SGLang uses the <span class='mono'>SpeculativeAlgorithm</span> enum (EAGLE, EAGLE3, NGRAM, STANDALONE, DFLASH, FROZEN_KV_MTP, NONE) to make 'how to draft' pluggable, and how <span class='mono'>BaseSpecWorker</span> orchestrates proposing and verifying via <span class='mono'>target_worker</span> and <span class='mono'>draft_worker</span> (EAGLE is Lesson 44, verification reuses the Lesson 28 sampler).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="42-multi-hardware-backends.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">多硬件后端</span><span class="lang-en">Multi-hardware backends</span></div></a><a class="next" href="44-eagle-and-next-gen.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">EAGLE 与下一代</span><span class="lang-en">EAGLE &amp; next-gen</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

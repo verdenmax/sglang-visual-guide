@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 42 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 48 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -378,6 +378,12 @@ details[open] > summary { list-style: none; }
   <li>Dissecting an attention kernel</li>
   <li>Operator fusion & CUDA graph</li>
   <li>Multi-hardware backends</li>
+  <li>Speculative decoding overview</li>
+  <li>EAGLE & next-gen</li>
+  <li>Prefill–decode disaggregation</li>
+  <li>TP/PP/EP/DP parallelism</li>
+  <li>Large-scale EP & EPLB</li>
+  <li>Structured outputs & jump-forward</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -8193,6 +8199,738 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
   <ul>
     <li>Using the 'travel charger + adapter head' analogy, explain how the <span class='mono'>SRTPlatform</span> platform-abstraction layer keeps the upper layers (scheduler Lesson 18, model Lesson 26) <strong>hardware-agnostic</strong>: spell out what uniform interface the factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>, <span class='mono'>get_graph_runner_cls()</span>) and the lifecycle hook (<span class='mono'>apply_server_args_defaults()</span>) each translate 'a specific chip's capability' into, and why this turns 'porting new hardware' from a big job into a small one.</li>
     <li>Using the two trees <span class='mono'>srt/platforms/</span> and <span class='mono'>srt/hardware_backend/</span>, describe how SGLang's hardware lineup (NVIDIA, AMD, Ascend NPU, Intel XPU, Moore Threads MUSA, Apple MLX, CPU) is organized; then explain why 'isolating the small handful that is per-chip (kernels Lessons 38/39, attention backend Lesson 33, platform hooks) so the upper layers can be reused' is the engineering basis for 'single GPU to cross-hardware large clusters' (echoing Lesson 62's 'everything is pluggable' theme).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Speculative decoding overview</h1>
+
+<p class="lead">Plain autoregression emits exactly <strong>one</strong> token per target forward, and decode is <strong>bandwidth-bound</strong> (Lesson 4): every step re-reads all weights and the KV cache from HBM, so the compute units sit starved. Speculative decoding breaks the "one token per forward" ceiling — a cheap <span class="mono">draft</span> model first guesses k tokens, then the expensive <span class="mono">target</span> model <strong>verifies all k in ONE forward</strong>, so a single step can emit several tokens while the output distribution stays <strong>provably identical</strong> to plain target sampling (lossless).</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Think of the target model as a <strong>senior editor</strong>: writing every word personally is fast and accurate, but each word forces a full re-read of the style manual — painfully slow. So we hire an <strong>intern (the draft model)</strong> who blasts out a whole draft sentence (k words) from intuition. Instead of writing word by word, the editor <strong>skims the whole draft to "mark it up"</strong>: reading from the start, ticking each word that matches what they had in mind, until the first wrong word. Everything ticked is kept, and the editor <strong>appends one word they are sure of</strong> (the bonus_token). The better the intern guesses, the more words get fixed in one pass; and if the intern goes off-topic, the editor simply rewrites from the divergence point — <strong>never compromising quality</strong>. That is the "cheap guesser, expensive single-pass verifier" division of labor.</p>
+<p>Three details of this analogy map exactly onto the real algorithm. First, the editor "skimming the whole draft to mark it up" corresponds to the target packing k positions into <strong>one forward</strong> to score in parallel — reading the whole draft sentence costs about as much as reading a single word, and that is the source of the speedup. Second, "stop at the first wrong word, keep everything before it, void everything after" corresponds to keeping only the <strong>longest correct prefix</strong>: every later word was written following that wrong word, so once the foundation is crooked, everything built on top must be torn down. Third, the editor "appending one word they are sure of" corresponds to the unbreakable <span class="mono">bonus_token</span>: even if the intern's whole sentence goes off-topic and not a single word is kept, the editor still lays down one word, so the process is <strong>never slower than the editor writing word by word</strong> — only faster or tied.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Slow decode is not a compute shortage — it is producing <strong>one token per step</strong> while hauling the entire weight set, so the GPU waits on memory. The whole power of speculative decoding rests on one plain fact: <strong>verifying k tokens is almost as cheap as verifying 1</strong>, because the target can <strong>score k positions in parallel</strong> inside the same forward. So as long as the draft is accurate, we amortize that expensive weight haul across "one forward + many accepted tokens." SGLang makes this <strong>pluggable</strong>: a <span class="mono">SpeculativeAlgorithm</span> enum picks "how to draft," and a <span class="mono">BaseSpecWorker</span> orchestrates "who proposes, who verifies." How fast it runs comes down to two numbers: acceptance rate and acceptance length.</p>
+<p>One common misconception must be dispelled: speculative decoding <strong>does not approximate the big model with the small model's quality</strong> — every emitted token is vetted by the target model, so quality is indistinguishable from pure target sampling. The draft model plays only the role of a "<strong>bold guesser</strong>": a wrong guess carries no quality cost, only the speed cost of "this guess was wasted, we must haul the weights again." The criteria for picking a draft model are therefore entirely different from picking a generation model: we do not care how good its standalone output is, only how "<strong>aligned its thinking is</strong>" with the target — alignment means high α. That is why methods like EAGLE train the draft head by directly reusing the target's hidden states (Lesson 44): letting the draft "read" the target's internal state is what makes it guess so much like the target.</p></div>
+
+<h2>1. Why autoregression is bandwidth-bound</h2>
+<p>Recall Lesson 4: during decode, generating one token forces the GPU to read the model's <strong>entire weights</strong> plus the ever-growing <span class="mono">KV cache</span> from HBM into the chip, do one matmul, and emit <strong>exactly one</strong> token. The arithmetic intensity is tiny — far more bytes moved than flops done — so the bottleneck is <strong>memory bandwidth</strong>, not compute, and the tensor cores idle waiting for data. In other words, <strong>every token pays a fixed "full weight haul" cost</strong>, yet that haul does pitifully little work (one token's forward). If we could produce several tokens within the <strong>same haul</strong>, the per-token cost drops — exactly the weak spot speculative decoding attacks.</p>
+<p>There is an easily overlooked but crucial asymmetry here: <strong>a forward's cost barely grows with how many tokens you feed it at once</strong>. Prefill is efficient precisely because it stuffs all positions of a whole prompt into one parallel forward; decode is inefficient because it is forced to compute one new position at a time. Speculative decoding essentially <strong>turns "decode" back into "mini-prefill"</strong>: the draft guesses the next k future positions, and the target computes those k positions in parallel just like it would a prompt. As long as a good fraction of those k positions get accepted, we have <strong>traded the cost of one forward for the output of many tokens</strong>, sidestepping the bandwidth wall. Worth stressing: the speedup ceiling does not hinge on how fast the draft model is (it is cheap by construction), but on <strong>how accurately the draft guesses</strong> — accuracy is what keeps the expensive target forward from being wasted.</p>
+
+<h2>2. Draft proposes + target verifies: many tokens per forward</h2>
+<p>Speculative decoding uses two models: a cheap <span class="mono">draft</span> (small) and an expensive <span class="mono">target</span> (big). The procedure: the draft model <strong>autoregressively proposes k tokens</strong> (it is small, so even k steps are cheap); the target then concatenates "original context + those k drafts" and <strong>scores all k positions in parallel in ONE forward</strong>. Next we <strong>compare from the start</strong>: a draft token that lands in the target distribution is <span class="mono">accept</span>ed, until the first rejected position; we keep the <strong>longest correct prefix</strong>, and in all cases the target emits one <strong>always-produced</strong> <span class="mono">bonus_token</span> at the divergence point (or right after a full accept). When draft quality is high, one target forward yields "several accepted drafts + 1 bonus," a big speedup; and because accept/reject uses a criterion mathematically equivalent to target sampling, <strong>the final output distribution is exactly the same as sampling token-by-token from the target — provably lossless</strong>.</p>
+<p>The "compare from the start" criterion deserves unpacking. At each draft position the target produces its own probability distribution; we compare the draft token's probability under the target distribution against the probability the draft model originally assigned it: if the target "endorses" the token more, accept it; otherwise reject it with some probability and resample a replacement from a carefully constructed <strong>residual distribution</strong> — it is exactly this residual correction that guarantees the overall distribution matches pure target sampling to the letter. Once a position is rejected, <strong>all draft tokens after it must be discarded</strong> (they were built on a wrong prefix), which is why we can only keep the "longest correct prefix." Regardless of whether this step accepted 0 or k drafts, the target appends one free <span class="mono">bonus_token</span> sampled by itself at the end, so even if every draft is wiped out, the step still advances at least 1 token — never slower than plain autoregression.</p>
+
+<div class="flow"><div class="node">draft proposes k tokens</div><div class="arrow">→</div><div class="node">target verifies all k in ONE forward</div><div class="arrow">→</div><div class="node">accept longest correct prefix + bonus_token</div></div>
+
+<h2>3. Two core metrics: accept_rate(α) and accept_length(τ)</h2>
+<p>To judge speculative decoding, the papers use two terms — keep them straight. <strong>accept_rate</strong> (α) = <span class="mono">correct_drafts / proposed_drafts</span>, the probability that <strong>a single draft token</strong> is accepted; it <strong>excludes</strong> the free bonus_token — it measures how accurately the draft guesses. <strong>accept_length</strong> (τ) = <strong>the average number of tokens emitted per verify step</strong>; it <strong>includes</strong> the always-emitted bonus_token — it measures how many tokens one target forward actually produces. Both are better when larger: higher α means a more reliable draft, larger τ means more tokens amortizing each expensive forward, i.e. more speedup. Intuitively τ rises monotonically with α, but thanks to the bonus, <strong>even if α is very low, τ is at least 1</strong> (the worst case degrades to plain autoregression — never slower).</p>
+<p>Put these two metrics together with cost and you can estimate the speedup. If the draft proposes k per round, the <strong>gain</strong> per verify step is τ tokens, while the <strong>cost</strong> is mainly one target forward plus the small overhead of running the draft for k steps. Roughly, the ideal speedup is about τ divided by the effective number of forwards that "one target forward + draft overhead" amounts to; when the draft is tiny and nearly free, the speedup is approximately proportional to τ. This reveals a practical trade-off: <strong>bigger k is not always better</strong>. Too small a k caps τ low and saves little; too large a k makes the later draft positions — sitting on longer prefixes — harder to guess, so α drops, rejected drafts waste compute, and the verify forward grows larger. Real systems therefore tune k around the model pair and task difficulty to land the α·τ product at the sweet spot. A frequently cited rule of thumb: <strong>α sets the ceiling of τ, while the bonus sets the floor of τ</strong>. In practice people instrument both metrics alongside end-to-end throughput: a low α usually signals that the draft is poorly aligned with the target and the drafting method should be swapped or the draft head retrained; a τ that will not climb signals that k is set too conservatively or acceptance is too strict. Treat them as the <strong>thermometer of speculative decoding</strong> and tuning gains a concrete handle.</p>
+
+<div class="cols"><div class="col"><strong>Baseline (plain autoregression)</strong><br/>per target forward = <span class="mono">1</span> token<br/>one full weight haul buys one token<br/>bandwidth-bound, compute idle</div><div class="col"><strong>Speculative decoding</strong><br/>per target forward = <span class="mono">m</span> tokens (accepted prefix + bonus)<br/>same haul amortized over many tokens<br/>m is governed by accept_length(τ)</div></div>
+
+<h2>4. SGLang makes "how to draft" pluggable</h2>
+<p>Different ways to "propose drafts" map to different algorithms, which SGLang selects via a <span class="mono">SpeculativeAlgorithm</span> enum whose members include <span class="mono">EAGLE</span>, <span class="mono">EAGLE3</span>, <span class="mono">NGRAM</span>, <span class="mono">STANDALONE</span>, <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">NONE</span>. They share one "propose→verify→accept" skeleton and differ only in "where the draft comes from": some train a lightweight draft head reusing the target's hidden states (the EAGLE family, see <strong>Lesson 44</strong>), some hit history text with n-grams, some attach an independent small model. Orchestrating all this is <span class="mono">BaseSpecWorker</span>: it holds a <span class="mono">target_worker</span> (the big model, verifies k in one forward) and a <span class="mono">draft_worker</span> (the small model, proposes k), and exposes <span class="mono">clear_cache_pool</span> to reset the draft/target KV pools between runs. Verification itself reuses the <strong>sampler</strong> from Lesson 28 — the accept/reject criterion compares against the target distribution at the sampling layer.</p>
+<p>Decoupling "drafting" from "verification orchestration" pays a huge engineering dividend: whether the draft comes from a trained EAGLE head, cheap n-gram hits, or an independent small model, <span class="mono">BaseSpecWorker</span> sees the same set of interfaces — obtain k candidates, organize one target forward, accept under a uniform criterion, append the bonus, clear the cache pool, and move to the next round. So a researcher inventing a new drafting method only needs to add a member to the <span class="mono">SpeculativeAlgorithm</span> enum and implement the corresponding <span class="mono">draft_worker</span>; <strong>the losslessness proof on the verify side, plus batching and cache management, never need rewriting</strong>. This echoes a recurring SGLang design philosophy: cleanly separate "what changes" (how to guess) from "what must not change" (how to verify losslessly). The <span class="mono">NONE</span> member is the degenerate endpoint of this family — selecting it turns speculative decoding off and returns to the Lesson 4 world of honestly emitting one token at a time, a one-switch fallback for when drafting is not worth its cost.</p>
+
+<table class="t"><tr><th>SpeculativeAlgorithm value</th><th>Drafting idea</th></tr>
+<tr><td><span class="mono">EAGLE / EAGLE3</span></td><td>train a lightweight draft head, reuse target hidden states to propose autoregressively (Lesson 44)</td></tr>
+<tr><td><span class="mono">NGRAM</span></td><td>hit candidates directly from generated/prompt text via n-grams, zero extra model</td></tr>
+<tr><td><span class="mono">STANDALONE</span></td><td>attach an independent small draft model to propose</td></tr>
+<tr><td><span class="mono">DFLASH / FROZEN_KV_MTP</span></td><td>multi-token-prediction schemes, reuse/freeze KV to emit many drafts efficiently</td></tr>
+<tr><td><span class="mono">NONE</span></td><td>disable speculative decoding, degrade to plain autoregression</td></tr></table>
+
+<p>View a full round as a loop: the draft proposes, the target verifies in one pass, we accept the longest correct prefix plus the bonus, then roll forward with the newly accepted tokens into the next round. The only truly expensive part of the loop is that <strong>one</strong> target forward — and it pins down m tokens at once.</p>
+<p>One final engineering trade-off to stress: speculative decoding saves <strong>time</strong> by spending <strong>compute and memory</strong>. Each step runs the draft model extra, the target forward computes a bit more for the k draft positions (the rejected ones being pure waste), and KV pools must be maintained for both draft and target — which is exactly why <span class="mono">clear_cache_pool</span> exists. So in scenarios with <strong>sparse requests where the GPU is already idle</strong> (low latency, strongly bandwidth-bound), speculative decoding pays off the most — the compute is sitting free anyway, so betting it on drafts is a bargain; whereas in <strong>high-concurrency scenarios where the GPU is already saturated by large batches</strong> (compute-bound), the extra draft compute can crowd out already-scarce compute, thinning the benefit or even making it negative. It is therefore not a switch to blindly leave on, but one to decide based on load, the model pair, and measured α/τ — which is precisely the practical reason SGLang makes it <strong>pluggable, with a one-switch fallback to <span class="mono">NONE</span></strong>.</p>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>propose</h4><p class="mono">draft_worker</p><p>the draft autoregressively proposes k draft tokens.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>verify</h4><p class="mono">target_worker</p><p>the target scores all k positions in one forward.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>accept</h4><p class="mono">correct_drafts + bonus_token</p><p>keep the longest correct prefix and always emit a bonus_token.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>roll forward</h4><p class="mono">next round</p><p>carry the newly accepted tokens into the next propose.</p></div></div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/base_spec_worker.py ::BaseSpecWorker</span><span class="ln">the draft worker proposes, the target worker verifies in one pass</span></div><pre>class BaseSpecWorker(ABC):
+    # owns two model workers: a cheap draft + the expensive target
+
+    @property
+    @abstractmethod
+    def target_worker(self):     # the big model — verifies k drafts in ONE forward
+        ...
+    @property
+    @abstractmethod
+    def draft_worker(self):      # the small model — proposes k draft tokens
+        ...
+    @abstractmethod
+    def clear_cache_pool(self):  # reset the draft/target KV pools between runs
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li>Plain autoregression emits 1 token per forward and decode is <strong>bandwidth-bound</strong> (Lesson 4): every step re-reads all weights + KV, so the GPU waits on memory.</li>
+<li>Speculative decoding has a cheap <span class="mono">draft</span> propose k and an expensive <span class="mono">target</span> <strong>verify all k in ONE forward</strong>, <span class="mono">accept</span> the longest correct prefix plus one always-emitted <span class="mono">bonus_token</span>; the output distribution is <strong>provably lossless</strong>.</li>
+<li><strong>accept_rate</strong>(α) = <span class="mono">correct_drafts / proposed_drafts</span>, <strong>excludes</strong> the bonus; <strong>accept_length</strong>(τ) = avg tokens emitted per verify step, <strong>includes</strong> the bonus; larger is faster for both.</li>
+<li>SGLang selects the drafting method via the <span class="mono">SpeculativeAlgorithm</span> enum (EAGLE, EAGLE3, NGRAM, STANDALONE, DFLASH, FROZEN_KV_MTP, NONE); <span class="mono">BaseSpecWorker</span> owns a <span class="mono">target_worker</span> and a <span class="mono">draft_worker</span>.</li>
+<li>Naming: use <span class="mono">accept</span> / <span class="mono">bonus_token</span> / <span class="mono">correct_drafts</span>; EAGLE is Lesson 44, verification reuses the Lesson 28 sampler, and the bottleneck it attacks comes from Lesson 4.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the core division of labor in speculative decoding?</div>
+  <ol class="opts">
+    <li>Two equally large models take turns generating tokens</li>
+    <li><strong>A cheap draft model proposes k tokens, and the expensive target model verifies all k in one parallel forward</strong></li>
+    <li>The draft both proposes and decides the final output while the target only caches</li>
+    <li>The target proposes tokens one by one and the draft verifies them one by one</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Speculative decoding has the cheap <span class='mono'>draft</span> autoregressively propose k candidates, then the expensive <span class='mono'>target</span> verify all k positions in parallel in <strong>one forward</strong>; one expensive forward thus pins down many tokens. The other options invert the roles of the small and big models.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is speculative decoding <strong>lossless</strong>, and never slower even in the worst case?</div>
+  <ol class="opts">
+    <li><strong>The accept/reject criterion is mathematically equivalent to target sampling, so the distribution is identical; and since a bonus_token is always emitted, every step yields at least 1 token</strong></li>
+    <li>Because it quantizes the output to FP8 to speed up</li>
+    <li>Because the draft model is specially fine-tuned to always guess correctly</li>
+    <li>Because it skips the target's forward computation</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <span class='mono'>accept</span>/reject uses a criterion equivalent to target sampling, so the distribution is <strong>provably lossless</strong>; even if <span class='mono'>accept_rate</span> is low and every draft is rejected, the target still emits one always-produced <span class='mono'>bonus_token</span> at the divergence point, degrading to plain autoregression rather than being slower. It neither skips the target forward nor relates to quantization.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Regarding <span class='mono'>accept_rate</span>(α) and <span class='mono'>accept_length</span>(τ), which is correct?</div>
+  <ol class="opts">
+    <li>Smaller values of both mean more speedup</li>
+    <li><strong>α = correct_drafts / proposed_drafts, excluding the bonus; τ = avg tokens emitted per verify step, including the bonus</strong></li>
+    <li>α and τ are two notations for the same quantity</li>
+    <li>α includes the bonus while τ excludes it</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <span class='mono'>accept_rate</span> measures the acceptance probability of a single draft token and <strong>excludes</strong> the bonus; <span class='mono'>accept_length</span> measures how many tokens each verify step yields on average and <strong>includes</strong> the always-emitted bonus. They are not the same quantity, and larger is faster for both.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, describe one full round of speculative decoding: the <span class='mono'>draft</span> proposes k, the <span class='mono'>target</span> verifies in one parallel forward, we <span class='mono'>accept</span> the longest correct prefix plus a <span class='mono'>bonus_token</span>, then roll forward. Then explain why this attacks the <strong>bandwidth-bound</strong> bottleneck from Lesson 4: how one expensive 'full weight haul' is amortized across many tokens.</li>
+    <li>Explain the difference between <span class='mono'>accept_rate</span>(α) and <span class='mono'>accept_length</span>(τ) (which includes the bonus, which excludes it) and how together they determine the speedup; then explain why SGLang uses the <span class='mono'>SpeculativeAlgorithm</span> enum (EAGLE, EAGLE3, NGRAM, STANDALONE, DFLASH, FROZEN_KV_MTP, NONE) to make 'how to draft' pluggable, and how <span class='mono'>BaseSpecWorker</span> orchestrates proposing and verifying via <span class='mono'>target_worker</span> and <span class='mono'>draft_worker</span> (EAGLE is Lesson 44, verification reuses the Lesson 28 sampler).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>EAGLE & next-gen</h1>
+
+<p class="lead">In Lesson 43 we learned "draft + verify": a small model guesses <span class="mono">k</span> tokens, the target model verifies them all in one forward, and the accept rate <span class="mono">accept_rate</span> (α) and accept length <span class="mono">accept_length</span> (τ) set the speedup, with a <span class="mono">bonus_token</span> tacked on at the end. But naive drafting has two weaknesses: it can only guess one "chain", and the draft model is itself a whole second model. <strong>EAGLE</strong> does both smarter—it drafts at the <strong>feature level</strong>, and it proposes a <strong>tree</strong> instead of a chain. This lesson unpacks EAGLE and the next-gen family behind it.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Imagine a word-chain guessing game. <strong>Naive drafting (a chain)</strong> is like reciting five characters in one breath with your eyes shut: if the second one is wrong, the last three are all wasted. <strong>EAGLE's tree drafting</strong> instead prepares the <span class="mono">topk</span> most likely branches at every step—"this step could be A, or B, or C"—and weaves all those possibilities into a branching tree. The teacher (target model) glances at the whole tree once and ticks off the longest correct path. Even if one branch is wrong, its <strong>sibling</strong> branches survive, so nothing collapses entirely. A tree covers far more "continuations" than a single chain, so one verification accepts more tokens.</p>
+<p>Also, naive drafting must raise a full "second student" to guess words, which is costly. EAGLE is clever: it does not start from scratch but borrows the <strong>hidden state</strong> the teacher just computed (Lesson 8) as the clue, attaching only a tiny "draft head" to write the next feature. The clue comes from the teacher itself, so the draft is naturally aligned with the teacher—fast and accurate.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Think of speculative decoding as a bet: every target forward is expensive, and we want "as many confirmed tokens as possible per forward". Lesson 43 raised the expected payoff from 1 to τ using a chain; EAGLE pushes τ higher <strong>without adding target forwards</strong> via two moves: <strong>feature-level drafting</strong> makes the draft more accurate (each branch is more likely accepted), and <strong>tree drafting + tree attention</strong> lets one verification examine many candidate paths at once (accepting the longest). Together, <span class="mono">accept_length</span> rises noticeably while per-token target compute amortizes down. That is why the whole list of <span class="mono">SpeculativeAlgorithm</span>—from <span class="mono">EAGLE</span> to <span class="mono">EAGLE3</span>, then <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">STANDALONE</span>, <span class="mono">NGRAM</span>—evolves along the same line: make the draft more accurate, and cover more per verification.</p>
+</div>
+
+<h2>1. From "chain" to "tree": why EAGLE stops wasting</h2>
+<p>A naive draft model proposes one <strong>chain</strong> per round: token #1 → #2 → … → #k. During verification, as soon as some token disagrees with the target distribution, everything after it is discarded. The problem: language naturally branches—at many positions several "next words" are all plausible. A chain bets on just one and loses everything when wrong. EAGLE's key insight is—since a target forward is already paid for, why not verify <strong>many</strong> candidates at once? So across <span class="mono">spec_steps</span> draft steps, EAGLE keeps <span class="mono">topk</span> candidate branches at each step, organizing them into a <strong>token tree</strong> of <span class="mono">draft_token_num</span> nodes. Every root→node path is a valid candidate continuation.</p>
+
+<h2>2. Feature-level drafting: borrowing the teacher's hidden state</h2>
+<p>EAGLE no longer trains a separate full draft model; it continues <strong>at the feature level</strong>. Concretely, it reuses the target model's last-layer <strong>hidden state</strong> (that high-dimensional vector from Lesson 8), combined with the previously sampled token, to predict the "next feature". Because the input clue comes directly from the target model itself, the draft head needs only a tiny amount of parameters to stay highly aligned with the target—high alignment means the draft's acceptance probability (α) is naturally higher. That is what "feature-level autoregression" in EAGLE's name means: predicting the next step in feature space, not running a language model from scratch.</p>
+
+<h2>3. Tree attention: verify the whole tree in one forward</h2>
+<p>With a tree, how do we verify it all in a single target forward? The key is <strong>tree attention</strong>. EAGLE builds a <span class="mono">custom_mask</span> so each node can only "see" its <strong>ancestors</strong>, not side branches. This way every "root → node" path behaves like a normal contiguous sequence in attention, scored independently without cross-contamination. The tree structure is encoded by three index groups: <span class="mono">retrieve_index</span> maps flat positions back to tree nodes, <span class="mono">retrieve_next_token</span> records the child going down a branch, and <span class="mono">retrieve_next_sibling</span> records <strong>sibling</strong> links—exactly these sibling links make the structure a <strong>tree</strong> rather than a chain. Verification walks the tree, accepts the longest valid path, then appends the <span class="mono">bonus_token</span>; note <span class="mono">accept_length</span> is counted <strong>including the bonus</strong>. The one actually running this tree-mask kernel on the GPU is the attention <strong>backend</strong> from Lesson 33.</p>
+
+<h2>4. The next-gen family: EAGLE3 and beyond</h2>
+<p>EAGLE3 and the wider family push along the same line: more draft depth, multi-token prediction (MTP), n-gram drafts, and more. The <span class="mono">SpeculativeAlgorithm</span> enum from Lesson 43—<span class="mono">EAGLE</span>, <span class="mono">EAGLE3</span>, <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">STANDALONE</span>, <span class="mono">NGRAM</span>—is just different trade-offs along this path. Whichever one, it ultimately relies on the attention backend to actually compute the tree mask, and the yardstick is always the same: under the same number of target forwards, can we accept a longer path? On naming, remember: use <span class="mono">accept</span> / <span class="mono">bonus_token</span>, never <span class="mono">accepted</span> / <span class="mono">verified_id</span>; <span class="mono">accept_length</span> always includes the bonus.</p>
+
+<div class="layers">
+<div class="layer"><strong>root</strong>: the last confirmed token (tree height starts here)</div>
+<div class="layer"><strong>Layer 1 (topk children)</strong>: branch A ✓ ｜ branch B ｜ branch C — each a candidate next token</div>
+<div class="layer"><strong>Layer 2 (grandchildren)</strong>: A→a1 ✓ ｜ A→a2 ｜ B→b1 ｜ C→c1 — siblings cannot see each other</div>
+<div class="layer"><strong>Layer 3</strong>: A→a1→x ✓ — <span class="mono">green ✓ path root→A→a1→x</span> is accepted as the longest valid path, then a bonus_token is appended</div>
+</div>
+
+<div class="cols">
+<div class="col"><strong>Chain draft (naive)</strong><br>root → t1 → t2 → t3 → t4<br>Bets on one path only; if t2 is wrong, t3/t4 are wasted.<br>One target forward examines just <strong>1</strong> continuation, expected accept length capped by single-path hit rate.</div>
+<div class="col"><strong>Tree draft (EAGLE)</strong><br>root forks into topk branches, growing layer by layer into a tree.<br>One target forward examines many continuations <strong>in parallel</strong>, accepting the longest valid one.<br>Covers more "plausible continuations" → higher <span class="mono">accept_length</span> for the same number of forwards.</div>
+</div>
+
+<table class="t">
+<tr><th>EagleVerifyInput field</th><th>what it encodes</th></tr>
+<tr><td><span class="mono">draft_token</span></td><td>all tree nodes' candidate tokens, flattened</td></tr>
+<tr><td><span class="mono">custom_mask</span></td><td>tree-attention mask: each node sees only its ancestors</td></tr>
+<tr><td><span class="mono">retrieve_index</span></td><td>flat position → tree node</td></tr>
+<tr><td><span class="mono">retrieve_next_token</span></td><td>child link going down a branch (next token)</td></tr>
+<tr><td><span class="mono">retrieve_next_sibling</span></td><td>sibling links — what makes it a "tree", not a chain</td></tr>
+<tr><td><span class="mono">spec_steps</span></td><td>draft depth (tree height)</td></tr>
+<tr><td><span class="mono">topk</span></td><td>branches kept per step</td></tr>
+<tr><td><span class="mono">draft_token_num</span></td><td>total tree nodes verified in one target forward</td></tr>
+</table>
+
+<div class="flow">
+<div class="node">reuse target hidden state + previous token</div>
+<div class="arrow">→</div>
+<div class="node">draft head builds topk tree (spec_steps levels)</div>
+<div class="arrow">→</div>
+<div class="node">tree attention verifies the whole tree in one forward</div>
+<div class="arrow">→</div>
+<div class="node">accept longest valid path + bonus_token</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_info.py ::EagleVerifyInput</span><span class="ln">a token tree + tree attention: verify the whole candidate tree in one forward</span></div><pre>class EagleVerifyInput(SpecInput):
+    draft_token: torch.Tensor          # all tree nodes' candidate tokens, flattened
+    custom_mask: torch.Tensor          # tree-attention mask: each node sees only its ancestors
+    retrieve_index: torch.Tensor       # flat position -&gt; tree node
+    retrieve_next_token: torch.Tensor  # tree child links (next token down a branch)
+    retrieve_next_sibling: torch.Tensor  # tree sibling links -&gt; this is what makes it a TREE, not a chain
+    spec_steps: int                    # draft depth (tree height)
+    topk: int                          # branches kept per step
+    draft_token_num: int               # total tree nodes verified in one target forward</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li>EAGLE drafts at the <strong>feature level</strong>: it reuses the target model's <span class="mono">hidden state</span> (Lesson 8) + the previously sampled token to predict the next feature, so the draft head is tiny and naturally aligned with the target, giving higher <span class="mono">accept_rate</span> (α).</li>
+<li>EAGLE proposes a <strong>token tree</strong>, not a chain: across <span class="mono">spec_steps</span> draft steps it keeps <span class="mono">topk</span> branches per step, totaling <span class="mono">draft_token_num</span> nodes.</li>
+<li><strong>Tree attention</strong> uses <span class="mono">custom_mask</span> so each node sees only its ancestors; <span class="mono">retrieve_index</span> / <span class="mono">retrieve_next_token</span> / <span class="mono">retrieve_next_sibling</span> encode the tree, where the <strong>sibling links</strong> are exactly what makes it a tree rather than a chain.</li>
+<li>One target forward verifies the whole tree, accepting the longest valid path + <span class="mono">bonus_token</span>; a tree covers more continuations → higher <span class="mono">accept_length</span> (including the bonus) for the same number of forwards.</li>
+<li><span class="mono">EAGLE3</span> and the family (<span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">STANDALONE</span>, <span class="mono">NGRAM</span>) push further; the one actually running the tree-mask kernel is the attention <strong>backend</strong> from Lesson 33. Use <span class="mono">accept</span>/<span class="mono">bonus_token</span>, not <span class="mono">accepted</span>/<span class="mono">verified_id</span>.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What exactly is EAGLE's 'feature-level drafting'?</div>
+  <ol class="opts">
+    <li>Training a separate draft model as large as the target to generate from scratch</li>
+    <li><strong>It reuses the target model's last hidden state + the previously sampled token to predict the next feature, so the draft head is tiny and naturally aligned with the target</strong></li>
+    <li>Quantizing the target's weights to FP8 before drafting</li>
+    <li>Directly copying the target's previous output token as the draft</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. EAGLE does not raise a full second model; it continues at the <strong>feature level</strong>: using the target's <span class='mono'>hidden state</span> (Lesson 8) plus the previously sampled token to predict the next feature. The draft head is tiny and highly aligned with the target, so <span class='mono'>accept_rate</span>(α) is higher.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does EAGLE proposing a token <strong>tree</strong> accept more tokens than a naive <strong>chain</strong>?</div>
+  <ol class="opts">
+    <li>A tree skips verification and accepts all nodes directly</li>
+    <li>A tree swaps the draft model for a larger one</li>
+    <li>A tree runs several more target forwards, so it accepts more</li>
+    <li><strong>A chain bets on one continuation and wastes the rest if it errs midway; a tree keeps topk branches per step, examines many continuations in parallel in one target forward, and accepts the longest valid path</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Language naturally branches and a chain bets on one path; EAGLE keeps <span class='mono'>topk</span> branches per step across <span class='mono'>spec_steps</span> to form a tree, covering more continuations in parallel under the <strong>same number of target forwards</strong> and accepting the longest valid path, so <span class='mono'>accept_length</span> rises. It does not add target forwards.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. In <span class='mono'>EagleVerifyInput</span>, which field makes the structure a 'tree' not a 'chain', and what verifies the whole tree at once?</div>
+  <ol class="opts">
+    <li><strong>retrieve_next_sibling's sibling links make it a tree; the custom_mask tree attention lets each node see only its ancestors, verifying the whole tree in one target forward</strong></li>
+    <li>draft_token defines the shape, and verification is serial token-by-token forwards</li>
+    <li>spec_steps makes the tree, and verification skips the attention mask</li>
+    <li>topk makes the tree, and the draft model verifies itself</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <span class='mono'>retrieve_next_sibling</span>'s <strong>sibling links</strong> are exactly what makes it a tree not a chain (together with <span class='mono'>retrieve_index</span> / <span class='mono'>retrieve_next_token</span> encoding the tree); <span class='mono'>custom_mask</span> implements <strong>tree attention</strong> so each node sees only its ancestors, letting every root→node path be scored independently like a normal sequence, verifying the whole tree in <strong>one</strong> target forward and accepting the longest valid path + <span class='mono'>bonus_token</span>.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain EAGLE's two improvements: (1) why <strong>feature-level drafting</strong> (reusing the Lesson 8 hidden state + previous token) makes the draft head tiny yet aligned with the target, raising <span class='mono'>accept_rate</span>(α); and (2) why <strong>tree drafting</strong> raises <span class='mono'>accept_length</span>(τ, including the bonus) without adding target forwards.</li>
+    <li>Describe how <span class='mono'>EagleVerifyInput</span> encodes a token tree using <span class='mono'>custom_mask</span> and <span class='mono'>retrieve_index</span> / <span class='mono'>retrieve_next_token</span> / <span class='mono'>retrieve_next_sibling</span>, and explain how, in one target forward, <strong>tree attention</strong> scores every root→node path like a normal sequence, accepts the longest valid path, then appends a <span class='mono'>bonus_token</span>; then explain the role of the Lesson 33 attention <strong>backend</strong> here, and why the naming uses <span class='mono'>accept</span>/<span class='mono'>bonus_token</span> rather than <span class='mono'>accepted</span>/<span class='mono'>verified_id</span>.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Prefill–decode disaggregation</h1>
+
+<p class="lead">A request really wears two faces: <strong>prefill</strong> swallows the entire prompt in one shot, while <strong>decode</strong> emits one token at a time. Their appetites for hardware are exact opposites—one eats <span class="mono">compute</span>, the other eats <span class="mono">bandwidth</span>. Bolting them onto the same GPU is like making a sprinter and a marathoner share one lane; they drag each other down. This lesson covers SGLang's <strong>PD disaggregation (Prefill–decode disaggregation)</strong>: split the two phases into separate GPU pools so each can saturate its own bottleneck.</p>
+<p>Why does this deserve its own lesson? Because it is one of the key switches that decides whether large-scale online inference can be <strong>both fast and cheap</strong>. Cram the two faces onto one card and you forever compromise between TTFT and ITL; split them into pools and the two metrics can each be <strong>optimized properly</strong>. By the end you should be able to state three things clearly: why to split, what exactly gets transferred after the split, and what interface SGLang uses to abstract that transfer into a pluggable component.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a <strong>restaurant</strong>. The <span class="mono">prep station</span> (prefill) has to process a whole basket of ingredients in a short burst—a <strong>burst of heavy lifting</strong> that needs many hands chopping at once (compute-intensive). The <span class="mono">serving station</span> (decode) hands out dishes one by one, and between each it keeps running back to the kitchen for seasoning and to read the recipe (re-reading weights and KV); the hands are mostly <strong>waiting and carrying</strong> while the knife skills sit idle (bandwidth-intensive).</p>
+<p>If the <strong>same cooks</strong> do both prep and serving, then every time a big order arrives (a long prompt) all the cooks get yanked off to chop, and the customers waiting for their next dish just sit there—this is exactly how a long prefill <strong>stalls</strong> everyone's decode latency. PD disaggregation says: <strong>one crew only preps, another crew only serves</strong>, and the half-finished work (the KV cache) is rushed across on a <span class="mono">conveyor belt</span>. Each crew does its own job and neither slows the other.</p>
+<p>The analogy stretches one layer further: the prep and serving stations <strong>can be staffed separately</strong>. When a lunchtime flood of delivery orders pours in (a peak of long prompts), send more people to prep; in the evening when dine-in guests linger and order many courses (long outputs), send more people to serve. The headcount ratio of the two stations flexes with traffic, neither constraining the other—exactly mirroring the operational freedom of scaling the prefill pool and decode pool independently by traffic profile.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Recall <strong>Lesson 4</strong>: prefill computes the whole prompt in <strong>one big parallel pass</strong>, saturating the GPU's matrix-multiply units—it is <strong>compute-bound</strong>; decode produces just one token per step yet must re-read <strong>all the weights + KV</strong> every step, leaving the math units mostly idle—it is <strong>bandwidth-bound</strong>. On the same card they inevitably fight: slip in a long prefill and the ITL (inter-token latency) of decoding requests jumps. This is the <strong>TTFT vs ITL</strong> tension (<strong>Lessons 8 / 22</strong>'s chunked prefill mitigates but doesn't eliminate it).</p>
+<p>PD disaggregation splits the two phases <strong>physically</strong>: a <strong>prefill pool</strong> does only prefills, a <strong>decode pool</strong> does only decodes; once prefill finishes, the request's <strong>KV cache</strong> (<strong>Lesson 30</strong>'s paged KV) is <strong>transferred</strong> over a fast interconnect like RDMA / NVLink to the decode GPU, which then streams tokens. Each pool can be <strong>sized and tuned independently</strong> and each saturates its own bottleneck. Forward-ref <strong>Lessons 46 / 47</strong>: disaggregation + large-scale EP is how DeepSeek-scale serving is built.</p>
+<p>Seen from another angle, PD disaggregation simply applies the engineering principle of <strong>specialization of labor</strong> to inference hardware. Just as a modern factory won't have one worker run both the lathe and quality control, but splits the line into specialized stations each fitted with the right equipment, an inference service shouldn't make one GPU carry both compute-bound prefill and bandwidth-bound decode. The cost of the division is an extra <strong>hand-off</strong> between stations (the KV transfer); the reward is that every station can be polished to peak utilization. Whether you profit from the division depends on whether the <strong>hand-off cost is low enough</strong>—which leads us to its hard dependency on fast interconnects.</p>
+</div>
+
+<h2>1. Why split? Two faces, conflicting resources</h2>
+<p>Across a request's lifetime, <strong>prefill</strong> and <strong>decode</strong> place <strong>mirror-opposite</strong> demands on the GPU. Prefill feeds an N-token prompt into the network as one big batch, all tokens computed in parallel, the matrix multiplies keeping the <span class="mono">Tensor Cores</span> fully fed—it is <strong>short on compute</strong>, with bandwidth to spare. Decode is the reverse: each step has just 1 new token and tiny compute, but every emitted token requires re-reading the <strong>entire set of weights</strong> and the <strong>accumulated KV cache</strong> from memory, so the bottleneck is squarely <strong>memory bandwidth</strong> while the math units sit idle.</p>
+<p>This "one busy, one idle" mismatch isn't occasional but a <strong>structural feature that runs through the whole request</strong>: as long as the model generates autoregressively, prefill and decode have inherently opposite resource profiles. And precisely because it is structural, pure scheduling tricks (priorities, slicing, preemption) can only <strong>ease</strong> it, never <strong>eliminate</strong> it; the real fix must drop down to the level of "put the two kinds of work on different hardware." That is exactly what PD disaggregation does.</p>
+<p>When the two share one GPU, conflict is unavoidable. The scheduler must either favor prefill (raising the ITL of decoding requests) or favor decode (slowing new requests' TTFT). <span class="mono">Chunked prefill</span> (Lesson 22) slices a long prefill into small pieces interleaved between decode steps, shrinking the jitter—but as long as both kinds of work <strong>queue on the same compute</strong>, the interference can't be fully removed. The insight of PD disaggregation is blunt: <strong>since the two faces don't eat the same thing, don't make them fight over one table</strong>.</p>
+<p>Quantifying the mismatch makes it tangible. Prefill's <strong>arithmetic intensity</strong> (multiply-adds per byte of weights read) is high, because a whole batch of tokens shares one weight read; decode's arithmetic intensity is far lower, re-hauling the weights for almost every token, so what really decides decode speed is not peak compute but <strong>memory bandwidth</strong>. This means: piling more compute onto decode barely helps, and piling more bandwidth onto prefill doesn't help either. Bolt them onto one card and, however you tune it, half the hardware sits in <strong>structural idleness</strong>—either compute idle or bandwidth idle.</p>
+<p>Worse is the <strong>latency coupling</strong>. In online serving TTFT (time to first token) is set by prefill and ITL (inter-token latency) by decode, and these are often the metrics that different requests and different users care about most. Co-located, the prefill of one long prompt monopolizes compute for several milliseconds, during which all decoding requests are <strong>suspended</strong> and ITL spikes. Chunked prefill slices the long prefill and interleaves it, flattening the spike into small ripples, but at the price of scheduling overhead from repeatedly interrupting decode; in essence it does <strong>time-multiplexing within one resource pool</strong>, whereas PD disaggregation does <strong>spatial isolation</strong> directly, removing the preemption at the root.</p>
+
+<div class="flow"><div class="node">request arrives</div><div class="arrow">→</div><div class="node">prefill pool<br><span class="mono">compute-bound</span></div><div class="arrow">→</div><div class="node">KV transfer<br><span class="mono">RDMA/NVLink</span></div><div class="arrow">→</div><div class="node">decode pool<br><span class="mono">bandwidth-bound</span></div><div class="arrow">→</div><div class="node">stream tokens</div></div>
+
+<h2>2. After the split: two independent pools</h2>
+<p>PD disaggregation cuts the cluster in two. The <strong>prefill pool</strong> chases <strong>throughput</strong>: it handles bursts of big parallel computation, suits high-compute configs and can tolerate slightly larger batches; its output isn't tokens but <strong>a computed KV cache</strong>. The <strong>decode pool</strong> chases <strong>low, steady token latency</strong>: it wants high memory bandwidth and small, stable batches to drive each request's ITL down. The two pools' sizes, batching strategies, and parallelism can be <strong>tuned independently</strong>—impossible when they're bolted together.</p>
+<p>"Independent" also shows up in <strong>failure handling and scaling</strong>. If a node in the decode pool dies, the router can redirect subsequent requests to other decode workers while the prefill pool is wholly unaffected; conversely, to temporarily boost prefill throughput you just add cards to the prefill pool without touching decode. This <strong>decoupled elasticity</strong> lets online serving ride out traffic swings more smoothly, and lets ops actions like canary upgrades and capacity planning proceed pool by pool without interrupting each other.</p>
+<p>The crucial hand-off is the <strong>KV-cache transfer</strong>. After prefill finishes, the request's <strong>paged KV</strong> (Lesson 30, KV stored page by page) must be <strong>shipped</strong> from the prefill GPU's memory to the decode GPU's memory. This step rides a high-speed interconnect like <span class="mono">RDMA</span> or <span class="mono">NVLink</span>, the goal being a transfer time far smaller than the recomputation it saves. A <strong>router / load-balancer</strong> (Lesson 13) is responsible for <strong>pairing</strong> a prefill worker with a decode worker per request.</p>
+<p>Independent tuning brings a very practical lever: the <strong>pool ratio</strong>. If production traffic is "long prompts, short outputs" (e.g. retrieval-augmented QA), prefill is the pressure point, so provision more prefill nodes; if it is "short prompts, long outputs" (e.g. long-form writing, reasoning chains), decode is the pressure point, so provision more decode nodes. This P∶D ratio can be <strong>elastically adjusted</strong> with the traffic profile, even scaled by time of day—an operational freedom the single-card co-location mode simply cannot offer. The two pools can also each pick the most cost-effective hardware: high-compute cards for the prefill pool, high-bandwidth / large-memory cards for the decode pool.</p>
+<p>Of course, disaggregation is no free lunch. It introduces a <strong>cross-node KV transfer</strong>, adding the network as one more link; if the interconnect isn't fast enough, transfer time eats back into the savings and can even raise TTFT. So PD disaggregation is premised on having a <strong>fast enough interconnect</strong> (RDMA/NVLink) and on <strong>overlapping transfer with compute</strong> as much as possible. Understanding this boundary tells you it suits large, well-interconnected clusters—not any random pair of cards that should be split.</p>
+
+<div class="cols"><div class="col"><strong>Prefill node</strong><br><span class="mono">compute-bound</span><br>computes the whole prompt in one parallel pass<br>saturates Tensor Cores / compute<br>output: a computed <strong>KV cache</strong></div><div class="col"><strong>Decode node</strong><br><span class="mono">bandwidth-bound</span><br>generates only 1 token per step<br>re-reads weights + KV, compute idle<br>output: <strong>streamed tokens</strong></div></div>
+
+<h2>3. How SGLang abstracts the transfer</h2>
+<p>Interconnect hardware varies wildly across clusters, so SGLang doesn't hard-code the transfer logic—it hides it behind a <strong>pluggable connector</strong>. The prefill side holds a <span class="mono">BaseKVSender</span>; the decode side holds a mirrored <span class="mono">BaseKVReceiver</span>. The sender's interface is deliberately spare: <span class="mono">init</span> first <strong>announces</strong> how many KV pages will move; <span class="mono">send</span> <strong>pushes</strong> this request's KV pages to the decode worker; <span class="mono">poll</span> returns a <strong>non-blocking</strong> <span class="mono">KVPoll</span> status (Bootstrapping / WaitingForInput / Transferring / Success / Failed) so the scheduler never has to block; <span class="mono">get_transfer_metric</span> yields a <span class="mono">KVTransferMetric</span> (bytes, latency) for observability.</p>
+<p>The payoff of this abstraction is <strong>swappable backends</strong>: concrete connectors include <span class="mono">Mooncake</span>, <span class="mono">NIXL</span>, and <span class="mono">ascend</span>, each binding a different interconnect stack, yet the scheduler above sees the same <span class="mono">init / send / poll</span> contract. The decode-side <span class="mono">BaseKVReceiver</span> is symmetric: <span class="mono">init</span> + <span class="mono">receive</span> + <span class="mono">poll</span>, and when poll returns <span class="mono">Success</span> the KV has landed and decode can start emitting tokens.</p>
+<p>Why must <span class="mono">poll</span> be <strong>non-blocking</strong>? Because the scheduler is a single thread driving the state machine of a large batch of requests, and it must never stall the whole batch waiting on one KV transfer. A non-blocking poll lets the scheduler just <strong>glance</strong> at the current status each round: still <span class="mono">Bootstrapping</span> (handshake) means go serve other requests first, <span class="mono">Transferring</span> means keep waiting, only <span class="mono">Success</span> advances that request to decode, and <span class="mono">Failed</span> triggers retry / fallback. This "state machine + polling" design is the classic way high-concurrency services decouple slow I/O from fast scheduling.</p>
+<p>Designing the sender interface so <strong>spare</strong> (only four actions: init/send/poll/get_transfer_metric) is also deliberate: the narrower the interface, the easier new backends are to plug in. To adopt a new interconnect you only implement these methods and make poll correctly translate the underlying progress into the five <span class="mono">KVPoll</span> states; not a line of the upper routing, scheduling, or pairing logic needs to change. The <span class="mono">KVTransferMetric</span> (bytes, latency) returned by <span class="mono">get_transfer_metric</span> feeds monitoring, letting you pinpoint "is some interconnect dragging us down."</p>
+
+<table class="t"><tr><th>Method</th><th>Side / role</th></tr><tr><td><span class="mono">init(num_kv_indices, aux_index)</span></td><td>prefill side: announce how many KV pages will move</td></tr><tr><td><span class="mono">send(kv_indices)</span></td><td>prefill side: push this request's KV pages to the decode worker</td></tr><tr><td><span class="mono">poll() → KVPoll</span></td><td>both sides: non-blocking transfer status</td></tr><tr><td><span class="mono">get_transfer_metric()</span></td><td>prefill side: returns KVTransferMetric (bytes, latency)</td></tr><tr><td><span class="mono">BaseKVReceiver.receive()</span></td><td>decode side: receive KV pages (mirror of send)</td></tr></table>
+
+<p>Unrolling one successful transfer into a timeline gives the vertical sequence below. Note how <span class="mono">poll</span> is called repeatedly in the middle: it <strong>doesn't block</strong>, just reports the current status each time, until <span class="mono">Success</span>.</p>
+
+<div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>init</h4><p>announce num_kv_indices KV pages to move</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>send</h4><p>push the request's KV pages to the decode side</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>poll → KVPoll</h4><p>Transferring (still moving, <strong>non-blocking</strong>)</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>poll → Success</h4><p>KV received, decode starts emitting tokens</p></div></div></div>
+
+<h2>4. Putting it back in the big picture</h2>
+<p>PD disaggregation isn't an isolated trick; it strings several past lessons together: Lesson 4 gave us the two-phase resource profiles, Lessons 8 / 22's TTFT/ITL tension is the pain it solves, Lesson 30's paged KV is the object being shipped, and Lesson 13's router pairs the workers. This string of references isn't padding; it shows that PD disaggregation is essentially a <strong>system-level integration</strong> built on top of every mechanism before it—drop any one link and it won't stand up. Looking ahead, <strong>Lessons 46 / 47</strong> stack <strong>disaggregation</strong> with <strong>large-scale expert parallelism (EP)</strong>—the prefill and decode pools each get their own EP sharding, which is the real recipe for DeepSeek-scale online serving. Grasp "two faces, pool-and-conquer, KV transfer," and you hold the backbone of modern large-scale inference serving, and grasp the foundation the later advanced lessons build upon.</p>
+<p>Let's walk the whole pipeline once more as a recap: a request first hits the <strong>router</strong> and is assigned a prefill worker; prefill computes the entire prompt in one pass, produces a paged KV, and via <span class="mono">BaseKVSender</span>'s <span class="mono">init → send</span> pushes those pages to the paired decode worker; the decode-side <span class="mono">BaseKVReceiver</span> receives, both sides <span class="mono">poll</span> until the status flips to <span class="mono">Success</span>; at that moment the KV is in place in the decode GPU's memory, decode takes over and streams tokens back to the user one at a time. Throughout, the prefill pool is always "prepping" at full compute and the decode pool always "serving" at full bandwidth, with neither idling for the other. You could say disaggregation turns "hardware utilization" from a reluctant compromise inside a single card into a clear division of labor at the whole-cluster level that is designable, measurable, optimizable, and elastically scalable.</p>
+<p>One last easily-missed point: PD disaggregation changes the <strong>physical deployment</strong>, not the model's own math. The same model, the same weights, the same KV—it merely puts "computing the KV" and "using the KV" on different machines, with one explicit transfer in between. Precisely because it touches deployment without touching semantics, it can act as a <strong>composable building block</strong>, stacked with quantization, tensor parallelism, expert parallelism (EP), and more—which is exactly why the next stage (Lessons 46/47) can combine it with large-scale EP to build a DeepSeek-scale online inference system.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVSender</span><span class="ln">the prefill side ships KV to the decode side: init → send → poll(KVPoll)</span></div><pre>class BaseKVSender(ABC):                 # lives on the PREFILL side
+    @abstractmethod
+    def init(self, num_kv_indices, aux_index=None):
+        ...                              # announce how many KV pages will move
+    @abstractmethod
+    def send(self, kv_indices):
+        ...                              # push this request's KV pages to the decode worker
+    @abstractmethod
+    def poll(self):                      # non-blocking status -&gt; KVPoll
+        ...                              # Bootstrapping / WaitingForInput / Transferring / Success / Failed
+    @abstractmethod
+    def get_transfer_metric(self):       # -&gt; KVTransferMetric (bytes, latency)
+        ...
+# BaseKVReceiver mirrors this on the DECODE side (init + receive + poll)</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Two faces, opposite resources</strong>: prefill is a compute-bound parallel pass; decode is bandwidth-bound token-by-token generation. Co-locating them inevitably pits TTFT against ITL.</li>
+<li><strong>PD disaggregation = pool and conquer</strong>: the prefill pool only prefills, the decode pool only decodes, each saturating its own bottleneck and tuned independently.</li>
+<li><strong>What gets transferred is the KV cache</strong>: prefill's computed paged KV (Lesson 30) is shipped over RDMA / NVLink to the decode GPU, which then streams tokens.</li>
+<li><strong>Pluggable connector</strong>: <span class="mono">BaseKVSender</span> (init / send / poll → KVPoll / get_transfer_metric) and the mirrored <span class="mono">BaseKVReceiver</span>; backends include Mooncake, NIXL, ascend.</li>
+<li><strong>poll is non-blocking</strong>: status moves through Bootstrapping / WaitingForInput / Transferring / Success / Failed, and Success means KV has landed and decode begins.</li>
+<li><strong>Connecting the dots</strong>: the router (Lesson 13) pairs workers; forward-ref Lessons 46 / 47, disaggregation + large-scale EP is the recipe for DeepSeek-scale serving.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why split prefill and decode into separate GPU pools?</div>
+  <ol class="opts">
+    <li>After splitting, the KV cache is no longer needed</li>
+    <li><strong>The two phases have opposite resource profiles: prefill is a compute-bound parallel pass, decode is bandwidth-bound token-by-token generation, and co-locating them makes TTFT and ITL interfere</strong></li>
+    <li>Because decode needs larger batches than prefill so they must be separated</li>
+    <li>To quantize the model weights to FP8 before serving</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Recall Lesson 4: <strong>prefill</strong> computes the whole prompt in one parallel pass and saturates compute (compute-bound); <strong>decode</strong> emits 1 token per step yet re-reads weights + KV, stuck on bandwidth (bandwidth-bound). Co-located, a long prefill raises decode's <span class='mono'>ITL</span>—the TTFT vs ITL tension that chunked prefill (Lesson 22) only mitigates. Split into pools, each saturates its own bottleneck and is tuned independently.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. In PD disaggregation, what exactly is transferred to the decode GPU after prefill finishes?</div>
+  <ol class="opts">
+    <li>Only the last generated token is sent over</li>
+    <li>The prefill GPU's gradients are transferred</li>
+    <li><strong>The request's KV cache (Lesson 30's paged KV) is shipped over RDMA / NVLink to the decode GPU, which then streams tokens</strong></li>
+    <li>The entire set of model weights is copied over</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. What's shipped is the request's computed <strong>KV cache</strong>—stored page by page (Lesson 30's paged KV). The transfer rides <span class='mono'>RDMA</span> / <span class='mono'>NVLink</span> so transfer time stays far below the recomputation it saves; once the KV lands, the decode pool begins streaming tokens one at a time.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. About <span class='mono'>BaseKVSender</span>'s <span class='mono'>poll()</span> contract, which is correct?</div>
+  <ol class="opts">
+    <li>poll blocks until the transfer completes before returning</li>
+    <li>poll exists only on the decode side, not on prefill</li>
+    <li><strong>poll is non-blocking and returns a KVPoll status (Bootstrapping / WaitingForInput / Transferring / Success / Failed); Success means KV arrived and decode starts</strong></li>
+    <li>poll actually pushes the KV pages while send only announces</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The sender interface is spare: <span class='mono'>init</span> announces how many pages move, <span class='mono'>send</span> pushes the KV pages, <span class='mono'>poll</span> returns a <strong>non-blocking</strong> <span class='mono'>KVPoll</span> status, and <span class='mono'>get_transfer_metric</span> yields a <span class='mono'>KVTransferMetric</span>. The decode-side <span class='mono'>BaseKVReceiver</span> is symmetric (init + receive + poll). poll returning <strong>Success</strong> means the KV has landed and decode can begin; backends are swappable: Mooncake / NIXL / ascend.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain the core conflict PD disaggregation solves: why putting <strong>prefill</strong> (compute-bound) and <strong>decode</strong> (bandwidth-bound) on the same GPU makes them drag each other between <span class='mono'>TTFT</span> and <span class='mono'>ITL</span> (link to Lessons 4 and 8/22), and why splitting into a prefill pool + decode pool lets each pool be tuned independently and saturate its own bottleneck.</li>
+    <li>Describe the full flow of one successful KV transfer under SGLang's abstraction: from the prefill-side <span class='mono'>BaseKVSender</span>'s <span class='mono'>init → send → poll(KVPoll)</span> to the mirrored decode-side <span class='mono'>BaseKVReceiver</span> (init + receive + poll); explain why <span class='mono'>poll</span> must be non-blocking, what Success means, which interconnect the transferred object (Lesson 30's paged KV) rides, and how the router (Lesson 13) pairs a prefill / decode worker per request; then forward-ref Lessons 46/47's disaggregation + large-scale EP.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>TP/PP/EP/DP parallelism</h1>
+
+<p class="lead">When a model is too big to fit—or too heavy to compute—on a single GPU, we spread the "model" or the "requests" across many GPUs. There are exactly four axes to spread along: <strong>TP (tensor parallel)</strong>, <strong>PP (pipeline parallel)</strong>, <strong>EP (expert parallel)</strong>, and <strong>DP (data parallel)</strong>. This lesson makes all four clear: what each one splits, what it must communicate every step, and what link it demands. Finally it reveals SGLang's key unification—all four are just instances of the same <span class="mono">GroupCoordinator</span> abstraction over different rank layouts, and they <strong>compose</strong>. Once you grasp these four axes and how they combine, you can read any SGLang deployment command and tell exactly what its <span class="mono">tp_size</span>, <span class="mono">pp_size</span>, <span class="mono">ep_size</span>, and <span class="mono">dp_size</span> numbers are splitting and what each one costs.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture inference as a factory handling a flood of orders. There are four ways to scale capacity:</p>
+<p><strong>TP</strong> is like having four workers <strong>on one assembly line</strong> each tighten different screws on "building one machine" at the same time—each does a slice, and the parts must be <strong>merged</strong> into a finished product (that merge is all-reduce). Merging is frequent, so the four must sit shoulder to shoulder (a fast neighbor link like NVLink).</p>
+<p><strong>PP</strong> is like splitting the whole line into <strong>consecutive workshops</strong>: workshop one builds the chassis, then <strong>hands off</strong> to workshop two for the shell, then to workshop three for QC. Only half-products cross workshop boundaries, so a cheap link is fine; but at startup the later shops wait, and at the end the earlier shops idle—that idle waste is the "pipeline bubble".</p>
+<p><strong>EP</strong> is like having many <strong>specialist masters</strong> (experts); each order needs only two of them. The system first <strong>dispatches</strong> each order to the workshop holding its chosen masters (all-to-all), and after they finish <strong>sends it back</strong> (a second all-to-all). The more masters, and the more each order needs, the more shuttling.</p>
+<p><strong>DP</strong> is like simply <strong>replicating</strong> the whole factory and splitting orders evenly so each factory works independently—almost no shuttling, but every factory must own the full set of equipment (the whole model's weights).</p>
+<p>In practice all four are usually used <strong>at once</strong>: replicate one huge factory into several (DP), inside each factory split the line into consecutive workshops (PP), inside each workshop let neighboring workers share one operation (TP), and gather the many specialist masters into rooms by trade (EP). A single worker thus <strong>belongs to several teams at the same time</strong>—his "neighbor team", "workshop team", and "replica team" each handle their own shuttling. This freedom to stack them is exactly the "composability" the lesson ends on.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>The four parallelisms answer two different questions. <strong>TP / PP / EP</strong> split the <strong>model itself</strong>: TP splits the weight matrices within a layer (the column/row and vocab splits of lessons 25 & 37), PP splits the boundaries between layers (lesson 23), EP splits the set of MoE experts (lesson 34). <strong>DP</strong> doesn't split the model but the <strong>data (requests)</strong>: replicate the model, share out requests (the dp-controller of lesson 23). In a sentence: the first three "share one model's size and compute", while DP "shares throughput". SGLang also has a twist called <strong>Attention-DP</strong>: DP-shard the attention and EP-shard the experts, both at once. The elegant part: these four are not four separate implementations—they are the same <span class="mono">GroupCoordinator</span> running different collectives over different rank groups, so they naturally compose, e.g. TP=8 × PP=2 × DP=4.</p>
+<p>So when do you reach for which? Follow the bottleneck: if the model is <strong>too big to fit on one card</strong>, first apply TP to thin each layer; if a single node doesn't have enough cards, add PP to spread layers across more machines. If it is a <strong>many-expert MoE</strong> whose total parameters blow past memory, apply EP to scatter the experts. If the model already <strong>fits</strong> and you just want <strong>more throughput</strong>, apply DP to replicate it and share out requests. Almost every real deployment is not single-choice but stacks several by this priority: TP saturates the fast intra-node link, PP scales model size across nodes, EP spreads experts, DP replicates for throughput.</p>
+</div>
+
+<h2>TP tensor parallel: split the matrices "within a layer"</h2>
+<p><strong>TP (tensor parallel)</strong> shards each layer's <strong>weight matrices</strong> along some dimension across the ranks of a group. The classic cases: the q/k/v projections column-split (lesson 25), the MLP up-projection column-split (lesson 37), and the vocab row-split. Each rank holds only one slice of the matrix, so it computes only a <strong>partial result</strong>; to get the full layer output the partial sums must be <strong>merged</strong>—a column+row combo uses one <span class="mono">all_reduce</span> sum, while vocab-parallel logits use <span class="mono">all_gather</span> to concatenate.</p>
+<p>TP's signature is that it thins out both the <strong>compute and memory of a single layer</strong>: a giant matrix that won't fit on one card is split into slices, stored and computed separately. The price is that <strong>every layer</strong> communicates (once forward, once backward)—extremely frequent. So GPUs in a TP group must use a <strong>fast neighbor link</strong> (NVLink / NVSwitch) and usually stay <strong>within one node</strong>; doing TP across machines gets choked by slow links.</p>
+<div class="layers"><div class="layer">Rank0: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank1: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank2: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank3: holds a 1/4 slice of every layer's weights</div></div>
+<p>Note the diagram: under TP <strong>every rank runs "vertically" through all layers</strong>, just holding a thin strip of each. This is the fundamental difference from PP—TP splits the width of a layer, PP splits the depth of the stack.</p>
+<p>Concrete numbers help: a 70B model's per-layer weights are easily hundreds of MB; at TP=8 each card stores only 1/8 and computes only 1/8, but <strong>every single layer</strong> must run an <span class="mono">all_reduce</span> across those 8 cards to sum the partial results. Because the communication is so dense, TP's degree usually <strong>does not exceed the number of cards in one node</strong> (e.g. 8); to scale further you switch to PP or DP, otherwise frequent cross-node all_reduce would outweigh the compute it saves. Remember TP's trade-off in one line: it thins both "per-layer compute" and "per-layer memory", at the cost of "communicating every layer—the most expensive—over a fast neighbor link".</p>
+
+<h2>PP pipeline parallel: split "layers" into a relay of stages</h2>
+<p><strong>PP (pipeline parallel)</strong> splits the model's <strong>layers</strong> in order into consecutive <strong>stages</strong>, placed on different GPUs. Layers 1…k on rank0, k+1…2k on rank1, and so on. In the forward pass activations <strong>flow</strong> from one stage to the next (send to <span class="mono">next_rank</span>, receive from <span class="mono">prev_rank</span>, lesson 23); in the backward pass gradients flow the opposite way.</p>
+<p>PP communicates only at <strong>stage boundaries</strong>, far less than TP, so an ordinary link (even cross-node) suffices. But it has an inherent problem: if you feed only one batch, the earlier stages finish and idle while waiting for the later ones—low utilization. The fix is to split a large batch into many <strong>micro-batches</strong> streamed in continuously like a pipeline, keeping all stages busy; even so, the start and end leave stages idle—this waste is the <strong>pipeline bubble</strong>. PP thins out the <strong>memory from layer count</strong> (each card holds only some layers), not the compute of a single layer.</p>
+<p>The bubble's share is roughly proportional to <strong>number of stages ÷ number of micro-batches</strong>: more stages or fewer micro-batches mean a larger idle fraction at the start and end; cranking up the micro-batch count thins that waste to an acceptable level. PP's biggest advantage is that it <strong>moves one copy of activations only at boundaries</strong>—the volume scales with the hidden dimension (plus batch and sequence length), not with layer count—so it fits the case of "too many layers to fit in one node, and only slow links between machines": use PP to lay the model out <strong>vertically</strong> across machines, then TP for the <strong>horizontal</strong> fine split inside each machine. The two are exactly complementary.</p>
+
+<h2>EP expert parallel: spread MoE "experts" across ranks</h2>
+<p><strong>EP (expert parallel)</strong> is made for MoE (lesson 34). An MoE layer has many experts (FFNs), but each token's router picks only top-k of them to compute. EP places different <strong>experts</strong> on different ranks: each step, a first <span class="mono">all_to_all</span> sends <strong>every token</strong> to the rank that owns "the expert it chose", and after the experts compute, a second <span class="mono">all_to_all</span> brings the results back to the original rank.</p>
+<p>Why does EP use <span class="mono">all_to_all</span> rather than TP's <span class="mono">all_reduce</span>? Because each token's destination is <strong>different</strong>—token A picked expert 3, token B picked expert 7—it is a "point-to-point reshuffle", not an "everyone-sum". <span class="mono">all_to_all</span> is the collective built precisely for "each sends its own, each receives its own": every rank simultaneously sends a different chunk to all other ranks and receives a chunk from each, which is exactly "dispatch each token to the rank owning its chosen expert".</p>
+<p>EP thins out the <strong>experts' memory</strong>—hundreds or thousands of experts stored across ranks, sharing total parameters that won't fit on one card. Its communication grows with <strong>tokens × top-k</strong>: the larger the batch and the more experts each token picks, the more the all-to-all shuttles. SGLang's Attention-DP often pairs with EP: the attention part DP-replicated, the expert part EP-sharded, both in one deployment—yet another instance of "different GroupCoordinators each doing their job". Large-scale EP and expert load balancing (EPLB) are covered in <strong>lesson 47</strong>.</p>
+<p>Another key difference between EP and TP is <strong>whether the communication volume floats with load</strong>: TP's per-layer all_reduce has a fixed size (it depends only on the hidden dimension), whereas EP's all_to_all size varies with the <strong>actual tokens × top-k</strong>—the larger the batch and the more experts each token picks, the more data moves. Trickier still, <strong>expert load is often uneven</strong>—some popular experts are chosen by many tokens while others sit nearly idle, so the rank holding a hot expert becomes the bottleneck for the whole step. Reshuffling experts across ranks to balance load is exactly what lesson 47's EPLB tackles.</p>
+
+<h2>DP data parallel + the unified GroupCoordinator</h2>
+<p><strong>DP (data parallel)</strong> is the simplest: <strong>replicate</strong> the whole model to each replica and split the <strong>requests</strong> across replicas to be handled independently (the dp-controller of lesson 23 dispatches them). Each step is nearly <strong>zero communication</strong> (only training needs a gradient sync after backward; in serving the replicas are nearly independent), at the price that every replica must hold the <strong>whole model</strong>—it buys throughput, not memory savings.</p>
+<p>SGLang's <strong>Attention-DP</strong> deserves its own note: in large MoE deployments the attention part has few parameters but most fears redundant KV-cache use and duplicated compute, so it is DP-sharded—each replica handles the attention of its own batch of requests; the expert part is huge and must spread its memory, so it is EP-sharded. The two splits each govern a portion of <strong>one model</strong>—attention goes DP, FFN/experts go EP—without conflict. This is again "different GroupCoordinators each doing their job over different rank layouts", only this time DP and EP are combined on different submodules of one model.</p>
+<table class="t"><tr><th>Axis</th><th>Splits what</th><th>Communicates per step</th><th>Link need</th></tr>
+<tr><td><span class="mono">TP</span></td><td>Each layer's weight matrices (within a layer)</td><td>One all-reduce / all-gather per layer</td><td>Very high, NVLink, usually single node</td></tr>
+<tr><td><span class="mono">PP</span></td><td>The model's layers (consecutive stages)</td><td>Only send / recv activations at boundaries</td><td>Low, ordinary link, can cross nodes</td></tr>
+<tr><td><span class="mono">EP</span></td><td>The set of MoE experts</td><td>Two all-to-all (by token×top-k)</td><td>Mid-high, grows with token count</td></tr>
+<tr><td><span class="mono">DP</span></td><td>Requests (full model replicated)</td><td>Near zero per step (only training grad sync)</td><td>Very low</td></tr></table>
+<p>Here is the real unification: SGLang does not write four separate communication codepaths—it expresses all four with <strong>one abstraction</strong>, <span class="mono">GroupCoordinator</span>. A <span class="mono">GroupCoordinator</span> is "one process group" carrying <span class="mono">rank</span> (this process's global id), <span class="mono">ranks</span> (the global ranks belonging to this group), <span class="mono">world_size</span> (the group's size), <span class="mono">rank_in_group</span> (position within the group), and exposing <span class="mono">all_reduce</span> / <span class="mono">all_gather</span> / <span class="mono">all_to_all_single</span> / <span class="mono">next_rank</span> / <span class="mono">prev_rank</span>.</p>
+<div class="cols"><div class="col"><strong>Split the "weights" (TP / PP / EP)</strong><br/>Scatter one model's matrices, layers, or experts across cards, each holding only part of the parameters; saves memory and per-card compute, but collectives must stitch results back.</div><div class="col"><strong>Split the "data" (DP)</strong><br/>Replicate the whole model to each replica and split by request; each replica independent with almost no communication—buys throughput, not memory.</div></div>
+<p>So <span class="mono">TP</span>, <span class="mono">PP</span>, <span class="mono">EP</span>, <span class="mono">DP</span> are just <strong>different instances of the same class</strong>, each built over a different rank layout: a TP group bundles 8 cards in a node, a PP group strings corresponding ranks across nodes into stages, an EP group spans all expert ranks, a DP group bundles several replicas. They are therefore naturally <strong>composable</strong>—a deployment can be TP=8 × PP=2 × DP=4, where each card belongs to several GroupCoordinators at once, running different collectives in different groups.</p>
+<p>Put all four together in a concrete example: say you have 64 GPUs configured as <strong>TP=8 × PP=2 × DP=4</strong>. Every 8 cards (within one machine) form a TP group doing the per-layer all_reduce over NVLink; two adjacent TP groups chained head-to-tail form 2 PP stages, sending/receiving activations across machines only at the boundary—so 16 cards together make <strong>one full model replica</strong>; then replicate that 4 times to form DP, with the lesson-23 dp-controller dispatching requests to the 4 replicas. Thus <strong>one card sits inside three GroupCoordinators at once</strong>: its TP group, its PP group, and its DP group, each running its own collectives without interfering. 8×2×4=64, exactly filling all the GPUs.</p>
+<p>Choosing a combination always revolves around four things: <strong>communication volume</strong> (TP highest, DP lowest), <strong>link requirement</strong> (TP needs NVLink, PP/DP an ordinary link), <strong>pipeline bubble</strong> (only PP has it, eased by micro-batches), and <strong>memory</strong> (TP/PP/EP all save memory, DP does not—it only buys throughput). The rule of thumb: first use TP to saturate the fast intra-node link, then PP to scale model size across nodes, EP to spread MoE experts, and finally DP to replicate the whole thing for throughput—four GroupCoordinators each doing their job, stacking into one complete deployment topology.</p>
+<div class="flow"><div class="node">TP partial layer output</div><div class="arrow">→</div><div class="node">all_reduce sum</div><div class="arrow">→</div><div class="node">full layer output</div></div>
+<div class="flow"><div class="node">EP token batch</div><div class="arrow">→</div><div class="node">all_to_all route to experts</div><div class="arrow">→</div><div class="node">gathered result</div></div>
+<div class="flow"><div class="node">PP stage i activations</div><div class="arrow">→</div><div class="node">send / recv to next stage</div><div class="arrow">→</div><div class="node">stage i+1 continues</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">one unified abstraction: TP/PP/EP/DP are all instances over different rank layouts</span></div><pre>class GroupCoordinator:
+    # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
+    rank: int             # this process's global rank
+    ranks: list           # the global ranks that belong to THIS group
+    world_size: int       # number of ranks in this group
+    rank_in_group: int    # position within the group
+
+    def all_reduce(self, input_):              # TP: sum each rank's partial layer output
+        ...
+    def all_gather(self, input_, dim=-1):      # gather shards (e.g. vocab-parallel logits)
+        ...
+    def all_to_all_single(self, output, input):  # EP: route tokens to their expert owners
+        ...
+    def next_rank(self):   # PP: the downstream pipeline stage (send activations here)
+        ...
+    def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>TP</strong> splits the <strong>weight matrices within a layer</strong> (q/k/v, MLP columns, vocab; lessons 25/37), merging each layer with <span class="mono">all_reduce</span>/<span class="mono">all_gather</span>; the most frequent communication, needs NVLink, usually single node.</li>
+<li><strong>PP</strong> splits <strong>layers</strong> into consecutive stages (lesson 23), only <span class="mono">send</span>/<span class="mono">recv</span> activations at boundaries; cheap link, but has pipeline bubbles filled by micro-batches.</li>
+<li><strong>EP</strong> splits MoE <strong>experts</strong> (lesson 34), two <span class="mono">all_to_all</span> per step to route tokens to experts and back; communication grows with token×top-k, continued by large-scale EP + EPLB in lesson 47.</li>
+<li><strong>DP</strong> <strong>replicates the model and splits requests</strong> (dp-controller, lesson 23), near-zero per-step communication but every replica holds the whole model; Attention-DP is the "attention DP + expert EP" combined twist.</li>
+<li><strong>Unification & composition</strong>: all four are different instances of the same <span class="mono">GroupCoordinator</span> (carrying <span class="mono">rank</span>/<span class="mono">ranks</span>/<span class="mono">world_size</span>/<span class="mono">rank_in_group</span>), composable into TP=8 × PP=2 × DP=4.</li>
+<li><strong>How to choose</strong>: won't fit → TP first (intra-node) then PP (cross-node); MoE experts blow past memory → EP; fits but you just want more throughput → DP. Real deployments stack several by this priority.</li>
+<li><strong>Four trade-off factors</strong>: communication volume, link requirement, pipeline bubble, memory footprint. TP communicates the most but saves per-layer compute and memory; DP communicates the least but each replica holds the whole model; PP has a cheap link but a bubble; EP's communication floats with token×top-k and must guard against load imbalance.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which option most accurately summarizes what each of the four parallelisms splits?</div>
+  <ol class="opts">
+    <li><strong>TP splits the weight matrices within a layer; PP splits layers into consecutive stages; EP splits the MoE expert set; DP replicates the model and splits requests</strong></li>
+    <li>All four split requests, just at different granularities</li>
+    <li>They all quantize the model to FP8 before distributing it</li>
+    <li>TP splits layers, PP splits matrices, EP splits requests, DP splits experts</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two kinds of question: <strong>TP/PP/EP</strong> split the <strong>model itself</strong>—TP the weight matrices within a layer (Lessons 25/37 q/k/v, MLP columns, vocab), PP the layer boundaries into stages (Lesson 23), EP the MoE experts (Lesson 34); <strong>DP</strong> doesn't split the model but <strong>replicates it and splits requests</strong> (Lesson 23 dp-controller). The first three share one model's size and compute; DP shares throughput.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. About "what each communicates per step", which mapping is correct?</div>
+  <ol class="opts">
+    <li><strong>TP does an all-reduce/all-gather per layer; PP only send/recv activations at boundaries; EP does two all-to-all per step to route tokens; DP communicates near-zero per step</strong></li>
+    <li>EP only send/recv at boundaries while PP does two all-to-all per step</li>
+    <li>TP communicates near-zero while DP all-reduces every layer</li>
+    <li>All four do an identical all-reduce every step</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <strong>TP</strong> shards a single layer and must merge partial sums, so one <span class='mono'>all_reduce</span> per layer (or <span class='mono'>all_gather</span> for vocab parallel)—most frequent, needs NVLink. <strong>PP</strong> only <span class='mono'>send</span>/<span class='mono'>recv</span> activations at boundaries—cheap link. <strong>EP</strong> does two <span class='mono'>all_to_all</span> per step (to experts and back), growing with token×top-k. <strong>DP</strong> replicas are independent, near-zero communication per step at inference.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does SGLang express TP/PP/EP/DP in code so they compose (e.g. TP=8 × PP=2 × DP=4)?</div>
+  <ol class="opts">
+    <li><strong>All four are different instances of the same GroupCoordinator (carrying rank/ranks/world_size/rank_in_group, exposing all_reduce/all_gather/all_to_all_single/next_rank/prev_rank) over different rank layouts</strong></li>
+    <li>The four are compiled into different CUDA kernel choices</li>
+    <li>A separate, non-reusable process-group class is written for each parallelism</li>
+    <li>A global variable records the current mode and only one parallelism can run at a time</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The unification lives in <span class='mono'>parallel_state.py</span>'s <span class='mono'>GroupCoordinator</span>: it is "one process group" carrying <span class='mono'>rank</span>/<span class='mono'>ranks</span>/<span class='mono'>world_size</span>/<span class='mono'>rank_in_group</span> and exposing <span class='mono'>all_reduce</span>/<span class='mono'>all_gather</span>/<span class='mono'>all_to_all_single</span>/<span class='mono'>next_rank</span>/<span class='mono'>prev_rank</span>. TP/PP/EP/DP are just its instances over different rank layouts; each card can belong to several groups at once, so they compose into TP=8 × PP=2 × DP=4.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, distinguish TP from PP: why TP "splits the width of a layer" (sharding a layer's weight matrices, all-reducing every layer, needing NVLink, usually single node; link Lessons 25/37) while PP "splits the depth of the stack" (layers into consecutive stages, send/recv activations only at boundaries, cheap link but pipeline bubbles filled by micro-batches; link Lesson 23); and explain why the two can be used together.</li>
+    <li>Describe EP's full dataflow in one MoE step (Lesson 34): after the router picks top-k experts, a first all-to-all sends each token to the rank owning its expert, experts compute, a second all-to-all sends results back; explain why communication grows with token×top-k. Then explain how SGLang's Attention-DP combines "attention DP + expert EP", and why all of this ultimately rests on the same GroupCoordinator abstraction; forward-ref Lesson 47's large-scale EP + EPLB.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Large-scale EP & EPLB</h1>
+
+<p class="lead">In Lesson 34 we met MoE: the router picks top-k experts for each token; in Lesson 46 we saw expert parallelism (EP) spread hundreds of experts across many GPUs. But real traffic is not uniform—some experts are slammed every day, others sit nearly idle. This lesson is about what happens when EP meets that imbalance, and how SGLang's <span class="mono">EPLBManager</span> (Expert-Parallel Load Balancer) flattens that traffic-jam bottleneck.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a huge restaurant chain with 256 counters (experts) spread across 8 kitchens (GPUs), 32 counters per kitchen. Customers (tokens) walk in and a host (the router) assigns each to the most suitable top-k counters by dish. The problem: the viral "spicy hotpot" counter has a line out the door, while the "plain congee" counter sees almost no one. And the restaurant has an iron rule—<strong>all kitchens must serve their dishes at the same time; until the slowest kitchen is done, the whole floor waits</strong>. So if one kitchen happens to hold a viral counter, the cooks in the other 7 kitchens stand idle, and overall throughput is dragged down by that single hotspot.</p>
+<p>What would a clever manager do? Every so often he tallies each counter's actual foot traffic, then <strong>rearranges which counters sit in which kitchen</strong>: move idle counters aside to make room, and <strong>replicate the viral counter into several copies</strong> spread across kitchens so the line splits up. Now every kitchen serves about the same number of customers per round, and the slowest kitchen no longer holds everyone back. That "manager" is EPLB.</p>
+<p>Three details in this analogy are worth remembering. First, the manager <strong>cannot rely on opening-day forecasts alone</strong>—today's hot dish may go cold tomorrow, so he must keep watching traffic and adjust dynamically. Second, <strong>merely swapping counter positions cannot save a true blockbuster</strong>: if "spicy hotpot" alone draws 40% of all traffic, whichever kitchen it sits in will overflow, and the only fix is to open branches (replicate). Third, <strong>adjusting has a cost</strong>—moving counters and setting up a new kitchen means a brief pause, so the manager doesn't rebalance every minute but waits until enough traffic data confirms the landscape truly shifted. These three points map exactly onto EPLB's "periodic measurement, replicate hotspots, low-frequency rebalancing."</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>EP solves the capacity problem—too many experts to fit on one card—but it does not by itself solve the efficiency problem of load skew. EP's per-step all-to-all is a synchronization wall: <strong>the step cannot finish until the busiest card finishes</strong>. Whenever load is skewed, the GPUs holding the few hot experts become the shortest stave of the barrel, and the other GPUs spin idle. EPLB's core idea is that load is not fixed—it can be <strong>measured</strong> and <strong>re-placed</strong>. It periodically measures how many tokens each expert received, then solves a new expert→GPU placement that flattens the load—replicating hot experts when needed. For DeepSeek-scale MoE serving with hundreds of experts, this is not a nice-to-have; it is what makes serving feasible at all.</p>
+<p>Stringing the three lessons together makes it clearer: Lesson 34 is about MoE and FusedMoE routing—"which experts should a token go to"; Lesson 46 is about EP and all-to-all—"experts live on different GPUs, so how do tokens travel across cards"; this lesson adds the missing piece—"when the transported load is uneven, how do we flatten it back out." The three build on each other: MoE gives us experts, EP makes cross-card transport necessary, and skew makes balancing necessary. EPLB sits at the top, finally making full use of the stage the first two lessons set up. Grasp this line and you see why large-scale MoE inference is a systems effort where routing + parallelism + balancing are all indispensable.</p>
+</div>
+
+<h2>Why is EP load inherently skewed?</h2>
+<p>The MoE router is learned, not a uniform splitter. Training makes some experts specialize in high-frequency patterns (common grammatical structures, popular topics), so at inference those experts are naturally chosen by more tokens, becoming "hot experts"; other experts handle rare patterns and stay half-idle for long stretches. This <strong>long-tail distribution</strong> is an intrinsic property of MoE, not an accident. When EP spreads experts evenly across GPUs, the hot experts may happen to land on just a few cards, so those cards must process far more tokens than average each step.</p>
+<p>Some concrete numbers convey the skew. Suppose a MoE layer has 256 experts with top-k = 8, and a batch holds 4096 tokens; that layer dispatches 4096×8 = 32768 expert invocations in all. If load were perfectly uniform, each expert would receive 128; but in reality the top few experts often receive thousands each, while dozens of tail experts together add up to barely a few hundred. Spread those 256 experts across 8 cards by EP, 32 per card—if the top hotspots happen to land on the same card, that card must shoulder several times the average compute this step. Skew is not "slightly uneven"; it is often an order-of-magnitude gap.</p>
+<p>The key is EP's execution model: every forward step contains an all-to-all—sending each token to the GPU holding its expert, then collecting results back. This is a <strong>collective synchronization</strong>: all ranks must meet at the same barrier. So the step's wall-clock time is set by the <strong>busiest rank</strong>. If 7 of 8 cards each handle 1000 tokens while 1 handles 4000, the step costs as much as 4000, and the first 7 cards spend 75% of the time waiting. Raw EP thus wastes a great deal of compute.</p>
+<p>One often-overlooked detail: load skew is not static—it <strong>drifts over time and with the input distribution</strong>. The same model, facing code generation, chit-chat, and long-document summarization, may activate completely different hot experts; even within one conversation, when the topic shifts, the hotspots migrate with it. This means any "compute once, fix forever" expert placement quickly goes stale. Skew is both intrinsic and fluid—which is precisely why the solution must be <strong>periodic measurement and dynamic adjustment</strong>, not a static config decided once at deploy time.</p>
+
+<h2>What exactly does EPLB measure and rebalance?</h2>
+<p>EPLB (Expert-Parallel Load Balancer) does two things: <strong>measure</strong> and <strong>rebalance</strong>. Measuring means counting how many tokens each expert actually received over a recent window—this per-expert load statistic is accumulated by an expert-distribution recorder after every forward. Rebalancing means solving, from that statistic, a new <strong>expert→GPU placement</strong> whose goal is to make each GPU process roughly the same number of tokens per step.</p>
+<p>Rebalancing has two weapons. First is <strong>migration</strong>: moving experts between GPUs so hot and cold experts are paired up and hotspots stop clustering. Second is <strong>replicating hot experts</strong>: when an expert is so hot that one card cannot carry its traffic, EPLB <strong>replicates it onto several GPUs</strong>, so tokens pointing to it split across those copies. Replication is what sets EPLB apart from a simple "swap positions"—it cuts an indivisible hotspot into parallelizable copies. Once rebalancing is done, the new placement is written back to <span class="mono">expert_location</span> (the expert→GPU map), and subsequent steps route against this new map.</p>
+<p>Why isn't "swapping positions" enough—why must we replicate? Picture the extreme case: a single expert alone eats 40% of the whole system's tokens. No matter which card you place it on, that card overflows, and idle cards cannot help—because one expert is physically indivisible. The only way out is to make multiple copies of it, spread across several cards, so the flood that pointed to it is split into several channels. Think of migration as "reshuffling the seating" and replication as "opening branch stores for the popular counter": the former fixes uneven distribution, the latter fixes single-point overheating. Only together can they truly push each card's per-step token count close to the average.</p>
+<p>There are trade-offs here. Replicating a hot expert costs extra VRAM (storing another copy of its weights), and rebalancing itself moves parameters between GPUs at non-trivial cost. So EPLB does not rebalance every step; instead it <strong>accumulates statistics over a window and acts only once it confirms the load landscape has truly shifted</strong>. It balances "keeping up with load drift" against "not letting rebalancing overhead outweigh the gain"—which is exactly why collection is high-frequency while rebalancing is low-frequency. In other words, more replicas is not always better: too few cannot tame the hotspot, while too many needlessly eat VRAM that could have gone to KV cache or more concurrency. When EPLB solves a placement, it is precisely seeking a compromise between "balance each card's load as much as possible" and "don't pay too much VRAM and movement cost for it."</p>
+
+<h2>The EPLBManager loop</h2>
+<p>SGLang lands the ideas above as a clean loop in <span class="mono">EPLBManager</span>. It hangs off the <span class="mono">ModelRunner</span> and samples continuously via the expert-distribution recorder. Two hooks are central: <span class="mono">on_forward_pass_end()</span> is called <strong>after every forward</strong> to accumulate "how many tokens hit each expert this step" into the statistic; <span class="mono">rebalance()</span> is triggered <strong>periodically</strong> to solve a new expert placement (hot experts may be replicated) and then update <span class="mono">expert_location</span>. Note the division of labor: collection is high-frequency and lightweight (every step), rebalancing is low-frequency and heavier (every so often); decoupling them lets the system track load changes without letting rebalancing overhead drown out normal inference.</p>
+<p>Why make collection "once per step, ultra-light"? Because only by pushing the statistic's granularity down to every step can EPLB see the true shape of the load instead of being misled by a single instant's jitter. <span class="mono">on_forward_pass_end()</span> is deliberately restrained: it does no heavy work on the forward critical path, just adds this step's per-expert counts into the recorder—a simple addition. Precisely because it is cheap enough, it can afford to run every step. This continuously accumulated statistic is the sole basis on which <span class="mono">rebalance()</span> solves a new placement.</p>
+<p>This loop is stateful and adaptive: load shifts, statistics accumulate, placement refreshes periodically. It turns a "static expert layout" into a "dynamic layout that evolves with traffic." For large-scale MoE serving, this is exactly the piece that converts raw EP's theoretical throughput into real throughput.</p>
+<p>To compress the whole mechanism into one sentence: EPLB lets experts' physical locations "follow the traffic." It changes not a single model parameter and not the router's selection logic; it merely keeps answering a plain question—"given that these tokens are bound for these experts, on which GPUs and in how many copies should we place the experts so that every card does equal work each step?" The answer changes as traffic changes, so the placement refreshes accordingly. This "measure–solve–place–measure-again" closed loop is essentially a lightweight online optimizer, working quietly in the gaps of the inference main loop.</p>
+<p>From an engineering standpoint, the elegance of this design is its <strong>separation of concerns</strong>. The model's forward logic need not know EPLB exists at all—it merely routes tokens according to the current <span class="mono">expert_location</span>; meanwhile <span class="mono">EPLBManager</span> acts as a side-attached observer, quietly jotting a note at the end of each step and, every so often, swapping in a fresh map. Decoupling the forward path from balancing lets the balancing strategy evolve independently—even be replaced with a different solver—without touching model code. This "pluggable, designed-for-scale" mindset is the backbone of SGLang's overall architecture, which we expand on in Lessons 61 and 62. In short, the model only computes and the balancer only places—each minds its own job without disturbing the other.</p>
+<p>Finally, it is worth stressing the scale effect: the more experts and the more GPUs, the more severe the waste from load skew, and the greater EPLB's value. In a DeepSeek-scale deployment with dozens of cards and hundreds of experts, raw EP without load balancing can barely keep the hardware fed; only with periodic rebalancing can the whole cluster's compute utilization truly approach its theoretical ceiling. EPLB is not an optional optimization but a precondition for running large-scale MoE inference economically.</p>
+
+<div class="flow"><div class="node">route tokens to top-k experts</div><div class="arrow">→</div><div class="node">measure per-expert load</div><div class="arrow">→</div><div class="node">rebalance placement (replicate hot)</div><div class="arrow">→</div><div class="node">flatter GPU load</div></div>
+
+<div class="cols"><div class="col"><strong>Skewed (raw EP)</strong><br>8 cards, 1 hot expert crammed onto GPU0. This step must wait for GPU0 to process 4000 tokens; the other 7 cards handle 1000 each and then just wait. <span class="mono">The busiest sets the step time</span>; 75% of compute spins idle.</div><div class="col"><strong>Balanced (after EPLB)</strong><br>The hot expert is replicated onto 3 cards to split traffic, and hot/cold experts are re-paired. Each GPU now handles ~1500 tokens per step; wall time drops from 4000 to 1500. The sync wall is no longer stalled by a single hot card.</div></div>
+
+<table class="t"><tr><th>EPLBManager hook</th><th>What it does</th></tr><tr><td><span class="mono">on_forward_pass_end()</span></td><td>Called after each forward: accumulate the token count each expert hit this step into the load statistic (via the expert-distribution recorder). High-frequency, lightweight.</td></tr><tr><td><span class="mono">rebalance()</span></td><td>Called periodically: solve a new expert→GPU placement that flattens load; hot experts may be replicated. Low-frequency, heavier.</td></tr><tr><td><span class="mono">expert_location</span></td><td>The expert→GPU map: updated by rebalance, and subsequent steps route against this new map.</td></tr></table>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Collect stats</h4><p><span class="mono">on_forward_pass_end()</span> accumulates each expert's token count into the load statistic every step (via the expert-distribution recorder).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Solve placement</h4><p><span class="mono">rebalance()</span> periodically solves a new expert→GPU plan that flattens load; hot experts may be replicated into several copies.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Update the map</h4><p>Write the new placement back to <span class="mono">expert_location</span> (the expert→GPU map); subsequent steps route against this new map.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Repeat</h4><p>Load keeps evolving with traffic, stats keep accumulating, placement refreshes periodically — back to step 1.</p></div></div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">gather expert load + periodically rebalance placement</span></div><pre>class EPLBManager:
+    def __init__(self, model_runner):
+        self.model_runner = model_runner
+        # tracks per-expert token counts via the expert-distribution recorder
+        ...
+    def on_forward_pass_end(self):
+        # after each forward: accumulate how many tokens hit each expert
+        ...
+    def rebalance(self):
+        # periodically: solve a new expert -&gt; GPU placement that flattens load
+        # (hot experts may be replicated), then update expert_location
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li>MoE routing is inherently skewed: a few hot experts are chosen by many tokens; the long-tail distribution is intrinsic (ties to Lesson 34 FusedMoE routing).</li>
+<li>EP's all-to-all is a sync wall: the step time is set by the <strong>busiest rank</strong>, and the GPU holding hot experts drags down the whole floor (ties to Lesson 46 EP/all-to-all).</li>
+<li><strong>EPLB</strong> periodically <strong>measures</strong> per-expert load, then <strong>rebalances</strong> the expert→GPU placement to flatten load, <strong>replicating hot experts</strong> to split traffic when needed.</li>
+<li>SGLang's <span class="mono">EPLBManager</span>: <span class="mono">on_forward_pass_end()</span> accumulates stats each step; <span class="mono">rebalance()</span> periodically solves a new placement and updates <span class="mono">expert_location</span>.</li>
+<li>This is what makes DeepSeek-scale MoE serving feasible; its "pluggable, designed-for-scale" themes continue in Lessons 61/62.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Under large-scale EP, why do a few "hot experts" drag down the whole step's throughput?</div>
+  <ol class="opts">
+    <li>The router computes slower on hot experts because their weights are larger</li>
+    <li><strong>EP's per-step all-to-all is a sync wall; the step time is set by the busiest rank, so the GPU holding hot experts processes far more tokens than average while the others just wait</strong></li>
+    <li>Hot experts use more VRAM, forcing other experts to be swapped out</li>
+    <li>Hot experts require FP8 quantization while cold experts use FP16</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. EP's per-step all-to-all is a <strong>collective synchronization</strong> (ties to Lesson 46): all ranks must meet at the same barrier, so the step's wall time is set by the <strong>busiest rank</strong>. MoE routing is inherently skewed (Lesson 34); hot experts are chosen by many tokens, and if they cluster on a few cards, those cards process far more tokens per step than average while the rest spin idle. Raw EP thus wastes compute.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What does EPLB (Expert-Parallel Load Balancer) periodically measure and rebalance?</div>
+  <ol class="opts">
+    <li>Measures each GPU's temperature, then throttles the hot card's clock</li>
+    <li>Measures each token's length, then rearranges KV-cache paging</li>
+    <li><strong>Measures how many tokens each expert received (per-expert load), then solves a new expert→GPU placement that flattens load, replicating hot experts when needed</strong></li>
+    <li>Measures the router's weight gradients, then fine-tunes model parameters</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. EPLB does two things: <strong>measure</strong> how many tokens each expert actually received over a recent window (accumulated by the expert-distribution recorder), and <strong>rebalance</strong>—solving from that statistic a new <strong>expert→GPU placement</strong> so each card processes roughly equal tokens per step. Its two weapons: migrate experts between GPUs, and <strong>replicate</strong> a too-hot expert onto several cards to split its traffic.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which two hooks of SGLang's <span class='mono'>EPLBManager</span> implement the "high-frequency collect + low-frequency rebalance" loop?</div>
+  <ol class="opts">
+    <li><strong><span class='mono'>on_forward_pass_end()</span> accumulates per-expert load after each forward; <span class='mono'>rebalance()</span> periodically solves a new placement and updates <span class='mono'>expert_location</span></strong></li>
+    <li><span class='mono'>compile()</span> and <span class='mono'>capture_graph()</span></li>
+    <li><span class='mono'>quantize()</span> and <span class='mono'>dequantize()</span></li>
+    <li><span class='mono'>on_token_start()</span> and <span class='mono'>flush_kv()</span></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <span class='mono'>EPLBManager</span> hangs off the <span class='mono'>ModelRunner</span>: <span class='mono'>on_forward_pass_end()</span> is called <strong>after every forward</strong> to accumulate this step's per-expert token counts (high-frequency, lightweight); <span class='mono'>rebalance()</span> is triggered <strong>periodically</strong> to solve a new placement (hot experts may be replicated) and update <span class='mono'>expert_location</span> (the expert→GPU map; low-frequency, heavier). Decoupling them tracks load changes without drowning out normal inference.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why raw EP wastes compute: how MoE routing's long-tail distribution (Lesson 34) creates hot experts, and how EP's all-to-all sync wall (Lesson 46) makes the step time depend on the busiest rank; then explain why merely "swapping experts between GPUs" is not enough and why <strong>replicating hot experts</strong> is necessary to cut an indivisible hotspot into parallelizable copies.</li>
+    <li>Describe the full <span class='mono'>EPLBManager</span> loop: how <span class='mono'>on_forward_pass_end()</span> accumulates per-expert load via the expert-distribution recorder, how <span class='mono'>rebalance()</span> periodically solves a new expert→GPU placement and writes it back to <span class='mono'>expert_location</span>, and how subsequent steps route against this new map; explain why decoupling "high-frequency lightweight collection" from "low-frequency heavier rebalancing" is essential, and forward-ref Lessons 61/62's "pluggable, designed-for-scale" themes.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Structured outputs & jump-forward</h1>
+
+<p class="lead">Many real applications are not satisfied with a model being "roughly right"—they demand output that is <strong>strictly valid</strong>: it must be parseable JSON, must match a regex, or must follow a grammar. SGLang guarantees this at the root with <strong>constrained decoding</strong>: it compiles the constraint into a finite-state machine (FSM) and, <strong>before</strong> sampling at every step, sets the logits (<span class="inline">Lesson 37</span>) of every illegal token to <span class="mono">−∞</span>. So no matter how the sampler (<span class="inline">Lesson 28</span>) rolls the dice, the output is always well-formed. This lesson walks the whole pipeline and presents its most elegant optimization: <strong>jump-forward</strong>. It also closes Part 10.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div><p>Picture filling out a customs form at the airport. Every box is pre-printed with borders and hints: the name box accepts only letters, the date box only digits, the nationality box only an option from a dropdown. No matter how shaky your hand, you simply cannot write a birth date into the name box—because the form's "mold" fixes the legal options <strong>before</strong> your pen touches paper. Constrained decoding fits the model with exactly such a "glowing mold": before producing each token it computes "which tokens are legal right now," dims out the rest, and the model may only pick from the lit boxes. Jump-forward is like those "auto-filled" fixed fields on the form—if a span has only one possible answer, why make you copy it character by character? Just fill it in and jump the cursor ahead.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div><p>Place this back in the inference pipeline: the forward pass produces logits (<span class="inline">Lesson 37</span>), and the sampler picks a token from them (<span class="inline">Lesson 28</span>). Constrained decoding does not reinvent anything—it sits <strong>exactly between the two</strong>. In the instant after logits exist but before sampling happens, it overlays a "vocab mask" on the logits, allowing only tokens that keep the output legal. Because it edits logits rather than the sampling algorithm, it stacks seamlessly with greedy, temperature, top-p, beam search, and even speculative decoding (<span class="inline">Lesson 43</span>). Master this lesson and you understand how SGLang balances "free generation" against "strict structure"—correctly and efficiently.</p></div>
+
+<h2>Why constrained decoding is needed</h2>
+<p>A large language model is fundamentally a probability machine: it outputs a full distribution over the next token, and the sampler draws from it. This excels at fluent expression but <strong>guarantees nothing structurally</strong>. If your downstream is a function call, a config that must pass <span class="mono">json.loads</span>, or a field bound for a database, an occasional missing quote, an extra comma, or a number written as a word will break the entire pipeline. The traditional fix is "generate, validate, retry on failure," but retrying is slow and costly—and it still cannot <strong>guarantee</strong> the final result is valid. Imagine a three-level nested JSON where the model drops a quote in the very last field: the whole generation is voided and restarts from scratch; if you are unlucky enough to fail repeatedly at different spots, latency and cost balloon, which is especially fatal for online serving.</p>
+<p>Constrained decoding takes a different stance: rather than patching up afterward, <strong>forbid illegality at every step of generation</strong>. It asks the user for a "shape spec"—a JSON-Schema, a regular expression, or an EBNF grammar. Through a pluggable grammar backend (xgrammar / outlines / llguidance), SGLang <strong>compiles</strong> that spec into a finite-state machine: each FSM state knows precisely "at this position, which tokens are allowed." At each decode step SGLang asks the FSM for the "allowed set," builds a vocab mask from it, and sets the logit of every token outside the allowed set to <span class="mono">−∞</span>. After softmax those tokens have probability zero, so the sampler—whatever strategy it uses—can never pick them. In other words, <strong>validity is no longer the sampler's luck but the mask's iron law</strong>.</p>
+<p>It is worth stressing where the boundary of responsibility lies. The grammar backend does not decide <strong>which</strong> legal token to emit—that remains the sampler's job, governed by temperature, top-p, and the rest. The backend only decides <strong>which tokens are even allowed to be considered</strong>. This separation of concerns is precisely why constrained decoding composes so cleanly: it is a pure pre-filter on the candidate set, leaving the creative act of selection untouched. The model still expresses itself freely wherever the grammar permits freedom, and is merely fenced in wherever the grammar demands rigidity.</p>
+
+<div class="flow"><div class="node">logits (Lesson 37)</div><div class="arrow">→</div><div class="node">vocab mask: FSM allows only valid tokens, rest set to −∞</div><div class="arrow">→</div><div class="node">sampler (Lesson 28) can only pick a valid token</div><div class="arrow">→</div><div class="node">accept_token: FSM advances one step</div></div>
+
+<h2>One FSM per request: BaseGrammarObject</h2>
+<p>Structural constraints are <strong>per-request</strong>: different requests may carry different schemas, and each request's decode progress differs. SGLang therefore keeps a grammar object that belongs to each request, with the abstract base class <span class="mono">BaseGrammarObject</span>. Think of it as a personal notebook recording "where this request currently stands in the FSM." Its interface is tiny yet covers everything constrained decoding needs. The "one object per request" design exists because constrained-decoding state <strong>cannot be shared across requests</strong>: even two requests using the same schema may sit at different FSM states, each needing its own progress and its own rollback history. Encapsulating state in an object lets the scheduler drive dozens or hundreds of requests at different progress points within one batch without interference.</p>
+<p>The first group is <strong>advancing</strong>: once the sampler finally chooses a token, the scheduler calls <span class="mono">accept_token(token)</span>, transitioning the FSM to the next state—and the next step's "allowed set" updates accordingly. The second group is <strong>mask construction</strong>: <span class="mono">allocate_vocab_mask(...)</span> first allocates a mask buffer sized by vocab, batch, and device, then <span class="mono">fill_vocab_mask(vocab_mask, idx)</span> marks "which tokens are legal now" (idx says which request in the batch). That mask is then added onto the logits. The third group is <strong>rollback</strong>: <span class="mono">rollback(k)</span> backs the FSM up k steps, which is crucial in two scenarios—grammars that need backtracking, and speculative decoding (<span class="inline">Lesson 43</span>), where the draft model proposes several candidate tokens at once but some are rejected by verification, so the FSM must precisely undo the states it advanced through for those rejected tokens. Finally, <strong>termination</strong>: <span class="mono">is_terminated()</span> checks whether the FSM has reached an accept state—whether the structure is fully closed and generation can wrap up. These four groups look simple but map exactly onto every lifecycle event an FSM goes through during decoding: advance, query the current feasible set, rewind when needed, and check whether the end has been reached. Master them and you have grasped the entire outward contract of SGLang's constrained decoding.</p>
+
+<div class="cellgroup"><div class="cell">S0 <span class="mono">{</span></div><div class="cell sc">S1 <span class="mono">"name"</span> forced</div><div class="cell sc">S2 <span class="mono">:</span> forced</div><div class="cell">S3 value: free sampling</div><div class="cell"><span class="mono">}</span> accept</div></div>
+
+<table class="t"><tr><th>BaseGrammarObject method</th><th>Role</th></tr><tr><td><span class="mono">accept_token(token)</span></td><td>advance the FSM by the sampled token to the next state</td></tr><tr><td><span class="mono">allocate_vocab_mask(...)</span></td><td>allocate a mask buffer by vocab/batch/device</td></tr><tr><td><span class="mono">fill_vocab_mask(mask, idx)</span></td><td>mark which tokens keep the output legal now</td></tr><tr><td><span class="mono">rollback(k)</span></td><td>back up k steps (backtracking / spec-decode reject)</td></tr><tr><td><span class="mono">is_terminated()</span></td><td>has the FSM reached an accept state?</td></tr></table>
+
+<h2>Jump-forward: skip tokens the grammar nails down</h2>
+<p>So far constrained decoding guarantees <strong>correctness</strong> but is not yet <strong>fast</strong>. Observe a common phenomenon: often the FSM's "allowed set" in some state contains <strong>exactly one</strong> token, and the next state again only one, and the one after that still only one... In other words, the grammar is <strong>fully deterministic</strong> over this span, with no freedom at all. The classic case is a fixed key name in a JSON-Schema: once <span class="mono">{</span> is written, the schema forces the string <span class="mono">"name":</span> next, and the model has no choice here. Yet the step-by-step approach still <strong>calls the model forward for each</strong> of these nailed-down tokens to "predict" them—pure wasted compute, since the answer is predetermined. Such nailed-down fragments actually make up a large share of structured output: braces, quotes, colons, commas, fixed field names, and enum prefixes are all boilerplate the grammar imposes, and they often outnumber the genuinely free content fields.</p>
+<p>SGLang's optimization is called <strong>jump-forward, backed by a compressed FSM</strong>. At compile time it identifies these "deterministic spans": any run of tokens with a unique continuation is pre-compressed and recorded. At runtime, once the FSM reaches such a state, SGLang no longer runs the model forward but <strong>splices the whole forced string directly into the output</strong> and jumps the FSM ahead by the corresponding steps at once. Concretely this lives in <span class="mono">OutlinesJumpForwardMap.jump_forward_symbol(state)</span>: given the current state, it returns the string the grammar nails down from there for the scheduler to splice in. This jump brings a double payoff: it is <strong>faster</strong>—skipping a run of meaningless forwards visibly speeds up structured generation; and it yields <strong>better quality</strong>—the model no longer gets distracted predicting boilerplate and can focus on the free fields that truly need its judgment. This optimization closes Part 10. Notably, the longer and more frequent the deterministic spans, the greater jump-forward's payoff—for complex schemas with many fields and fixed key names, the saved forwards are substantial and end-to-end latency drops noticeably.</p>
+
+<div class="cols"><div class="col"><strong>Plain per-token decode</strong><br>For the nailed-down <span class="mono">" n a m e " :</span> it dutifully runs a model forward to "predict" each character—burning compute step by step even though there is only one answer.</div><div class="col"><strong>Jump-forward</strong><br>Detecting the unique continuation, <span class="mono">jump_forward_symbol</span> emits the whole <span class="mono">"name":</span> directly; the FSM jumps over these steps <strong>without calling the model</strong>—faster and steadier.</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/base_grammar_backend.py ::BaseGrammarObject</span><span class="ln">one grammar FSM per request: mask logits to stay valid + rollback</span></div><pre>class BaseGrammarObject:                 # one per request: the compiled grammar FSM
+    def accept_token(self, token):
+        ...                              # advance the FSM by the sampled token
+    def allocate_vocab_mask(self, vocab_size, batch_size, device):
+        ...                              # make a [vocab] mask buffer
+    def fill_vocab_mask(self, vocab_mask, idx):
+        ...                              # mark which tokens keep the output grammar-valid
+    def rollback(self, k):
+        ...                              # back up k steps (backtracking / spec-decode reject)
+    def is_terminated(self):
+        ...                              # has the grammar reached an accept state?
+# jump-forward lives in constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</pre></div>
+
+<h2>Rollback, termination, and the speculative-decoding interplay</h2>
+<p>Finally, three easily overlooked yet crucial details. First, <strong>rollback is not optional</strong>. In speculative decoding the draft model proposes several tokens at once and the target model verifies them in parallel, often accepting only the first few and rejecting the rest. The grammar FSM must assume all are accepted and advance accordingly before verification; once some are rejected it must use <span class="mono">rollback(k)</span> to precisely undo the extra k steps, keeping the FSM state strictly consistent with the truly accepted sequence—otherwise subsequent masks would be built from a wrong state and the constraint would fail. Second, <strong>termination decides when to stop</strong>: when <span class="mono">is_terminated()</span> returns true the structure is fully closed (e.g. the outermost JSON braces are balanced) and generation can safely stop without adding noise. Third, <strong>mask construction must be efficient</strong>: <span class="mono">allocate_vocab_mask</span> and <span class="mono">fill_vocab_mask</span> are designed to be batched on the GPU so that constrained decoding's overhead is largely hidden behind the forward compute, barely slowing throughput. This matters especially: if constrained decoding were implemented clumsily—judging each token's legality on the CPU every step and syncing back to the GPU—the overhead would easily eat the compute it saves. SGLang instead pushes "deciding legality" into compile time as much as possible, leaving the runtime with just one lightweight mask fill and one tensor add, so it guarantees strict structure at almost no throughput cost. Stitch advancing, masking, rollback, and termination together and you get the complete, sturdy skeleton of SGLang's constrained decoding.</p>
+<p>One more design lesson is worth drawing out: SGLang deliberately abstracts all of this behind a single base class so that the concrete grammar engine is <strong>pluggable</strong>. Whether the underlying compiler is xgrammar, outlines, or llguidance, the scheduler talks only to the <span class="mono">BaseGrammarObject</span> interface—advance, mask, rollback, terminate. This means a faster or more expressive grammar engine can be dropped in without touching the decode loop, and different engines can even coexist for different request types. The same discipline that makes the masking efficient also makes the whole subsystem future-proof, which is exactly the kind of "designed-for-scale, swappable internals" philosophy that recurs throughout SGLang's architecture.</p>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Constrained decoding guarantees valid structure</strong>: compile JSON-Schema / regex / EBNF into an FSM and, before sampling, use a vocab mask to set illegal tokens' logits to −∞.</li>
+<li><strong>It sits exactly between logits and the sampler</strong>: it edits logits (<span class="inline">Lesson 37</span>), not the sampling algorithm (<span class="inline">Lesson 28</span>), so it stacks with any sampling strategy.</li>
+<li><strong>BaseGrammarObject is the per-request FSM</strong>: <span class="mono">accept_token</span> advances, <span class="mono">fill_vocab_mask</span> builds the mask, <span class="mono">rollback</span> backs up, <span class="mono">is_terminated</span> checks the accept state.</li>
+<li><strong>Jump-forward skips forced tokens' forwards</strong>: the compressed FSM uses <span class="mono">jump_forward_symbol</span> to emit the forced string directly—faster, and the model stays focused for better quality.</li>
+<li><strong>Rollback underpins speculative decoding</strong>: rejected draft tokens need <span class="mono">rollback(k)</span> to precisely restore the FSM state (<span class="inline">Lesson 43</span>).</li>
+</ul></div>
+
+<div class="card"><div class="tag">🏁 Part 10 wrap-up</div><p>Part 10 centered on "how to push SGLang toward large scale and high performance": speculative decoding lands multiple tokens at once via draft+verify, and EAGLE further raises acceptance with feature-level drafting; PD disaggregation splits prefill and decode onto separate instances so each saturates compute and memory bandwidth; tensor/pipeline/data/expert parallelism lets giant models span many GPUs; EPLB dynamically balances expert load in MoE to erase hotspots; and this lesson's structured outputs with jump-forward guarantees strictly valid output while skipping pointless forwards. These techniques look like separate concerns but jointly answer one question—<strong>spend every bit of compute where it matters without sacrificing correctness</strong>—and thereby push SGLang steadily to a large-scale, high-performance production level. With that, Part 10's puzzle is fully assembled: from "compute faster" to "compute cheaper" to "compute both correctly and stably," SGLang answers, with a set of interlocking mechanisms, every core challenge of bringing large models into real production.</p></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Where exactly, and on what, does constrained decoding act to guarantee always-valid output?</div>
+  <ol class="opts">
+    <li><strong>Before sampling, it overlays a vocab mask on the logits (Lesson 37), setting every grammar-breaking token to −∞, so whatever the sampler (Lesson 28) picks stays valid</strong></li>
+    <li>After sampling, discard illegal tokens and retry until a valid result happens to appear</li>
+    <li>Fine-tune the model weights so it learns to emit only JSON</li>
+    <li>Rewrite the sampling algorithm so top-p normalizes only over legal tokens</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. SGLang compiles the constraint into an FSM and, at each decode step <strong>before sampling</strong>, asks the FSM for the allowed set, builds a vocab mask, and sets illegal tokens' logits to <span class='mono'>−∞</span> (Lesson 37). After softmax those probabilities are zero, so the sampler (Lesson 28)—greedy or top-p—cannot pick them. Editing logits rather than the sampler lets it stack with any sampling strategy.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What overhead does "jump-forward (compressed FSM)" save?</div>
+  <ol class="opts">
+    <li>Saves running JSON parsing to validate the sampled result</li>
+    <li><strong>When the grammar has a unique continuation over a span (e.g. the forced JSON key <span class='mono'>"name":</span>), it splices the whole span and jumps the FSM ahead at once, skipping the model forwards for those nailed-down tokens</strong></li>
+    <li>Saves transferring logits from GPU back to CPU</li>
+    <li>Saves the VRAM allocation for building the vocab mask</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Often the FSM's allowed set is a single token across a run of states—the grammar is fully deterministic with no freedom. Per-token decode still runs a forward for each nailed-down token, pure waste. <span class='mono'>OutlinesJumpForwardMap.jump_forward_symbol(state)</span> returns that forced string, splices it in, and jumps the FSM ahead at once: faster, and better quality since the model needn't predict boilerplate.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why does speculative decoding (Lesson 43) need the grammar object's <span class='mono'>rollback(k)</span>?</div>
+  <ol class="opts">
+    <li>To fall back to greedy sampling when temperature is too high</li>
+    <li>To undo the whole output after generation and restart</li>
+    <li>To checkpoint the FSM state to disk for resuming later</li>
+    <li><strong>The draft model proposes several tokens at once and the FSM advances assuming all are accepted; when verification rejects the trailing ones, it must <span class='mono'>rollback(k)</span> to keep the FSM state consistent with the truly accepted sequence</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. In speculative decoding the draft model emits several candidates that the target verifies in parallel, often accepting only the first few. The FSM must advance assuming all are accepted; once the trailing ones are rejected it uses <span class='mono'>rollback(k)</span> to undo the extra k steps so the FSM state matches the truly accepted sequence—otherwise later masks build on a wrong state and the constraint breaks.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why constrained decoding <strong>guarantees</strong> valid output rather than just "probably valid": after compiling JSON-Schema/regex/EBNF into an FSM, how <span class='mono'>fill_vocab_mask</span> sets illegal tokens' logits (Lesson 37) to −∞ before each sampling step so the sampler (Lesson 28) cannot pick them regardless of strategy; then contrast this with "generate then validate and retry."</li>
+    <li>Describe jump-forward's full payoff and mechanism: how the compressed FSM identifies "deterministic spans," how <span class='mono'>jump_forward_symbol(state)</span> emits the nailed-down string and jumps the FSM ahead to skip model forwards; explain why it is <strong>both faster and higher quality</strong>, and use <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> to show how the per-request FSM closes the loop of advance, mask, jump, and terminate.</li>
   </ul>
 </div>
 </div>
