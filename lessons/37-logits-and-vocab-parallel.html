@@ -395,7 +395,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>于是 <span class="mono">LogitsProcessor</span> 在调用 lm_head 之前，先把 hidden 从 <span class="mono">[2000, hidden]</span> 裁成 <span class="mono">[1, hidden]</span>，<strong>只让最后一行过那张 [hidden × vocab] 的大矩阵</strong>。lm_head 是整个前向里数一数二贵的矩阵乘（词表几万到几十万列），把它的输入从 2000 行压到 1 行，等于把这步的算力和访存直接<strong>砍掉了两千倍</strong>。批处理时也一样：每条请求只贡献它自己的末位，一个 batch 有多少条请求，就只算多少行 logits，而不是把整批 prompt 的全部位置都算一遍。</p>
 <p>唯一的例外是<strong>用户要 logprob</strong>：要返回每个 prompt token 的对数概率（评测、打分、推测解码的草稿校验都会用到），就得保留那些位置的 logits。<span class="mono">logits_metadata</span> 正是用来记录"这一批里哪些位置需要完整 logits、哪些只要末位"，让 LogitsProcessor 按需裁剪——默认省到只剩末位，需要时才多留几行。这也解释了为什么同一份代码，普通生成飞快、而开了 <span class="mono">logprobs</span> 的请求会稍慢一点：后者让那张大矩阵乘多吃了好些行输入。</p>
 
-<p>解码阶段这个优化更是天然成立：每步只往前走一个 token，每条请求的 hidden 本来就只有<strong>一行</strong>（最新那个位置），lm_head 自然只算一行。所以"末位切片"在预填充时是<strong>主动裁剪</strong>、在解码时是<strong>本就如此</strong>——两种模式（第 30 课）在这里被统一成同一句话：<strong>每条请求只取一行 hidden 去算 logits</strong>。也正因为输出头只处理这薄薄的几行，它在整个前向里的耗时占比通常很小；真正的大头还是中间那几十层注意力与 MLP。把这件事想清楚，你就能解释一个常见困惑：模型参数里词表头占了一大块<strong>显存</strong>，但它在每步解码里花的<strong>时间</strong>却很少——因为算的行数实在太少了。</p>
+<p>解码阶段这个优化更是天然成立：每步只往前走一个 token，每条请求的 hidden 本来就只有<strong>一行</strong>（最新那个位置），lm_head 自然只算一行。所以"末位切片"在预填充时是<strong>主动裁剪</strong>、在解码时是<strong>本就如此</strong>——两种模式（第 4 课）在这里被统一成同一句话：<strong>每条请求只取一行 hidden 去算 logits</strong>。也正因为输出头只处理这薄薄的几行，它在整个前向里的耗时占比通常很小；真正的大头还是中间那几十层注意力与 MLP。把这件事想清楚，你就能解释一个常见困惑：模型参数里词表头占了一大块<strong>显存</strong>，但它在每步解码里花的<strong>时间</strong>却很少——因为算的行数实在太少了。</p>
 
 <h2>词表太大：为什么要按 TP 切分</h2>
 <p>这里藏着一个容易被忽视的规模问题：<strong>词表非常大</strong>。常见模型的词表在 3 万到 25 万 token 之间，而 lm_head 是
@@ -436,9 +436,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <span class="kw">def</span> forward(self, input_ids, hidden_states,
                 lm_head: VocabParallelEmbedding, logits_metadata):
         <span class="cm"># 1) 解码/预填充都只取每条请求的“最后一位” hidden</span>
-        last_hidden = self._slice_last_token(hidden_states, logits_metadata)
+        pruned = self._get_pruned_states(hidden_states, logits_metadata)
         <span class="cm"># 2) 词表并行投影：本 rank 只算自己那段词表的 logits</span>
-        logits = lm_head(last_hidden)               <span class="cm"># [tokens, vocab/这段]</span>
+        logits = torch.matmul(pruned, lm_head.weight.T)  <span class="cm"># [tokens, vocab/这段]</span>
         <span class="kw">if</span> self.do_tensor_parallel_all_gather:       <span class="cm"># 3) 跨卡拼成完整 logits</span>
             logits = tensor_model_parallel_all_gather(logits)
         <span class="kw">return</span> LogitsProcessorOutput(next_token_logits=logits)</pre>
@@ -573,7 +573,7 @@ the lm_head with the input embedding, since "word→vector" and "vector→word s
 <p>"Keep only the last position" sounds like a minor tweak, but the compute it saves is substantial. Picture a 2000-token prompt: during prefill the model genuinely has to compute hidden for <strong>all 2000 positions</strong> — every layer's attention needs the representations of all preceding positions. But when we want to predict the <strong>2001st token</strong>, the only useful hidden is the <strong>last position's</strong>: it has already "seen" the whole prompt, and its logits are the next word's distribution. The logits of the other 1999 positions are, in ordinary generation, <strong>completely unused</strong>.</p>
 <p>So before calling lm_head, <span class="mono">LogitsProcessor</span> first prunes hidden from <span class="mono">[2000, hidden]</span> to <span class="mono">[1, hidden]</span>, <strong>letting only the last row pass through that [hidden × vocab] matrix</strong>. lm_head is one of the most expensive matmuls in the whole forward (tens to hundreds of thousands of vocab columns); shrinking its input from 2000 rows to 1 cuts this step's FLOPs and HBM traffic by <strong>2000×</strong>. Batching works the same way: each request contributes only its own last position, so a batch computes only as many logit rows as it has requests, not every position of every prompt.</p>
 <p>The one exception is when <strong>the user asks for logprobs</strong>: returning the log-probability of each prompt token (used by eval, scoring, and speculative-decoding draft verification) requires keeping those positions' logits. <span class="mono">logits_metadata</span> is exactly what records "which positions in this batch need full logits and which need only the last" so LogitsProcessor prunes on demand — down to just the last by default, keeping extra rows only when needed. That's why the same code is fast for ordinary generation but a touch slower with <span class="mono">logprobs</span> on: the latter feeds that big matmul several more rows.</p>
-<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (Lesson 30) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
+<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (Lesson 4) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
 
 <h2>The vocab is huge: why split it across TP</h2>
 <p>There's an easily-missed scale problem here: the <strong>vocab is very large</strong>. Common models have 30k–250k tokens, and lm_head
@@ -619,9 +619,9 @@ assemble the segments into full logits (gated by <span class="mono">do_tensor_pa
     <span class="kw">def</span> forward(self, input_ids, hidden_states,
                 lm_head: VocabParallelEmbedding, logits_metadata):
         <span class="cm"># 1) Both decode and prefill keep only each request's LAST hidden</span>
-        last_hidden = self._slice_last_token(hidden_states, logits_metadata)
+        pruned = self._get_pruned_states(hidden_states, logits_metadata)
         <span class="cm"># 2) Vocab-parallel projection: this rank computes its vocab segment</span>
-        logits = lm_head(last_hidden)               <span class="cm"># [tokens, vocab/segment]</span>
+        logits = torch.matmul(pruned, lm_head.weight.T)  <span class="cm"># [tokens, vocab/segment]</span>
         <span class="kw">if</span> self.do_tensor_parallel_all_gather:       <span class="cm"># 3) stitch into full logits</span>
             logits = tensor_model_parallel_all_gather(logits)
         <span class="kw">return</span> LogitsProcessorOutput(next_token_logits=logits)</pre>

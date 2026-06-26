@@ -6786,7 +6786,7 @@ How the lower-level kernels are written (Lessons 38/40) and the details of multi
 <p>Below is the contract itself — the <span class="mono">AttentionBackend</span> ABC. Note how <span class="mono">forward</span> dispatches by <span class="mono">forward_mode</span> to <span class="mono">forward_decode</span> / <span class="mono">forward_extend</span>, both of which are <span class="mono">NotImplementedError</span> in the base, waiting for a subclass:</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">the delegation contract: plan metadata + two forward paths</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/base_attn_backend.py ::AttentionBackend</span><span class="ln">the delegation contract: plan metadata + two forward paths</span></div>
   <pre><span class="kw">class</span> <span class="st">AttentionBackend</span>(ABC):
     <span class="cm"># Base class of all attention backends. The model only calls it; it</span>
     <span class="cm"># doesn't care which kernel runs inside.</span>
@@ -6936,7 +6936,7 @@ SGLang's <span class="mono">FusedMoE</span> exists precisely for this: it <stron
 </div>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">layers/moe/fused_moe_triton/layer.py ::FusedMoE</span><span class="ln">N experts + top-k routing, fused into kernels</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/moe/fused_moe_triton/layer.py ::FusedMoE</span><span class="ln">N experts + top-k routing, fused into kernels</span></div>
   <pre><span class="kw">class</span> <span class="st">FusedMoE</span>(torch.nn.Module):
     <span class="cm"># MoE layer: holds both gate_up_proj(w13) and down_proj(w2) expert weights</span>
     <span class="kw">def</span> __init__(
@@ -7290,7 +7290,7 @@ The fix isn't retraining but <strong>cleverly stretching the rotation frequencie
 <p>Below are the core lines of RoPE itself — how <span class="mono">forward_native</span> picks cos/sin by position and applies the rotation to q and k:</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">layers/rotary_embedding/base.py ::RotaryEmbedding</span><span class="ln">forward: applying the rotation to q/k by position</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/rotary_embedding/base.py ::RotaryEmbedding</span><span class="ln">forward: applying the rotation to q/k by position</span></div>
   <pre><span class="kw">def</span> forward_native(self, positions, query, key, ...):
     <span class="cm"># pick the precomputed cos / sin for each token's position</span>
     cos_sin = self.cos_sin_cache.index_select(<span class="st">0</span>, positions)
@@ -7420,7 +7420,7 @@ the lm_head with the input embedding, since "word→vector" and "vector→word s
 <p>"Keep only the last position" sounds like a minor tweak, but the compute it saves is substantial. Picture a 2000-token prompt: during prefill the model genuinely has to compute hidden for <strong>all 2000 positions</strong> — every layer's attention needs the representations of all preceding positions. But when we want to predict the <strong>2001st token</strong>, the only useful hidden is the <strong>last position's</strong>: it has already "seen" the whole prompt, and its logits are the next word's distribution. The logits of the other 1999 positions are, in ordinary generation, <strong>completely unused</strong>.</p>
 <p>So before calling lm_head, <span class="mono">LogitsProcessor</span> first prunes hidden from <span class="mono">[2000, hidden]</span> to <span class="mono">[1, hidden]</span>, <strong>letting only the last row pass through that [hidden × vocab] matrix</strong>. lm_head is one of the most expensive matmuls in the whole forward (tens to hundreds of thousands of vocab columns); shrinking its input from 2000 rows to 1 cuts this step's FLOPs and HBM traffic by <strong>2000×</strong>. Batching works the same way: each request contributes only its own last position, so a batch computes only as many logit rows as it has requests, not every position of every prompt.</p>
 <p>The one exception is when <strong>the user asks for logprobs</strong>: returning the log-probability of each prompt token (used by eval, scoring, and speculative-decoding draft verification) requires keeping those positions' logits. <span class="mono">logits_metadata</span> is exactly what records "which positions in this batch need full logits and which need only the last" so LogitsProcessor prunes on demand — down to just the last by default, keeping extra rows only when needed. That's why the same code is fast for ordinary generation but a touch slower with <span class="mono">logprobs</span> on: the latter feeds that big matmul several more rows.</p>
-<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (Lesson 30) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
+<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (Lesson 4) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
 
 <h2>The vocab is huge: why split it across TP</h2>
 <p>There's an easily-missed scale problem here: the <strong>vocab is very large</strong>. Common models have 30k–250k tokens, and lm_head
@@ -7466,9 +7466,9 @@ assemble the segments into full logits (gated by <span class="mono">do_tensor_pa
     <span class="kw">def</span> forward(self, input_ids, hidden_states,
                 lm_head: VocabParallelEmbedding, logits_metadata):
         <span class="cm"># 1) Both decode and prefill keep only each request's LAST hidden</span>
-        last_hidden = self._slice_last_token(hidden_states, logits_metadata)
+        pruned = self._get_pruned_states(hidden_states, logits_metadata)
         <span class="cm"># 2) Vocab-parallel projection: this rank computes its vocab segment</span>
-        logits = lm_head(last_hidden)               <span class="cm"># [tokens, vocab/segment]</span>
+        logits = torch.matmul(pruned, lm_head.weight.T)  <span class="cm"># [tokens, vocab/segment]</span>
         <span class="kw">if</span> self.do_tensor_parallel_all_gather:       <span class="cm"># 3) stitch into full logits</span>
             logits = tensor_model_parallel_all_gather(logits)
         <span class="kw">return</span> LogitsProcessorOutput(next_token_logits=logits)</pre>
