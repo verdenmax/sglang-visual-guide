@@ -16,13 +16,13 @@ LESSON_53 = {"zh": r"""
 </div>
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
-<p>一条命令 <span class="mono">python -m sglang.launch_server</span> 背后发生的事：它的 <span class="mono">run_server</span> 先调用 <span class="mono">prepare_server_args</span> 把命令行参数解析进一个庞大的 <span class="mono">ServerArgs</span> dataclass，然后据此启动引擎（<strong>TokenizerManager + Scheduler + DetokenizerManager</strong>，第13课），再对外提供一个 HTTP 服务（<span class="mono">/generate</span>、OpenAI 兼容的 <span class="mono">/v1/...</span>，第15课）。</p>
+<p>一条命令 <span class="mono">python -m sglang.launch_server</span> 背后发生的事：命令行入口（<span class="mono">__main__</span>）先用 <span class="mono">prepare_server_args</span> 把命令行参数解析进一个庞大的 <span class="mono">ServerArgs</span> dataclass，再把这份配置交给 <span class="mono">run_server</span>，由它据此启动引擎（<strong>TokenizerManager + Scheduler + DetokenizerManager</strong>，第13课），再对外提供一个 HTTP 服务（<span class="mono">/generate</span>、OpenAI 兼容的 <span class="mono">/v1/...</span>，第15课）。</p>
 <p>另有一个 <span class="mono">Engine</span> 类——<strong>进程内 / 离线</strong>模式，不开 HTTP，专为脚本和评测而生。两者共享同一套内核，只是“门面”不同。本课最大的洞见是：<strong><span class="mono">ServerArgs</span> 把整本书的知识收成了一排 CLI 旋钮</strong>。</p>
 <p>回头看你走过的路：从第5课的批处理、第13课的三件套链路，到第22课的分块预填充、第30课的 KV 显存、第33课的注意力后端、第35课的量化、第43课的投机解码、第46课的并行、第47课的 EPLB——这些曾经各自为政的知识点，如今都汇聚到同一个入口。这正是把它放在课程接近尾声讲的原因：只有先理解了每个零件，你才能真正读懂这一排 flag 的含义，而不是把它们当成一串需要死记硬背的咒语。本课不教新机制，它教你<strong>如何把已学的一切真正落地成一条命令</strong>。</p>
 </div>
 
 <h2>一、一条命令背后的故事</h2>
-<p>启动一个在线服务，你只需要：<span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct</span>。这条命令的入口函数是 <span class="mono">run_server</span>，它做的第一件事就是调用 <span class="mono">prepare_server_args</span>，把你在命令行敲下的一堆 <span class="mono">--flag</span> 解析进 <span class="mono">ServerArgs</span> 这个数据类。<span class="mono">ServerArgs</span> 里有几十上百个字段，每一个都对应着前面某一课讲过的某个机制。</p>
+<p>启动一个在线服务，你只需要：<span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct</span>。这条命令的入口（<span class="mono">__main__</span>）做的第一件事，是用 <span class="mono">prepare_server_args</span> 把你在命令行敲下的一堆 <span class="mono">--flag</span> 解析进 <span class="mono">ServerArgs</span> 这个数据类，再把解析好的 <span class="mono">ServerArgs</span> 交给 <span class="mono">run_server</span> 去启动引擎。<span class="mono">ServerArgs</span> 里有几十上百个字段，每一个都对应着前面某一课讲过的某个机制。</p>
 <p>不妨把它想成一次“开机自检 + 组装流水线”的过程。<span class="mono">prepare_server_args</span> 不只是把字符串塞进字段，它还会做合法性校验、推断未显式指定的默认值、处理互相冲突的选项（比如某些后端不支持某种量化时会报错或回退）。校验通过后，框架才放心地按这份配置去申请显存、加载权重、构建 KV 缓存池。如果你启动时漏了必填的 <span class="mono">--model-path</span>，或者给了一个不存在的注意力后端名，错误就会在这一步被早早拦下，而不是等到第一个请求进来才崩溃。这种“配置先行、校验在前”的设计，让一次成功的启动几乎就等于一次成功的部署。</p>
 <p>解析完成后，框架据此<strong>启动引擎</strong>：拉起 <span class="mono">TokenizerManager</span> 负责把文本转成 token、拉起 <span class="mono">Scheduler</span> 负责批处理与显存管理、拉起 <span class="mono">DetokenizerManager</span> 把生成的 token 流式还原成文本（这正是第13课讲的三件套）。最后，它绑定一个 HTTP 端口，对外暴露 <span class="mono">/generate</span> 原生接口和一整套 OpenAI 兼容的 <span class="mono">/v1/chat/completions</span>、<span class="mono">/v1/completions</span> 接口（第15课）。从此你就有了一个能接受请求、吐出 token 的推理服务器。</p>
 <p>值得强调的是：这条命令看似简单，背后却把前面十几课讲过的进程编排、零拷贝通信、连续批处理一次性串了起来。你不必再手写任何胶水代码——框架替你把分词进程、调度进程、反分词进程都拉起来，并用进程间通信把它们连成一条流水线。换句话说，<span class="mono">launch_server</span> 是整本书所有内核机制的<strong>总开关</strong>，按下它，一台完整的推理服务就活了过来。如果你只想在脚本里离线生成、不需要对外服务，那就跳过 HTTP，改用后面要讲的 <span class="mono">Engine</span>。</p>
@@ -41,7 +41,7 @@ LESSON_53 = {"zh": r"""
 <tr><td><span class="mono">--tp-size</span> / <span class="mono">--dp-size</span></td><td>张量并行 / 数据并行的规模（第46课）</td></tr>
 <tr><td><span class="mono">--attention-backend</span></td><td>注意力内核：flashinfer / triton / fa（第33课）</td></tr>
 <tr><td><span class="mono">--quantization</span></td><td>权重量化方式：fp8 / awq / gptq（第35课）</td></tr>
-<tr><td><span class="mono">--mem-fraction-static</span></td><td>KV 缓存池能占用多少 GPU 显存（第30/31课）</td></tr>
+<tr><td><span class="mono">--mem-fraction-static</span></td><td>静态分配（权重 + KV 池）占多少 GPU 显存（第30/31课）</td></tr>
 <tr><td><span class="mono">--chunked-prefill-size</span></td><td>把超长 prefill 切块以平滑显存（第22课）</td></tr>
 <tr><td><span class="mono">--max-running-requests</span></td><td>同时在跑的请求数上限，即批大小帽（第5课）</td></tr>
 <tr><td><span class="mono">--speculative-algorithm</span></td><td>投机解码算法的开关与选择（第43课）</td></tr>
@@ -73,7 +73,7 @@ class ServerArgs:
     model_path: str                    # --model-path: 要服务的 HF 模型
     tp_size: int = 1                   # --tp-size: 张量并行 rank 数 (第46课)
     dp_size: int = 1                   # --dp-size: 数据并行副本数 (第46课)
-    mem_fraction_static: float = None  # --mem-fraction-static: KV 池占的 GPU 显存 (第30课)
+    mem_fraction_static: float = None  # --mem-fraction-static: 静态分配(权重+KV池)的 GPU 显存比例 (第30课)
     attention_backend: str = None      # --attention-backend: flashinfer / triton / fa (第33课)
     chunked_prefill_size: int = None   # --chunked-prefill-size: 切分超长 prefill (第22课)
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (第35课)
@@ -82,7 +82,7 @@ class ServerArgs:
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>启动只需一条命令：<span class="mono">python -m sglang.launch_server --model-path &lt;模型&gt; [flags]</span>。</li>
-<li><span class="mono">run_server</span> → <span class="mono">prepare_server_args</span> 解析进 <span class="mono">ServerArgs</span> → 启动引擎（三件套，第13课）→ 暴露 HTTP（<span class="mono">/generate</span>、<span class="mono">/v1/...</span>，第15课）。</li>
+<li>命令行入口用 <span class="mono">prepare_server_args</span> 把 argv 解析进 <span class="mono">ServerArgs</span> → 交给 <span class="mono">run_server</span> 启动引擎（三件套，第13课）→ 暴露 HTTP（<span class="mono">/generate</span>、<span class="mono">/v1/...</span>，第15课）。</li>
 <li><strong>核心洞见</strong>：<span class="mono">ServerArgs</span> 每个 dataclass 字段自动映射成一个 <span class="mono">--kebab-case</span> flag，前 52 课的每个组件都变成一个旋钮。</li>
 <li>调优 = 拧对 flag：<span class="mono">--tp-size</span>/<span class="mono">--dp-size</span>、<span class="mono">--attention-backend</span>、<span class="mono">--quantization</span>、<span class="mono">--mem-fraction-static</span>、<span class="mono">--chunked-prefill-size</span>、<span class="mono">--max-running-requests</span> 等。</li>
 <li><span class="mono">Engine</span>（离线/进程内，无 HTTP）vs HTTP 服务器（在线）：同一内核，两种门面。</li>
@@ -98,13 +98,13 @@ class ServerArgs:
 </div>
 
 <div class="card macro"><div class="tag">🌍 The big picture</div>
-<p>What one command — <span class="mono">python -m sglang.launch_server</span> — does under the hood: its <span class="mono">run_server</span> first calls <span class="mono">prepare_server_args</span> to parse the command line into a big <span class="mono">ServerArgs</span> dataclass, then boots the engine (<strong>TokenizerManager + Scheduler + DetokenizerManager</strong>, Lesson 13) and serves an HTTP endpoint (<span class="mono">/generate</span>, OpenAI-compatible <span class="mono">/v1/...</span>, Lesson 15).</p>
+<p>What one command — <span class="mono">python -m sglang.launch_server</span> — does under the hood: its entry point (<span class="mono">__main__</span>) first uses <span class="mono">prepare_server_args</span> to parse the command line into a big <span class="mono">ServerArgs</span> dataclass, then hands that config to <span class="mono">run_server</span>, which boots the engine (<strong>TokenizerManager + Scheduler + DetokenizerManager</strong>, Lesson 13) and serves an HTTP endpoint (<span class="mono">/generate</span>, OpenAI-compatible <span class="mono">/v1/...</span>, Lesson 15).</p>
 <p>There's also an <span class="mono">Engine</span> class — an <strong>in-process / offline</strong> mode with no HTTP, built for scripting and eval. Both share the same core; only the "facade" differs. The key insight of this lesson: <strong><span class="mono">ServerArgs</span> gathers the whole guide's knowledge into one row of CLI knobs</strong>.</p>
 <p>Look back at the path you've walked: from batching in Lesson 5 and the trio pipeline in Lesson 13, to chunked prefill in Lesson 22, KV memory in Lesson 30, attention backends in Lesson 33, quantization in Lesson 35, speculative decoding in Lesson 43, parallelism in Lesson 46, and EPLB in Lesson 47 — all these once-separate ideas now converge on one entry point. That's exactly why this lesson sits near the end of the course: only after understanding each part can you truly read this row of flags rather than treat them as an incantation to memorize. This lesson teaches no new mechanism; it teaches <strong>how to land everything you've learned into one command</strong>.</p>
 </div>
 
 <h2>1. The story behind one command</h2>
-<p>To launch an online service you only need: <span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct</span>. The entry function is <span class="mono">run_server</span>, and the first thing it does is call <span class="mono">prepare_server_args</span> to parse the bunch of <span class="mono">--flag</span>s you typed into the <span class="mono">ServerArgs</span> dataclass. <span class="mono">ServerArgs</span> holds dozens upon dozens of fields, and each one corresponds to a mechanism from some earlier lesson.</p>
+<p>To launch an online service you only need: <span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct</span>. The first thing this command's entry point (<span class="mono">__main__</span>) does is call <span class="mono">prepare_server_args</span> to parse the bunch of <span class="mono">--flag</span>s you typed into the <span class="mono">ServerArgs</span> dataclass, then hand the parsed <span class="mono">ServerArgs</span> to <span class="mono">run_server</span> to launch. <span class="mono">ServerArgs</span> holds dozens upon dozens of fields, and each one corresponds to a mechanism from some earlier lesson.</p>
 <p>Think of it as a "power-on self-test plus assembly line". <span class="mono">prepare_server_args</span> doesn't just stuff strings into fields; it validates them, infers defaults you didn't specify, and resolves conflicting options (e.g. erroring or falling back when a backend doesn't support a given quantization). Only after validation passes does the framework confidently allocate memory, load weights, and build the KV pool according to that config. If you forget the required <span class="mono">--model-path</span>, or pass a non-existent attention backend name, the error is caught early here rather than crashing when the first request arrives. This "config first, validate up front" design means a successful launch is almost equivalent to a successful deployment.</p>
 <p>Once parsed, the framework <strong>boots the engine</strong>: it brings up <span class="mono">TokenizerManager</span> to turn text into tokens, <span class="mono">Scheduler</span> to handle batching and memory management, and <span class="mono">DetokenizerManager</span> to stream generated tokens back into text (exactly the trio from Lesson 13). Finally it binds an HTTP port and exposes the native <span class="mono">/generate</span> endpoint plus a full set of OpenAI-compatible <span class="mono">/v1/chat/completions</span> and <span class="mono">/v1/completions</span> endpoints (Lesson 15). And now you have an inference server that accepts requests and emits tokens.</p>
 <p>Worth stressing: the command looks simple, but behind it sits all the process orchestration, zero-copy communication, and continuous batching from the previous dozen lessons, wired up at once. You no longer write any glue code — the framework brings up the tokenizer, scheduler, and detokenizer processes for you and connects them into a pipeline via inter-process communication. In other words, <span class="mono">launch_server</span> is the <strong>master switch</strong> for every kernel mechanism in the whole guide; flip it and a complete inference service comes alive. If you only want offline generation in a script with no external serving, skip HTTP and use the <span class="mono">Engine</span> covered below.</p>
@@ -123,7 +123,7 @@ class ServerArgs:
 <tr><td><span class="mono">--tp-size</span> / <span class="mono">--dp-size</span></td><td>Scale of tensor / data parallelism (Lesson 46)</td></tr>
 <tr><td><span class="mono">--attention-backend</span></td><td>Attention kernel: flashinfer / triton / fa (Lesson 33)</td></tr>
 <tr><td><span class="mono">--quantization</span></td><td>Weight quantization: fp8 / awq / gptq (Lesson 35)</td></tr>
-<tr><td><span class="mono">--mem-fraction-static</span></td><td>How much GPU memory the KV pool gets (Lessons 30/31)</td></tr>
+<tr><td><span class="mono">--mem-fraction-static</span></td><td>GPU memory fraction for static allocation (weights + KV pool) (Lessons 30/31)</td></tr>
 <tr><td><span class="mono">--chunked-prefill-size</span></td><td>Split long prefills to smooth memory (Lesson 22)</td></tr>
 <tr><td><span class="mono">--max-running-requests</span></td><td>Cap on concurrent requests, i.e. batch size (Lesson 5)</td></tr>
 <tr><td><span class="mono">--speculative-algorithm</span></td><td>Enable / choose the speculative decoding algorithm (Lesson 43)</td></tr>
@@ -155,7 +155,7 @@ class ServerArgs:
     model_path: str                    # --model-path: the HF model to serve
     tp_size: int = 1                   # --tp-size: tensor-parallel ranks (Lesson 46)
     dp_size: int = 1                   # --dp-size: data-parallel replicas (Lesson 46)
-    mem_fraction_static: float = None  # --mem-fraction-static: GPU mem for the KV pool (Lesson 30)
+    mem_fraction_static: float = None  # --mem-fraction-static: GPU mem fraction for static alloc (weights + KV pool) (Lesson 30)
     attention_backend: str = None      # --attention-backend: flashinfer / triton / fa (Lesson 33)
     chunked_prefill_size: int = None   # --chunked-prefill-size: split long prefills (Lesson 22)
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (Lesson 35)
@@ -164,7 +164,7 @@ class ServerArgs:
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>Launching takes one command: <span class="mono">python -m sglang.launch_server --model-path &lt;model&gt; [flags]</span>.</li>
-<li><span class="mono">run_server</span> → <span class="mono">prepare_server_args</span> parses into <span class="mono">ServerArgs</span> → boots the engine (the trio, Lesson 13) → exposes HTTP (<span class="mono">/generate</span>, <span class="mono">/v1/...</span>, Lesson 15).</li>
+<li>The entry point uses <span class="mono">prepare_server_args</span> to parse argv into <span class="mono">ServerArgs</span> → hands it to <span class="mono">run_server</span> to boot the engine (the trio, Lesson 13) → exposes HTTP (<span class="mono">/generate</span>, <span class="mono">/v1/...</span>, Lesson 15).</li>
 <li><strong>Core insight</strong>: each <span class="mono">ServerArgs</span> dataclass field auto-maps to a <span class="mono">--kebab-case</span> flag, so every component from the first 52 lessons becomes a knob.</li>
 <li>Tuning = setting the right flags: <span class="mono">--tp-size</span>/<span class="mono">--dp-size</span>, <span class="mono">--attention-backend</span>, <span class="mono">--quantization</span>, <span class="mono">--mem-fraction-static</span>, <span class="mono">--chunked-prefill-size</span>, <span class="mono">--max-running-requests</span>, and more.</li>
 <li><span class="mono">Engine</span> (offline / in-process, no HTTP) vs HTTP server (online): same core, two facades.</li>
@@ -182,9 +182,8 @@ LESSON_54 = {"zh": r"""
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
 <p>性能调优永远是一个<strong>两段式循环</strong>：<span class="mono">benchmark → profile → 优化 → 再 benchmark</span>。<strong>benchmark 是黑盒</strong>，它向一台真实运行的服务器发射可配置的请求流（请求速率、输入/输出长度、ShareGPT 这类数据集），最后吐出一份 <span class="mono">BenchmarkMetrics</span> 汇总，告诉你"快还是慢、慢在第几分位"。<strong>profiler 是白盒</strong>，它录下 GPU 上每一个 CUDA kernel 的时间线，告诉你"慢在哪个阶段、哪个 kernel"。</p>
 <p>关键认知：在压力之下，延迟不是一个数，而是一条<strong>分布</strong>——mean / median / p90 / p95 / p99。普通用户感受到的卡顿往往来自<strong>长尾（p99）</strong>，而不是平均值。所以一份诚实的压测报告必须给出<strong>分位数</strong>，而不是只报一个漂亮的均值。再换个角度看这两件工具的分工：benchmark 给你的是<strong>结果</strong>（多快、多稳、能扛多大并发），profiler 给你的是<strong>过程</strong>（这段时间里 GPU 到底在忙什么）。结果告诉你"该不该优化、优化目标是否达成"，过程告诉你"具体动哪里"。一个负责对外承诺 SLA，一个负责对内指导改代码，二者合起来才能把性能工作从玄学变成工程。</p>
+<p>这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
 </div>
-
-这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
 
 <h2>一、压测：给运行中的服务器打分</h2>
 <p>SGLang 自带的压测工具是 <span class="mono">python -m sglang.bench_serving</span>。它的工作方式很直白：你先把服务器跑起来，然后这个脚本<strong>不修改服务器</strong>，只是按你设定的<strong>请求速率（request rate）</strong>和<strong>输入/输出长度</strong>，从外部发射一批请求，逐个记录每条请求的 <span class="mono">ttft</span> 和 <span class="mono">tpot</span>，跑完后聚合成一份 <span class="mono">BenchmarkMetrics</span>。你可以用 ShareGPT 这样的真实对话数据集，让请求长度分布贴近线上场景。</p>
@@ -258,9 +257,8 @@ class BenchmarkMetrics:
 <div class="card macro"><div class="tag">🌍 The big picture</div>
 <p>Performance tuning is always a <strong>two-stage loop</strong>: <span class="mono">benchmark → profile → optimize → benchmark again</span>. <strong>The benchmark is black-box</strong>: it fires a configurable request load (request rate, input/output lengths, datasets like ShareGPT) at a real running server and finally emits a <span class="mono">BenchmarkMetrics</span> summary telling you "fast or slow, and slow at which percentile." <strong>The profiler is white-box</strong>: it records the timeline of every CUDA kernel on the GPU, telling you "which phase, which kernel is slow."</p>
 <p>The key insight: under load, latency is not a single number but a <strong>distribution</strong> — mean / median / p90 / p95 / p99. The lag ordinary users feel usually comes from the <strong>tail (p99)</strong>, not the mean. So an honest benchmark report must give <strong>percentiles</strong>, not just one pretty average. Another way to see the division of labor between these two tools: the benchmark gives you <strong>results</strong> (how fast, how steady, how much concurrency it sustains), the profiler gives you <strong>process</strong> (what the GPU is actually busy with during that time). Results tell you "whether to optimize and whether the goal is met," process tells you "exactly where to act." One commits SLAs externally, the other guides code changes internally; together they turn performance work from black magic into engineering.</p>
+<p>This two-stage loop isn't a one-shot but iterates repeatedly: after each optimization, re-benchmark to confirm the numbers really improved, then decide whether to keep analyzing the next bottleneck. Performance optimization has no end, only the judgment of "is it good enough under the current SLA."</p>
 </div>
-
-This two-stage loop isn't a one-shot but iterates repeatedly: after each optimization, re-benchmark to confirm the numbers really improved, then decide whether to keep analyzing the next bottleneck. Performance optimization has no end, only the judgment of "is it good enough under the current SLA."</p>
 
 <h2>1. Benchmark: scoring a running server</h2>
 <p>SGLang's built-in benchmark tool is <span class="mono">python -m sglang.bench_serving</span>. Its workflow is straightforward: you start the server first, then this script <strong>does not modify the server</strong> — it just fires a batch of requests from outside at your chosen <strong>request rate</strong> and <strong>input/output lengths</strong>, records each request's <span class="mono">ttft</span> and <span class="mono">tpot</span>, and aggregates them into a <span class="mono">BenchmarkMetrics</span> when done. You can use a real conversation dataset like ShareGPT so request-length distributions match production.</p>
@@ -472,6 +470,8 @@ LESSON_55 = {"zh": r"""
 <li><strong>All tests inherit <span class="mono">CustomTestCase</span></strong>, which wraps <span class="mono">setUpClass</span> so that even if setup fails, <span class="mono">tearDownClass</span> still runs—avoiding leaked ports/GPU processes and cascade-failing later tests.</li>
 <li><strong>CI</strong> <strong>partitions</strong> the tests under <span class="mono">test/registered/</span> across labelled GPU machines to run in parallel; <span class="mono">pre-commit</span> gates style/lint first.</li>
 <li>Contributor workflow: find/add a test under <span class="mono">test/registered/unit/…</span> → local <span class="mono">pytest</span> → push → CI re-runs on real hardware. Ties Lesson 13 (the server) to Lesson 56 (the PR flow).</li>
+<li>Remember the test pyramid: lots of cheap unit tests at the base, a few expensive e2e tests guarding the critical path; unit tests catch part-level bugs, e2e catches the seam/integration bugs.</li>
+<li>Layered gating: earlier gates are cheaper and faster (pre-commit), later ones slower and costlier (GPU e2e); installing the pre-commit hook locally fixes formatting the moment you commit, saving the wait in the CI queue.</li>
 </ul></div>
 """}
 LESSON_56 = {"zh": r"""

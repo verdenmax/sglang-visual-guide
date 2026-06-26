@@ -353,9 +353,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
 <p>性能调优永远是一个<strong>两段式循环</strong>：<span class="mono">benchmark → profile → 优化 → 再 benchmark</span>。<strong>benchmark 是黑盒</strong>，它向一台真实运行的服务器发射可配置的请求流（请求速率、输入/输出长度、ShareGPT 这类数据集），最后吐出一份 <span class="mono">BenchmarkMetrics</span> 汇总，告诉你"快还是慢、慢在第几分位"。<strong>profiler 是白盒</strong>，它录下 GPU 上每一个 CUDA kernel 的时间线，告诉你"慢在哪个阶段、哪个 kernel"。</p>
 <p>关键认知：在压力之下，延迟不是一个数，而是一条<strong>分布</strong>——mean / median / p90 / p95 / p99。普通用户感受到的卡顿往往来自<strong>长尾（p99）</strong>，而不是平均值。所以一份诚实的压测报告必须给出<strong>分位数</strong>，而不是只报一个漂亮的均值。再换个角度看这两件工具的分工：benchmark 给你的是<strong>结果</strong>（多快、多稳、能扛多大并发），profiler 给你的是<strong>过程</strong>（这段时间里 GPU 到底在忙什么）。结果告诉你"该不该优化、优化目标是否达成"，过程告诉你"具体动哪里"。一个负责对外承诺 SLA，一个负责对内指导改代码，二者合起来才能把性能工作从玄学变成工程。</p>
+<p>这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
 </div>
-
-这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
 
 <h2>一、压测：给运行中的服务器打分</h2>
 <p>SGLang 自带的压测工具是 <span class="mono">python -m sglang.bench_serving</span>。它的工作方式很直白：你先把服务器跑起来，然后这个脚本<strong>不修改服务器</strong>，只是按你设定的<strong>请求速率（request rate）</strong>和<strong>输入/输出长度</strong>，从外部发射一批请求，逐个记录每条请求的 <span class="mono">ttft</span> 和 <span class="mono">tpot</span>，跑完后聚合成一份 <span class="mono">BenchmarkMetrics</span>。你可以用 ShareGPT 这样的真实对话数据集，让请求长度分布贴近线上场景。</p>
@@ -478,9 +477,8 @@ class BenchmarkMetrics:
 <div class="card macro"><div class="tag">🌍 The big picture</div>
 <p>Performance tuning is always a <strong>two-stage loop</strong>: <span class="mono">benchmark → profile → optimize → benchmark again</span>. <strong>The benchmark is black-box</strong>: it fires a configurable request load (request rate, input/output lengths, datasets like ShareGPT) at a real running server and finally emits a <span class="mono">BenchmarkMetrics</span> summary telling you "fast or slow, and slow at which percentile." <strong>The profiler is white-box</strong>: it records the timeline of every CUDA kernel on the GPU, telling you "which phase, which kernel is slow."</p>
 <p>The key insight: under load, latency is not a single number but a <strong>distribution</strong> — mean / median / p90 / p95 / p99. The lag ordinary users feel usually comes from the <strong>tail (p99)</strong>, not the mean. So an honest benchmark report must give <strong>percentiles</strong>, not just one pretty average. Another way to see the division of labor between these two tools: the benchmark gives you <strong>results</strong> (how fast, how steady, how much concurrency it sustains), the profiler gives you <strong>process</strong> (what the GPU is actually busy with during that time). Results tell you "whether to optimize and whether the goal is met," process tells you "exactly where to act." One commits SLAs externally, the other guides code changes internally; together they turn performance work from black magic into engineering.</p>
+<p>This two-stage loop isn't a one-shot but iterates repeatedly: after each optimization, re-benchmark to confirm the numbers really improved, then decide whether to keep analyzing the next bottleneck. Performance optimization has no end, only the judgment of "is it good enough under the current SLA."</p>
 </div>
-
-This two-stage loop isn't a one-shot but iterates repeatedly: after each optimization, re-benchmark to confirm the numbers really improved, then decide whether to keep analyzing the next bottleneck. Performance optimization has no end, only the judgment of "is it good enough under the current SLA."</p>
 
 <h2>1. Benchmark: scoring a running server</h2>
 <p>SGLang's built-in benchmark tool is <span class="mono">python -m sglang.bench_serving</span>. Its workflow is straightforward: you start the server first, then this script <strong>does not modify the server</strong> — it just fires a batch of requests from outside at your chosen <strong>request rate</strong> and <strong>input/output lengths</strong>, records each request's <span class="mono">ttft</span> and <span class="mono">tpot</span>, and aggregates them into a <span class="mono">BenchmarkMetrics</span> when done. You can use a real conversation dataset like ShareGPT so request-length distributions match production.</p>

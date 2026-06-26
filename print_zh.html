@@ -9778,13 +9778,13 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 </div>
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
-<p>一条命令 <span class="mono">python -m sglang.launch_server</span> 背后发生的事：它的 <span class="mono">run_server</span> 先调用 <span class="mono">prepare_server_args</span> 把命令行参数解析进一个庞大的 <span class="mono">ServerArgs</span> dataclass，然后据此启动引擎（<strong>TokenizerManager + Scheduler + DetokenizerManager</strong>，第13课），再对外提供一个 HTTP 服务（<span class="mono">/generate</span>、OpenAI 兼容的 <span class="mono">/v1/...</span>，第15课）。</p>
+<p>一条命令 <span class="mono">python -m sglang.launch_server</span> 背后发生的事：命令行入口（<span class="mono">__main__</span>）先用 <span class="mono">prepare_server_args</span> 把命令行参数解析进一个庞大的 <span class="mono">ServerArgs</span> dataclass，再把这份配置交给 <span class="mono">run_server</span>，由它据此启动引擎（<strong>TokenizerManager + Scheduler + DetokenizerManager</strong>，第13课），再对外提供一个 HTTP 服务（<span class="mono">/generate</span>、OpenAI 兼容的 <span class="mono">/v1/...</span>，第15课）。</p>
 <p>另有一个 <span class="mono">Engine</span> 类——<strong>进程内 / 离线</strong>模式，不开 HTTP，专为脚本和评测而生。两者共享同一套内核，只是“门面”不同。本课最大的洞见是：<strong><span class="mono">ServerArgs</span> 把整本书的知识收成了一排 CLI 旋钮</strong>。</p>
 <p>回头看你走过的路：从第5课的批处理、第13课的三件套链路，到第22课的分块预填充、第30课的 KV 显存、第33课的注意力后端、第35课的量化、第43课的投机解码、第46课的并行、第47课的 EPLB——这些曾经各自为政的知识点，如今都汇聚到同一个入口。这正是把它放在课程接近尾声讲的原因：只有先理解了每个零件，你才能真正读懂这一排 flag 的含义，而不是把它们当成一串需要死记硬背的咒语。本课不教新机制，它教你<strong>如何把已学的一切真正落地成一条命令</strong>。</p>
 </div>
 
 <h2>一、一条命令背后的故事</h2>
-<p>启动一个在线服务，你只需要：<span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct</span>。这条命令的入口函数是 <span class="mono">run_server</span>，它做的第一件事就是调用 <span class="mono">prepare_server_args</span>，把你在命令行敲下的一堆 <span class="mono">--flag</span> 解析进 <span class="mono">ServerArgs</span> 这个数据类。<span class="mono">ServerArgs</span> 里有几十上百个字段，每一个都对应着前面某一课讲过的某个机制。</p>
+<p>启动一个在线服务，你只需要：<span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct</span>。这条命令的入口（<span class="mono">__main__</span>）做的第一件事，是用 <span class="mono">prepare_server_args</span> 把你在命令行敲下的一堆 <span class="mono">--flag</span> 解析进 <span class="mono">ServerArgs</span> 这个数据类，再把解析好的 <span class="mono">ServerArgs</span> 交给 <span class="mono">run_server</span> 去启动引擎。<span class="mono">ServerArgs</span> 里有几十上百个字段，每一个都对应着前面某一课讲过的某个机制。</p>
 <p>不妨把它想成一次“开机自检 + 组装流水线”的过程。<span class="mono">prepare_server_args</span> 不只是把字符串塞进字段，它还会做合法性校验、推断未显式指定的默认值、处理互相冲突的选项（比如某些后端不支持某种量化时会报错或回退）。校验通过后，框架才放心地按这份配置去申请显存、加载权重、构建 KV 缓存池。如果你启动时漏了必填的 <span class="mono">--model-path</span>，或者给了一个不存在的注意力后端名，错误就会在这一步被早早拦下，而不是等到第一个请求进来才崩溃。这种“配置先行、校验在前”的设计，让一次成功的启动几乎就等于一次成功的部署。</p>
 <p>解析完成后，框架据此<strong>启动引擎</strong>：拉起 <span class="mono">TokenizerManager</span> 负责把文本转成 token、拉起 <span class="mono">Scheduler</span> 负责批处理与显存管理、拉起 <span class="mono">DetokenizerManager</span> 把生成的 token 流式还原成文本（这正是第13课讲的三件套）。最后，它绑定一个 HTTP 端口，对外暴露 <span class="mono">/generate</span> 原生接口和一整套 OpenAI 兼容的 <span class="mono">/v1/chat/completions</span>、<span class="mono">/v1/completions</span> 接口（第15课）。从此你就有了一个能接受请求、吐出 token 的推理服务器。</p>
 <p>值得强调的是：这条命令看似简单，背后却把前面十几课讲过的进程编排、零拷贝通信、连续批处理一次性串了起来。你不必再手写任何胶水代码——框架替你把分词进程、调度进程、反分词进程都拉起来，并用进程间通信把它们连成一条流水线。换句话说，<span class="mono">launch_server</span> 是整本书所有内核机制的<strong>总开关</strong>，按下它，一台完整的推理服务就活了过来。如果你只想在脚本里离线生成、不需要对外服务，那就跳过 HTTP，改用后面要讲的 <span class="mono">Engine</span>。</p>
@@ -9803,7 +9803,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <tr><td><span class="mono">--tp-size</span> / <span class="mono">--dp-size</span></td><td>张量并行 / 数据并行的规模（第46课）</td></tr>
 <tr><td><span class="mono">--attention-backend</span></td><td>注意力内核：flashinfer / triton / fa（第33课）</td></tr>
 <tr><td><span class="mono">--quantization</span></td><td>权重量化方式：fp8 / awq / gptq（第35课）</td></tr>
-<tr><td><span class="mono">--mem-fraction-static</span></td><td>KV 缓存池能占用多少 GPU 显存（第30/31课）</td></tr>
+<tr><td><span class="mono">--mem-fraction-static</span></td><td>静态分配（权重 + KV 池）占多少 GPU 显存（第30/31课）</td></tr>
 <tr><td><span class="mono">--chunked-prefill-size</span></td><td>把超长 prefill 切块以平滑显存（第22课）</td></tr>
 <tr><td><span class="mono">--max-running-requests</span></td><td>同时在跑的请求数上限，即批大小帽（第5课）</td></tr>
 <tr><td><span class="mono">--speculative-algorithm</span></td><td>投机解码算法的开关与选择（第43课）</td></tr>
@@ -9835,7 +9835,7 @@ class ServerArgs:
     model_path: str                    # --model-path: 要服务的 HF 模型
     tp_size: int = 1                   # --tp-size: 张量并行 rank 数 (第46课)
     dp_size: int = 1                   # --dp-size: 数据并行副本数 (第46课)
-    mem_fraction_static: float = None  # --mem-fraction-static: KV 池占的 GPU 显存 (第30课)
+    mem_fraction_static: float = None  # --mem-fraction-static: 静态分配(权重+KV池)的 GPU 显存比例 (第30课)
     attention_backend: str = None      # --attention-backend: flashinfer / triton / fa (第33课)
     chunked_prefill_size: int = None   # --chunked-prefill-size: 切分超长 prefill (第22课)
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (第35课)
@@ -9844,7 +9844,7 @@ class ServerArgs:
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>启动只需一条命令：<span class="mono">python -m sglang.launch_server --model-path &lt;模型&gt; [flags]</span>。</li>
-<li><span class="mono">run_server</span> → <span class="mono">prepare_server_args</span> 解析进 <span class="mono">ServerArgs</span> → 启动引擎（三件套，第13课）→ 暴露 HTTP（<span class="mono">/generate</span>、<span class="mono">/v1/...</span>，第15课）。</li>
+<li>命令行入口用 <span class="mono">prepare_server_args</span> 把 argv 解析进 <span class="mono">ServerArgs</span> → 交给 <span class="mono">run_server</span> 启动引擎（三件套，第13课）→ 暴露 HTTP（<span class="mono">/generate</span>、<span class="mono">/v1/...</span>，第15课）。</li>
 <li><strong>核心洞见</strong>：<span class="mono">ServerArgs</span> 每个 dataclass 字段自动映射成一个 <span class="mono">--kebab-case</span> flag，前 52 课的每个组件都变成一个旋钮。</li>
 <li>调优 = 拧对 flag：<span class="mono">--tp-size</span>/<span class="mono">--dp-size</span>、<span class="mono">--attention-backend</span>、<span class="mono">--quantization</span>、<span class="mono">--mem-fraction-static</span>、<span class="mono">--chunked-prefill-size</span>、<span class="mono">--max-running-requests</span> 等。</li>
 <li><span class="mono">Engine</span>（离线/进程内，无 HTTP）vs HTTP 服务器（在线）：同一内核，两种门面。</li>
@@ -9895,7 +9895,7 @@ class ServerArgs:
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用你自己的话描述一条 <span class='mono'>python -m sglang.launch_server</span> 命令背后发生的事：从 <span class='mono'>run_server</span> 调用 <span class='mono'>prepare_server_args</span> 解析进 <span class='mono'>ServerArgs</span>，到启动引擎三件套（第13课），再到暴露 HTTP 端点（第15课）。并说明为什么“每个 dataclass 字段自动映射成 --kebab-case flag”能把“一墙 flag”变成“我早就理解的组件”。</li>
+    <li>用你自己的话描述一条 <span class='mono'>python -m sglang.launch_server</span> 命令背后发生的事：从命令行入口用 <span class='mono'>prepare_server_args</span> 解析进 <span class='mono'>ServerArgs</span>、再把它交给 <span class='mono'>run_server</span> 启动引擎三件套（第13课），再到暴露 HTTP 端点（第15课）。并说明为什么“每个 dataclass 字段自动映射成 --kebab-case flag”能把“一墙 flag”变成“我早就理解的组件”。</li>
     <li>对比 <span class='mono'>Engine</span>（离线 / 进程内，无 HTTP）与 HTTP 服务器（在线）两种门面：各自的使用场景、开销与对外接口是什么？再举出至少 4 个你会用到的 flag（如 <span class='mono'>--tp-size</span>、<span class='mono'>--quantization</span>、<span class='mono'>--mem-fraction-static</span>、<span class='mono'>--max-running-requests</span>），分别说明它们控制什么、对应前面哪一课。</li>
   </ul>
 </div>
@@ -9914,9 +9914,8 @@ class ServerArgs:
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
 <p>性能调优永远是一个<strong>两段式循环</strong>：<span class="mono">benchmark → profile → 优化 → 再 benchmark</span>。<strong>benchmark 是黑盒</strong>，它向一台真实运行的服务器发射可配置的请求流（请求速率、输入/输出长度、ShareGPT 这类数据集），最后吐出一份 <span class="mono">BenchmarkMetrics</span> 汇总，告诉你"快还是慢、慢在第几分位"。<strong>profiler 是白盒</strong>，它录下 GPU 上每一个 CUDA kernel 的时间线，告诉你"慢在哪个阶段、哪个 kernel"。</p>
 <p>关键认知：在压力之下，延迟不是一个数，而是一条<strong>分布</strong>——mean / median / p90 / p95 / p99。普通用户感受到的卡顿往往来自<strong>长尾（p99）</strong>，而不是平均值。所以一份诚实的压测报告必须给出<strong>分位数</strong>，而不是只报一个漂亮的均值。再换个角度看这两件工具的分工：benchmark 给你的是<strong>结果</strong>（多快、多稳、能扛多大并发），profiler 给你的是<strong>过程</strong>（这段时间里 GPU 到底在忙什么）。结果告诉你"该不该优化、优化目标是否达成"，过程告诉你"具体动哪里"。一个负责对外承诺 SLA，一个负责对内指导改代码，二者合起来才能把性能工作从玄学变成工程。</p>
+<p>这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
 </div>
-
-这个两段式循环不是做一次就完事，而是要反复迭代：每次优化后都重新压测确认数字真的变好了，再决定是否还需要继续分析下一个瓶颈。性能优化没有终点，只有"在当前 SLA 下是否够用"的判断。</p>
 
 <h2>一、压测：给运行中的服务器打分</h2>
 <p>SGLang 自带的压测工具是 <span class="mono">python -m sglang.bench_serving</span>。它的工作方式很直白：你先把服务器跑起来，然后这个脚本<strong>不修改服务器</strong>，只是按你设定的<strong>请求速率（request rate）</strong>和<strong>输入/输出长度</strong>，从外部发射一批请求，逐个记录每条请求的 <span class="mono">ttft</span> 和 <span class="mono">tpot</span>，跑完后聚合成一份 <span class="mono">BenchmarkMetrics</span>。你可以用 ShareGPT 这样的真实对话数据集，让请求长度分布贴近线上场景。</p>

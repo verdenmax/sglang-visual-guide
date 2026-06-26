@@ -3897,8 +3897,8 @@ QUIZZES = {
         ],
         "open": [
             {
-                "zh": "用你自己的话描述一条 <span class='mono'>python -m sglang.launch_server</span> 命令背后发生的事：从 <span class='mono'>run_server</span> 调用 <span class='mono'>prepare_server_args</span> 解析进 <span class='mono'>ServerArgs</span>，到启动引擎三件套（第13课），再到暴露 HTTP 端点（第15课）。并说明为什么“每个 dataclass 字段自动映射成 --kebab-case flag”能把“一墙 flag”变成“我早就理解的组件”。",
-                "en": "In your own words, describe what happens behind one <span class='mono'>python -m sglang.launch_server</span> command: from <span class='mono'>run_server</span> calling <span class='mono'>prepare_server_args</span> to parse into <span class='mono'>ServerArgs</span>, to booting the engine trio (Lesson 13), to exposing the HTTP endpoint (Lesson 15). Explain why \"each dataclass field auto-maps to a --kebab-case flag\" turns a 'wall of flags' into 'components I already understand'.",
+                "zh": "用你自己的话描述一条 <span class='mono'>python -m sglang.launch_server</span> 命令背后发生的事：从命令行入口用 <span class='mono'>prepare_server_args</span> 解析进 <span class='mono'>ServerArgs</span>、再把它交给 <span class='mono'>run_server</span> 启动引擎三件套（第13课），再到暴露 HTTP 端点（第15课）。并说明为什么“每个 dataclass 字段自动映射成 --kebab-case flag”能把“一墙 flag”变成“我早就理解的组件”。",
+                "en": "In your own words, describe what happens behind one <span class='mono'>python -m sglang.launch_server</span> command: from the entry point using <span class='mono'>prepare_server_args</span> to parse into <span class='mono'>ServerArgs</span>, to handing it to <span class='mono'>run_server</span> to boot the engine trio (Lesson 13), to exposing the HTTP endpoint (Lesson 15). Explain why \"each dataclass field auto-maps to a --kebab-case flag\" turns a 'wall of flags' into 'components I already understand'.",
             },
             {
                 "zh": "对比 <span class='mono'>Engine</span>（离线 / 进程内，无 HTTP）与 HTTP 服务器（在线）两种门面：各自的使用场景、开销与对外接口是什么？再举出至少 4 个你会用到的 flag（如 <span class='mono'>--tp-size</span>、<span class='mono'>--quantization</span>、<span class='mono'>--mem-fraction-static</span>、<span class='mono'>--max-running-requests</span>），分别说明它们控制什么、对应前面哪一课。",
