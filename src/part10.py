@@ -5,8 +5,6 @@ speculative decoding, EAGLE, PD disaggregation, TP/PP/EP/DP, EPLB, and structure
 Each LESSON_XX is a {"zh": html, "en": html} dict consumed via registry.CONTENT.
 """
 
-_P = "PLACEHOLDER "
-
 LESSON_43 = {"zh": r"""
 <p class="lead">普通自回归一次目标前向只吐<strong>一个</strong> token，而解码阶段是<strong>带宽受限</strong>的（第4课）：每一步都要把全部权重和 KV 从 HBM 重新读一遍，算力被活活饿着。投机解码（Speculative decoding）打破"一次前向一个 token"的天花板——让一个便宜的<span class="mono">draft</span>草稿模型先猜 k 个，再让昂贵的<span class="mono">target</span>目标模型<strong>一次前向</strong>把这 k 个全部验完，从而在一步里吐出多个 token，且输出分布与原始目标采样<strong>完全一致</strong>（无损）。</p>
 
@@ -333,11 +331,11 @@ LESSON_45 = {"zh": r"""
 
 <h2>三、SGLang 怎么抽象这次搬运</h2>
 <p>不同集群的互联硬件五花八门，SGLang 不把传输逻辑写死，而是藏在一个<strong>可插拔的连接器</strong>后面。Prefill 侧持有一个 <span class="mono">BaseKVSender</span>，decode 侧持有一个镜像的 <span class="mono">BaseKVReceiver</span>。发送方的接口很克制：<span class="mono">init</span> 先<strong>宣告</strong>这次要搬多少页 KV；<span class="mono">send</span> 把这个请求的 KV 页<strong>推</strong>给 decode worker；<span class="mono">poll</span> 返回一个<strong>非阻塞</strong>的 <span class="mono">KVPoll</span> 状态（Bootstrapping / WaitingForInput / Transferring / Success / Failed），让调度器不必卡死等待；<span class="mono">get_transfer_metric</span> 则吐出 <span class="mono">KVTransferMetric</span>（字节数、延迟）供观测。</p>
-<p>这层抽象的好处是<strong>后端可替换</strong>：具体实现有 <span class="mono">Mooncake</span>、<span class="mono">NIXL</span>、<span class="mono">ascend</span> 等几种连接器，各自对接不同的互联栈，但上层调度看到的都是同一套 <span class="mono">init / send / poll</span> 契约。Decode 侧的 <span class="mono">BaseKVReceiver</span> 与之对称：<span class="mono">init</span> + <span class="mono">receive</span> + <span class="mono">poll</span>，当 poll 返回 <span class="mono">Success</span>，就意味着 KV 已落地，decode 可以开吐 token。</p>
+<p>这层抽象的好处是<strong>后端可替换</strong>：具体实现有 <span class="mono">Mooncake</span>、<span class="mono">NIXL</span>、<span class="mono">ascend</span> 等几种连接器，各自对接不同的互联栈，但上层调度看到的都是同一套 <span class="mono">init / send / poll</span> 契约。Decode 侧的 <span class="mono">BaseKVReceiver</span> 与之对称：<span class="mono">init</span> + <span class="mono">send_metadata</span> + <span class="mono">poll</span>——decode 先用 <span class="mono">send_metadata</span> 把自己这边的 KV 槽位索引<strong>通告</strong>给 prefill，prefill 据此把 KV 直接写进 decode 显存（常用单边 RDMA）；当 poll 返回 <span class="mono">Success</span>，就意味着 KV 已落地，decode 可以开吐 token。</p>
 <p>为什么 <span class="mono">poll</span> 一定要<strong>非阻塞</strong>？因为调度器是单线程驱动一大批请求的状态机，它绝不能为了等某一次 KV 传输而把整批都卡住。非阻塞的 poll 让调度器每轮只<strong>瞄一眼</strong>当前状态：还在 <span class="mono">Bootstrapping</span>（建链握手）就先去伺候别的请求，变成 <span class="mono">Transferring</span> 就继续等，直到 <span class="mono">Success</span> 才把该请求推进到解码、或 <span class="mono">Failed</span> 时走重试/降级。这种"状态机 + 轮询"的设计，正是高并发服务里把慢 I/O 和快调度解耦的经典手法。</p>
 <p>把发送方接口设计得如此<strong>克制</strong>（只有 init/send/poll/get_transfer_metric 四个动作）也是有意为之：接口越窄，新后端越好接。想接入一种新互联，只要实现这几个方法，让 poll 正确地把底层进度翻译成 <span class="mono">KVPoll</span> 五态即可，上层的路由、调度、配对逻辑一行都不用改。<span class="mono">get_transfer_metric</span> 返回的 <span class="mono">KVTransferMetric</span>（字节数、延迟）则喂给监控，让你能定位"是不是某条互联在拖后腿"。</p>
 
-<table class="t"><tr><th>方法</th><th>所在侧 / 作用</th></tr><tr><td><span class="mono">init(num_kv_indices, aux_index)</span></td><td>prefill 侧：宣告本次要搬多少页 KV</td></tr><tr><td><span class="mono">send(kv_indices)</span></td><td>prefill 侧：把该请求的 KV 页推给 decode worker</td></tr><tr><td><span class="mono">poll() → KVPoll</span></td><td>双侧：非阻塞返回传输状态</td></tr><tr><td><span class="mono">get_transfer_metric()</span></td><td>prefill 侧：返回 KVTransferMetric（字节、延迟）</td></tr><tr><td><span class="mono">BaseKVReceiver.receive()</span></td><td>decode 侧：接收 KV 页（与 send 对称）</td></tr></table>
+<table class="t"><tr><th>方法</th><th>所在侧 / 作用</th></tr><tr><td><span class="mono">init(num_kv_indices, aux_index)</span></td><td>prefill 侧：宣告本次要搬多少页 KV</td></tr><tr><td><span class="mono">send(kv_indices)</span></td><td>prefill 侧：把该请求的 KV 页推给 decode worker</td></tr><tr><td><span class="mono">poll() → KVPoll</span></td><td>双侧：非阻塞返回传输状态</td></tr><tr><td><span class="mono">get_transfer_metric()</span></td><td>prefill 侧：返回 KVTransferMetric（字节、延迟）</td></tr><tr><td><span class="mono">BaseKVReceiver.send_metadata()</span></td><td>decode 侧：把本侧 KV 槽位索引通告给 prefill（与 send 配对）</td></tr></table>
 
 <p>把一次成功的搬运拆成时间线，就是下面这条竖向流程。注意 <span class="mono">poll</span> 在中间反复被调用：它<strong>不阻塞</strong>，每次只报告当前状态，直到 <span class="mono">Success</span>。</p>
 
@@ -346,7 +344,7 @@ LESSON_45 = {"zh": r"""
 <h2>四、把它放回大图里</h2>
 <p>PD 分离不是孤立技巧，它把前面几课串了起来：第4课告诉我们两阶段的资源画像，第8 / 22课的 TTFT/ITL 张力是它要解决的痛点，第30课的分页 KV 是被搬运的对象，第13课的路由器负责配对 worker。这一串引用不是凑数，而是说明 PD 分离本质上是建立在前面所有机制之上的<strong>系统级集成</strong>：少了任何一环都搭不起来。再往前看，<strong>第46 / 47课</strong>会把<strong>分离</strong>与<strong>大规模专家并行（EP）</strong>叠在一起——prefill 池、decode 池各自再做 EP 切分，正是 DeepSeek 级别在线服务的真实搭法。</p>
 <p>理解了"两副面孔、分池而治、KV 搬运"，就握住了现代大规模推理服务的主骨架，也就理解了后续高阶课程的地基。</p>
-<p>不妨把整条链路再走一遍当作复盘：请求先到<strong>路由器</strong>，被指派一个 prefill worker；prefill 把整段 prompt 一次算完，得到一份分页 KV，并通过 <span class="mono">BaseKVSender</span> 的 <span class="mono">init → send</span> 把这些页推向被配对的 decode worker；decode 侧 <span class="mono">BaseKVReceiver</span> 接收，双方各自 <span class="mono">poll</span> 直到状态翻到 <span class="mono">Success</span>；此刻 KV 已在 decode GPU 的显存里就位，decode 接手，逐 token 流式返回给用户。整个过程里，prefill 池始终在打满算力地"备料"，decode 池始终在带宽满载地"出餐"，没有谁为对方空转。可以说，分离把"硬件利用率"这件事从单卡内部的无奈妥协，变成了整个集群层面可设计、可度量、可优化、可弹性伸缩的清晰分工。</p>
+<p>不妨把整条链路再走一遍当作复盘：请求先到<strong>路由器</strong>，被指派一个 prefill worker；prefill 把整段 prompt 一次算完，得到一份分页 KV，并通过 <span class="mono">BaseKVSender</span> 的 <span class="mono">init → send</span> 把这些页推向被配对的 decode worker；decode 侧 <span class="mono">BaseKVReceiver</span> 通过 <span class="mono">send_metadata</span> 通告 KV 落点，双方各自 <span class="mono">poll</span> 直到状态翻到 <span class="mono">Success</span>；此刻 KV 已在 decode GPU 的显存里就位，decode 接手，逐 token 流式返回给用户。整个过程里，prefill 池始终在打满算力地"备料"，decode 池始终在带宽满载地"出餐"，没有谁为对方空转。可以说，分离把"硬件利用率"这件事从单卡内部的无奈妥协，变成了整个集群层面可设计、可度量、可优化、可弹性伸缩的清晰分工。</p>
 <p>最后强调一个容易被忽略的点：PD 分离改变的是<strong>物理部署</strong>，而不是模型本身的数学。同一个模型、同一份权重、同样的 KV，只是把"算 KV"和"用 KV"这两件事放到了不同的机器上，中间加了一次显式搬运。正因为它只动部署不动语义，才能作为一块<strong>可组合的积木</strong>，和量化、张量并行、专家并行（EP）等技术叠加使用——这也是为什么下一阶段（第46/47课）能把它和大规模 EP 拼在一起，搭出 DeepSeek 级别的在线推理系统。</p>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVSender</span><span class="ln">prefill 侧把 KV 传给 decode 侧：init → send → poll(KVPoll)</span></div><pre>class BaseKVSender(ABC):                 # lives on the PREFILL side
@@ -362,7 +360,7 @@ LESSON_45 = {"zh": r"""
     @abstractmethod
     def get_transfer_metric(self):       # -&gt; KVTransferMetric (bytes, latency)
         ...
-# BaseKVReceiver mirrors this on the DECODE side (init + receive + poll)</pre></div>
+# BaseKVReceiver mirrors this on the DECODE side (init + send_metadata + poll)</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>两副面孔，资源相反</strong>：prefill 是 compute-bound 的一次大并行；decode 是 bandwidth-bound 的逐 token 生成。同卡共存必然在 TTFT 与 ITL 之间打架。</li>
@@ -408,11 +406,11 @@ LESSON_45 = {"zh": r"""
 
 <h2>3. How SGLang abstracts the transfer</h2>
 <p>Interconnect hardware varies wildly across clusters, so SGLang doesn't hard-code the transfer logic—it hides it behind a <strong>pluggable connector</strong>. The prefill side holds a <span class="mono">BaseKVSender</span>; the decode side holds a mirrored <span class="mono">BaseKVReceiver</span>. The sender's interface is deliberately spare: <span class="mono">init</span> first <strong>announces</strong> how many KV pages will move; <span class="mono">send</span> <strong>pushes</strong> this request's KV pages to the decode worker; <span class="mono">poll</span> returns a <strong>non-blocking</strong> <span class="mono">KVPoll</span> status (Bootstrapping / WaitingForInput / Transferring / Success / Failed) so the scheduler never has to block; <span class="mono">get_transfer_metric</span> yields a <span class="mono">KVTransferMetric</span> (bytes, latency) for observability.</p>
-<p>The payoff of this abstraction is <strong>swappable backends</strong>: concrete connectors include <span class="mono">Mooncake</span>, <span class="mono">NIXL</span>, and <span class="mono">ascend</span>, each binding a different interconnect stack, yet the scheduler above sees the same <span class="mono">init / send / poll</span> contract. The decode-side <span class="mono">BaseKVReceiver</span> is symmetric: <span class="mono">init</span> + <span class="mono">receive</span> + <span class="mono">poll</span>, and when poll returns <span class="mono">Success</span> the KV has landed and decode can start emitting tokens.</p>
+<p>The payoff of this abstraction is <strong>swappable backends</strong>: concrete connectors include <span class="mono">Mooncake</span>, <span class="mono">NIXL</span>, and <span class="mono">ascend</span>, each binding a different interconnect stack, yet the scheduler above sees the same <span class="mono">init / send / poll</span> contract. The decode-side <span class="mono">BaseKVReceiver</span> is symmetric: <span class="mono">init</span> + <span class="mono">send_metadata</span> + <span class="mono">poll</span> — the decode side first uses <span class="mono">send_metadata</span> to <strong>advertise</strong> its own KV slot indices to the prefill side, which then writes the KV straight into decode memory (typically one-sided RDMA); and when poll returns <span class="mono">Success</span> the KV has landed and decode can start emitting tokens.</p>
 <p>Why must <span class="mono">poll</span> be <strong>non-blocking</strong>? Because the scheduler is a single thread driving the state machine of a large batch of requests, and it must never stall the whole batch waiting on one KV transfer. A non-blocking poll lets the scheduler just <strong>glance</strong> at the current status each round: still <span class="mono">Bootstrapping</span> (handshake) means go serve other requests first, <span class="mono">Transferring</span> means keep waiting, only <span class="mono">Success</span> advances that request to decode, and <span class="mono">Failed</span> triggers retry / fallback. This "state machine + polling" design is the classic way high-concurrency services decouple slow I/O from fast scheduling.</p>
 <p>Designing the sender interface so <strong>spare</strong> (only four actions: init/send/poll/get_transfer_metric) is also deliberate: the narrower the interface, the easier new backends are to plug in. To adopt a new interconnect you only implement these methods and make poll correctly translate the underlying progress into the five <span class="mono">KVPoll</span> states; not a line of the upper routing, scheduling, or pairing logic needs to change. The <span class="mono">KVTransferMetric</span> (bytes, latency) returned by <span class="mono">get_transfer_metric</span> feeds monitoring, letting you pinpoint "is some interconnect dragging us down."</p>
 
-<table class="t"><tr><th>Method</th><th>Side / role</th></tr><tr><td><span class="mono">init(num_kv_indices, aux_index)</span></td><td>prefill side: announce how many KV pages will move</td></tr><tr><td><span class="mono">send(kv_indices)</span></td><td>prefill side: push this request's KV pages to the decode worker</td></tr><tr><td><span class="mono">poll() → KVPoll</span></td><td>both sides: non-blocking transfer status</td></tr><tr><td><span class="mono">get_transfer_metric()</span></td><td>prefill side: returns KVTransferMetric (bytes, latency)</td></tr><tr><td><span class="mono">BaseKVReceiver.receive()</span></td><td>decode side: receive KV pages (mirror of send)</td></tr></table>
+<table class="t"><tr><th>Method</th><th>Side / role</th></tr><tr><td><span class="mono">init(num_kv_indices, aux_index)</span></td><td>prefill side: announce how many KV pages will move</td></tr><tr><td><span class="mono">send(kv_indices)</span></td><td>prefill side: push this request's KV pages to the decode worker</td></tr><tr><td><span class="mono">poll() → KVPoll</span></td><td>both sides: non-blocking transfer status</td></tr><tr><td><span class="mono">get_transfer_metric()</span></td><td>prefill side: returns KVTransferMetric (bytes, latency)</td></tr><tr><td><span class="mono">BaseKVReceiver.send_metadata()</span></td><td>decode side: advertise this side's KV slot indices to prefill (paired with send)</td></tr></table>
 
 <p>Unrolling one successful transfer into a timeline gives the vertical sequence below. Note how <span class="mono">poll</span> is called repeatedly in the middle: it <strong>doesn't block</strong>, just reports the current status each time, until <span class="mono">Success</span>.</p>
 
@@ -420,7 +418,7 @@ LESSON_45 = {"zh": r"""
 
 <h2>4. Putting it back in the big picture</h2>
 <p>PD disaggregation isn't an isolated trick; it strings several past lessons together: Lesson 4 gave us the two-phase resource profiles, Lessons 8 / 22's TTFT/ITL tension is the pain it solves, Lesson 30's paged KV is the object being shipped, and Lesson 13's router pairs the workers. This string of references isn't padding; it shows that PD disaggregation is essentially a <strong>system-level integration</strong> built on top of every mechanism before it—drop any one link and it won't stand up. Looking ahead, <strong>Lessons 46 / 47</strong> stack <strong>disaggregation</strong> with <strong>large-scale expert parallelism (EP)</strong>—the prefill and decode pools each get their own EP sharding, which is the real recipe for DeepSeek-scale online serving. Grasp "two faces, pool-and-conquer, KV transfer," and you hold the backbone of modern large-scale inference serving, and grasp the foundation the later advanced lessons build upon.</p>
-<p>Let's walk the whole pipeline once more as a recap: a request first hits the <strong>router</strong> and is assigned a prefill worker; prefill computes the entire prompt in one pass, produces a paged KV, and via <span class="mono">BaseKVSender</span>'s <span class="mono">init → send</span> pushes those pages to the paired decode worker; the decode-side <span class="mono">BaseKVReceiver</span> receives, both sides <span class="mono">poll</span> until the status flips to <span class="mono">Success</span>; at that moment the KV is in place in the decode GPU's memory, decode takes over and streams tokens back to the user one at a time. Throughout, the prefill pool is always "prepping" at full compute and the decode pool always "serving" at full bandwidth, with neither idling for the other. You could say disaggregation turns "hardware utilization" from a reluctant compromise inside a single card into a clear division of labor at the whole-cluster level that is designable, measurable, optimizable, and elastically scalable.</p>
+<p>Let's walk the whole pipeline once more as a recap: a request first hits the <strong>router</strong> and is assigned a prefill worker; prefill computes the entire prompt in one pass, produces a paged KV, and via <span class="mono">BaseKVSender</span>'s <span class="mono">init → send</span> pushes those pages to the paired decode worker; the decode-side <span class="mono">BaseKVReceiver</span> advertises its KV slots via <span class="mono">send_metadata</span>, both sides <span class="mono">poll</span> until the status flips to <span class="mono">Success</span>; at that moment the KV is in place in the decode GPU's memory, decode takes over and streams tokens back to the user one at a time. Throughout, the prefill pool is always "prepping" at full compute and the decode pool always "serving" at full bandwidth, with neither idling for the other. You could say disaggregation turns "hardware utilization" from a reluctant compromise inside a single card into a clear division of labor at the whole-cluster level that is designable, measurable, optimizable, and elastically scalable.</p>
 <p>One last easily-missed point: PD disaggregation changes the <strong>physical deployment</strong>, not the model's own math. The same model, the same weights, the same KV—it merely puts "computing the KV" and "using the KV" on different machines, with one explicit transfer in between. Precisely because it touches deployment without touching semantics, it can act as a <strong>composable building block</strong>, stacked with quantization, tensor parallelism, expert parallelism (EP), and more—which is exactly why the next stage (Lessons 46/47) can combine it with large-scale EP to build a DeepSeek-scale online inference system.</p>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVSender</span><span class="ln">the prefill side ships KV to the decode side: init → send → poll(KVPoll)</span></div><pre>class BaseKVSender(ABC):                 # lives on the PREFILL side
@@ -436,7 +434,7 @@ LESSON_45 = {"zh": r"""
     @abstractmethod
     def get_transfer_metric(self):       # -&gt; KVTransferMetric (bytes, latency)
         ...
-# BaseKVReceiver mirrors this on the DECODE side (init + receive + poll)</pre></div>
+# BaseKVReceiver mirrors this on the DECODE side (init + send_metadata + poll)</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Two faces, opposite resources</strong>: prefill is a compute-bound parallel pass; decode is bandwidth-bound token-by-token generation. Co-locating them inevitably pits TTFT against ITL.</li>
@@ -512,8 +510,10 @@ LESSON_46 = {"zh": r"""
         ...
     def all_to_all_single(self, output, input):  # EP: route tokens to their expert owners
         ...
+    @property
     def next_rank(self):   # PP: the downstream pipeline stage (send activations here)
         ...
+    @property
     def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
         ...</pre></div>
 
@@ -591,8 +591,10 @@ LESSON_46 = {"zh": r"""
         ...
     def all_to_all_single(self, output, input):  # EP: route tokens to their expert owners
         ...
+    @property
     def next_rank(self):   # PP: the downstream pipeline stage (send activations here)
         ...
+    @property
     def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
         ...</pre></div>
 
@@ -659,7 +661,8 @@ LESSON_47 = {"zh": r"""
         # tracks per-expert token counts via the expert-distribution recorder
         ...
     def on_forward_pass_end(self):
-        # after each forward: accumulate how many tokens hit each expert
+        # called after each forward: ticks the per-step counter that
+        # periodically triggers rebalance (the recorder accumulates the counts)
         ...
     def rebalance(self):
         # periodically: solve a new expert -&gt; GPU placement that flattens load
@@ -726,7 +729,8 @@ LESSON_47 = {"zh": r"""
         # tracks per-expert token counts via the expert-distribution recorder
         ...
     def on_forward_pass_end(self):
-        # after each forward: accumulate how many tokens hit each expert
+        # called after each forward: ticks the per-step counter that
+        # periodically triggers rebalance (the recorder accumulates the counts)
         ...
     def rebalance(self):
         # periodically: solve a new expert -&gt; GPU placement that flattens load
