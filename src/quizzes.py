@@ -3549,7 +3549,7 @@ QUIZZES = {
                         "en": "<strong>The input seam (processor turns media into tensors and inserts placeholder tokens) and the embed seam (<span class='mono'>general_mm_embed_routine</span> runs encoders and splices media embeddings at placeholders); the rest of the engine is untouched</strong>",
                     },
                     {"zh": "调度器（第18课）与分页 KV 缓存（第30课）", "en": "The scheduler (L18) and the paged KV cache (L30)"},
-                    {"zh": "RadixAttention（第33课）与采样器（第28课）", "en": "RadixAttention (L33) and the sampler (L28)"},
+                    {"zh": "RadixAttention（第29课）与采样器（第28课）", "en": "RadixAttention (L29) and the sampler (L28)"},
                     {"zh": "需要重写整条流水线并新增一台 VLM 专用引擎", "en": "Rewrite the whole pipeline and add a dedicated VLM-only engine"},
                 ],
                 "answer": 0,
@@ -3594,8 +3594,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "占位符保证缝合前后序列长度不变，缝合只是把占位嵌入替换成等量的媒体嵌入。替换后这一行是均质的嵌入向量，语言模型不在乎来源。于是调度器（第18课）照样连续批处理、分页 KV（第30课）照样按页存取、RadixAttention（第33课）照样前缀复用、采样器（第28课）照样从 logits 采样——多模态信息在嵌入接缝处一次性融入，后续无需再感知。",
-                    "en": "Placeholders keep the sequence length identical before and after; the splice merely replaces placeholder embeddings with an equal number of media embeddings. Afterward the row is a homogeneous set of embedding vectors and the language model does not care about origin. So the scheduler (L18) still does continuous batching, paged KV (L30) still pages, RadixAttention (L33) still reuses prefixes, and the sampler (L28) still samples from logits — multimodal info is fused once at the embed seam and never needs to be seen again.",
+                    "zh": "占位符保证缝合前后序列长度不变，缝合只是把占位嵌入替换成等量的媒体嵌入。替换后这一行是均质的嵌入向量，语言模型不在乎来源。于是调度器（第18课）照样连续批处理、分页 KV（第30课）照样按页存取、RadixAttention（第29课）照样前缀复用、采样器（第28课）照样从 logits 采样——多模态信息在嵌入接缝处一次性融入，后续无需再感知。",
+                    "en": "Placeholders keep the sequence length identical before and after; the splice merely replaces placeholder embeddings with an equal number of media embeddings. Afterward the row is a homogeneous set of embedding vectors and the language model does not care about origin. So the scheduler (L18) still does continuous batching, paged KV (L30) still pages, RadixAttention (L29) still reuses prefixes, and the sampler (L28) still samples from logits — multimodal info is fused once at the embed seam and never needs to be seen again.",
                 },
             },
         ],
@@ -3605,8 +3605,8 @@ QUIZZES = {
                 "en": "In your own words, explain how VLM's \"two seams\" upgrade a text engine into a multimodal one: in the <strong>input seam</strong>, how <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens into the token stream (L14); in the <strong>embed seam</strong>, how <span class='mono'>general_mm_embed_routine</span> embeds text first, then runs the ViT/audio encoder, and scatter-splices where <span class='mono'>input_ids==placeholder</span>; describe the roles of <span class='mono'>data_embedding_funcs</span> and <span class='mono'>placeholder_tokens</span>.",
             },
             {
-                "zh": "解释为什么“VLM = 处理媒体 + 在占位符处织入嵌入，而不是一台新引擎”：占位符如何保证序列长度在缝合前后一致，从而让调度器（第18课）、分页 KV（第30课）、RadixAttention（第33课）、采样器（第28课）全部原样复用；再讨论若编码器自带 CUDA Graph 运行器（第27课），它如何嵌入这条路径而不打扰下游。",
-                "en": "Explain why \"VLM = process media + weave embeddings in at placeholders, not a new engine\": how placeholders keep the sequence length identical before and after the splice so that the scheduler (L18), paged KV (L30), RadixAttention (L33), and sampler (L28) are all reused as-is; then discuss how, if an encoder carries its own CUDA-graph runner (L27), it fits into this path without disturbing the downstream.",
+                "zh": "解释为什么“VLM = 处理媒体 + 在占位符处织入嵌入，而不是一台新引擎”：占位符如何保证序列长度在缝合前后一致，从而让调度器（第18课）、分页 KV（第30课）、RadixAttention（第29课）、采样器（第28课）全部原样复用；再讨论若编码器自带 CUDA Graph 运行器（第27课），它如何嵌入这条路径而不打扰下游。",
+                "en": "Explain why \"VLM = process media + weave embeddings in at placeholders, not a new engine\": how placeholders keep the sequence length identical before and after the splice so that the scheduler (L18), paged KV (L30), RadixAttention (L29), and sampler (L28) are all reused as-is; then discuss how, if an encoder carries its own CUDA-graph runner (L27), it fits into this path without disturbing the downstream.",
             },
         ],
     },
@@ -3648,8 +3648,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "若按适配器逐个循环，就退化成多次小 GEMM，把连续批处理（第6课）的吞吐拆散。<span class='mono'>prepare_lora_batch</span> 接过当前 ForwardBatch（第19课），逐请求看清每行需要哪个适配器，把权重<strong>分段摆放</strong>，使后续一次分段/分组 GEMM 就在一次内核启动里把每个请求各自的 ΔW 都应用上去。",
-                    "en": "Looping per adapter degrades into many small GEMMs and shreds the throughput of continuous batching (L6). <span class='mono'>prepare_lora_batch</span> takes the current ForwardBatch (L19), sees per request which adapter each row needs, and <strong>stages/segments</strong> the weights so a single segmented/grouped GEMM applies each request's own ΔW in one kernel launch.",
+                    "zh": "若按适配器逐个循环，就退化成多次小 GEMM，把连续批处理（第5课）的吞吐拆散。<span class='mono'>prepare_lora_batch</span> 接过当前 ForwardBatch（第24课），逐请求看清每行需要哪个适配器，把权重<strong>分段摆放</strong>，使后续一次分段/分组 GEMM 就在一次内核启动里把每个请求各自的 ΔW 都应用上去。",
+                    "en": "Looping per adapter degrades into many small GEMMs and shreds the throughput of continuous batching (L5). <span class='mono'>prepare_lora_batch</span> takes the current ForwardBatch (L24), sees per request which adapter each row needs, and <strong>stages/segments</strong> the weights so a single segmented/grouped GEMM applies each request's own ΔW in one kernel launch.",
                 },
             },
             {
@@ -3679,8 +3679,8 @@ QUIZZES = {
                 "en": "In your own words, explain why \"one base + an adapter pool\" beats N full models: how a LoRA adapter as a small low-rank delta <span class='mono'>W + B·A</span> (rank <span class='mono'>r ≪ d</span>) lets one base (L25) carry many \"skills\"; then describe how <span class='mono'>max_loras_per_batch</span> caps distinct adapters coexisting in a batch, and how <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> add/remove them at runtime with no restart.",
             },
             {
-                "zh": "解释批处理为何是多 LoRA 的真正难点：当同批请求各要各的适配器（req1→A、req2→B、req3→A…）时，<span class='mono'>prepare_lora_batch(forward_batch)</span> 如何接过 ForwardBatch（第19课）逐请求收集并摆放适配器，使<strong>分段/分组 GEMM</strong> 在一次内核里应用各自 ΔW，从而不拆散连续批处理（第6课）的吞吐；再对比第51课的 RL 也换权重，但换的是整个模型。",
-                "en": "Explain why batching is the real hard part of multi-LoRA: when requests in one batch each want a different adapter (req1→A, req2→B, req3→A…), how <span class='mono'>prepare_lora_batch(forward_batch)</span> takes the ForwardBatch (L19), gathers and stages adapters per request so a <strong>segmented/grouped GEMM</strong> applies each ΔW in one kernel without shredding continuous-batching throughput (L6); then contrast with L51's RL, which also swaps weights but swaps the whole model.",
+                "zh": "解释批处理为何是多 LoRA 的真正难点：当同批请求各要各的适配器（req1→A、req2→B、req3→A…）时，<span class='mono'>prepare_lora_batch(forward_batch)</span> 如何接过 ForwardBatch（第24课）逐请求收集并摆放适配器，使<strong>分段/分组 GEMM</strong> 在一次内核里应用各自 ΔW，从而不拆散连续批处理（第5课）的吞吐；再对比第51课的 RL 也换权重，但换的是整个模型。",
+                "en": "Explain why batching is the real hard part of multi-LoRA: when requests in one batch each want a different adapter (req1→A, req2→B, req3→A…), how <span class='mono'>prepare_lora_batch(forward_batch)</span> takes the ForwardBatch (L24), gathers and stages adapters per request so a <strong>segmented/grouped GEMM</strong> applies each ΔW in one kernel without shredding continuous-batching throughput (L5); then contrast with L51's RL, which also swaps weights but swaps the whole model.",
             },
         ],
     },

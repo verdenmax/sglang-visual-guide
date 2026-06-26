@@ -9230,7 +9230,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <section class="lesson-print">
 <h1>多模态 VLM 服务</h1>
 
-<p class="lead">本课讲 SGLang 如何把一个纯文本推理引擎，变成能同时处理<strong>图像、音频、视频 + 文本</strong>的多模态视觉语言模型（VLM）引擎。核心洞见只有一句话：<strong>只需要改两处接缝（seam），其余引擎完全不动</strong>。第一处是<span class="mono">输入接缝</span>——把原始像素 / 音频转成模型张量，并在 token 流里插入<strong>占位符（placeholder）token</strong>；第二处是<span class="mono">嵌入接缝</span>——在前向计算时，跑各模态的编码器（encoder）产生媒体嵌入，再把它们<strong>缝合（scatter）</strong>到 token 嵌入流里占位符所在的位置。缝合之后，序列就只是一行普通的嵌入向量，调度器（第18课）、分页 KV（第30课）、RadixAttention（第33课）、采样器（第28课）全部照常运行。</p>
+<p class="lead">本课讲 SGLang 如何把一个纯文本推理引擎，变成能同时处理<strong>图像、音频、视频 + 文本</strong>的多模态视觉语言模型（VLM）引擎。核心洞见只有一句话：<strong>只需要改两处接缝（seam），其余引擎完全不动</strong>。第一处是<span class="mono">输入接缝</span>——把原始像素 / 音频转成模型张量，并在 token 流里插入<strong>占位符（placeholder）token</strong>；第二处是<span class="mono">嵌入接缝</span>——在前向计算时，跑各模态的编码器（encoder）产生媒体嵌入，再把它们<strong>缝合（scatter）</strong>到 token 嵌入流里占位符所在的位置。缝合之后，序列就只是一行普通的嵌入向量，调度器（第18课）、分页 KV（第30课）、RadixAttention（第29课）、采样器（第28课）全部照常运行。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div>
 <p>把文本引擎想象成一条<strong>填字游戏的横排格子</strong>。平时每个格子里填一个字（文本 token）。现在你想在句子中间嵌入一张图片，怎么办？你<strong>先用铅笔在格子里画上记号</strong>（占位符 token），告诉大家“这里以后要放图片，先占住 5 个格子”。等真正动笔时，你拿出图片，用<strong>专门的相机（ViT 编码器）</strong>把它压成几枚“图片印章”，然后<strong>精确地盖到那些画了记号的格子上</strong>，把铅笔记号替换掉。最后整排格子看起来就是一串均匀的内容——后面读句子的人根本不需要知道哪格原来是文字、哪格原来是图片，他照常一格一格往下读。这就是 VLM：<span class="mono">占位 + 在占位处织入嵌入</span>，而不是另造一台机器。</p>
@@ -9258,14 +9258,14 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <p>这里还藏着一个常被忽略的细节：<strong>占位符的数量必须事先算准</strong>。处理器在输入接缝插占位符时，并不是随便塞几个，而是按该模型 ViT 的输出长度精确计算——一张图经过切块、池化后会产生多少个视觉 token，就插多少个占位符。如果数量对不上，缝合时散射的源（媒体嵌入）和目标（占位符槽位）就会形状不匹配，直接报错。所以输入接缝和嵌入接缝之间有一个<strong>隐含契约</strong>：处理器承诺“我为这张图留了 N 个槽位”，编码器承诺“我恰好产出 N 个嵌入”，两者由同一个占位符 token 串成一条线。正因为这个契约在预处理阶段就钉死了，下游拼批、分页、注意力才能把这段“图片区间”当成普通 token 一视同仁地处理。多图、多模态混排时也一样：每个媒体项各有自己的一段占位符，互不干扰，散射时各回各的槽位。</p>
 
 <h2>三、为什么其余引擎一行都不用改</h2>
-<p>这是本课最重要的一句话：<strong>VLM 支持 = “处理媒体 + 在占位符处织入嵌入”，而不是一台新引擎</strong>。一旦缝合完成，序列就退化成一行普通嵌入，语言模型主体根本分辨不出哪段来自图片。于是引擎的其余部分原封不动地复用：<strong>调度器</strong>（第18课）照样按 token 数排队、做连续批处理；<strong>分页 KV 缓存</strong>（第30课）照样按页分配、按 token 写入 KV；<strong>RadixAttention</strong>（第33课）照样按前缀树复用缓存、做前缀匹配；<strong>采样器</strong>（第28课）照样从 logits 里采样下一个 token。多模态信息在“嵌入接缝”处一次性融入序列后，后续没有任何一处需要知道它的存在。</p>
+<p>这是本课最重要的一句话：<strong>VLM 支持 = “处理媒体 + 在占位符处织入嵌入”，而不是一台新引擎</strong>。一旦缝合完成，序列就退化成一行普通嵌入，语言模型主体根本分辨不出哪段来自图片。于是引擎的其余部分原封不动地复用：<strong>调度器</strong>（第18课）照样按 token 数排队、做连续批处理；<strong>分页 KV 缓存</strong>（第30课）照样按页分配、按 token 写入 KV；<strong>RadixAttention</strong>（第29课）照样按前缀树复用缓存、做前缀匹配；<strong>采样器</strong>（第28课）照样从 logits 里采样下一个 token。多模态信息在“嵌入接缝”处一次性融入序列后，后续没有任何一处需要知道它的存在。</p>
 <p>这种“克制”带来的工程红利非常实在。第一，<strong>复杂度被隔离</strong>：所有和模态相关的脏活——不同图片分辨率、不同音频采样率、不同模型的切块规则——全部关在处理器和编码器这两个盒子里，引擎核心保持单一职责。第二，<strong>性能优化自动继承</strong>：你为文本引擎做的连续批处理、前缀缓存复用、分页显存管理，VLM 请求一行不改地全盘享受；甚至一段“文本前缀 + 同一张图”被多个请求共享时，RadixAttention 仍能在缝合后的嵌入序列上命中前缀缓存。第三，<strong>新模型接入成本低</strong>：要支持一个新的 VLM，通常只需写一个新的 <span class="mono">BaseMultimodalProcessor</span> 子类、挂上它的编码器、在 <span class="mono">data_embedding_funcs</span> 里注册“占位符 → 编码器”的映射，引擎其余部分完全不用碰。这正是把变化点收敛到两处接缝的价值：<strong>新增的是适配器，不是引擎</strong>。</p>
 
-<div class="cols"><div class="col"><strong>VLM 专属（新增的两处接缝）</strong><ul><li>处理器：像素 / 音频 → 张量 + 插占位符</li><li>编码器：ViT / 音频编码器算媒体嵌入</li><li>缝合：在占位符位置散射嵌入</li></ul></div><div class="col"><strong>完全复用（一行不改）</strong><ul><li>调度器：连续批处理（第18课）</li><li>分页 KV 缓存：分页存取（第30课）</li><li>RadixAttention：前缀复用（第33课）</li><li>采样器：从 logits 采样（第28课）</li></ul></div></div>
+<div class="cols"><div class="col"><strong>VLM 专属（新增的两处接缝）</strong><ul><li>处理器：像素 / 音频 → 张量 + 插占位符</li><li>编码器：ViT / 音频编码器算媒体嵌入</li><li>缝合：在占位符位置散射嵌入</li></ul></div><div class="col"><strong>完全复用（一行不改）</strong><ul><li>调度器：连续批处理（第18课）</li><li>分页 KV 缓存：分页存取（第30课）</li><li>RadixAttention：前缀复用（第29课）</li><li>采样器：从 logits 采样（第28课）</li></ul></div></div>
 
 <h2>四、把两处接缝对到具体职责</h2>
 <p>下面这张表把两处接缝、它们所在的阶段、以及各自的职责一一对上。可以看到，<strong>输入接缝</strong>属于分词 / 预处理阶段（第14课），交付的是“张量 + 带占位符的 token 流”；<strong>嵌入接缝</strong>属于前向计算阶段，交付的是“缝合好媒体嵌入的一行向量”。两者一前一后，把媒体从“原始字节”一路接力到“可被语言模型直接消费的嵌入”，中间没有惊动引擎的任何其他部分。</p>
-<p>不妨把整条路径再完整走一遍，体会两处接缝如何接力。用户发来一条带图请求，分词器（第14课）先把文本部分切成 token，与此同时输入接缝里的处理器把图片解码、归一化、按模型规则切块成张量，并在文本 token 流的对应位置插入一串占位符 token；此刻请求带着“张量 + 含占位符的 token 序列”进入调度器（第18课）排队、拼批。轮到它前向时，嵌入接缝接手：先把整批 token id 查表得到文本嵌入，再让 ViT/音频编码器把张量编码成媒体嵌入，最后一次散射把媒体嵌入写到占位符槽位上。从这一步往后，序列就是纯粹的嵌入，分页 KV（第30课）按 token 分配缓存、RadixAttention（第33课）做前缀匹配与复用、采样器（第28课）从 logits 采样下一个 token——它们谁都不知道、也不需要知道这里曾经有过一张图。每解码出一个新 token，循环继续，直到生成结束。<strong>整条链路里，“多模态”只在最前面两处接缝短暂现身，之后彻底消融进通用的嵌入流</strong>，这就是 SGLang VLM 设计的全部精髓：用最小的改动面，换来对整套高性能基础设施的完整复用。</p>
+<p>不妨把整条路径再完整走一遍，体会两处接缝如何接力。用户发来一条带图请求，分词器（第14课）先把文本部分切成 token，与此同时输入接缝里的处理器把图片解码、归一化、按模型规则切块成张量，并在文本 token 流的对应位置插入一串占位符 token；此刻请求带着“张量 + 含占位符的 token 序列”进入调度器（第18课）排队、拼批。轮到它前向时，嵌入接缝接手：先把整批 token id 查表得到文本嵌入，再让 ViT/音频编码器把张量编码成媒体嵌入，最后一次散射把媒体嵌入写到占位符槽位上。从这一步往后，序列就是纯粹的嵌入，分页 KV（第30课）按 token 分配缓存、RadixAttention（第29课）做前缀匹配与复用、采样器（第28课）从 logits 采样下一个 token——它们谁都不知道、也不需要知道这里曾经有过一张图。每解码出一个新 token，循环继续，直到生成结束。<strong>整条链路里，“多模态”只在最前面两处接缝短暂现身，之后彻底消融进通用的嵌入流</strong>，这就是 SGLang VLM 设计的全部精髓：用最小的改动面，换来对整套高性能基础设施的完整复用。</p>
 
 <table class="t"><tr><th>接缝</th><th>所在阶段</th><th>职责</th></tr><tr><td>输入处理器 <span class="mono">BaseMultimodalProcessor</span></td><td>分词 / 预处理（第14课）</td><td>原始像素 / 音频 → 模型张量；往 token 流插入占位符 token</td></tr><tr><td>嵌入入口 <span class="mono">general_mm_embed_routine</span></td><td>前向计算入口</td><td>跑编码器算媒体嵌入；在 <span class="mono">input_ids==占位符</span> 处散射缝合</td></tr></table>
 
@@ -9291,7 +9291,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <li><strong>输入接缝</strong>由每模型的 <span class="mono">BaseMultimodalProcessor</span> 负责：原始像素 / 音频 → 张量，并往 token 流插入<strong>占位符 token</strong>。</li>
 <li><strong>嵌入接缝</strong>由 <span class="mono">general_mm_embed_routine</span> 负责：先嵌入文本，再跑各模态<strong>编码器</strong>（ViT / 音频编码器，可带 CUDA Graph，第27课），把媒体嵌入<strong>散射</strong>到占位符位置。</li>
 <li>分发由 <span class="mono">data_embedding_funcs</span> 驱动，以 <span class="mono">placeholder_tokens</span> 为键，决定哪种占位符用哪个编码器填。</li>
-<li>缝合后序列只是一行嵌入，所以<strong>调度器（第18课）/ 分页 KV（第30课）/ RadixAttention（第33课）/ 采样器（第28课）全部复用</strong>。</li>
+<li>缝合后序列只是一行嵌入，所以<strong>调度器（第18课）/ 分页 KV（第30课）/ RadixAttention（第29课）/ 采样器（第28课）全部复用</strong>。</li>
 <li>核心洞见：VLM = <span class="mono">处理媒体 + 在占位符处织入嵌入</span>，不是一台新引擎。</li>
 <li>这是一种<strong>“窄腰”架构</strong>：所有模态在两处接缝被翻译成统一的嵌入序列，腰以下的引擎只面对这一种抽象，因而新模态只需新增适配器即可接入。</li>
 </ul>
@@ -9302,7 +9302,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <div class="quiz">
   <div class="qn">1. 把一个纯文本引擎变成 VLM 引擎，SGLang 只动了哪两处“接缝”？</div>
   <ol class="opts">
-    <li>RadixAttention（第33课）与采样器（第28课）</li>
+    <li>RadixAttention（第29课）与采样器（第28课）</li>
     <li>需要重写整条流水线并新增一台 VLM 专用引擎</li>
     <li>调度器（第18课）与分页 KV 缓存（第30课）</li>
     <li><strong>输入接缝（处理器把媒体转张量并插占位符 token）与嵌入接缝（<span class='mono'>general_mm_embed_routine</span> 跑编码器并在占位符处缝合媒体嵌入），其余引擎不动</strong></li>
@@ -9335,14 +9335,14 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
   </ol>
   <details class="accordion" open>
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。占位符保证缝合前后序列长度不变，缝合只是把占位嵌入替换成等量的媒体嵌入。替换后这一行是均质的嵌入向量，语言模型不在乎来源。于是调度器（第18课）照样连续批处理、分页 KV（第30课）照样按页存取、RadixAttention（第33课）照样前缀复用、采样器（第28课）照样从 logits 采样——多模态信息在嵌入接缝处一次性融入，后续无需再感知。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。占位符保证缝合前后序列长度不变，缝合只是把占位嵌入替换成等量的媒体嵌入。替换后这一行是均质的嵌入向量，语言模型不在乎来源。于是调度器（第18课）照样连续批处理、分页 KV（第30课）照样按页存取、RadixAttention（第29课）照样前缀复用、采样器（第28课）照样从 logits 采样——多模态信息在嵌入接缝处一次性融入，后续无需再感知。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用你自己的话讲清 VLM 的“两处接缝”如何把一台文本引擎升级成多模态引擎：<strong>输入接缝</strong>里 <span class='mono'>BaseMultimodalProcessor</span> 如何把原始像素/音频转张量并往 token 流插占位符 token（第14课）；<strong>嵌入接缝</strong>里 <span class='mono'>general_mm_embed_routine</span> 如何先嵌入文本、再跑 ViT/音频编码器、并在 <span class='mono'>input_ids==占位符</span> 处散射缝合；说明 <span class='mono'>data_embedding_funcs</span> 与 <span class='mono'>placeholder_tokens</span> 各自的角色。</li>
-    <li>解释为什么“VLM = 处理媒体 + 在占位符处织入嵌入，而不是一台新引擎”：占位符如何保证序列长度在缝合前后一致，从而让调度器（第18课）、分页 KV（第30课）、RadixAttention（第33课）、采样器（第28课）全部原样复用；再讨论若编码器自带 CUDA Graph 运行器（第27课），它如何嵌入这条路径而不打扰下游。</li>
+    <li>解释为什么“VLM = 处理媒体 + 在占位符处织入嵌入，而不是一台新引擎”：占位符如何保证序列长度在缝合前后一致，从而让调度器（第18课）、分页 KV（第30课）、RadixAttention（第29课）、采样器（第28课）全部原样复用；再讨论若编码器自带 CUDA Graph 运行器（第27课），它如何嵌入这条路径而不打扰下游。</li>
   </ul>
 </div>
 </div>
@@ -9371,8 +9371,8 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <p>这种"热插拔"在生产里非常实用。比如你上线了一个新的客服话术适配器，只需把它装进池子，新请求立刻就能指定使用，老请求毫不受影响；当某个适配器很久没人用、又快撑爆池子时，把它卸载即可，腾出的空间留给更热门的技能。整个过程没有停机窗口，也不需要重新加载几十 GB 的基座权重——因为基座从头到尾就是那一份，真正进出的只是几兆到几十兆的小增量。</p>
 
 <h2>批处理才是真正的难点</h2>
-<p>如果一个批次里所有请求都用同一个适配器，那事情很简单：把 ΔW 算一遍，加到整批上即可。但现实是——同一批里的请求往往<strong>各要各的适配器</strong>：req1 要 adapterA、req2 要 adapterB、req3 又要 adapterA、req4 要 adapterC……如果按适配器一个一个循环处理，就退化成了多次小 GEMM，把连续批处理（<strong>第6课</strong>）辛辛苦苦攒起来的吞吐又拆散了。</p>
-<p>SGLang 的关键函数是 <span class="mono">LoRAManager.prepare_lora_batch(forward_batch)</span>。它接过当前的 <span class="mono">ForwardBatch</span>（<strong>第19课</strong>），<strong>逐请求</strong>看清每一行需要哪个适配器，把这些适配器的权重在内存里<strong>摆放/分段（stage &amp; segment）</strong>好，使得后续可以用一次<strong>分段 / 分组 GEMM（segmented / grouped GEMM）</strong>，在<span class="mono">一次</span>内核启动里就把每个请求<strong>各自的</strong> ΔW 都应用上去，而不是为每个适配器单独跑一趟。</p>
+<p>如果一个批次里所有请求都用同一个适配器，那事情很简单：把 ΔW 算一遍，加到整批上即可。但现实是——同一批里的请求往往<strong>各要各的适配器</strong>：req1 要 adapterA、req2 要 adapterB、req3 又要 adapterA、req4 要 adapterC……如果按适配器一个一个循环处理，就退化成了多次小 GEMM，把连续批处理（<strong>第5课</strong>）辛辛苦苦攒起来的吞吐又拆散了。</p>
+<p>SGLang 的关键函数是 <span class="mono">LoRAManager.prepare_lora_batch(forward_batch)</span>。它接过当前的 <span class="mono">ForwardBatch</span>（<strong>第24课</strong>），<strong>逐请求</strong>看清每一行需要哪个适配器，把这些适配器的权重在内存里<strong>摆放/分段（stage &amp; segment）</strong>好，使得后续可以用一次<strong>分段 / 分组 GEMM（segmented / grouped GEMM）</strong>，在<span class="mono">一次</span>内核启动里就把每个请求<strong>各自的</strong> ΔW 都应用上去，而不是为每个适配器单独跑一趟。</p>
 <p>这就是"批次感知"的含义：不是无视适配器差异硬算，也不是为差异付出循环的代价，而是把差异<strong>编码进一次分组矩阵乘法的布局里</strong>，让 GPU 一趟搞定。</p>
 <p>不妨把"逐适配器循环"和"分组 GEMM"放在一起比较。逐适配器循环时，假设这批里有 5 个不同适配器，就要发起 5 次小内核，每次都伴随一次内核启动开销、一次显存读写，而每个小内核处理的行数又很少，GPU 的算力利用率很低——这恰恰是连续批处理最想避免的"碎片化"。分组 GEMM 则把这 5 段拼成<strong>一次</strong>调用：启动开销摊到整批、显存只走一遍、GPU 的众多计算单元被同时喂饱。请求数越多、适配器越杂，这种"一趟做完"相对于"循环 N 趟"的优势就越明显。</p>
 <p>具体一点说，分组 GEMM（grouped GEMM）的思路是：把一个大批次按"用哪个适配器"切成若干<strong>段（segment）</strong>，每一段对应一个适配器、包含该批里所有用到它的请求行。这些段被并排打包成一次内核调用的输入，内核内部对每一段套用它自己的 <span class="mono">B、A</span> 矩阵。于是从外部看，仍然只有<strong>一次</strong>内核启动、一次显存往返；从内部看，每个请求都精确地拿到了它该有的 ΔW。这正是 <span class="mono">prepare_lora_batch</span> 要在前向之前默默做好的"摆放"工作——计算每段的偏移、长度、对应的适配器索引，把零散的"谁要谁"整理成 GPU 喜欢的规整布局。</p>
@@ -9381,7 +9381,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <h2>运行时的生命周期</h2>
 <p>把整条链路串起来：服务启动时，<span class="mono">LoRAManager</span> 拿到基座模型、<span class="mono">max_loras_per_batch</span> 上限和一个 LoRA 后端（默认 <span class="mono">triton</span>），建立起内存池。运营过程中，新技能通过 <span class="mono">load_lora_adapter</span> 进池、旧技能通过 <span class="mono">unload_lora_adapter</span> 出池。每一步前向，调度器先调用 <span class="mono">prepare_lora_batch</span> 为这一批摆好各请求的适配器，再让基座按常规跑前向、在 LoRA 层用分组 GEMM 叠加各自 ΔW。整套机制让单一部署能像换批头一样，灵活地服务几十种任务专用适配器。</p>
 <p>需要区分的是：多 LoRA 换的是<strong>小小的增量</strong>，基座始终不动；而后面 <strong>第51课</strong> 讲的 RL 训练里也会"换权重"，但换的是<span class="mono">整个</span>模型的权重，量级与目的都完全不同。</p>
-<p>把视角拉回到一次真实请求：客户端发来一段提示词，并在参数里写明"我要用 <span class="mono">sql-expert</span> 这个适配器"。请求进入调度器排队、与其他请求一起被组成连续批（第6课）。前向开始前，<span class="mono">prepare_lora_batch</span> 扫一遍这批里每个请求的适配器名，发现里面混着 <span class="mono">sql-expert</span>、<span class="mono">med-qa</span>、还有几条不带适配器的纯基座请求——它把不带适配器的当作"零增量"统一处理，把带适配器的按名分段。前向跑到注入了 LoRA 的那些线性层时，先算基座的 <span class="mono">W·x</span>，再用分组 GEMM 把每段各自的 <span class="mono">B·A·x</span> 加上去，得到 <span class="mono">(W + B·A)·x</span>。从采样、KV 缓存到输出，后面的一切都和普通文本推理没有区别。</p>
+<p>把视角拉回到一次真实请求：客户端发来一段提示词，并在参数里写明"我要用 <span class="mono">sql-expert</span> 这个适配器"。请求进入调度器排队、与其他请求一起被组成连续批（第5课）。前向开始前，<span class="mono">prepare_lora_batch</span> 扫一遍这批里每个请求的适配器名，发现里面混着 <span class="mono">sql-expert</span>、<span class="mono">med-qa</span>、还有几条不带适配器的纯基座请求——它把不带适配器的当作"零增量"统一处理，把带适配器的按名分段。前向跑到注入了 LoRA 的那些线性层时，先算基座的 <span class="mono">W·x</span>，再用分组 GEMM 把每段各自的 <span class="mono">B·A·x</span> 加上去，得到 <span class="mono">(W + B·A)·x</span>。从采样、KV 缓存到输出，后面的一切都和普通文本推理没有区别。</p>
 <p>值得强调的是，这条路径里"用哪个适配器"完全由请求自己携带的参数决定，而不是由部署时写死的全局开关决定。这意味着同一个端点可以同时面向不同租户、不同任务：A 团队的请求带上他们训练的法律适配器，B 团队的请求带上客服适配器，二者在同一批里被并行服务，却各自得到正确的结果。这种"按请求选技能"的能力，正是多 LoRA 在多租户场景下极具性价比的根源。</p>
 <p>正因为适配器只是"叠加在基座之上的一层薄增量"，多 LoRA 与 SGLang 其余的机制天然兼容：连续批处理照常攒批、分页 KV 照常按页存取、前缀复用照常命中。LoRA 只在少数被注入的权重层上多做一次分组加法，其余引擎对"这条请求到底用了哪个适配器"几乎无感。这种"低侵入"正是它能在一份部署里廉价托管几十个微调版本的根本原因。</p>
 
@@ -9419,7 +9419,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <li>服务 N 个微调不必起 N 份完整模型：SGLang 保留<strong>一份基座 + 一个适配器池</strong>，按请求应用对应适配器。</li>
 <li>真正的难点是<strong>批处理</strong>：同批请求可能各要各的适配器，<span class="mono">prepare_lora_batch(forward_batch)</span> 逐请求收集并摆放，使<strong>分段/分组 GEMM</strong> 能在一次内核里应用每个请求各自的 ΔW。</li>
 <li><span class="mono">max_loras_per_batch</span> 限定同批可共存的不同适配器数（池/显存约束）；适配器可经 <span class="mono">load_lora_adapter</span> / <span class="mono">unload_lora_adapter</span> 在运行时增删，<strong>无需重启</strong>。</li>
-<li>关联：<strong>第19课</strong> ForwardBatch、<strong>第25课</strong> 基座权重、<strong>第6课</strong> 连续批处理；前瞻 <strong>第51课</strong>（RL 也换权重，但换的是<span class="mono">整个</span>模型）。</li>
+<li>关联：<strong>第24课</strong> ForwardBatch、<strong>第25课</strong> 基座权重、<strong>第5课</strong> 连续批处理；前瞻 <strong>第51课</strong>（RL 也换权重，但换的是<span class="mono">整个</span>模型）。</li>
 </ul>
 </div>
 
@@ -9448,7 +9448,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
   </ol>
   <details class="accordion" open>
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。若按适配器逐个循环，就退化成多次小 GEMM，把连续批处理（第6课）的吞吐拆散。<span class='mono'>prepare_lora_batch</span> 接过当前 ForwardBatch（第19课），逐请求看清每行需要哪个适配器，把权重<strong>分段摆放</strong>，使后续一次分段/分组 GEMM 就在一次内核启动里把每个请求各自的 ΔW 都应用上去。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。若按适配器逐个循环，就退化成多次小 GEMM，把连续批处理（第5课）的吞吐拆散。<span class='mono'>prepare_lora_batch</span> 接过当前 ForwardBatch（第24课），逐请求看清每行需要哪个适配器，把权重<strong>分段摆放</strong>，使后续一次分段/分组 GEMM 就在一次内核启动里把每个请求各自的 ΔW 都应用上去。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -9468,7 +9468,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用你自己的话讲清“一份基座 + 适配器池”为什么比起 N 份完整模型更省：LoRA 适配器作为低秩小增量 <span class='mono'>W + B·A</span>（秩 <span class='mono'>r ≪ d</span>）如何让一份基座（第25课）挂许多“技能”；再说明 <span class='mono'>max_loras_per_batch</span> 限定同批可共存的适配器数，以及 <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> 如何在运行时增删而无需重启。</li>
-    <li>解释批处理为何是多 LoRA 的真正难点：当同批请求各要各的适配器（req1→A、req2→B、req3→A…）时，<span class='mono'>prepare_lora_batch(forward_batch)</span> 如何接过 ForwardBatch（第19课）逐请求收集并摆放适配器，使<strong>分段/分组 GEMM</strong> 在一次内核里应用各自 ΔW，从而不拆散连续批处理（第6课）的吞吐；再对比第51课的 RL 也换权重，但换的是整个模型。</li>
+    <li>解释批处理为何是多 LoRA 的真正难点：当同批请求各要各的适配器（req1→A、req2→B、req3→A…）时，<span class='mono'>prepare_lora_batch(forward_batch)</span> 如何接过 ForwardBatch（第24课）逐请求收集并摆放适配器，使<strong>分段/分组 GEMM</strong> 在一次内核里应用各自 ΔW，从而不拆散连续批处理（第5课）的吞吐；再对比第51课的 RL 也换权重，但换的是整个模型。</li>
   </ul>
 </div>
 </div>

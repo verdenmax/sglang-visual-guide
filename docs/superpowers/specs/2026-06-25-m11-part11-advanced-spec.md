@@ -52,8 +52,8 @@ single deployment serves dozens of task-specific adapters cheaply. **Cited:**
 max_loras_per_batch). **Read:** `lora/lora_manager.py`, `lora/lora.py` (`LoRAAdapter`),
 `lora/mem_pool.py`, `lora/backend/`. **Diagrams:** a `layers`/`flow` base weight + per-request ΔW
 (adapter) → output; a `cellgroup` one batch where rows use different adapters (A/B/A/C); a `table.t`
-LoRAManager method → role; a `cols` N full models (naive) vs 1 base + adapter pool (SGLang). Tie 第19课
-(ForwardBatch), 第25课 (weights), 第6课 (batching). Forward-ref 第51课 (RL also swaps weights).
+LoRAManager method → role; a `cols` N full models (naive) vs 1 base + adapter pool (SGLang). Tie 第24课
+(ForwardBatch), 第25课 (weights), 第5课 (batching). Forward-ref 第51课 (RL also swaps weights).
 
 ### L51 — 51-rl-rollout-and-weight-sync.html / "RL Rollout 与权重同步"
 **Scope:** SGLang as the fast GENERATION ("rollout") engine inside an RL / RLHF training loop. RL
