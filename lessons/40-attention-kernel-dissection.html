@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>40 · 关键 attention kernel 剖析 / Dissecting an attention kernel - SGLang 图解教程</title>
+<meta name="description" content="第九部分 · 内核与硬件｜关键 attention kernel 剖析 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="40 · 关键 attention kernel 剖析 / Dissecting an attention kernel - SGLang 图解教程">
+<meta property="og:description" content="第九部分 · 内核与硬件｜关键 attention kernel 剖析 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="40 · 关键 attention kernel 剖析 / Dissecting an attention kernel - SGLang 图解教程">
+<meta name="twitter:description" content="第九部分 · 内核与硬件｜关键 attention kernel 剖析 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第九部分 · 内核与硬件</span><span class="lang-en">Part 9 · Kernels &amp; hardware</span></span>
+    <span class="pill">40 / 42</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:95%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第九部分 · 内核与硬件</span><span class="lang-en">Part 9 · Kernels &amp; hardware</span></div>
+    <h1><span class="lang-zh">关键 attention kernel 剖析</span><span class="lang-en">Dissecting an attention kernel</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">第40课，我们把镜头拉到最近，正面解剖一个真实的 <strong>attention kernel</strong>（注意力核函数）。前面几课我们讲过分页 KV 缓存（第30课）、解码阶段的带宽瓶颈（第4课）、以及注意力后端的封装方式（第33课），这一课要把这些拼图拼到一起：当一个序列在 <span class="mono">decode</span>（解码，每步只生成一个新 token）阶段需要做注意力时，GPU 上那段被成千上万次反复调用的核函数，里面到底发生了什么。我们不谈玄学，只谈这段代码每一步搬了哪些字节、为什么这么搬。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>把 decode 注意力核函数想象成一个<strong>仓库拣货员</strong>。仓库里的货架（KV 缓存）不是一整排连续摆放的，而是被切成一个个<strong>货格</strong>（page，分页），散落在仓库各处。拣货员手里有一张<strong>取货单</strong>（<span class="mono">page_table</span>，块表），上面写着「这个客户的货分别在 7 号、3 号、19 号格子」。他不会把整个仓库搬空，而是<strong>只按单取那几格</strong>，边取边算账。</p>
+<p>更妙的是他算账的方式：他不等所有货都搬出来再统一称重，而是<strong>每取一格就更新一次累计值</strong>——记住目前的最大值和累计权重，新的一格来了就按比例修正之前的结果。这样他全程只需要一个小本子（寄存器），永远不用把整张大表摊在地上。这正是<strong>在线 softmax</strong> 的精髓。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>注意力的数学很短：<span class="mono">softmax(Q·Kᵀ / √d)·V</span>。但 decode 阶段的难点不在算术，而在<strong>数据从哪来、怎么搬</strong>。每生成一个 token，Q 只有一行（一个查询位置），却要和这条序列<strong>历史上所有的 K、V</strong> 做点积。这些 K、V 早就被写进了分页 KV 缓存，物理上散落在非连续的页里。所以核函数的真正主线是：<strong>用 page_table 把分散的 KV 页收集（gather）回来 → 分块（tiling）流式地算 Q·Kᵀ → 在线 softmax → 再乘 V</strong>。因为 decode 是带宽瓶颈型负载，核函数的全部价值就在于「高效地把 KV 字节搬过来」。</p>
+</div>
+
+<h2>一、decode 注意力核函数的主线：收集、点积、归一、加权</h2>
+<p>先把整条主线说清楚。当调度器决定为某个序列生成下一个 token，它会发起一次 decode 前向。注意力这一步收到的输入是：一行 <strong>Q</strong>（当前查询位置，形状很「瘦」，只有一个 token），加上整条序列<strong>已经缓存好的 K 和 V</strong>。这些 K、V 不在一块连续显存里，而是被分页 KV 缓存切成固定大小的页，分散存放，每个序列拥有哪几页由 <span class="mono">page_table</span> 记录。</p>
+<p>于是核函数干的第一件事不是算乘法，而是<strong>查表寻址</strong>：根据 <span class="mono">page_table[b]</span> 找到序列 b 的所有 KV 页编号，再从这些非连续的页里把 K、V 块逐块读进来。读进来之后才进入数学部分：当前这一行 Q 和读进来的这一块 K 做点积，得到一小段注意力分数；这段分数立刻喂给在线 softmax 更新累计值；最后用归一化后的权重去加权对应的 V 块，累加进输出。整个过程是<strong>流式</strong>的——读一块、算一块、丢一块，从不把完整的分数矩阵留在显存里。</p>
+
+<p>这里有一个直觉上的反转值得记住：很多人以为注意力的瓶颈是那一堆乘加，但在 decode 里，乘加其实很少（Q 只有一行），真正昂贵的是<strong>把历史 KV 一字节一字节读进来</strong>。所以核函数的设计目标不是「少算」，而是「少搬、搬得连贯、搬一遍就算完」。带着这个目标去看下面每一个设计选择，你会发现它们指向同一个方向：把宝贵的显存带宽花在刀刃上。</p>
+
+<div class="flow"><div class="node">page_table 收集分页 KV</div><div class="arrow">→</div><div class="node">Q·Kᵀ 分块点积</div><div class="arrow">→</div><div class="node">在线 softmax 归一</div><div class="arrow">→</div><div class="node">·V 加权累加 → 输出</div></div>
+
+<p>注意第一个节点：在很多教科书的注意力图里，第一步是「Q 乘 K」，但在真实的 decode 核函数里，<strong>真正的第一步是「按取货单收集 KV」</strong>。这一步决定了核函数的访存模式，也决定了它能不能跑满显存带宽。因为 KV 缓存通常远大于片上的 SRAM，所以怎么把页搬进来、搬进来的粒度多大，几乎就等于性能本身。</p>
+
+<p>再强调一遍这条主线为什么重要：在 decode 阶段，模型权重的搬运和注意力对 KV 的搬运，共同决定了每一步生成耗时，而其中 KV 的访问会随着序列变长而不断增大。也就是说，序列越长、上下文越多，注意力核函数搬运的 KV 字节就越多，它在整步耗时里的占比也越高。这就是为什么我们必须把这段核函数看得这么仔细：它不是一段可有可无的小函数，而是长上下文推理里实打实的热点。理解它每一步搬了什么，才能理解后端为它做的种种优化到底优化在哪里。</p>
+
+<h2>二、为什么 KV 要分页，以及核函数如何「按页拣货」</h2>
+<p>第30课讲过，分页 KV 缓存把每条序列的历史切成固定大小的页，像操作系统的虚拟内存一样按页分配。好处是：不同序列长度差异巨大，按页分配可以避免为长序列预留巨大连续显存、也避免短序列浪费，显存利用率高、还能在序列间共享前缀。但代价是：<strong>同一条序列的 KV 在物理上不再连续</strong>，逻辑上第 0、1、2、3 个 KV 块，可能分别落在 7、3、19、5 号物理页。</p>
+<p>核函数要还原逻辑顺序，就得靠 <span class="mono">page_table</span>（也叫 block table）。它是一张「逻辑块号 → 物理页号」的映射表。核函数遍历某个序列需要的逻辑位置，通过 page_table 翻译成物理页地址，再去那一页读 K、V。下面这组格子就是 page_table 收集分页 KV 的样子——逻辑上相邻的页，物理上是跳着取的：</p>
+
+<div class="cellgroup"><div class="cell">页 #7</div><div class="cell">页 #3</div><div class="cell">页 #19</div><div class="cell">页 #5</div><div class="cell">页 #12</div><div class="cell">页 #0</div></div>
+
+<p>这种「跳着取」的访存正是 decode 核函数最大的工程挑战。如果实现得粗糙，跳页会让访存变得零散、带宽利用率低；实现得好，核函数会让一个线程块负责一个序列、或者把多个 KV 页的读取合并成对齐的、连贯的内存事务，尽量把每一次显存读取都用满。这也是为什么同一份注意力数学，不同后端（第33课）跑出来的速度天差地别——差距几乎全在 KV 的访存效率上。</p>
+
+<p>这里还藏着一个常见误解需要澄清：分页并不会让注意力「算得更少」，它改变的只是 KV 在显存里的<strong>组织方式</strong>。点积、softmax、加权这些数学一步都没省，省的是<strong>显存的分配与浪费</strong>，以及让相同前缀能被多条序列共享、不必重复存一遍。换句话说，分页是显存管理层面的胜利，而核函数要做的是「在这种非连续布局上，依然把字节高效地搬进来」。理解了这一点，你就不会把 page_table 误当成某种加速算法——它是寻址机制，是核函数和分页缓存之间的那张地图。</p>
+
+<h2>三、分块（tiling）与在线 softmax：一遍流式算完</h2>
+<p>第二个关键设计是<strong>分块</strong>。GPU 的寄存器和共享内存（SRAM）非常小，装不下完整的 K、V，更装不下一条长序列的全部注意力分数矩阵。所以核函数把序列的 KV 切成一个个<strong>瓦片（tile）</strong>，一次只把一个瓦片流进 SRAM 来算，算完就让下一个瓦片覆盖它。核函数<strong>从不一次性把整张分数矩阵物化（materialise）出来</strong>，因为那张矩阵既占显存、又要反复读写、纯属浪费带宽。</p>
+<p>但分块带来一个数学难题：softmax 需要先知道所有分数里的最大值、再算所有指数的总和，才能归一化。如果分块流式处理，怎么可能「先看完所有分数」？答案是 FlashAttention 风格的<strong>在线 softmax</strong>：核函数维护两个累计量——一个<strong>运行最大值</strong>（running max）和一个<strong>运行分母</strong>（running denominator，即累计的指数和）。每来一个新瓦片，就用新的局部最大值去修正旧的累计值（按指数比例缩放之前累加的结果），再把这块的贡献加进去。这样<strong>只需要一遍流式扫描</strong>，不用存下所有分数，就能算出和「全局 softmax」完全等价的结果，省显存、更省带宽。</p>
+<p>这也解释了 prefill（预填充）和 decode 两种核函数为什么长得不一样。下面把两者并排对比：</p>
+
+<div class="cols"><div class="col"><strong>prefill 核函数</strong><br>处理 prompt 的所有 token，查询位置很多，是一个又宽又厚的、类似 GEMM（大矩阵乘）的稠密计算。计算密集，能把张量核心喂饱，瓶颈更偏算力。</div><div class="col"><strong>decode 核函数</strong><br>每步只有一个查询位置，形状又「瘦」又长，主体是按 page_table 在 KV 缓存上反复 gather。计算量很小、访存量很大，瓶颈是显存带宽（第4课）。</div></div>
+
+<p>正因为两者的形状和瓶颈完全不同，SGLang 会为它们走不同的核函数路径：prefill 像一次大 GEMM，decode 像一次大规模的稀疏拣货。把它们硬塞进同一个实现，往往两头都跑不快。</p>
+
+<p>还有一个值得记住的细节：在线 softmax 不仅让一遍扫描成为可能，它还和分页、分片自然衔接。当一条很长的序列被切成很多 KV 分片，甚至这些分片被分配给不同的线程块并行处理时，每个分片只能算出自己那段的<strong>局部最大值和局部分母</strong>。要得到全局正确的结果，就需要把这些局部 softmax 结果<strong>按在线 softmax 的规则合并</strong>——这正是后面会提到的 <span class="mono">merge_attn_states.cu</span> 干的事。所以在线 softmax 不是一个孤立的小技巧，而是贯穿「分块、分片、并行合并」的同一套数学骨架。理解了它，你就能把核函数内部的循环和跨线程块的归并看成同一件事的不同尺度。</p>
+
+<h2>四、一个真实的 wrinkle：MLA 的压缩潜变量布局</h2>
+<p>把上面所有概念落到一段真实代码上，我们看 DeepSeek 风格的 <strong>MLA</strong>（多头潜在注意力）的 decode 核函数。MLA 有个现实中的小皱褶：它的 KV 不是普通地存成「每个头一份 K、一份 V」，而是存成一个<strong>压缩潜变量</strong>（latent，<span class="mono">D_latent=512</span>）外加一小段 <strong>rope（旋转位置编码）部分</strong>（<span class="mono">D_rope=64</span>），合起来每个位置 576 维。核函数通过 page_table 从 <span class="mono">kv_c_and_k_pe_cache</span> 里读出这份压缩 KV，再把头数<strong>补齐</strong>到核函数的瓦片宽度 <span class="mono">MAX_HEADS=128</span>，然后把活儿派发给编译好的 CUDA 核函数。下面这段 Python 就是这层「准备数据 + 派发」的封装，真正的乘加发生在 <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span> 背后的编译核函数里：</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/attention.py ::cutlass_mla_decode</span><span class="ln">按 page_table 收集分页 KV → 分块 Q·Kᵀ → 在线 softmax → ·V</span></div><pre>def cutlass_mla_decode(
+    q_nope, q_pe,                 # query: compressed (nope) + rope parts
+    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope, one entry per page
+    seq_lens, page_table,         # page_table[b] -&gt; the KV page ids for sequence b
+    workspace, sm_scale, num_kv_splits=1,
+):
+    B_q, H, D_q_nope = q_nope.shape
+    _, PAGE_SIZE, D_ckv = kv_c_and_k_pe_cache.shape
+    D_latent, D_rope = 512, 64        # MLA: 512 latent + 64 rope = 576
+    MAX_HEADS = 128
+    if H &lt; MAX_HEADS:               # pad heads up to the kernel's tile width
+        q_nope = pad_to(q_nope, MAX_HEADS)
+        q_pe   = pad_to(q_pe,   MAX_HEADS)
+    out = q_nope.new_empty((B_q, MAX_HEADS, D_latent))
+    # the compiled CUDA kernel: gather KV pages via page_table, then
+    # tiled Q.K^T -&gt; online softmax -&gt; .V, writing into out
+    torch.ops.sgl_kernel.cutlass_mla_decode.default(
+        out, q_nope, q_pe, kv_c_and_k_pe_cache,
+        seq_lens, page_table, workspace, sm_scale, num_kv_splits)
+    return out[:, :H].contiguous()    # drop the head padding
+</pre></div>
+
+<p>注意这段 Python 本身<strong>几乎不做数学</strong>：它读形状、定下 MLA 的潜变量与 rope 维度、把头数补齐到 128、开好输出张量，然后把所有指针交给编译核函数。真正的「gather → 分块点积 → 在线 softmax → 加权」全在 <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span> 背后的 C++/CUDA 里。这些 CUDA 源码就放在 <span class="mono">sgl-kernel/csrc/attention/</span> 目录下，例如 <span class="mono">cutlass_mla_kernel.cu</span>、<span class="mono">merge_attn_states.cu</span>（后者负责把多个 KV 分片各自算出的局部 softmax 结果按在线 softmax 规则合并起来）。本课不贴 CUDA，只指路；想深入可以顺着这个路径去读。</p>
+
+<p>为什么 MLA 要这么折腾？因为它把每个头原本各自一份的 K、V，压缩成了一份共享的低维潜变量，再加一小段承载位置信息的 rope。这样存下来的 KV 体积大幅变小，decode 阶段要搬运的字节随之减少——对一个带宽瓶颈的负载来说，这是直接的性能收益。代价是核函数读到的不再是「现成的每头 K、V」，而是压缩布局，需要在核函数内部按 MLA 的方式展开和计算。这正是「真实核函数的皱褶」：教科书公式干干净净，工程实现却要迁就具体的存储布局、对齐要求和瓦片宽度。把头数补齐到 <span class="mono">MAX_HEADS=128</span> 也是同理——编译核函数是按固定瓦片宽度优化的，不足就补齐、算完再把多余的头切掉（<span class="mono">out[:, :H]</span>），用一点点冗余换取核函数走在它最擅长的形状上。这层封装本身被注意力后端（第33课）调用，而当核函数已经足够精炼，下一步要省的就是反复启动它们的开销，那正是 CUDA Graph（第41课）的主场。</p>
+
+<p>最后把几个核心设计选择和它们的理由列成一张表，方便回顾：</p>
+
+<table class="t"><tr><th>设计选择</th><th>为什么这么做</th></tr>
+<tr><td>分块 tiling（按瓦片流式处理）</td><td>SRAM/寄存器装不下完整 KV 与分数矩阵；分块让数据刚好放进片上、可流式覆盖</td></tr>
+<tr><td>在线 softmax（运行最大值 + 运行分母）</td><td>一遍扫完即得正确归一化，无需存全部分数，省显存、省带宽</td></tr>
+<tr><td>分页 KV 布局 + page_table 收集</td><td>序列 KV 非连续存放，显存利用率高、可共享前缀；核函数靠块表还原逻辑顺序</td></tr>
+<tr><td>MLA 压缩潜变量（512 + 64）</td><td>KV 体积更小、搬运更省带宽；核函数读压缩布局并补齐头数到 128 的瓦片宽度</td></tr>
+</table>
+
+<p>把这些放在一起看：decode 注意力核函数的设计哲学，从头到尾都是<strong>围绕带宽做减法</strong>——少存、少搬、一遍算完。理解了这条主线，你就能看懂注意力后端（第33课）为什么长那样，也为后面要讲的 CUDA Graph（第41课）打好基础——当核函数本身已经足够精炼，下一步要优化的就是「反复启动这些核函数」的开销了。</p>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>decode 核函数的真正第一步是收集，不是相乘</strong>：先用 <span class="mono">page_table</span> 从分页 KV 缓存（第30课）里 gather 非连续的 K、V 页，再做 Q·Kᵀ → softmax → ·V。</li>
+<li><strong>分块 tiling</strong>：把 KV 切成瓦片流进 SRAM，绝不物化完整分数矩阵，让数据刚好放进寄存器/共享内存。</li>
+<li><strong>在线 softmax</strong>（FlashAttention 风格）：维护运行最大值 + 运行分母，一遍流式扫描得到等价归一化，省显存省带宽。</li>
+<li><strong>prefill 与 decode 核函数不同</strong>：prefill 是又宽又厚的类 GEMM 稠密计算；decode 又瘦又长、以 KV gather 为主，受带宽限制（第4课）。</li>
+<li><strong>MLA 的现实皱褶</strong>：KV 存成压缩潜变量（512）+ rope（64），核函数读 <span class="mono">kv_c_and_k_pe_cache</span>、补齐头数到 128 再派发；封装在注意力后端（第33课）里，CUDA 源码位于 <span class="mono">sgl-kernel/csrc/attention/</span>。前向引用 CUDA Graph（第41课）。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 <strong>decode（解码）</strong>注意力核函数里，紧接着拿到一行 Q 之后，核函数真正做的<strong>第一步</strong>是什么？</div>
+  <ol class="opts">
+    <li><strong>用 <span class='mono'>page_table</span> 从分页 KV 缓存里收集（gather）该序列散落在非连续页上的 K、V 块</strong>，之后才做 Q·Kᵀ → softmax → ·V</li>
+    <li>立刻把整条序列的完整注意力分数矩阵物化到显存</li>
+    <li>把 KV 从分页布局复制成一整块连续显存再开始算</li>
+    <li>先对 V 做一次全量归一化，再去读 K</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。decode 的真正第一步是<strong>收集而非相乘</strong>：KV 被分页缓存切成非连续页，核函数靠 <span class='mono'>page_table</span> 把逻辑块翻译成物理页地址并 gather 回来，之后才进入点积与归一。它不会物化整张分数矩阵，也不会先复制成连续显存。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <strong>在线 softmax（FlashAttention 风格）</strong>之所以能在<strong>分块 tiling</strong> 流式处理时仍算出正确的归一化，关键机制是什么？</div>
+  <ol class="opts">
+    <li>先把所有瓦片的分数全部存下来，最后统一做一次标准 softmax</li>
+    <li><strong>维护运行最大值（running max）+ 运行分母（累计指数和），每来一个瓦片就按指数比例修正旧累计值，一遍流式扫描即得等价结果</strong></li>
+    <li>跳过求最大值的步骤，直接对原始分数取指数</li>
+    <li>对每个瓦片各自独立做 softmax，再简单求平均</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。在线 softmax 的核心是<strong>两个运行累计量</strong>：运行最大值与运行分母。新瓦片到来时用其局部最大值缩放之前的累计结果再加入贡献，因此无需存全部分数、一遍扫完即与全局 softmax 等价。逐瓦片独立 softmax 求平均是错误的，也不能跳过求最大值。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 关于 <strong>prefill（预填充）核函数</strong>与 <strong>decode 核函数</strong>的差异，下列哪种描述<strong>最准确</strong>？</div>
+  <ol class="opts">
+    <li>decode 每步要处理 prompt 的全部 token，所以比 prefill 更稠密</li>
+    <li>两者完全相同，只是 decode 跑在更快的 GPU 上</li>
+    <li><strong>prefill 查询位置很多、是又宽又厚的类 GEMM 稠密计算（偏算力）；decode 每步只有一个查询位置、又瘦又长、以按 page_table 在 KV 上 gather 为主（受带宽限制）</strong></li>
+    <li>prefill 受带宽限制，decode 受算力限制</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。两者形状与瓶颈相反：prefill 是对很多查询位置的类 GEMM 稠密大计算，偏算力；decode 每步仅一个查询位置，主体是 KV gather，受显存带宽限制（第4课）。所以 SGLang 为它们走不同核函数路径，绝非相同，也不是“prefill 受带宽限制”。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用自己的话描述一次 decode 注意力核函数的完整主线：从拿到一行 Q 开始，如何用 <span class='mono'>page_table</span> 从分页 KV 缓存收集非连续的 K、V，如何用<strong>分块 tiling</strong> 把瓦片流进 SRAM，并用<strong>在线 softmax</strong> 一遍算完 Q·Kᵀ → softmax → ·V。说明为什么这套设计本质上是“围绕带宽做减法”。</li>
+    <li>结合 MLA（DeepSeek 风格）的真实皱褶说明 <span class='mono'>cutlass_mla_decode</span> 的封装做了什么：KV 为何存成压缩潜变量（<span class='mono'>D_latent=512</span>）+ rope（<span class='mono'>D_rope=64</span>），为什么要把头数补齐到 <span class='mono'>MAX_HEADS=128</span> 再派发给编译核函数，以及它和注意力后端（第33课）、CUDA Graph（第41课）的关系。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">In Lesson 40 we zoom all the way in and dissect a real <strong>attention kernel</strong>. Earlier lessons covered the paged KV cache (Lesson 30), why decode is bandwidth-bound (Lesson 4), and how attention backends wrap kernels (Lesson 33). Now we put the pieces together: when a sequence runs an attention step during <span class="mono">decode</span> (generating one new token per step), what actually happens inside that kernel that gets called tens of thousands of times on the GPU? No hand-waving — just which bytes this code moves at each step, and why.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a decode attention kernel as a <strong>warehouse picker</strong>. The shelves (the KV cache) are not one long contiguous row; they are cut into <strong>bins</strong> (pages) scattered around the warehouse. The picker holds a <strong>pick list</strong> (<span class="mono">page_table</span>, the block table) that says "this customer's goods are in bins 7, 3, 19." He does not empty the whole warehouse — he <strong>fetches only those bins</strong> and tallies as he goes.</p>
+<p>Even better is how he tallies: instead of weighing everything at the end, he <strong>updates a running total after each bin</strong> — remembering the current maximum and the accumulated weight, rescaling the earlier result whenever a bigger value shows up. He only ever needs a tiny notepad (registers) and never spreads the whole ledger on the floor. That is exactly <strong>online softmax</strong>.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>The math of attention is short: <span class="mono">softmax(Q·Kᵀ / √d)·V</span>. But in decode the hard part is not arithmetic — it is <strong>where the data lives and how to move it</strong>. For each generated token, Q is just one row (one query position), yet it must dot against <strong>every K and V in this sequence's history</strong>. Those K/V were written long ago into the paged KV cache, physically scattered across non-contiguous pages. So the kernel's real main line is: <strong>gather the scattered KV pages via page_table → stream Q·Kᵀ in tiles → online softmax → multiply by V</strong>. Because decode is bandwidth-bound, the kernel's whole job is to move KV bytes efficiently.</p>
+</div>
+
+<h2>1. The main line: gather, dot, normalise, weight</h2>
+<p>Let's state the main line clearly. When the scheduler decides to generate the next token for a sequence, it launches a decode forward. The attention step receives one row of <strong>Q</strong> (the current query position, a very "skinny" shape with a single token) plus the entire sequence's <strong>already-cached K and V</strong>. Those K/V do not sit in one contiguous block; the paged KV cache slices them into fixed-size pages stored apart, and which pages a sequence owns is recorded in the <span class="mono">page_table</span>.</p>
+<p>So the kernel's first job is not multiplication but <strong>address lookup</strong>: use <span class="mono">page_table[b]</span> to find all KV page ids for sequence b, then read the K/V blocks from those non-contiguous pages. Only then does the math begin: the current Q row dots against the block of K just read, producing a slice of attention scores; that slice immediately feeds online softmax to update the running totals; finally the normalised weights scale the matching V block and accumulate into the output. The whole thing is <strong>streaming</strong> — read a block, compute it, drop it — never keeping the full score matrix in memory.</p>
+
+<div class="flow"><div class="node">gather paged KV via page_table</div><div class="arrow">→</div><div class="node">Q·Kᵀ tiled dot</div><div class="arrow">→</div><div class="node">online softmax normalise</div><div class="arrow">→</div><div class="node">·V weighted accumulate → output</div></div>
+
+<p>Notice the first node: in many textbook attention diagrams step one is "Q times K," but in a real decode kernel <strong>the true first step is "gather the KV per the pick list."</strong> This step sets the kernel's memory-access pattern and decides whether it can saturate memory bandwidth. Since the KV cache is usually far larger than on-chip SRAM, how pages are brought in — and at what granularity — is essentially performance itself.</p>
+
+<h2>2. Why KV is paged, and how the kernel "picks by page"</h2>
+<p>As Lesson 30 explained, the paged KV cache cuts each sequence's history into fixed-size pages, allocated by page like an OS virtual-memory system. The upside: sequence lengths vary wildly, so per-page allocation avoids reserving huge contiguous memory for long sequences and avoids waste for short ones — high memory utilisation, plus prefix sharing across sequences. The cost: <strong>a single sequence's KV is no longer physically contiguous</strong>; logical KV blocks 0, 1, 2, 3 might land on physical pages 7, 3, 19, 5.</p>
+<p>To restore logical order the kernel relies on the <span class="mono">page_table</span> (also called the block table): a "logical block id → physical page id" map. The kernel walks the logical positions a sequence needs, translates them through the page_table into physical page addresses, and reads K/V there. The cells below show paged KV gathered by a page_table — logically adjacent pages fetched out of physical order:</p>
+
+<div class="cellgroup"><div class="cell">page #7</div><div class="cell">page #3</div><div class="cell">page #19</div><div class="cell">page #5</div><div class="cell">page #12</div><div class="cell">page #0</div></div>
+
+<p>This "jump-around" access is the biggest engineering challenge of a decode kernel. Done crudely, page jumps make access scattered and bandwidth poor; done well, the kernel lets one thread block own one sequence, or coalesces several page reads into aligned, contiguous memory transactions, using every memory read fully. That is why the very same attention math runs at wildly different speeds across backends (Lesson 33) — almost all the difference is KV access efficiency.</p>
+
+<h2>3. Tiling and online softmax: done in one streaming pass</h2>
+<p>The second key design is <strong>tiling</strong>. A GPU's registers and shared memory (SRAM) are tiny — they cannot hold the full K/V, let alone the whole attention score matrix of a long sequence. So the kernel cuts the KV into <strong>tiles</strong> and streams one tile into SRAM at a time, overwriting it with the next. The kernel <strong>never materialises the full score matrix</strong> at once, because that matrix would occupy memory and be read and written repeatedly — pure wasted bandwidth.</p>
+<p>But tiling creates a math problem: softmax needs the maximum of all scores and the sum of all exponentials before it can normalise. If we process in tiles, how can we "see all scores first"? The answer is FlashAttention-style <strong>online softmax</strong>: the kernel keeps two running quantities — a <strong>running max</strong> and a <strong>running denominator</strong> (the accumulated sum of exponentials). For each new tile, it corrects the old totals using the new local max (rescaling the previously accumulated result by an exponential factor) and adds this tile's contribution. Thus <strong>one streaming pass</strong> suffices, with no need to store all scores, yet the result is exactly equivalent to a global softmax — saving memory and bandwidth.</p>
+<p>This also explains why prefill and decode kernels look different. Here they are side by side:</p>
+
+<div class="cols"><div class="col"><strong>prefill kernel</strong><br>Processes all prompt tokens, with many query positions — a wide, thick, GEMM-like dense computation. Compute-heavy, it can keep tensor cores fed; the bottleneck leans toward arithmetic.</div><div class="col"><strong>decode kernel</strong><br>One query position per step, a skinny and long shape, dominated by gathering over the KV cache via page_table. Tiny compute, large access; the bottleneck is memory bandwidth (Lesson 4).</div></div>
+
+<p>Because their shapes and bottlenecks differ entirely, SGLang takes different kernel paths for them: prefill like one big GEMM, decode like a large sparse pick. Forcing both into one implementation usually leaves both running slowly.</p>
+
+<h2>4. A real wrinkle: MLA's compressed latent layout</h2>
+<p>To ground all of this in real code, look at the DeepSeek-style <strong>MLA</strong> (multi-head latent attention) decode kernel. MLA has a real-world wrinkle: its KV is not stored plainly as "one K, one V per head," but as a <strong>compressed latent</strong> (<span class="mono">D_latent=512</span>) plus a small <strong>rope part</strong> (<span class="mono">D_rope=64</span>), 576 dims per position together. The kernel reads this compressed KV from <span class="mono">kv_c_and_k_pe_cache</span> via the page_table, <strong>pads</strong> the head count up to the kernel's tile width <span class="mono">MAX_HEADS=128</span>, then dispatches to the compiled CUDA kernel. The Python below is that "prepare data + dispatch" wrapper; the real multiply-accumulate happens inside the compiled kernel behind <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span>:</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/attention.py ::cutlass_mla_decode</span><span class="ln">gather paged KV via page_table → tiled Q·Kᵀ → online softmax → ·V</span></div><pre>def cutlass_mla_decode(
+    q_nope, q_pe,                 # query: compressed (nope) + rope parts
+    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope, one entry per page
+    seq_lens, page_table,         # page_table[b] -&gt; the KV page ids for sequence b
+    workspace, sm_scale, num_kv_splits=1,
+):
+    B_q, H, D_q_nope = q_nope.shape
+    _, PAGE_SIZE, D_ckv = kv_c_and_k_pe_cache.shape
+    D_latent, D_rope = 512, 64        # MLA: 512 latent + 64 rope = 576
+    MAX_HEADS = 128
+    if H &lt; MAX_HEADS:               # pad heads up to the kernel's tile width
+        q_nope = pad_to(q_nope, MAX_HEADS)
+        q_pe   = pad_to(q_pe,   MAX_HEADS)
+    out = q_nope.new_empty((B_q, MAX_HEADS, D_latent))
+    # the compiled CUDA kernel: gather KV pages via page_table, then
+    # tiled Q.K^T -&gt; online softmax -&gt; .V, writing into out
+    torch.ops.sgl_kernel.cutlass_mla_decode.default(
+        out, q_nope, q_pe, kv_c_and_k_pe_cache,
+        seq_lens, page_table, workspace, sm_scale, num_kv_splits)
+    return out[:, :H].contiguous()    # drop the head padding
+</pre></div>
+
+<p>Notice this Python does <strong>almost no math</strong>: it reads shapes, fixes MLA's latent and rope dims, pads heads to 128, allocates the output tensor, then hands all the pointers to the compiled kernel. The real "gather → tiled dot → online softmax → weight" all lives in the C++/CUDA behind <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span>. Those CUDA sources sit under <span class="mono">sgl-kernel/csrc/attention/</span> — files like <span class="mono">cutlass_mla_kernel.cu</span> and <span class="mono">merge_attn_states.cu</span> (the latter merges per-KV-split local softmax results under online-softmax rules). We won't paste CUDA here, just point the way; follow the path to dig deeper.</p>
+
+<p>Finally, a table of the core design choices and their reasons, for review:</p>
+
+<table class="t"><tr><th>Design choice</th><th>Why</th></tr>
+<tr><td>Tiling (stream by tile)</td><td>SRAM/registers can't hold the full KV or score matrix; tiling fits data on-chip and lets it stream-overwrite</td></tr>
+<tr><td>Online softmax (running max + running denom)</td><td>One pass yields correct normalisation without storing all scores — saves memory and bandwidth</td></tr>
+<tr><td>Paged KV layout + page_table gather</td><td>Sequence KV stored non-contiguously for high utilisation and prefix sharing; the block table restores logical order</td></tr>
+<tr><td>MLA compressed latent (512 + 64)</td><td>Smaller KV, cheaper to move; the kernel reads the compressed layout and pads heads to the 128 tile width</td></tr>
+</table>
+
+<p>Seen together: a decode attention kernel's whole design philosophy is <strong>subtraction around bandwidth</strong> — store less, move less, finish in one pass. Grasp this main line and you'll understand why attention backends (Lesson 33) look the way they do, and you'll be ready for CUDA Graph (Lesson 41) next — once the kernel itself is lean enough, the next thing to optimise is the cost of launching these kernels over and over.</p>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>A decode kernel's true first step is gather, not multiply</strong>: use <span class="mono">page_table</span> to gather non-contiguous K/V pages from the paged KV cache (Lesson 30), then do Q·Kᵀ → softmax → ·V.</li>
+<li><strong>Tiling</strong>: stream KV tiles into SRAM and never materialise the full score matrix, fitting data into registers/shared memory.</li>
+<li><strong>Online softmax</strong> (FlashAttention-style): keep a running max + running denominator for an equivalent normalisation in one streaming pass, saving memory and bandwidth.</li>
+<li><strong>Prefill and decode kernels differ</strong>: prefill is a wide, thick GEMM-like dense pass; decode is skinny and long, gather-heavy, bandwidth-bound (Lesson 4).</li>
+<li><strong>MLA's real wrinkle</strong>: KV stored as a compressed latent (512) + rope (64); the kernel reads <span class="mono">kv_c_and_k_pe_cache</span>, pads heads to 128, then dispatches; wrapped by attention backends (Lesson 33), with CUDA sources under <span class="mono">sgl-kernel/csrc/attention/</span>. Forward-ref CUDA Graph (Lesson 41).</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In a <strong>decode</strong> attention kernel, right after receiving one row of Q, what is the kernel's true <strong>first step</strong>?</div>
+  <ol class="opts">
+    <li><strong>Use the <span class='mono'>page_table</span> to gather this sequence's K/V blocks scattered across non-contiguous pages from the paged KV cache</strong>, and only then do Q·Kᵀ → softmax → ·V</li>
+    <li>Immediately materialise the full attention score matrix for the whole sequence in memory</li>
+    <li>Copy KV from the paged layout into one contiguous block before computing</li>
+    <li>First fully normalise V, then read K</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The true first step in decode is <strong>gather, not multiply</strong>: the paged cache stores KV in non-contiguous pages, so the kernel uses the <span class='mono'>page_table</span> to translate logical blocks to physical page addresses and gather them before any dot product. It does not materialise the full score matrix nor pre-copy into contiguous memory.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is the key mechanism that lets <strong>online softmax (FlashAttention-style)</strong> still produce a correct normalisation while processing in <strong>tiles</strong>?</div>
+  <ol class="opts">
+    <li>Store all tiles' scores first, then do one standard softmax at the end</li>
+    <li><strong>Keep a running max + a running denominator (accumulated exp sum), rescaling the old totals by an exponential factor for each new tile, getting an equivalent result in one streaming pass</strong></li>
+    <li>Skip computing the max and just exponentiate the raw scores</li>
+    <li>Do an independent softmax per tile, then just average them</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Online softmax hinges on <strong>two running quantities</strong>: a running max and a running denominator. When a new tile arrives, it rescales the previously accumulated result by the new local max and adds the contribution, so it needs no full score storage and one pass equals a global softmax. Per-tile independent softmax then averaging is wrong, and the max step cannot be skipped.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which description of the difference between the <strong>prefill kernel</strong> and the <strong>decode kernel</strong> is <strong>most accurate</strong>?</div>
+  <ol class="opts">
+    <li>Decode processes all prompt tokens each step, so it is denser than prefill</li>
+    <li>They are identical; decode just runs on a faster GPU</li>
+    <li><strong>Prefill has many query positions and is a wide, thick GEMM-like dense compute (compute-leaning); decode has one query position per step, is skinny and long, dominated by page_table gather over KV (bandwidth-bound)</strong></li>
+    <li>Prefill is bandwidth-bound and decode is compute-bound</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Their shapes and bottlenecks are opposite: prefill is a GEMM-like dense compute over many query positions (compute-leaning); decode has one query position per step and is dominated by KV gather, bandwidth-bound (Lesson 4). Hence SGLang takes different kernel paths; they are not identical, and prefill is not the bandwidth-bound one.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, trace the full main line of one decode attention kernel: starting from one row of Q, how it uses the <span class='mono'>page_table</span> to gather non-contiguous K/V from the paged KV cache, how it streams tiles into SRAM via <strong>tiling</strong>, and how <strong>online softmax</strong> computes Q·Kᵀ → softmax → ·V in one pass. Explain why this design is essentially 'subtraction around bandwidth'.</li>
+    <li>Using MLA's (DeepSeek-style) real wrinkle, explain what the <span class='mono'>cutlass_mla_decode</span> wrapper does: why KV is stored as a compressed latent (<span class='mono'>D_latent=512</span>) + rope (<span class='mono'>D_rope=64</span>), why heads are padded to <span class='mono'>MAX_HEADS=128</span> before dispatching to the compiled kernel, and how it relates to attention backends (Lesson 33) and CUDA Graph (Lesson 41).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="39-jit-kernel.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">JIT kernel</span><span class="lang-en">JIT kernels</span></div></a><a class="next" href="41-operator-fusion-and-cuda-graph.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">算子融合与 CUDA Graph 配合</span><span class="lang-en">Operator fusion &amp; CUDA graph</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

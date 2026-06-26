@@ -13,6 +13,7 @@ import part5
 import part6
 import part7
 import part8
+import part9
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -53,4 +54,9 @@ CONTENT = {
     "35-quantization.html": part8.LESSON_35,
     "36-rope-norm-and-ops.html": part8.LESSON_36,
     "37-logits-and-vocab-parallel.html": part8.LESSON_37,
+    "38-sgl-kernel-overview.html": part9.LESSON_38,
+    "39-jit-kernel.html": part9.LESSON_39,
+    "40-attention-kernel-dissection.html": part9.LESSON_40,
+    "41-operator-fusion-and-cuda-graph.html": part9.LESSON_41,
+    "42-multi-hardware-backends.html": part9.LESSON_42,
 }

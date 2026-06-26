@@ -121,6 +121,16 @@ PAGES = [
      "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
     ("37-logits-and-vocab-parallel.html", "Logits 处理与词表并行", "Logits & vocab parallel",
      "第八部分 · Attention 与算子层", "Part 8 · Attention & layers"),
+    ("38-sgl-kernel-overview.html", "sgl-kernel 总览", "sgl-kernel overview",
+     "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
+    ("39-jit-kernel.html", "JIT kernel", "JIT kernels",
+     "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
+    ("40-attention-kernel-dissection.html", "关键 attention kernel 剖析", "Dissecting an attention kernel",
+     "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
+    ("41-operator-fusion-and-cuda-graph.html", "算子融合与 CUDA Graph 配合", "Operator fusion & CUDA graph",
+     "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
+    ("42-multi-hardware-backends.html", "多硬件后端", "Multi-hardware backends",
+     "第九部分 · 内核与硬件", "Part 9 · Kernels & hardware"),
 ]
 
 
@@ -644,6 +654,16 @@ SUBTITLES = {
                                   "RoPE rotates q/k by position · RMSNorm lightweight norm · fused ops"),
     "37-logits-and-vocab-parallel.html": ("词表维度按 TP 切分 · 各 rank 算一片再 gather · 接采样器",
                                           "vocab split across TP ranks · each scores a shard then gather · into the Sampler"),
+    "38-sgl-kernel-overview.html": ("AOT C++/CUDA 内核包 · csrc 编译成 .so · 暴露为 torch.ops.sgl_kernel.*",
+                                    "AOT C++/CUDA kernel package · csrc compiled into a .so · exposed as torch.ops.sgl_kernel.*"),
+    "39-jit-kernel.html": ("运行时按需编译小内核 · 编译即缓存 · 灵活但有首次编译开销",
+                           "compile small kernels on demand at runtime · compile-and-cache · flexible but first-call cost"),
+    "40-attention-kernel-dissection.html": ("decode 内核读分页 KV · Q·Kᵀ→softmax→·V · tiling 与在线 softmax",
+                                            "decode kernel reads paged KV · Q·Kᵀ→softmax→·V · tiling & online softmax"),
+    "41-operator-fusion-and-cuda-graph.html": ("融合算子省 HBM 往返 · 静态形状利于图捕获 · 二者协同近零开销",
+                                               "fused ops save HBM round-trips · static shapes suit graph capture · together near-zero overhead"),
+    "42-multi-hardware-backends.html": ("一套引擎多种芯片 · 平台抽象 + 各芯片内核 · 上层硬件无关",
+                                        "one engine many chips · platform abstraction + per-chip kernels · upper layers hardware-agnostic"),
 }
 
 

@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 37 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 42 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -373,6 +373,11 @@ details[open] > summary { list-style: none; }
   <li>Quantization</li>
   <li>RoPE, norm & other ops</li>
   <li>Logits & vocab parallel</li>
+  <li>sgl-kernel overview</li>
+  <li>JIT kernels</li>
+  <li>Dissecting an attention kernel</li>
+  <li>Operator fusion & CUDA graph</li>
+  <li>Multi-hardware backends</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -7544,6 +7549,649 @@ and the real engineering complexity is tucked inside them.</p>
   <ul>
     <li>Using the '<strong>giant dictionary + N librarians</strong>' analogy, fully explain the output head and vocab parallelism, and pin down the FLOPs saved by the <strong>last-token slice</strong>. Cover: (1) <span class='mono'>lm_head</span> is a big <span class='mono'>[hidden × vocab]</span> matrix that projects each position's hidden into <strong>vocab-sized logits</strong>, handed to the Sampler (Lesson 28) for a token; (2) the vocab is huge (30k–250k) ⇒ this table is a billion+ params, too big for one GPU under TP, so <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> split the <strong>vocab dim</strong> across ranks, each computing a segment then <strong>all-gather</strong>-ing into full logits (same idea as the q/k/v and MLP splits, Lessons 25/46); (3) the <strong>last-token slice</strong> — for a 2000-token prompt, prefill computes hidden for all positions but only the <strong>last position's</strong> logits predict the next word, so shrinking lm_head's input from 2000 rows to <strong>1 row</strong> cuts this step's compute by 2000× (unless logprobs are requested, keeping a few more rows).</li>
     <li>Explain how <span class='mono'>LogitsProcessor</span> <strong>chains the output head into a pipeline</strong>, and place it in the 'closing the whole forward' arc. Cover: (1) its three steps — <strong>last-token slice</strong> (keep only each request's last hidden per <span class='mono'>logits_metadata</span>) → <strong>vocab-parallel projection</strong> (<span class='mono'>ParallelLMHead</span> computes this rank's segment) → <strong>cross-GPU all-gather</strong> (gated by <span class='mono'>do_tensor_parallel_all_gather</span>, skipped on one GPU); (2) the 'last mile' post-processing before sampling that all acts on this logits vector — <strong>logprob</strong> (log-softmax for log-probabilities), the <strong>structured-output vocab mask</strong> (Lesson 48, driving illegal tokens' logits to negative infinity), and <strong>logit bias</strong>, all of which must be applied <strong>before sampling</strong> to seal off illegal tokens at the root; (3) how this lesson closes the whole forward: Lesson 24's ModelRunner.forward → model body (Lesson 26) → LogitsProcessor → logits → Sampler (Lesson 28) → token, tying Part 8 (attention L33, MoE L34, quant L35, RoPE/Norm L36, and this lesson's logits/vocab parallelism) into the full 'pluggable operator layer' picture.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>sgl-kernel overview</h1>
+
+<p class="lead">For an entire Part-8 we talked "algorithms" at the Python level: how the attention backend lays out the KV (Lesson 33), how MoE routes (Lesson 34), how quantization compresses weights (Lesson 35), how normalization and activation are computed (Lesson 36). But all of that Python eventually has to land on real machine code that runs blazingly fast on the GPU. <strong>sgl-kernel</strong> is where that machine code lives — it is a <strong>separate C++/CUDA project</strong> with its own <span class="mono">CMakeLists.txt</span>, which compiles the hot-path kernels <strong>ahead of time (AOT)</strong> into a single <span class="mono">.so</span> shared library shipped inside the wheel. This lesson gives you the bird's-eye view: how the project is organized, how the kernels are registered as PyTorch custom ops, and how Python calls them through <span class="mono">torch.ops.sgl_kernel.*</span>.</p>
+
+<div class="card analogy"><div class="tag">🔌 打个比方 / Analogy</div>Think of the main SGLang project as a fully assembled car, with the Python code being the dashboard and steering wheel — you turn the wheel and the car turns. <strong>sgl-kernel</strong> is the engine factory: on a separate production line, with a completely different craft (C++/CUDA, CMake), it <strong>builds the engine in advance</strong>, crates it up (into a <span class="mono">.so</span>) and ships it to the assembly plant. By the time you slide into the driver's seat the engine is already waiting under the hood; you just press the pedal (call <span class="mono">torch.ops.sgl_kernel.merge_state_v2</span>) without caring how the pistons and cylinders were cast. Every button on the dashboard (a thin Python wrapper) is wired (the torch op registry) to a specific part inside the engine (a kernel in <span class="mono">csrc/</span>).</div>
+
+<div class="card macro"><div class="tag">🌍 放到全局 / The big picture</div>Why a separate project just for kernels? Because GPU kernel compilation marches to a completely different beat than Python execution. Python is interpreted and runs as you edit; a CUDA kernel must go through <span class="mono">nvcc</span> compilation and linking, taking minutes. If every service start had to compile on the fly, the latency would be unbearable. So SGLang compiles the most common, most stable kernels <strong>ahead of time (AOT)</strong> and packs them into the <span class="mono">.so</span> in the wheel — install and go. The contrast is <strong>just-in-time (JIT)</strong> compilation, where some experimental or highly shape-variable kernels are compiled at runtime (the forward-looking topic of Lesson 39). Recall Lesson 4: the decode phase is <strong>bandwidth-bound</strong> — every generated token re-reads weights and KV from device memory, so how well a kernel is written directly decides how much of the memory bandwidth gets saturated, and thus the throughput. sgl-kernel is not icing on the cake; it is the performance foundation of the whole inference engine.</div>
+<h2>1. sgl-kernel is a standalone project, not an ordinary Python module</h2>
+<p>At the repo root, <span class="mono">sgl-kernel/</span> and <span class="mono">python/sglang/</span> are two sibling worlds. <span class="mono">python/sglang/</span> is the pure-Python inference framework; <span class="mono">sgl-kernel/</span> carries its own <span class="mono">CMakeLists.txt</span> and <span class="mono">pyproject.toml</span>, and its heart is the <span class="mono">csrc/</span> directory — hundreds of thousands of lines of C++/CUDA that implement the hot-path kernels for attention, GEMM, MoE, quantization and more. Driven by CMake, <span class="mono">nvcc</span> and the C++ compiler link this source into <strong>one</strong> shared library, the <span class="mono">.so</span>. That <span class="mono">.so</span> is not compiled on the user's machine; it is built and packed at wheel-build time. In other words, when you <span class="mono">pip install sgl-kernel</span> you receive a binary artifact already compiled for a specific CUDA architecture. That is what AOT means: compilation happens <strong>beforehand</strong> (at release time), not at runtime.</p>
+<p>Why pull it out instead of folding it into the main framework? First, the languages and toolchains differ entirely: the framework is Python, the kernels are C++/CUDA, and their build systems, dependencies, and release cadences all differ — forcing them together only drags each down. Second, the build artifact can be released on its own: the same Python framework can pair with <span class="mono">.so</span> files compiled for different CUDA architectures, and it is easy to build separately for NVIDIA, AMD, Moore Threads, and other platforms. Third, responsibilities are clear: the framework handles "scheduling and orchestration," the kernel project handles "computing a single op to the limit," and the two evolve independently. This separation also brings cleaner version management: <span class="mono">sgl-kernel</span> is a standalone release unit with its own version number, which the main framework pins as a dependency — a kernel fix or optimization just ships a new sgl-kernel patch release, no need to re-release the whole framework, and a pure-Python scheduling change need not touch the compiled <span class="mono">.so</span> at all.</p>
+
+<h2>2. What lives in csrc: organized by function</h2>
+<p><span class="mono">csrc/</span> is not a single soup but is cut into clear subdirectories by op category. <span class="mono">attention/</span> holds attention kernels (such as the merge_state dissected below); <span class="mono">gemm/</span> holds matrix multiplies, including quantized GEMM; <span class="mono">moe/</span> holds the routing and dispatch kernels for mixture-of-experts; <span class="mono">elementwise/</span> holds per-element ops like normalization and activation; <span class="mono">allreduce/</span> holds custom multi-GPU communication reductions; <span class="mono">quantization/</span> holds weight/activation quantize and dequantize; <span class="mono">grammar/</span> holds grammar handling for constrained decoding; <span class="mono">speculative/</span> holds speculative-decoding kernels; <span class="mono">memory/</span> and <span class="mono">kvcacheio/</span> handle device-memory and KV-cache movement; and <span class="mono">cpu/</span> holds the CPU-backend implementations. What glues all of these onto PyTorch is the registration file <span class="mono">common_extension.cc</span> (plus <span class="mono">rocm</span> and <span class="mono">musa</span> variants for AMD and Moore Threads platforms), which uses <span class="mono">TORCH_LIBRARY</span> to declare each C++ function as a PyTorch custom op.</p>
+<p>The benefit of this by-function layout is that you can <strong>find the matching kernel straight from an upper-level need</strong>. Lesson 33's attention backend laying out KV wants its merge and compute kernels right there in <span class="mono">attention/</span>; Lesson 34's MoE routing maps to dispatch/combine in <span class="mono">moe/</span>; Lesson 35's quantization lands in <span class="mono">quantization/</span> and <span class="mono">gemm/</span>; Lesson 36's norm and activation land in <span class="mono">elementwise/</span>. Note one more detail: each subdirectory often holds not one implementation but <strong>several variants</strong> of the same op class for different precisions, hardware, and shapes — <span class="mono">gemm/</span> carries FP16, BF16, FP8 and quantized matmuls at once, and <span class="mono">attention/</span>'s prefill and decode paths need different kernels. The registration glue registers each variant into <span class="mono">torch.ops.sgl_kernel</span> and prepares ROCm/MUSA variant files so the same upper call lands on the right implementation per hardware (Lesson 42). It is this clean directory-and-registration convention that lets sgl-kernel keep a stable interface while housing a large, still-growing set of kernels.</p>
+
+<h2>3. From Python to kernel: the torch.ops wire</h2>
+<p>Once kernels are compiled into the <span class="mono">.so</span>, how does Python call them? Through PyTorch's <strong>custom-op mechanism</strong>. The registration glue hangs each kernel under the <span class="mono">torch.ops.sgl_kernel</span> namespace, so writing <span class="mono">torch.ops.sgl_kernel.merge_state_v2.default(...)</span> in Python jumps straight into the compiled C++/CUDA code. But you rarely call <span class="mono">torch.ops</span> bare — under <span class="mono">sgl-kernel/python/sgl_kernel/</span> there is a layer of <strong>thin Python wrappers</strong>: <span class="mono">attention.py</span>, <span class="mono">gemm.py</span>, <span class="mono">moe.py</span> and so on. These wrapper functions do three small things: validate the shapes and dtypes of input tensors, allocate output tensors as needed, then hand the work off to <span class="mono">torch.ops</span>. They are thin, containing almost no algorithmic logic — the real computation is all in the kernel. The Part-8 backends — attention backend (Lesson 33), MoE (Lesson 34), quantization (Lesson 35), norm/activation (Lesson 36) — use exactly this thin layer to offload performance-sensitive steps to sgl-kernel for speed.</p>
+<p>A note on naming: the <span class="mono">sgl_kernel</span> in <span class="mono">torch.ops.sgl_kernel</span> is this custom-op library's namespace, fixed at registration by the line <span class="mono">TORCH_LIBRARY(sgl_kernel, m)</span>; the trailing <span class="mono">.default</span> is the default overload entry PyTorch generates for the op. So when you see the long <span class="mono">torch.ops.sgl_kernel.merge_state_v2.default(...)</span> in the source, its meaning is plain: under the <span class="mono">sgl_kernel</span> namespace, find the custom op named <span class="mono">merge_state_v2</span> and call its default implementation. This mechanism also brings a bonus — these ops can be recognized and captured by <span class="mono">torch.compile</span> and CUDA Graph (Lessons 27, 41), taking part in graph-level optimization and replay rather than becoming an opaque external call PyTorch cannot see through. That is why SGLang prefers the "proper road" of PyTorch custom ops over a bare <span class="mono">ctypes</span> dlopen of the <span class="mono">.so</span>.</p>
+
+<h2>4. AOT vs JIT: the trade-off between two compile paths</h2>
+<p>sgl-kernel's main road is <strong>AOT</strong>: stable, general, common-shape kernels are compiled ahead and packed into the wheel, with zero compile overhead at startup. But not every kernel suits AOT — some kernels' optimal implementation depends heavily on a specific shape or hardware feature, and compiling all combinations ahead would blow up the <span class="mono">.so</span> size and the build time. Such kernels suit <strong>JIT</strong> better: compiled at runtime against the real shape, slower the first time, then cached and reused. Lesson 39 looks ahead at the JIT path specifically; Lesson 40 walks you line by line through a real attention kernel, dropping this lesson's "bird's-eye" view down to a "microscope" level. Once you grasp the division of labor between AOT and JIT, you understand why some ops take effect the moment you tweak them while others require re-packing the whole wheel.</p>
+<p>A handy rule of thumb: given an SGLang install, to know which path an op takes, look at where it comes from. If the call lands on <span class="mono">torch.ops.sgl_kernel.*</span> and the implementation already lives in the shipped <span class="mono">.so</span>, it is AOT; if the first call triggers a compile that generates a temporary module and loads it, it is JIT. The two can look almost identical at the call site — the only difference is "when compilation happens." Keep that difference in mind and, whether you are chasing a slow startup or figuring out why a change did not take effect, you can quickly pin which layer the problem is in — whether to re-pack the wheel or to clear the JIT cache.</p>
+
+<div class="layers"><div class="layer">Python inference layer: attention/moe/quant backends (Lessons 33–36)</div><div class="layer">sgl_kernel thin wrappers: attention.py / gemm.py / moe.py (validate + allocate output)</div><div class="layer">torch.ops.sgl_kernel.* custom-op namespace (registry)</div><div class="layer">C++/CUDA kernels in csrc/ (compiled into the .so, AOT)</div></div>
+
+<table class="t"><tr><th>csrc subdir</th><th>kernels it holds</th></tr>
+<tr><td><span class="mono">attention/</span></td><td>attention compute, split-KV partial-state merge (merge_state)</td></tr>
+<tr><td><span class="mono">gemm/</span></td><td>matrix multiply, including quantized GEMM</td></tr>
+<tr><td><span class="mono">moe/</span></td><td>mixture-of-experts routing and dispatch</td></tr>
+<tr><td><span class="mono">elementwise/</span></td><td>per-element: normalization, activation</td></tr>
+<tr><td><span class="mono">allreduce/</span></td><td>custom multi-GPU communication reduction</td></tr>
+<tr><td><span class="mono">quantization/</span></td><td>quantize and dequantize</td></tr>
+<tr><td><span class="mono">grammar/</span></td><td>grammar handling for constrained decoding</td></tr>
+<tr><td><span class="mono">speculative/</span></td><td>speculative-decoding kernels</td></tr>
+<tr><td><span class="mono">memory/</span></td><td>device-memory management and movement</td></tr>
+<tr><td><span class="mono">kvcacheio/</span></td><td>KV-cache read/write</td></tr>
+<tr><td><span class="mono">cpu/</span></td><td>CPU-backend implementations</td></tr>
+<tr><td><span class="mono">common_extension.cc</span></td><td>registration glue (+rocm/musa variants)</td></tr></table>
+
+<div class="cols"><div class="col"><b>AOT (this lesson's main road)</b><br>Compiled ahead with nvcc at wheel-build time; the <span class="mono">.so</span> ships with the package; zero compile overhead at startup; suits stable, general, common-shape kernels; a change requires re-packing the whole wheel.</div><div class="col"><b>JIT (Lesson 39 preview)</b><br>Compiled at runtime against the real shape; a compile delay the first time, then cached and reused; suits highly shape-variable or experimental kernels; a change can take effect instantly without re-packing the wheel.</div></div>
+
+<div class="flow"><div class="node">CMake drives nvcc to compile csrc/</div><div class="arrow">→</div><div class="node">link into .so, pack into wheel</div><div class="arrow">→</div><div class="node">register as torch.ops.sgl_kernel.*</div><div class="arrow">→</div><div class="node">thin Python wrapper calls → kernel runs</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/attention.py ::merge_state_v2</span><span class="ln">thin wrapper: dtype cast + output allocation → torch.ops kernel</span></div><pre>def merge_state_v2(v_a, s_a, v_b, s_b, v_merged=None, s_merged=None):
+    s_a = s_a.to(torch.float32)
+    s_b = s_b.to(torch.float32)
+    # avoid allocating new tensors if outputs are already provided
+    if v_merged is None:
+        v_merged = torch.empty_like(v_a)
+    if s_merged is None:
+        s_merged = torch.empty_like(s_a)
+    # dispatch into the compiled C++/CUDA kernel registered as a torch op
+    torch.ops.sgl_kernel.merge_state_v2.default(v_a, s_a, v_b, s_b, v_merged, s_merged)
+    return v_merged, s_merged</pre></div>
+<p>This snippet is a <strong>microcosm</strong> of the whole sgl-kernel calling pattern. It does just three things: first, cast the state tensors <span class="mono">s_a</span> and <span class="mono">s_b</span> to <span class="mono">float32</span> (dtype validation/normalization); second, if the caller did not pass <span class="mono">v_merged</span> and <span class="mono">s_merged</span>, allocate the outputs with <span class="mono">torch.empty_like</span>, otherwise reuse the provided buffers to avoid re-allocation; third, hand all tensors to <span class="mono">torch.ops.sgl_kernel.merge_state_v2.default</span>, jumping into the compiled C++/CUDA kernel that does the real work. The wrapper is paper-thin; the algorithm is in the kernel. Its semantics: merge two <strong>partial attention states</strong> (a value tensor v and its corresponding softmax-normalization scalar s) into one, commonly used to stitch split-KV partial results (a long KV run cut into segments computed separately) back into a complete attention output. <strong>Thin Python wrapper → torch.ops.sgl_kernel.&lt;name&gt; → compiled csrc kernel</strong> — a wire you will see countless times across sgl-kernel.</p>
+<p>Two small details in this code reflect the engineering thinking of a kernel wrapper. One is <strong>casting <span class="mono">s</span> to <span class="mono">float32</span></strong>: the normalization scalar in a partial attention state is sensitive to numeric precision, and promoting to fp32 first avoids accumulated error during the merge — this kind of "dtype normalization for correctness" belongs in the thin Python wrapper, not stuffed into every kernel. The other is that <strong>output tensors can be passed in by the caller</strong>: when the upper layer already has buffers ready, the wrapper skips a fresh <span class="mono">empty_like</span> allocation and reuses them — on the decode hot path that calls this repeatedly every step, every saved allocation is a real cost reduction. Seen together, they sharpen the elegant division of labor: the thin wrapper owns correctness and resources, the kernel owns the all-out computation.</p>
+
+<div class="card key"><div class="tag">🎯 本课要点 / Key points</div><ul>
+<li><strong>Standalone project</strong>: <span class="mono">sgl-kernel/</span> has its own CMake, sits as a sibling of <span class="mono">python/sglang/</span>, and is centered on the C++/CUDA source in <span class="mono">csrc/</span>.</li>
+<li><strong>AOT compilation</strong>: hot-path kernels are compiled ahead into one <span class="mono">.so</span> shipped with the wheel, zero compile overhead at startup; contrast with JIT (Lesson 39) compiled at runtime.</li>
+<li><strong>torch custom ops</strong>: kernels are registered via <span class="mono">common_extension.cc</span> as <span class="mono">torch.ops.sgl_kernel.*</span>, the door through which Python jumps into native code.</li>
+<li><strong>Thin wrapper, three jobs</strong>: the attention/gemm/moe wrappers under <span class="mono">sgl_kernel/python/</span> only validate shapes/dtypes, allocate outputs, and forward to torch.ops.</li>
+<li><strong>Who uses it</strong>: Part-8's attention (Lesson 33), MoE (Lesson 34), quantization (Lesson 35), norm/activation (Lesson 36) all rely on it for speed; decode being bandwidth-bound (Lesson 4) makes kernel quality directly decide throughput.</li>
+<li><strong>What's next</strong>: Lesson 39 covers JIT, Lesson 40 dissects a real attention kernel line by line.</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why does SGLang put hot-path kernels in a <strong>separate sgl-kernel project</strong> and <strong>AOT</strong>-compile them into a <span class='mono'>.so</span> shipped in the wheel, instead of compiling at startup?</div>
+  <ol class="opts">
+    <li><strong>A CUDA kernel takes minutes to compile/link via nvcc; compiling on every startup is unacceptable. Pre-compiling stable, general kernels into the .so means install-and-go with zero startup compile cost</strong>, fitting Lesson 4's bandwidth-bound decode where kernel quality decides throughput</li>
+    <li>Because PyTorch does not support custom ops, so a subprocess is the only option</li>
+    <li>Because Python cannot call C++ code, so it must be built into a standalone executable first</li>
+    <li>To let each user re-train the model weights on their own machine</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. AOT's core motivation is <strong>moving compilation to release time</strong>: nvcc takes minutes, so pre-compiling into the wheel's <span class='mono'>.so</span> gives zero startup overhead. Python certainly can call C++/CUDA via <span class='mono'>torch.ops</span>, and PyTorch explicitly supports custom ops; this has nothing to do with re-training weights or subprocesses.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is the <strong>main job</strong> of the thin wrappers under <span class='mono'>sgl-kernel/python/sgl_kernel/</span> (e.g. <span class='mono'>merge_state_v2</span> in <span class='mono'>attention.py</span>)?</div>
+  <ol class="opts">
+    <li>Load the model weights from disk into device memory</li>
+    <li>Re-compile the entire .so with nvcc at runtime</li>
+    <li>Implement the full attention computation with pure-Python loops</li>
+    <li><strong>Validate/normalize shapes and dtypes, allocate output tensors as needed, then forward to <span class='mono'>torch.ops.sgl_kernel.&lt;name&gt;</span></strong> — the wrapper is paper-thin, the real algorithm is in the compiled csrc kernel</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A thin wrapper does just three small things: dtype cast/validate, allocate outputs, forward to <span class='mono'>torch.ops</span>, with almost no algorithmic logic. It does <strong>not</strong> compute attention in Python (that's in the kernel), does not re-compile the AOT .so at runtime, and does not load weights.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Through <strong>what mechanism</strong> does Python code ultimately jump into the C++/CUDA kernel compiled into the <span class='mono'>.so</span>?</div>
+  <ol class="opts">
+    <li>By dlopen-ing an anonymous .so directly via ctypes, bypassing PyTorch</li>
+    <li>By sending tensors over HTTP to a local GPU service process</li>
+    <li>By transpiling the Python code into CUDA source and compiling it</li>
+    <li><strong>The registration glue <span class='mono'>common_extension.cc</span> uses <span class='mono'>TORCH_LIBRARY</span> to register each kernel as a PyTorch custom op under the <span class='mono'>torch.ops.sgl_kernel.*</span> namespace, through which Python calls straight into native code</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Kernels are registered via <span class='mono'>common_extension.cc</span> (and rocm/musa variants) using <span class='mono'>TORCH_LIBRARY</span> as <span class='mono'>torch.ops.sgl_kernel.*</span>, the standard door from Python into native code. It is not HTTP, not runtime transpilation of Python, and not a bare dlopen bypassing PyTorch.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using <span class='mono'>merge_state_v2</span> as the example, describe sgl-kernel's <strong>general calling pattern</strong>: thin Python wrapper (dtype cast + output allocation) → <span class='mono'>torch.ops.sgl_kernel.&lt;name&gt;</span> → the csrc kernel compiled into the .so. Explain what the op does (merging two split-KV partial attention states v/s), and why keeping 'validate/allocate' in Python and 'compute' in the kernel is a sound layering.</li>
+    <li>Contrast the <strong>AOT</strong> and <strong>JIT</strong> (Lesson 39 preview) compile paths: what kind of kernel each suits, and their startup/first-time costs and change costs (AOT requires re-packing the whole wheel, JIT can take effect instantly). Then, drawing on <span class='mono'>csrc/</span>'s directory split (attention/gemm/moe/quantization, etc.) and the Lesson 33–36 upper layers, explain why sgl-kernel is the performance foundation of the whole inference engine.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>JIT kernels</h1>
+
+<p class="lead">In Lesson 38 we saw that <span class="mono">sgl-kernel</span> follows the AOT (ahead-of-time) route: kernels are compiled by <span class="mono">nvcc</span> into the binary when the wheel is built. This lesson's star, <span class="mono">python/sglang/jit_kernel/</span>, takes the other road—<strong>just-in-time compilation at runtime, on demand</strong> (JIT). Instead of stuffing every kernel into the wheel up front, it compiles the C++/CUDA source into a <span class="mono">.so</span> on the local machine only when actually needed, then caches the result for reuse.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div> AOT is like a factory baking every flavor of cake before shipping and packing them all in a box: you can eat the moment you buy, but the box is big and heavy, and the factory has to guess in advance which flavors you'll want. JIT is like the oven at home: the first time you want a flavor you bake a batch from the recipe, which takes a while; but once baked, you put it in the fridge and any later craving is served instantly, as fast as ready-made. The oven (compiler toolchain) must be in your home and you must carry the recipe (source), but you don't haul a whole box of cakes around.</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div> Whether AOT or JIT, both end up as a set of <span class="mono">torch.ops</span>-style callables that invoke compiled GPU kernels directly from Python. The difference isn't "what the result is" but "when and how it gets built and shipped." AOT front-loads the compile cost to release time in exchange for being ready out of the box; JIT defers the compile cost to first call in exchange for flexibility and a slimmer wheel. SGLang keeps both paths so stable, hot kernels go AOT while experimental or architecture-specific ones go JIT.</div>
+
+<h2>1. What the JIT kernel path is</h2>
+<p>The core idea of the <span class="mono">jit_kernel</span> module is to ship small C++/CUDA kernels as "source + recipe" rather than pre-compiled into the binary. The first time an op is used, the module invokes the compiler on the spot to build it into a PyTorch extension module. The immediate payoff is that the wheel doesn't bloat from packing kernels for every architecture and dtype. For example, <span class="mono">jit_kernel/activation.py</span> builds a corresponding JIT module per dtype on first use; <span class="mono">jit_kernel/norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span>—exactly the fused kernel the RMSNorm fast path from Lesson 36 relies on.</p>
+<p>It is worth unpacking where "wheel bloat" comes from. A kernel often has more than one version: it may need a separate build for each dtype (fp16, bf16, fp8, etc.), a separate build for each GPU compute capability (e.g. sm80, sm90), and on top of that the combinations of shapes and flags, so the compiled artifacts grow multiplicatively. If everything went AOT, all these combinations would have to be enumerated up front and packed into the <span class="mono">.so</span>, making the wheel quickly unacceptable in size—while the vast majority of those combinations are never used in any given deployment. JIT takes the opposite approach: the release contains only the slim source, and whichever combination is actually needed gets compiled and cached on the spot for that one combination—trading a space cost for a one-time time cost, and paying only for the code paths that actually run.</p>
+<p>These two modules illustrate JIT's "on demand" nature well. <span class="mono">activation.py</span> does not compile activation kernels for every dtype up front; instead, only when a concrete dtype is first used does it build the corresponding JIT module—use fp16 and it compiles the fp16 one, use bf16 and it compiles the bf16 one, and unused ones cost no compile time at all. This "compile only what is triggered" strategy spends the compile cost precisely on the code paths that actually run. <span class="mono">norm.py</span>'s <span class="mono">fused_add_rmsnorm</span> is a typical fused kernel: it merges the "residual add" and "RMSNorm normalization" steps into one GPU kernel, saving a round trip to memory. Lesson 36's RMSNorm fast path calls exactly this—showing the JIT path is not a side note but genuinely serves a key op in the main inference pipeline.</p>
+<p>Why not make everything AOT? Because in practice many kernels are not "stable and general." Some ops are still experimental with changing interfaces; some kernels need different code per GPU architecture (the JIT path queries the current architecture, e.g. via <span class="mono">get_jit_cuda_arch</span> to get the compute capability) and picks instructions and templates accordingly; some kernels must be parameterized by shapes or flags known only at runtime. Enumerating all of these into the wheel up front is both unrealistic and bloated, so letting JIT generate them on demand is the better strategy.</p>
+<p>Seen from another angle, AOT and JIT are not rivals replacing each other but two cooperating pipelines. SGLang hands the hot, fixed-shape, startup-latency-sensitive kernels to <span class="mono">sgl-kernel</span> to be compiled into the binary ahead of time; it leaves the still-evolving, hardware-feature-dependent, or only-for-specific-dtype/shape kernels to <span class="mono">jit_kernel</span> to build on the spot. This "route by a kernel's lifecycle and stability" design keeps the release lean without sacrificing fast adaptation to cutting-edge hardware and new ops. Understanding the JIT path is essentially understanding all the benefits and costs of "moving compilation from release time to runtime."</p>
+
+<h2>2. How load_jit works: compile once, reuse later</h2>
+<p>The unified entry to the whole JIT path is <span class="mono">load_jit(...)</span>. You give it a set of C++/CUDA source files plus a set of "wrappers": each wrapper is an <span class="mono">(export_name, kernel_name)</span> tuple mapping a Python-facing callable name to some underlying C++/CUDA kernel class. From these, <span class="mono">load_jit</span> compiles a torch extension module and caches the built <span class="mono">.so</span> keyed by a unique marker. Besides source and wrappers, it accepts optional parameters: extra compile flags, extra include search paths, external dependencies (e.g. <span class="mono">cutlass</span>), a build directory, and so on, so the on-the-spot compilation can hook into the needed third-party libraries and custom options.</p>
+<p>The cache is the key. <strong>The first call pays a one-time compile cost</strong> (an actual <span class="mono">nvcc</span> run, possibly seconds to tens of seconds), but as long as the marker hits, <strong>later calls reuse the cached <span class="mono">.so</span> directly</strong> with no recompilation. In other words: slow the first time, then as fast as AOT. This "compile once, reuse forever" design is exactly why JIT can keep its flexibility while still being high-performance. The unique marker ensures different kernels and different parameter combinations each map to their own cache entry without cross-contamination—when you change the source, switch architecture, or flip a key compile flag, the marker changes accordingly, triggering a fresh compilation and a new cache entry instead of wrongly reusing the old artifact.</p>
+<p>From the caller's viewpoint this is almost transparent: you just call the Python name exported by a wrapper, the first call "stalls" briefly (because it's compiling), and afterwards it's so smooth you don't feel JIT is there at all. What <span class="mono">load_jit</span> ultimately returns is the loaded extension Module, carrying the callable kernels exposed under their <span class="mono">export_name</span>; upper-layer code takes it and uses it just like any ordinary compiled op.</p>
+<p>There is also an easily-overlooked detail: the cache usually lives in a build directory on disk, so the "compile once, reuse later" benefit is not limited to a single process—it carries across processes and even across multiple restarts. As long as the source, architecture, and key compile options are unchanged (i.e. the unique marker is unchanged), the first time a new process uses the kernel it simply finds a ready-made <span class="mono">.so</span> already on disk and loads it, skipping compilation. This means that when you restart the service repeatedly on the same machine, the actual <span class="mono">nvcc</span> compile cost is usually paid only the very first time; no matter how many times you restart afterwards, it's a sub-second load. Once you understand this, you see why JIT is not so "scary" in production—the first-call latency is one-time, while the cache is persistent.</p>
+
+<h2>3. Why JIT: flexibility and its cost</h2>
+<p>JIT's core selling point is flexibility. First, experimental ops can be changed and used freely without re-releasing a wheel each time. Second, it enables architecture-specific code generation: after querying the concrete GPU architecture, it decides which templates and compile flags to use, squeezing more performance out of each card. Third, kernels can be parameterized by runtime shapes or flags, adapting to ever-changing inputs. Fourth, the wheel stays slim—source is tiny, the compiled artifact is generated on demand and cached locally, keeping the release lean.</p>
+<p>Of these four, "architecture-specific code generation" especially shows JIT's value. The optimal implementation of the same algorithm often differs across GPU generations: a new architecture may offer new tensor-core instructions, larger shared memory, or a different memory hierarchy, and only by hand-writing or generating code specialized for them can you fully exploit the hardware. For AOT to cover these differences, it must compile a separate build per architecture and pack them all into the wheel; JIT only needs to query "which architecture am I running on now" at runtime and compile a best-fitting kernel for it. For an inference engine that must keep pace with cutting-edge hardware, this "adapt to the hardware" ability is invaluable—it means when a new card hits the market, you can run on it and gradually tune without waiting for the next release cycle.</p>
+<p>Flexibility isn't free, of course. The most direct cost is first-call compile latency: the first time a kernel is used, you must stop and wait for <span class="mono">nvcc</span> to build it. Next, the runtime environment must actually have a working compiler toolchain (compiler, CUDA headers, etc.), or on-the-spot compilation simply fails—whereas an AOT binary has no such prerequisite. So choosing JIT is essentially a trade-off between "flexible and slim" and "ready out of the box with zero first-call latency."</p>
+<p>This cost is clearer in SGLang's real setting. A service is usually long-running: an inference process may serve for hours or even days, so amortizing the one-or-two-second first-call compile cost over a long serving window is practically negligible; in return you get the ability for "the same code to compile an optimal kernel on each different architecture." Conversely, in scenarios extremely sensitive to cold start, or deployed in a slim image without a compiler, JIT's first-call latency and toolchain dependency become real pain points—there, AOT is the safer choice. So this question has no one-size-fits-all answer, only the best solution after weighing "kernel stability, call frequency, deployment environment, and tolerance for startup latency."</p>
+
+<h2>4. AOT and JIT reach the same destination</h2>
+<p>Putting Lesson 38 and this lesson side by side makes it clearer: AOT (<span class="mono">sgl-kernel</span>) and JIT (<span class="mono">jit_kernel</span>) both end up "calling a compiled GPU kernel from Python." Their destination is the same; they only differ on the way there—AOT compiles kernels at wheel-build time and ships them with the binary, ready on install; JIT ships the source and compiles plus caches on the local machine at first call. Once you grasp this, you can make the right call when designing new ops: hand stable, hot, zero-dependency kernels to AOT; hand experimental, architecture-specific, or wheel-slimming kernels to JIT. Having both is precisely the engineering wisdom that lets SGLang's kernel system balance performance and flexibility.</p>
+<p>Going further, the two paths are not isolated. A kernel often is born as JIT first: it iterates quickly inside <span class="mono">jit_kernel</span>, is tried per architecture, and once correctness and performance are proven—if it stabilizes and is heavily reused—it can "graduate" to <span class="mono">sgl-kernel</span> on the AOT path, baked into the wheel to enjoy zero first-call latency. Conversely, when new hardware just launches and new instructions are still being polished, JIT lets SGLang run on it immediately without waiting for the next release. Precisely because the destination is unified (both are <span class="mono">torch.ops</span>-style callables into compiled kernels), upper-layer code barely needs to care whether an op comes from AOT or JIT—this abstraction, which encapsulates the complexity of "when to compile and how to ship," is the key to an engine that is both fast and flexible.</p>
+<p>In one sentence: JIT is not a replacement for AOT but its complement. Lesson 38's <span class="mono">sgl-kernel</span> bakes the most stable, hottest kernels into the binary in exchange for being ready out of the box with zero first-call latency; this lesson's <span class="mono">jit_kernel</span> compiles the experimental, architecture-specific, or shape-varying kernels on demand at runtime in exchange for flexibility and slimness. Both paths ultimately converge into the same <span class="mono">torch.ops</span>-style calls, together holding up SGLang's kernel performance foundation, and together embodying the engineering wisdom of balancing performance and flexibility in a large inference system.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>First call to <span class="mono">load_jit</span></h4><p>The target <span class="mono">.so</span> does not exist yet; the marker is not found in the cache.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Compile on the spot</h4><p>Invoke <span class="mono">nvcc</span> to compile the C++/CUDA source, paying a one-time cost (seconds to tens of seconds).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Write to cache</h4><p>Store the compiled <span class="mono">.so</span> into the cache keyed by a unique marker.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Reuse later</h4><p>Subsequent calls hit the cache and reuse the <span class="mono">.so</span> directly, no recompilation, as fast as AOT.</p></div></div>
+</div>
+
+<div class="cols">
+  <div class="col"><strong>AOT (sgl-kernel, Lesson 38)</strong>: at wheel-build time <span class="mono">nvcc</span> compiles all kernels into the binary. Ready on install, zero first-call compile latency; but the wheel is large and architecture combinations must be enumerated up front.</div>
+  <div class="col"><strong>JIT (jit_kernel, this lesson)</strong>: compiles on demand at runtime, the first call pays a one-time <span class="mono">nvcc</span> cost, then cache hits are as fast as AOT; the wheel stays slim and can be generated flexibly per GPU architecture and runtime shape, but it requires a compiler toolchain on the machine.</div>
+</div>
+
+<table class="t">
+  <tr><th>Criterion</th><th>Choice</th></tr>
+  <tr><td>Stable kernel, heavily reused, must be ready out of the box</td><td>AOT (sgl-kernel)</td></tr>
+  <tr><td>Experimental op, interface iterates frequently</td><td>JIT (jit_kernel)</td></tr>
+  <tr><td>Needs architecture-specific code generation</td><td>JIT</td></tr>
+  <tr><td>Deployment environment lacks a compiler toolchain</td><td>AOT</td></tr>
+  <tr><td>Want to avoid wheel size bloat</td><td>JIT</td></tr>
+</table>
+
+<div class="flow">
+  <div class="node">C++/CUDA source + wrappers</div>
+  <div class="arrow">→</div>
+  <div class="node"><span class="mono">nvcc</span> compile</div>
+  <div class="arrow">→</div>
+  <div class="node">cached <span class="mono">.so</span> (by unique marker)</div>
+  <div class="arrow">→</div>
+  <div class="node"><span class="mono">torch.ops</span>-style call</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/jit_kernel/utils.py ::load_jit</span><span class="ln">compile on demand + cache the .so: build once, reuse</span></div><pre>def load_jit(
+    *args,                         # unique marker identifying this kernel (distinct per kernel)
+    cpp_files=None, cuda_files=None,
+    cpp_wrappers=None, cuda_wrappers=None,   # each is a (export_name, kernel_name) tuple
+    extra_cuda_cflags=None, extra_include_paths=None,
+    extra_dependencies=None,       # e.g. "cutlass"
+    build_directory=None,
+    header_only=True,
+):
+    # Build a JIT module from C++/CUDA source ON DEMAND, then cache the
+    # compiled .so so later calls reuse it (compile once, reuse forever).
+    # A wrapper (export_name, kernel_name) maps the Python-facing name to
+    # the C++/CUDA kernel class. Returns the loaded extension Module.
+    ...
+</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><span class="mono">jit_kernel/</span> compiles small C++/CUDA kernels on demand at runtime, instead of shipping them ahead of time in the wheel like Lesson 38's <span class="mono">sgl-kernel</span>.</li>
+<li>Core entry <span class="mono">load_jit(...)</span>: pass source + wrappers (each an <span class="mono">(export_name, kernel_name)</span> tuple), it builds a torch extension and caches the <span class="mono">.so</span> by a unique marker.</li>
+<li><strong>Compile once, reuse later</strong>: the first call pays a one-time <span class="mono">nvcc</span> cost; after a cache hit it's as fast as AOT.</li>
+<li>Reasons to pick JIT: flexibility (experimental ops, architecture-specific codegen, runtime parameterization) and no wheel bloat; the cost is first-call latency + needing a compiler toolchain.</li>
+<li><span class="mono">activation.py</span> builds a JIT module per dtype on first use; <span class="mono">norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span> (used by Lesson 36's RMSNorm fast path).</li>
+<li>AOT and JIT converge: both become <span class="mono">torch.ops</span>-style callables into compiled kernels; the difference is only "when and how they're built and shipped."</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. On the <span class='mono'>jit_kernel</span> <strong>JIT (runtime just-in-time)</strong> path, how does the cost of the first <span class='mono'>load_jit(...)</span> call differ from later calls?</div>
+  <ol class="opts">
+    <li>Every call recompiles the source, so it is always slower than AOT</li>
+    <li>It never compiles and just interprets the CUDA source directly</li>
+    <li>The first call does not compile; nvcc is only triggered on the second call</li>
+    <li><strong>The first call pays a one-time nvcc compile cost, then caches the built .so by a unique marker; later calls hit the cache and reuse it with no recompile, as fast as AOT</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The essence of JIT is <strong>compile once, reuse later</strong>: the first call runs nvcc on the spot for a one-time cost, then later calls hit the <span class='mono'>.so</span> cached by a unique marker, as fast as AOT. It does not recompile each time, nor interpret.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. A <strong>wrapper</strong> in <span class='mono'>load_jit</span> is an <span class='mono'>(export_name, kernel_name)</span> tuple. What is its role?</div>
+  <ol class="opts">
+    <li>It is the filesystem path used to cache the .so</li>
+    <li>It specifies which GPU the kernel should run on</li>
+    <li>It declares the minimum VRAM the kernel needs</li>
+    <li><strong>It maps a Python-facing callable name to some underlying C++/CUDA kernel class</strong>, so after compilation the kernel can be called from Python</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A wrapper does <strong>name-to-kernel-class mapping</strong>: <span class='mono'>export_name</span> is the Python-side callable name, <span class='mono'>kernel_name</span> is the C++/CUDA kernel class. It has nothing to do with device, cache path, or VRAM.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When choosing <strong>AOT (sgl-kernel, Lesson 38)</strong> vs <strong>JIT (jit_kernel)</strong> for a new op, which judgment is <strong>most sound</strong>?</div>
+  <ol class="opts">
+    <li>Always choose AOT because JIT can never match compiled-kernel performance</li>
+    <li>Always choose JIT because it has no cost</li>
+    <li><strong>Stable, hot, must be ready out of the box, and deploy env may lack a compiler → AOT; experimental, needs architecture-specific codegen, wants to avoid wheel bloat → JIT</strong></li>
+    <li>Pick either; the two are fully equivalent in shipping and first-call latency</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The choice is a trade-off: AOT is ready out of the box with zero first-call latency but a large wheel and pre-enumerated architectures; JIT is flexible with a slim wheel but has first-call compile latency and needs a toolchain. After a cache hit JIT equals AOT, so it is neither 'always slower' nor 'equivalent'.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In one sentence explain <span class='mono'>load_jit</span>'s '<strong>compile on demand + cache the .so</strong>' mechanism, the role of the unique marker in cache reuse, and why this design lets JIT stay high-performance while keeping flexibility.</li>
+    <li>Contrast where <strong>AOT</strong> and <strong>JIT</strong> 'reach the same destination' yet diverge: both become <span class='mono'>torch.ops</span>-style callables into compiled kernels, differing only in 'when/how they're built and shipped'. Using <span class='mono'>activation.py</span> building per-dtype modules and <span class='mono'>norm.py</span>'s JIT <span class='mono'>fused_add_rmsnorm</span> (used by Lesson 36), explain what kind of kernel each suits.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Dissecting an attention kernel</h1>
+
+<p class="lead">In Lesson 40 we zoom all the way in and dissect a real <strong>attention kernel</strong>. Earlier lessons covered the paged KV cache (Lesson 30), why decode is bandwidth-bound (Lesson 4), and how attention backends wrap kernels (Lesson 33). Now we put the pieces together: when a sequence runs an attention step during <span class="mono">decode</span> (generating one new token per step), what actually happens inside that kernel that gets called tens of thousands of times on the GPU? No hand-waving — just which bytes this code moves at each step, and why.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a decode attention kernel as a <strong>warehouse picker</strong>. The shelves (the KV cache) are not one long contiguous row; they are cut into <strong>bins</strong> (pages) scattered around the warehouse. The picker holds a <strong>pick list</strong> (<span class="mono">page_table</span>, the block table) that says "this customer's goods are in bins 7, 3, 19." He does not empty the whole warehouse — he <strong>fetches only those bins</strong> and tallies as he goes.</p>
+<p>Even better is how he tallies: instead of weighing everything at the end, he <strong>updates a running total after each bin</strong> — remembering the current maximum and the accumulated weight, rescaling the earlier result whenever a bigger value shows up. He only ever needs a tiny notepad (registers) and never spreads the whole ledger on the floor. That is exactly <strong>online softmax</strong>.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>The math of attention is short: <span class="mono">softmax(Q·Kᵀ / √d)·V</span>. But in decode the hard part is not arithmetic — it is <strong>where the data lives and how to move it</strong>. For each generated token, Q is just one row (one query position), yet it must dot against <strong>every K and V in this sequence's history</strong>. Those K/V were written long ago into the paged KV cache, physically scattered across non-contiguous pages. So the kernel's real main line is: <strong>gather the scattered KV pages via page_table → stream Q·Kᵀ in tiles → online softmax → multiply by V</strong>. Because decode is bandwidth-bound, the kernel's whole job is to move KV bytes efficiently.</p>
+</div>
+
+<h2>1. The main line: gather, dot, normalise, weight</h2>
+<p>Let's state the main line clearly. When the scheduler decides to generate the next token for a sequence, it launches a decode forward. The attention step receives one row of <strong>Q</strong> (the current query position, a very "skinny" shape with a single token) plus the entire sequence's <strong>already-cached K and V</strong>. Those K/V do not sit in one contiguous block; the paged KV cache slices them into fixed-size pages stored apart, and which pages a sequence owns is recorded in the <span class="mono">page_table</span>.</p>
+<p>So the kernel's first job is not multiplication but <strong>address lookup</strong>: use <span class="mono">page_table[b]</span> to find all KV page ids for sequence b, then read the K/V blocks from those non-contiguous pages. Only then does the math begin: the current Q row dots against the block of K just read, producing a slice of attention scores; that slice immediately feeds online softmax to update the running totals; finally the normalised weights scale the matching V block and accumulate into the output. The whole thing is <strong>streaming</strong> — read a block, compute it, drop it — never keeping the full score matrix in memory.</p>
+
+<div class="flow"><div class="node">gather paged KV via page_table</div><div class="arrow">→</div><div class="node">Q·Kᵀ tiled dot</div><div class="arrow">→</div><div class="node">online softmax normalise</div><div class="arrow">→</div><div class="node">·V weighted accumulate → output</div></div>
+
+<p>Notice the first node: in many textbook attention diagrams step one is "Q times K," but in a real decode kernel <strong>the true first step is "gather the KV per the pick list."</strong> This step sets the kernel's memory-access pattern and decides whether it can saturate memory bandwidth. Since the KV cache is usually far larger than on-chip SRAM, how pages are brought in — and at what granularity — is essentially performance itself.</p>
+
+<h2>2. Why KV is paged, and how the kernel "picks by page"</h2>
+<p>As Lesson 30 explained, the paged KV cache cuts each sequence's history into fixed-size pages, allocated by page like an OS virtual-memory system. The upside: sequence lengths vary wildly, so per-page allocation avoids reserving huge contiguous memory for long sequences and avoids waste for short ones — high memory utilisation, plus prefix sharing across sequences. The cost: <strong>a single sequence's KV is no longer physically contiguous</strong>; logical KV blocks 0, 1, 2, 3 might land on physical pages 7, 3, 19, 5.</p>
+<p>To restore logical order the kernel relies on the <span class="mono">page_table</span> (also called the block table): a "logical block id → physical page id" map. The kernel walks the logical positions a sequence needs, translates them through the page_table into physical page addresses, and reads K/V there. The cells below show paged KV gathered by a page_table — logically adjacent pages fetched out of physical order:</p>
+
+<div class="cellgroup"><div class="cell">page #7</div><div class="cell">page #3</div><div class="cell">page #19</div><div class="cell">page #5</div><div class="cell">page #12</div><div class="cell">page #0</div></div>
+
+<p>This "jump-around" access is the biggest engineering challenge of a decode kernel. Done crudely, page jumps make access scattered and bandwidth poor; done well, the kernel lets one thread block own one sequence, or coalesces several page reads into aligned, contiguous memory transactions, using every memory read fully. That is why the very same attention math runs at wildly different speeds across backends (Lesson 33) — almost all the difference is KV access efficiency.</p>
+
+<h2>3. Tiling and online softmax: done in one streaming pass</h2>
+<p>The second key design is <strong>tiling</strong>. A GPU's registers and shared memory (SRAM) are tiny — they cannot hold the full K/V, let alone the whole attention score matrix of a long sequence. So the kernel cuts the KV into <strong>tiles</strong> and streams one tile into SRAM at a time, overwriting it with the next. The kernel <strong>never materialises the full score matrix</strong> at once, because that matrix would occupy memory and be read and written repeatedly — pure wasted bandwidth.</p>
+<p>But tiling creates a math problem: softmax needs the maximum of all scores and the sum of all exponentials before it can normalise. If we process in tiles, how can we "see all scores first"? The answer is FlashAttention-style <strong>online softmax</strong>: the kernel keeps two running quantities — a <strong>running max</strong> and a <strong>running denominator</strong> (the accumulated sum of exponentials). For each new tile, it corrects the old totals using the new local max (rescaling the previously accumulated result by an exponential factor) and adds this tile's contribution. Thus <strong>one streaming pass</strong> suffices, with no need to store all scores, yet the result is exactly equivalent to a global softmax — saving memory and bandwidth.</p>
+<p>This also explains why prefill and decode kernels look different. Here they are side by side:</p>
+
+<div class="cols"><div class="col"><strong>prefill kernel</strong><br>Processes all prompt tokens, with many query positions — a wide, thick, GEMM-like dense computation. Compute-heavy, it can keep tensor cores fed; the bottleneck leans toward arithmetic.</div><div class="col"><strong>decode kernel</strong><br>One query position per step, a skinny and long shape, dominated by gathering over the KV cache via page_table. Tiny compute, large access; the bottleneck is memory bandwidth (Lesson 4).</div></div>
+
+<p>Because their shapes and bottlenecks differ entirely, SGLang takes different kernel paths for them: prefill like one big GEMM, decode like a large sparse pick. Forcing both into one implementation usually leaves both running slowly.</p>
+
+<h2>4. A real wrinkle: MLA's compressed latent layout</h2>
+<p>To ground all of this in real code, look at the DeepSeek-style <strong>MLA</strong> (multi-head latent attention) decode kernel. MLA has a real-world wrinkle: its KV is not stored plainly as "one K, one V per head," but as a <strong>compressed latent</strong> (<span class="mono">D_latent=512</span>) plus a small <strong>rope part</strong> (<span class="mono">D_rope=64</span>), 576 dims per position together. The kernel reads this compressed KV from <span class="mono">kv_c_and_k_pe_cache</span> via the page_table, <strong>pads</strong> the head count up to the kernel's tile width <span class="mono">MAX_HEADS=128</span>, then dispatches to the compiled CUDA kernel. The Python below is that "prepare data + dispatch" wrapper; the real multiply-accumulate happens inside the compiled kernel behind <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span>:</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/attention.py ::cutlass_mla_decode</span><span class="ln">gather paged KV via page_table → tiled Q·Kᵀ → online softmax → ·V</span></div><pre>def cutlass_mla_decode(
+    q_nope, q_pe,                 # query: compressed (nope) + rope parts
+    kv_c_and_k_pe_cache,         # paged KV: latent (c) + key-rope, one entry per page
+    seq_lens, page_table,         # page_table[b] -&gt; the KV page ids for sequence b
+    workspace, sm_scale, num_kv_splits=1,
+):
+    B_q, H, D_q_nope = q_nope.shape
+    _, PAGE_SIZE, D_ckv = kv_c_and_k_pe_cache.shape
+    D_latent, D_rope = 512, 64        # MLA: 512 latent + 64 rope = 576
+    MAX_HEADS = 128
+    if H &lt; MAX_HEADS:               # pad heads up to the kernel's tile width
+        q_nope = pad_to(q_nope, MAX_HEADS)
+        q_pe   = pad_to(q_pe,   MAX_HEADS)
+    out = q_nope.new_empty((B_q, MAX_HEADS, D_latent))
+    # the compiled CUDA kernel: gather KV pages via page_table, then
+    # tiled Q.K^T -&gt; online softmax -&gt; .V, writing into out
+    torch.ops.sgl_kernel.cutlass_mla_decode.default(
+        out, q_nope, q_pe, kv_c_and_k_pe_cache,
+        seq_lens, page_table, workspace, sm_scale, num_kv_splits)
+    return out[:, :H].contiguous()    # drop the head padding
+</pre></div>
+
+<p>Notice this Python does <strong>almost no math</strong>: it reads shapes, fixes MLA's latent and rope dims, pads heads to 128, allocates the output tensor, then hands all the pointers to the compiled kernel. The real "gather → tiled dot → online softmax → weight" all lives in the C++/CUDA behind <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span>. Those CUDA sources sit under <span class="mono">sgl-kernel/csrc/attention/</span> — files like <span class="mono">cutlass_mla_kernel.cu</span> and <span class="mono">merge_attn_states.cu</span> (the latter merges per-KV-split local softmax results under online-softmax rules). We won't paste CUDA here, just point the way; follow the path to dig deeper.</p>
+
+<p>Finally, a table of the core design choices and their reasons, for review:</p>
+
+<table class="t"><tr><th>Design choice</th><th>Why</th></tr>
+<tr><td>Tiling (stream by tile)</td><td>SRAM/registers can't hold the full KV or score matrix; tiling fits data on-chip and lets it stream-overwrite</td></tr>
+<tr><td>Online softmax (running max + running denom)</td><td>One pass yields correct normalisation without storing all scores — saves memory and bandwidth</td></tr>
+<tr><td>Paged KV layout + page_table gather</td><td>Sequence KV stored non-contiguously for high utilisation and prefix sharing; the block table restores logical order</td></tr>
+<tr><td>MLA compressed latent (512 + 64)</td><td>Smaller KV, cheaper to move; the kernel reads the compressed layout and pads heads to the 128 tile width</td></tr>
+</table>
+
+<p>Seen together: a decode attention kernel's whole design philosophy is <strong>subtraction around bandwidth</strong> — store less, move less, finish in one pass. Grasp this main line and you'll understand why attention backends (Lesson 33) look the way they do, and you'll be ready for CUDA Graph (Lesson 41) next — once the kernel itself is lean enough, the next thing to optimise is the cost of launching these kernels over and over.</p>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>A decode kernel's true first step is gather, not multiply</strong>: use <span class="mono">page_table</span> to gather non-contiguous K/V pages from the paged KV cache (Lesson 30), then do Q·Kᵀ → softmax → ·V.</li>
+<li><strong>Tiling</strong>: stream KV tiles into SRAM and never materialise the full score matrix, fitting data into registers/shared memory.</li>
+<li><strong>Online softmax</strong> (FlashAttention-style): keep a running max + running denominator for an equivalent normalisation in one streaming pass, saving memory and bandwidth.</li>
+<li><strong>Prefill and decode kernels differ</strong>: prefill is a wide, thick GEMM-like dense pass; decode is skinny and long, gather-heavy, bandwidth-bound (Lesson 4).</li>
+<li><strong>MLA's real wrinkle</strong>: KV stored as a compressed latent (512) + rope (64); the kernel reads <span class="mono">kv_c_and_k_pe_cache</span>, pads heads to 128, then dispatches; wrapped by attention backends (Lesson 33), with CUDA sources under <span class="mono">sgl-kernel/csrc/attention/</span>. Forward-ref CUDA Graph (Lesson 41).</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In a <strong>decode</strong> attention kernel, right after receiving one row of Q, what is the kernel's true <strong>first step</strong>?</div>
+  <ol class="opts">
+    <li><strong>Use the <span class='mono'>page_table</span> to gather this sequence's K/V blocks scattered across non-contiguous pages from the paged KV cache</strong>, and only then do Q·Kᵀ → softmax → ·V</li>
+    <li>Immediately materialise the full attention score matrix for the whole sequence in memory</li>
+    <li>Copy KV from the paged layout into one contiguous block before computing</li>
+    <li>First fully normalise V, then read K</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The true first step in decode is <strong>gather, not multiply</strong>: the paged cache stores KV in non-contiguous pages, so the kernel uses the <span class='mono'>page_table</span> to translate logical blocks to physical page addresses and gather them before any dot product. It does not materialise the full score matrix nor pre-copy into contiguous memory.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is the key mechanism that lets <strong>online softmax (FlashAttention-style)</strong> still produce a correct normalisation while processing in <strong>tiles</strong>?</div>
+  <ol class="opts">
+    <li>Store all tiles' scores first, then do one standard softmax at the end</li>
+    <li><strong>Keep a running max + a running denominator (accumulated exp sum), rescaling the old totals by an exponential factor for each new tile, getting an equivalent result in one streaming pass</strong></li>
+    <li>Skip computing the max and just exponentiate the raw scores</li>
+    <li>Do an independent softmax per tile, then just average them</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Online softmax hinges on <strong>two running quantities</strong>: a running max and a running denominator. When a new tile arrives, it rescales the previously accumulated result by the new local max and adds the contribution, so it needs no full score storage and one pass equals a global softmax. Per-tile independent softmax then averaging is wrong, and the max step cannot be skipped.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which description of the difference between the <strong>prefill kernel</strong> and the <strong>decode kernel</strong> is <strong>most accurate</strong>?</div>
+  <ol class="opts">
+    <li>Decode processes all prompt tokens each step, so it is denser than prefill</li>
+    <li>They are identical; decode just runs on a faster GPU</li>
+    <li><strong>Prefill has many query positions and is a wide, thick GEMM-like dense compute (compute-leaning); decode has one query position per step, is skinny and long, dominated by page_table gather over KV (bandwidth-bound)</strong></li>
+    <li>Prefill is bandwidth-bound and decode is compute-bound</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Their shapes and bottlenecks are opposite: prefill is a GEMM-like dense compute over many query positions (compute-leaning); decode has one query position per step and is dominated by KV gather, bandwidth-bound (Lesson 4). Hence SGLang takes different kernel paths; they are not identical, and prefill is not the bandwidth-bound one.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, trace the full main line of one decode attention kernel: starting from one row of Q, how it uses the <span class='mono'>page_table</span> to gather non-contiguous K/V from the paged KV cache, how it streams tiles into SRAM via <strong>tiling</strong>, and how <strong>online softmax</strong> computes Q·Kᵀ → softmax → ·V in one pass. Explain why this design is essentially 'subtraction around bandwidth'.</li>
+    <li>Using MLA's (DeepSeek-style) real wrinkle, explain what the <span class='mono'>cutlass_mla_decode</span> wrapper does: why KV is stored as a compressed latent (<span class='mono'>D_latent=512</span>) + rope (<span class='mono'>D_rope=64</span>), why heads are padded to <span class='mono'>MAX_HEADS=128</span> before dispatching to the compiled kernel, and how it relates to attention backends (Lesson 33) and CUDA Graph (Lesson 41).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Operator fusion & CUDA graph</h1>
+
+<p class="lead">In this lesson we drop all the way down from the "algorithm layer" to the "kernel layer" and study two hardware-level speedups — <strong>operator fusion</strong> and <strong>CUDA graphs (capture/replay)</strong> — and, crucially, how they <strong>cooperate</strong> to push decode throughput to the limit. Fusion attacks "too many memory trips and too many launches per computation"; CUDA graphs attack "the CPU keeps submitting kernels, and submission itself becomes the bottleneck." Stacked together, they give SGLang's decode path its near-zero-overhead kernel pipeline.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div><p>Think of one kernel launch as "a round trip to the warehouse." <strong>Unfused</strong> is like: go fetch raw material (read HBM), process it into a half-product and ship it back (write HBM), then the next step fetches that half-product again (read HBM) to keep working. The hauling alone burns huge time, and the GPU's "warehouse" (memory) bandwidth is finite. <strong>Fusion</strong> is like merging several adjacent steps into one workshop done in a single pass, keeping the half-product right on the bench (registers) instead of round-tripping to the warehouse.</p><p>And a <span class="mono">CUDA graph</span> is like recording today's whole assembly-line choreography ahead of time: each run, the foreman (CPU) need not bark every command — just <strong>play the recording (replay)</strong> and the machines follow. The catch: the moves must be <strong>identical</strong> every time (fixed shapes, no branch that is decided by looking at data), or the recording no longer matches.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div><p>Recall <span class="mono">Lesson 4</span>: decoding is <strong>bandwidth-bound</strong>; per-token compute utilization is low and the bottleneck is moving data and issuing instructions. So anything that <strong>cuts HBM round-trips</strong> and <strong>cuts kernel launch count</strong> converts directly into throughput. Fusion reduces both; CUDA graphs (<span class="mono">Lesson 27</span>) nearly eliminate the "CPU submission" part of the latter. The fused and captured kernels ultimately come from <span class="mono">Lesson 38 (AOT)</span> and <span class="mono">Lesson 39 (JIT)</span> — fusion and graphs merely <strong>orchestrate</strong> them better.</p></div>
+
+<h2>1. Operator fusion: merge many small kernels into one</h2>
+<p>Fusion has two core motivations. First, <strong>memory traffic (HBM round-trips)</strong>: unfused, every op reads its input from memory and writes its output back, and the next op reads it again. These intermediates (temporaries) add nothing to the final answer yet waste precious bandwidth. Second, <strong>launch overhead</strong>: every kernel launch costs a CPU submission and a GPU dispatch; in decode, where each step computes very little, launch overhead can exceed the real compute.</p>
+<p>Take SGLang's archetypal <span class="mono">SiluAndMul</span> (gate-and-up activation, gate×up). The unfused reference <span class="mono">forward_native</span> does it in <strong>two steps — silu THEN multiply</strong>: run <span class="mono">F.silu(gate)</span> on the first half into a temporary written to HBM, then read it back and multiply elementwise with the second half <span class="mono">up</span>. That is <strong>two kernel passes plus one extra temporary written and read</strong>. The fused <span class="mono">forward_cuda</span> does silu AND multiply in <strong>one kernel</strong>: once data is in registers, the silu result stays in <strong>registers</strong> for the multiply, never spilling to memory, writing only the final output once.</p>
+<p>SGLang has many similar fusions: <span class="mono">fused_add_rmsnorm</span> (residual-add fused with RMSNorm into one kernel, see <span class="mono">Lesson 36</span>), and fusing q/k normalization with RoPE (fused qk-norm+rope). Their common trait: <strong>kill the "write-out-then-read-back" intermediate inside registers/shared memory</strong>, and collapse several launches into one.</p>
+
+<div class="flow"><div class="node">read gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">write temp (HBM)</div><div class="arrow">→</div><div class="node">read temp + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
+<div class="flow"><div class="node">read x (HBM)</div><div class="arrow">→</div><div class="node">fused kernel: silu &amp; mul in registers</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
+
+<h2>2. CUDA graphs: capture once, replay many times</h2>
+<p>Recall <span class="mono">Lesson 27</span>: a CUDA graph records a <strong>fixed sequence of kernel launches</strong> (capture), and then each decode step just <strong>replays</strong> that graph with almost no CPU-side submission overhead. This matters enormously for decode, because each step computes so little that per-kernel CPU submission balloons into the dominant cost.</p>
+<p>But CUDA graphs impose two hard constraints: <strong>shapes must be static</strong> and <strong>no data-dependent control branching</strong>. Capture records concrete pointers and launch parameters; if next time a tensor's shape changes, or the program "looks at data to decide which branch to take," the recorded graph no longer applies. Hence: <strong>fixed-shape, deterministic fused kernels are inherently graph-friendly</strong>; ops whose <strong>shapes vary, or that branch on the host side</strong>, must stay <strong>outside</strong> the captured region.</p>
+<p>SGLang's answer is <strong>piecewise / breakable graphs (<span class="mono">Lesson 27</span>)</strong>: split the forward into several "static sub-spans," capture each as a small graph, and run the dynamic bits in between (dynamic shapes, host-side branches) <strong>eagerly</strong>. This way you get near-zero launch overhead on most kernels without being held back by the few dynamic ops.</p>
+
+<table class="t"><tr><th>Fused op</th><th>Why fuse it</th></tr>
+<tr><td><span class="mono">SiluAndMul</span> (gate×up activation)</td><td>Drops the silu temporary's HBM write/read; two passes become one, one launch</td></tr>
+<tr><td><span class="mono">fused_add_rmsnorm</span> (residual-add + RMSNorm, Lesson 36)</td><td>Sum stays in registers and is normalized in place; saves a round-trip and a launch</td></tr>
+<tr><td>fused qk-norm + RoPE</td><td>Normalization and rotary embedding in one kernel; less traffic, fewer submissions</td></tr>
+<tr><td>Fixed-shape kernels after fusion</td><td>Static shape → graph-friendly → capturable/replayable by a CUDA graph</td></tr></table>
+
+<h2>3. How they cooperate: fewer + fused + static → capture → replay</h2>
+<p>Chaining the two ideas, the logic is clean: first use <strong>fusion</strong> to shrink the kernel count and erase intermediate traffic, so most kernels in the forward are both <strong>few</strong> and <strong>fixed-shape</strong>; such a kernel sequence exactly satisfies the CUDA graph's static premise, so you can <strong>capture once</strong> and then <strong>replay</strong> it every decode step, driving the "CPU submits each kernel" cost to nearly zero. For the bandwidth-bound, launch-sensitive decode stage (<span class="mono">Lesson 4</span>), this is a key reason throughput can climb.</p>
+<p>For ops that truly cannot be made static (e.g. some dynamic shapes or data-dependent branches), hand them to <strong>piecewise graphs</strong>: keep them outside the captured region, run them eagerly, and capture/replay the remaining static sub-spans as usual. Note these kernels are not conjured from nowhere — they come from <span class="mono">Lesson 38</span>'s AOT-precompiled kernels and <span class="mono">Lesson 39</span>'s JIT kernels; fusion and graphs merely <strong>orchestrate</strong> them more cheaply and quickly at a higher level.</p>
+
+<div class="cols"><div class="col"><strong>Fusion-friendly (static shape, capturable)</strong><ul><li><span class="mono">SiluAndMul</span> and other elementwise fusions: shape set by hidden dim, fixed</li><li><span class="mono">fused_add_rmsnorm</span>: residual + norm, deterministic shape</li><li>fused qk-norm + RoPE: fixed head dim and sequence layout</li><li>These can be captured together into one graph, replayed with zero submission cost</li></ul></div><div class="col"><strong>Graph-breaking (data-dependent / dynamic shape)</strong><ul><li>Ops with variable-length input or dynamic batch/seq shapes</li><li>Host-side control branching that "branches after looking at data"</li><li>Must stay outside the captured region, or sit between small graphs in a piecewise graph</li><li>Run eagerly so the captured static sub-spans are not broken</li></ul></div></div>
+
+<h2>4. Grounding it in real code</h2>
+<p>Below is a condensed version of SGLang's <span class="mono">SiluAndMul</span>. Focus on the two forwards: <span class="mono">forward_native</span> is the "<strong>two passes + a temporary</strong>" reference, while <span class="mono">forward_cuda</span> is the "<strong>one kernel does silu and multiply</strong>" fused version. The latter writes <span class="mono">out</span> to memory only once at the end, keeping silu's intermediate in registers throughout — less traffic, fewer launches, and a fixed shape, exactly what a CUDA graph likes.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Fuse</h4><p class="mono">SiluAndMul</p><p>Merge several small ops into one kernel; kill temporaries and extra launches.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Fix shape</h4><p class="mono">static shape</p><p>The fused kernel is static-shaped and deterministic, meeting the graph premise.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Capture</h4><p class="mono">CUDA Graph</p><p>Record this static kernel run into a graph (Lesson 27).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p class="mono">replay</p><p>Each decode step replays it; CPU submission cost near zero.</p></div></div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/activation.py ::SiluAndMul</span><span class="ln">unfused: two passes + a temporary; fused: one kernel does silu and multiply</span></div><pre>class SiluAndMul(MultiPlatformOp):
+    # gate-and-up activation: split x in half, then silu(gate) * up
+
+    def forward_native(self, x):        # reference: TWO ops + a temporary in HBM
+        d = x.shape[-1] // 2
+        return F.silu(x[..., :d]) * x[..., d:]
+
+    def forward_cuda(self, x):          # FUSED: one kernel does silu AND mul
+        d = x.shape[-1] // 2
+        out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
+        silu_and_mul(x, out)            # -&gt; torch.ops.sgl_kernel.silu_and_mul
+        return out</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Fusion</strong> merges several small ops into one kernel, eliminating intermediate temporaries' <span class="mono">HBM</span> round-trips and collapsing many <strong>launches</strong> into one.</li>
+<li><span class="mono">SiluAndMul</span>'s <span class="mono">forward_native</span> is the "silu then multiply" two-pass reference; <span class="mono">forward_cuda</span> does both in one kernel with data kept in registers.</li>
+<li>Common SGLang fusions: <span class="mono">SiluAndMul</span>, <span class="mono">fused_add_rmsnorm</span> (Lesson 36), fused qk-norm+RoPE.</li>
+<li><strong>CUDA graphs</strong> (Lesson 27) capture a fixed kernel sequence and replay it with near-zero submission cost, but require <strong>static shapes and no data-dependent branches</strong>.</li>
+<li>Fixed-shape fused kernels are <strong>graph-friendly</strong>; dynamic/data-dependent ops must stay outside the captured region, or sit between small graphs in a <strong>piecewise/breakable graph</strong>, run eagerly.</li>
+<li><strong>Fewer + fused + static → capture once → replay</strong> is key to bandwidth-bound decode throughput (Lesson 4); the kernels themselves come from Lesson 38 (AOT) / Lesson 39 (JIT).</li>
+</ul></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. When several small ops are <strong>fused</strong> into one kernel, what two things are most directly saved?</div>
+  <ol class="opts">
+    <li>The maximum sequence length of attention</li>
+    <li>Model parameter count and total memory footprint</li>
+    <li>The size of the calibration dataset needed for quantization</li>
+    <li><strong>The intermediate temporary's HBM round-trips (write-out then read-back) + multiple kernel launch overheads</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Fusion merges adjacent ops into one kernel; intermediates like silu stay in <strong>registers</strong> instead of being written to <span class='mono'>HBM</span> and read back, saving round-trips, while several launches collapse into one, saving launch overhead. It changes neither parameter count, sequence limits, nor quantization data.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What <strong>hard requirement</strong> does a <strong>CUDA graph</strong> (Lesson 27, capture/replay) impose on the captured kernel sequence?</div>
+  <ol class="opts">
+    <li><strong>Shapes must be static and there must be no data-dependent control flow (host-side branches)</strong></li>
+    <li>Every op must be FP8-quantized</li>
+    <li>Each replay must recompile the kernels</li>
+    <li>It can only be captured under multi-GPU tensor parallelism</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Capture records fixed pointers and launch parameters, so <strong>shapes must be static with no data-dependent branches</strong>, else the recorded graph no longer matches. It is unrelated to quantization or parallelism, and replay exists precisely to <strong>avoid</strong> re-submission/recompilation.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. For ops with <strong>dynamic shapes or data-dependent branches</strong>, how does SGLang still enjoy the graph's low overhead without being held back?</div>
+  <ol class="opts">
+    <li>Abandon CUDA graphs entirely and run the whole forward eagerly</li>
+    <li>Force the dynamic ops into the same graph and hope the replay works</li>
+    <li>Always pad dynamic shapes to the maximum and never split</li>
+    <li><strong>Use piecewise/breakable graphs: capture the static sub-spans and run the dynamic bits eagerly between the small graphs</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Piecewise/breakable graphs split the forward into static sub-spans captured separately, running the dynamic parts (dynamic shapes, host branches) eagerly between the small graphs, keeping zero-submission cost on most kernels without breaking the captured spans. Forcing dynamic ops into one graph breaks capture, and going fully eager forfeits the benefit.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using <span class='mono'>SiluAndMul</span>, explain what extra cost the <strong>unfused</strong> <span class='mono'>forward_native</span> (silu then multiply) pays versus the <strong>fused</strong> <span class='mono'>forward_cuda</span> (one kernel does both): develop it from both <span class='mono'>HBM</span> round-trips and <strong>launch overhead</strong>, and explain why this matters for the bandwidth-bound decode stage (Lesson 4).</li>
+    <li>Explain how fusion and CUDA graphs <strong>cooperate</strong>: why a 'fewer + fused + static-shape' kernel sequence exactly meets the graph's capture premise so it can be <strong>captured once and replayed</strong> to drive CPU submission cost near zero; then explain what it means that the fused/captured kernels themselves come from Lesson 38 (AOT) and Lesson 39 (JIT).</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Multi-hardware backends</h1>
+
+<p class="lead">The same SGLang engine can run on NVIDIA GPUs, but also on AMD GPUs, Huawei Ascend NPUs, Intel XPUs, Moore Threads MUSA, Apple MLX, and even plain CPUs. Behind this lies a layer of <strong>platform abstraction</strong>: it lets the upper engine stay almost entirely ignorant of "which chip is under its feet," achieving "one codebase, many kinds of hardware." This is the closing lesson of Part 9 (Kernels &amp; Hardware); we tie together the attention kernels, CUDA Graphs, and AOT/JIT kernels from earlier lessons and see how they get "swapped per chip."</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a <strong>travel charger</strong> that supports sockets from many countries. No matter which country you fly to, the plug shapes differ wildly — UK, EU, US, China — but your phone cable is always the same one. The <span class="mono">adapter head</span> in the middle translates "the socket on the wall" into "power your phone can use."</p>
+<p>SGLang's platform abstraction is exactly that adapter head. The upper scheduler, model, and various modules are like your phone cable, never changing; the chips below are like the assorted sockets. The <span class="mono">SRTPlatform</span> abstraction translates "this specific chip's capabilities" into "a uniform interface for the upper tiers." Swap the chip, swap only the adapter head — not the phone.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>From a single GPU to large clusters spanning many kinds of hardware, SGLang aims for "one engine, runs everywhere." The key to this is cleanly separating the part that is "<strong>hardware-agnostic</strong>" from the part that is "<strong>per-chip</strong>." The scheduler (Lesson 18), the model (Lesson 26), and most modules don't know — and don't need to know — which chip is underneath; the only things that truly need "swapping per chip" are the kernels (Lesson 38 AOT / Lesson 39 JIT), the attention backend (Lesson 33), and a few platform hooks. This is precisely the guide's recurring "<strong>everything is pluggable</strong>" theme (design-theme forward-ref Lesson 62).</p></div>
+
+<h2>1. The platform abstraction: one base class, one subclass per chip</h2>
+<p>The core of the platform abstraction is a base class <span class="mono">SRTPlatform</span>, defined in <span class="mono">srt/platforms/interface.py</span>. It does no work directly; instead it declares a set of questions "every chip must answer" — and these questions take three forms: <strong>factory methods</strong>, <strong>capability flags</strong>, and <strong>lifecycle hooks</strong>.</p>
+<p><strong>Factory methods</strong> are responsible for "building" the components for the current chip. For example, <span class="mono">get_default_attention_backend()</span> returns which family of attention kernels this chip should use (Lesson 33 covered backends like FlashAttention, FlashInfer, Triton); <span class="mono">get_graph_runner_cls()</span> returns the CUDA-graph runner class (Lesson 27 covered recording the whole forward pass into a graph to eliminate launch overhead). Different chips return different implementations in these two methods, while the upper tiers just call them, indifferent to which one comes back.</p>
+<p><strong>Capability flags</strong> are a set of boolean judgments that let upper tiers ask "can this chip do a certain thing." For instance <span class="mono">supports_fp8</span> (can it run FP8 quantization), <span class="mono">support_cuda_graph</span> (can it use CUDA Graph), <span class="mono">support_piecewise_cuda_graph</span> (can it use piecewise CUDA Graph). Upper tiers adapt accordingly: if some chip doesn't support CUDA Graph, they gracefully fall back to per-operator execution instead of crashing outright.</p>
+<p><strong>Lifecycle hooks</strong> let a chip "step in" at engine startup to adjust defaults. <span class="mono">apply_server_args_defaults()</span> is such a hook: each chip can set its own suitable default flags here (e.g. some chips disable a feature by default). There is also a <span class="mono">supported_quantization</span> list declaring which quantization formats this chip supports.</p>
+
+<h2>2. Two trees: platforms and hardware_backend</h2>
+<p>The code has two mirroring directory trees. The first is <span class="mono">srt/platforms/</span>, containing each chip's subclassing of <span class="mono">SRTPlatform</span>: <span class="mono">CudaSRTPlatform</span> (NVIDIA, the in-tree default), plus ROCm (AMD), CPU, etc., living in <span class="mono">srt/platforms/{cuda,rocm,cpu}.py</span>. Each subclass overrides the base class's factory methods and capability flags, answering "how my chip does it."</p>
+<p>The second is <span class="mono">srt/hardware_backend/</span>, which organizes a set of backend directories by device: <span class="mono">cpu/ gpu/ npu/ xpu/ musa/ mlx/</span>. They cover NVIDIA and AMD GPUs, Huawei Ascend NPUs, Intel XPUs, Moore Threads MUSA, Apple MLX, and plain CPU. Note that Google TPU is not in this tree, but is served via a separate sglang-jax project.</p>
+
+<h2>3. Key insight: the upper tiers are hardware-agnostic</h2>
+<p>The most important sentence of this lesson is: <strong>the upper tiers are hardware-agnostic</strong>. The scheduler (Lesson 18) decides who runs first and who runs later; the model (Lesson 26) defines the network structure; most modules only care about tensors in, tensors out. None of them know which chip is underneath, nor do they need to. The things that truly get "swapped per chip" are compressed into a very small scope: the kernels (Lesson 38 AOT precompiled / Lesson 39 JIT just-in-time), the attention backend (Lesson 33), and the platform hooks.</p>
+<p>This layering matters because it turns "porting to new hardware," a huge undertaking, into "just implement a new <span class="mono">SRTPlatform</span> subclass plus a set of new kernels," a small one. The thousands of lines of upper scheduling and model code can be reused untouched. Capability flags act as the lubricant here: upper tiers needn't write an if-else branch for every chip, but instead uniformly ask "<span class="mono">support_cuda_graph</span>?" and take the fallback path on a "no."</p>
+
+<div class="layers">
+<div class="layer">🧠 Scheduler (Lesson 18) · Model (Lesson 26) · various modules — hardware-agnostic, unaware of which chip is underneath</div>
+<div class="layer">🔌 SRTPlatform abstraction layer — factory methods + capability flags + lifecycle hooks (translating per chip)</div>
+<div class="layer">⚙️ Per-chip kernels: attention backend (Lesson 33) · AOT kernels (Lesson 38) · JIT kernels (Lesson 39) — swapped per chip</div>
+</div>
+
+<table class="t">
+<tr><th>Hardware</th><th>Its backend / kernels</th></tr>
+<tr><td>NVIDIA GPU</td><td>CudaSRTPlatform · hardware_backend/gpu · CUDA attention kernels</td></tr>
+<tr><td>AMD GPU</td><td>ROCm platform · hardware_backend/gpu · ROCm/HIP kernels</td></tr>
+<tr><td>Huawei Ascend NPU</td><td>hardware_backend/npu · Ascend kernels</td></tr>
+<tr><td>Intel XPU</td><td>hardware_backend/xpu · XPU kernels</td></tr>
+<tr><td>Moore Threads MUSA</td><td>hardware_backend/musa · MUSA kernels</td></tr>
+<tr><td>Apple MLX</td><td>hardware_backend/mlx · MLX kernels</td></tr>
+<tr><td>Plain CPU</td><td>CPU platform · hardware_backend/cpu · CPU kernels</td></tr>
+</table>
+
+<div class="cols">
+<div class="col"><strong>✅ Portable (one codebase runs everywhere)</strong><br/>The scheduler (Lesson 18), the model (Lesson 26), most modules, and the input/output (IO) pipeline. They are hardware-agnostic and reused as-is when chips change.</div>
+<div class="col"><strong>🔧 Per-chip (must be swapped)</strong><br/>The various kernels (Lesson 38 / Lesson 39), the attention backend (Lesson 33), and the platform hooks (factory methods, capability flags, <span class="mono">apply_server_args_defaults</span>). Porting new hardware is mainly filling in this part.</div>
+</div>
+
+<div class="flow">
+<div class="node">Upper-layer op request (e.g. one attention computation)</div>
+<div class="arrow">→</div>
+<div class="node">SRTPlatform dispatch + capability check (support_cuda_graph? supports_fp8?)</div>
+<div class="arrow">→</div>
+<div class="node">The matching device kernel executes (CUDA / ROCm / NPU / …)</div>
+</div>
+
+<h2>4. A look at what the base class looks like</h2>
+<p>Below is a faithful condensed version of <span class="mono">SRTPlatform</span>. Notice that many methods in the base class directly <span class="mono">raise NotImplementedError</span> — this says "every chip must answer this itself"; while <span class="mono">CudaSRTPlatform</span>, as the in-tree default, gives NVIDIA's answers. A new out-of-tree chip just follows the pattern, subclassing and overriding these methods.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/platforms/interface.py ::SRTPlatform</span><span class="ln">each chip subclasses: factory methods + capability flags + lifecycle hooks</span></div><pre>class SRTPlatform(DeviceMixin):
+    # base class for a hardware platform; out-of-tree chips subclass + override
+    supported_quantization = []
+
+    def apply_server_args_defaults(self, server_args):   # per-chip default flags
+        pass
+    def get_default_attention_backend(self) -&gt; str:     # which attention kernel family (Lesson 33)
+        raise NotImplementedError
+    def get_graph_runner_cls(self) -&gt; type:             # the CUDA-graph runner (Lesson 27)
+        raise NotImplementedError
+
+class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDIA platform
+    def supports_fp8(self): return True
+    def support_cuda_graph(self): return True
+    def support_piecewise_cuda_graph(self): return True</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li>The <strong>platform abstraction</strong> lets one engine run on many chips: the base class <span class="mono">SRTPlatform</span> (in <span class="mono">srt/platforms/interface.py</span>) declares per-chip factory methods, capability flags, and lifecycle hooks.</li>
+<li><strong>Factory methods</strong> like <span class="mono">get_default_attention_backend()</span> (Lesson 33 attention kernels), <span class="mono">get_graph_runner_cls()</span> (Lesson 27 CUDA-graph runner); <strong>hooks</strong> like <span class="mono">apply_server_args_defaults()</span>.</li>
+<li>Each chip <strong>subclasses</strong> the base: <span class="mono">CudaSRTPlatform</span> (NVIDIA), ROCm (AMD), etc.; another tree <span class="mono">srt/hardware_backend/</span> organizes per-device backends by <span class="mono">cpu/gpu/npu/xpu/musa/mlx</span>.</li>
+<li>The <strong>upper tiers are hardware-agnostic</strong>: the scheduler (Lesson 18), model (Lesson 26), and most modules don't know the chip; only the kernels (Lessons 38/39), attention backend (Lesson 33), and platform hooks are swapped per chip.</li>
+<li><strong>Capability flags</strong> (<span class="mono">supports_fp8</span>, <span class="mono">support_cuda_graph</span>, <span class="mono">support_piecewise_cuda_graph</span>) let upper tiers ask "can this chip do X" and adapt (e.g. fall back when CUDA graph isn't available).</li>
+<li>This is the engineering basis for "single GPU to large clusters across many kinds of hardware," and an embodiment of the guide's "<strong>everything is pluggable</strong>" theme (design-theme forward-ref Lesson 62).</li>
+</ul></div>
+
+<div class="card"><div class="tag">🏁 Part 9 wrap-up</div><p>And that wraps up Part 9, "Kernels &amp; Hardware." We started from the AOT and JIT kernels closest to the metal (Lessons 38, 39), looked at quantization and communication kernels, then strung together performance levers like CUDA Graph and the attention backend, and finally used this lesson's platform abstraction to gather them into one sentence: <strong>isolate the small handful of things that are per-chip well, and the upper tiers can be reused in a hardware-agnostic way</strong>. This is exactly why SGLang can scale from a single GPU all the way to large clusters spanning many kinds of hardware.</p></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the role of the <strong>platform abstraction</strong> (the base class <span class='mono'>SRTPlatform</span>)?</div>
+  <ol class="opts">
+    <li><strong>Let one engine run on many chips: each chip subclasses it and provides factory methods, capability flags, and lifecycle hooks</strong></li>
+    <li>Compress model weights to FP8 to save memory</li>
+    <li>Rewrite the entire scheduler and model code for each chip</li>
+    <li>Decide which request gets scheduled first</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <span class='mono'>SRTPlatform</span> (in <span class='mono'>srt/platforms/interface.py</span>) declares the per-chip factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>), capability flags, and hooks (e.g. <span class='mono'>apply_server_args_defaults()</span>) every chip must answer; each chip subclasses it (<span class='mono'>CudaSRTPlatform</span>, etc.). It neither quantizes nor schedules, and certainly does not rewrite the upper layers per chip.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. In SGLang, which of the following is <strong>per-chip and must be swapped</strong>, rather than portable?</div>
+  <ol class="opts">
+    <li>The model structure (Lesson 26)</li>
+    <li><strong>The kernels (Lessons 38/39), the attention backend (Lesson 33), and the platform hooks</strong></li>
+    <li>The scheduler (Lesson 18)</li>
+    <li>The input/output (IO) flow</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The upper layers are <strong>hardware-agnostic</strong>: the scheduler, model, and IO flow are reused as-is when chips change. Only the kernels (AOT/JIT), the attention backend, and the platform hooks are truly swapped per chip — porting new hardware is mainly filling in that small handful.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What do <strong>capability flags</strong> (e.g. <span class='mono'>support_cuda_graph</span>, <span class='mono'>supports_fp8</span>) let the upper layers do?</div>
+  <ol class="opts">
+    <li>Force every chip to support the exact same feature set</li>
+    <li><strong>Ask 'can this chip do X' and adapt accordingly (e.g. fall back to per-operator execution when CUDA Graph isn't supported)</strong></li>
+    <li>Split the upper-layer code into per-chip copies to maintain separately</li>
+    <li>Recompile the entire model at runtime</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Capability flags are boolean judgments letting upper layers uniformly ask 'can you do X' and take a fallback path (e.g. revert to eager) on a 'no', instead of writing piles of if-else per chip or crashing outright. They neither force a uniform feature set nor require splitting or recompiling the upper layers.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using the 'travel charger + adapter head' analogy, explain how the <span class='mono'>SRTPlatform</span> platform-abstraction layer keeps the upper layers (scheduler Lesson 18, model Lesson 26) <strong>hardware-agnostic</strong>: spell out what uniform interface the factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>, <span class='mono'>get_graph_runner_cls()</span>) and the lifecycle hook (<span class='mono'>apply_server_args_defaults()</span>) each translate 'a specific chip's capability' into, and why this turns 'porting new hardware' from a big job into a small one.</li>
+    <li>Using the two trees <span class='mono'>srt/platforms/</span> and <span class='mono'>srt/hardware_backend/</span>, describe how SGLang's hardware lineup (NVIDIA, AMD, Ascend NPU, Intel XPU, Moore Threads MUSA, Apple MLX, CPU) is organized; then explain why 'isolating the small handful that is per-chip (kernels Lessons 38/39, attention backend Lesson 33, platform hooks) so the upper layers can be reused' is the engineering basis for 'single GPU to cross-hardware large clusters' (echoing Lesson 62's 'everything is pluggable' theme).</li>
   </ul>
 </div>
 </div>

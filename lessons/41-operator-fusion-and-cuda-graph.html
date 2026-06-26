@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>41 · 算子融合与 CUDA Graph 配合 / Operator fusion &amp; CUDA graph - SGLang 图解教程</title>
+<meta name="description" content="第九部分 · 内核与硬件｜算子融合与 CUDA Graph 配合 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="41 · 算子融合与 CUDA Graph 配合 / Operator fusion &amp; CUDA graph - SGLang 图解教程">
+<meta property="og:description" content="第九部分 · 内核与硬件｜算子融合与 CUDA Graph 配合 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="41 · 算子融合与 CUDA Graph 配合 / Operator fusion &amp; CUDA graph - SGLang 图解教程">
+<meta name="twitter:description" content="第九部分 · 内核与硬件｜算子融合与 CUDA Graph 配合 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第九部分 · 内核与硬件</span><span class="lang-en">Part 9 · Kernels &amp; hardware</span></span>
+    <span class="pill">41 / 42</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:97%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第九部分 · 内核与硬件</span><span class="lang-en">Part 9 · Kernels &amp; hardware</span></div>
+    <h1><span class="lang-zh">算子融合与 CUDA Graph 配合</span><span class="lang-en">Operator fusion &amp; CUDA graph</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">这一课我们把目光从"算法层"彻底沉到"内核层"，讲两种最贴近硬件的提速手段——<strong>算子融合（operator fusion）</strong>与 <strong>CUDA Graph（捕获/重放）</strong>——以及它们如何<strong>互相配合</strong>，共同把解码阶段的吞吐推到极限。融合解决的是"一次计算里访存太多、启动太多"的问题；CUDA Graph 解决的是"CPU 反复提交内核、提交本身成了瓶颈"的问题。两者叠加，才有了今天 SGLang 解码路径那种近乎零开销的内核流水线。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div><p>把一次内核启动想象成"去仓库取一趟货"。<strong>未融合</strong>就像：先去仓库取原料（读 HBM），加工成半成品后再送回仓库（写 HBM），下一道工序又把半成品取出来（再读 HBM）继续做。光是来回搬运就耗掉大量时间，而 GPU 的"仓库"（显存）带宽是有限的。<strong>融合</strong>则像：把相邻几道工序合并在同一个车间一次做完，半成品直接放在手边的工作台（寄存器）上，不再往返仓库。</p><p>而 <span class="mono">CUDA Graph</span> 像是把"今天要跑的整条流水线动作"提前录像一遍：每次开工不用工头（CPU）逐个喊口令，直接<strong>放录像（replay）</strong>，机器照着做即可。但录像有个前提——动作必须每次<strong>一模一样</strong>（形状固定、没有临场看数据才决定的分支），否则录像就对不上了。</p></div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div><p>回顾<span class="mono">第4课</span>：解码阶段是<strong>带宽受限（bandwidth-bound）</strong>的，每个 token 的实际算力利用率很低，瓶颈在搬数据和发指令。于是任何能<strong>减少 HBM 往返</strong>、<strong>减少内核启动次数</strong>的手段都直接转化为吞吐。算子融合减少前者与后者，CUDA Graph（<span class="mono">第27课</span>）几乎消灭后者中"CPU 提交"的那部分。这些被融合、被捕获的内核，最终来自<span class="mono">第38课（AOT 预编译）</span>与<span class="mono">第39课（JIT 即时编译）</span>——融合与图只是更好地"编排"它们。</p></div>
+
+<h2>一、算子融合：把多个小内核合成一个</h2>
+<p>融合的核心动机有两条。第一是<strong>访存（HBM round-trip）</strong>：未融合时，每个算子都要把输入从显存读进来、把输出写回显存，下一个算子又要重新读一遍。这些中间结果（临时张量）对最终答案没有价值，却白白占用了宝贵的显存带宽。第二是<strong>启动开销（launch overhead）</strong>：每发起一个内核，CPU 都要做一次提交，GPU 都要做一次调度；在解码这种单步计算量很小的场景下，启动开销可能比真正的计算还要久。</p>
+<p>以 SGLang 里最典型的 <span class="mono">SiluAndMul</span> 为例（门控激活，gate×up）。未融合的参考实现 <span class="mono">forward_native</span> 是"<strong>先 silu 再相乘</strong>"两步：先对前半段做 <span class="mono">F.silu(gate)</span> 得到一个临时张量并写回 HBM，再把它读出来与后半段 <span class="mono">up</span> 逐元素相乘。这意味着<strong>两趟内核、一次额外的临时张量写入与读取</strong>。融合内核 <span class="mono">forward_cuda</span> 则在<strong>一个 kernel</strong> 里同时完成 silu 与乘法：数据读进寄存器后，silu 的结果直接留在<strong>寄存器</strong>里参与乘法，从不落回显存，最后只写一次最终输出。</p>
+<p>SGLang 中类似的融合还有很多：<span class="mono">fused_add_rmsnorm</span>（把残差相加与 RMSNorm 合成一个内核，见<span class="mono">第36课</span>）、把 q/k 的归一化与 RoPE 旋转位置编码融合（fused qk-norm+rope）等。它们的共同点都是：<strong>把"写出去又读回来"的中间张量消灭在寄存器/共享内存里</strong>，并把多次启动压成一次。</p>
+<p>为什么访存往返如此致命？因为现代 GPU 的算力增长速度远远快于显存带宽的增长速度，所谓"内存墙"。当一个算子真正要做的乘加运算很少，它的执行时间几乎完全由"从显存读多少、往显存写多少"决定。未融合的两趟实现，等于把一份本来可以留在芯片内部的数据，先搬下楼再搬上楼：silu 的临时张量先被写进 HBM，紧接着又被原封不动地读回来，这一来一回的带宽全是浪费。融合之所以快，本质就是把这份"中间数据"锁在离计算单元最近的寄存器或共享内存里，让它在被消费之前从不离开芯片，从而把宝贵的显存带宽只留给真正必须读写的输入和最终输出。</p>
+<p>再看启动开销这一侧。每一次内核启动，CPU 都要走一遍"准备参数、提交到 GPU 队列"的流程，GPU 也要为这次启动做调度与同步。单看一次也许只有几微秒，但解码阶段一个模型前向里可能要发起成百上千个内核，而每步又只解码一个 token——把这些零碎的启动开销累加起来，往往能和真正的计算时间相提并论，甚至更高。融合把"多次启动"压成"一次启动"，正是从根上削减了这部分固定成本。这也解释了为什么融合在解码阶段的收益，常常比在预填充阶段更明显：预填充计算量大、启动开销被摊薄，而解码恰恰是启动开销最敏感的地方。</p>
+
+<div class="flow"><div class="node">读 gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">写临时张量 (HBM)</div><div class="arrow">→</div><div class="node">读临时 + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">写输出 (HBM)</div></div>
+<div class="flow"><div class="node">读 x (HBM)</div><div class="arrow">→</div><div class="node">融合 kernel：silu 与 mul 同在寄存器</div><div class="arrow">→</div><div class="node">写输出 (HBM)</div></div>
+
+<h2>二、CUDA Graph：捕获一次，反复重放</h2>
+<p>回顾<span class="mono">第27课</span>：CUDA Graph 把一串<strong>固定的内核启动序列</strong>记录下来（capture），之后每一步解码只要<strong>重放（replay）</strong>这张图即可，几乎没有 CPU 端的提交开销。这对解码极其关键，因为解码每步真正算的东西很少，CPU 逐个提交内核的开销会被放大成主要瓶颈。可以这样打个比方：没有图的时候，CPU 像一个必须亲口逐道下令的指挥，每道命令都要先在脑子里整理、再开口传达；有了图，整套命令被提前写成一张乐谱，演奏时只要照谱直奏，指挥几乎不必再开口。解码动辄要重复成千上万步，省下的这点"开口"成本累加起来非常可观，对最终的吞吐曲线影响相当明显，这也是工程上必须把这条路径打磨到位的原因。</p>
+<p>但 CUDA Graph 有两条硬约束：<strong>形状必须静态</strong>、<strong>不能有依赖数据的控制流</strong>。捕获时记录的是一组具体的指针与启动参数；如果下一次张量形状变了，或者程序要"看了数据才决定走哪条分支"，录下来的图就不再适用。因此：<strong>形状固定、行为确定的融合内核天然是"图友好（graph-friendly）"的</strong>；而那些<strong>形状会变、或在主机端有分支</strong>的算子，必须留在捕获区<strong>之外</strong>。</p>
+<p>SGLang 的做法是引入<strong>分段 / 可打断的图（piecewise / breakable graph，<span class="mono">第27课</span>）</strong>：把整条前向拆成若干"静态子段"分别捕获成小图，中间那些动态的部分（动态形状、host 侧分支）则在小图之间<strong>以 eager 方式即时执行</strong>。这样既享受了大部分内核的零启动开销，又不被少数动态算子拖累。</p>
+<p>这里要厘清一个常见误解：CUDA Graph 并不会让单个内核本身算得更快，它优化的是"<strong>怎么把内核交给 GPU</strong>"这件事。一张被捕获的图，记录的是一连串内核的启动顺序、各自的网格/线程块配置以及它们读写的具体显存地址。重放时，GPU 驱动不再需要 CPU 一条一条地解析与提交，而是把这整张"已经排好的指令表"一次性丢给硬件执行。正因为记录的是<strong>具体地址</strong>，所以输入张量必须落在与捕获时相同的缓冲区里、形状也必须一致——这也是为什么 SGLang 会预先分配固定大小的输入输出缓冲区，并按若干预设的 batch 尺寸分别捕获多张图，运行时再挑形状最接近的那张来重放。</p>
+<p>那么哪些东西会"打断"图？典型是<strong>依赖数据的控制流</strong>：比如根据某个张量里实际算出来的值，去决定要不要走某条分支、要循环几次、要处理多长的序列。这类逻辑发生在 host（CPU）侧，且每次的走向都可能不同，无法被录进一张固定的图里。变长输入带来的<strong>动态形状</strong>同理——形状一变，捕获时记录的地址与启动参数就全部失配。分段图的智慧就在于：不强求把整条前向塞进一张图，而是承认"有些段天生是动态的"，把它们留给 eager，只把真正静态、可复用的子段固化成图。</p>
+
+<table class="t"><tr><th>被融合的算子</th><th>为什么要融</th></tr>
+<tr><td><span class="mono">SiluAndMul</span>（gate×up 激活）</td><td>免去 silu 临时张量的 HBM 写/读，两趟变一趟，一次启动</td></tr>
+<tr><td><span class="mono">fused_add_rmsnorm</span>（残差相加 + RMSNorm，第36课）</td><td>相加结果留在寄存器直接归一化，省一次往返与一次启动</td></tr>
+<tr><td>fused qk-norm + RoPE</td><td>归一化与旋转位置编码同内核完成，减少访存与提交</td></tr>
+<tr><td>融合后形状固定的内核</td><td>静态形状 → 图友好 → 可被 CUDA Graph 捕获重放</td></tr></table>
+
+<h2>三、二者如何配合：少 + 融 + 静态 → 捕获 → 重放</h2>
+<p>把两件事串起来看，逻辑非常顺：先用<strong>融合</strong>把内核数量压下来、把中间访存消灭掉，让前向里大部分内核既<strong>少</strong>又<strong>形状固定</strong>；这样的内核序列恰好满足 CUDA Graph 的静态前提，于是可以<strong>捕获一次</strong>，之后每步解码<strong>反复重放</strong>，把"CPU 逐个提交内核"的开销几乎归零。对于带宽受限、启动开销敏感的解码阶段（<span class="mono">第4课</span>），这正是吞吐能上去的关键一环。</p>
+<p>对于那些实在无法静态化的算子（典型如某些动态形状或数据依赖分支），就交给<strong>分段图</strong>：把它们隔在捕获区之外，用 eager 跑，其余静态子段照常捕获重放。需要强调的是，这些内核本体并不是凭空出现的——它们来自<span class="mono">第38课</span>的 AOT 预编译算子和<span class="mono">第39课</span>的 JIT 即时编译；融合与图只是在更高层把这些内核<strong>编排</strong>得更省、更快。</p>
+<p>可以用一个量化的直觉来感受这套配合的威力。假设解码每步要发起一千个内核，每次启动的 CPU 提交开销约两微秒，那么光是提交就要两毫秒；而如果这一千个内核里有九成能被融合压缩并捕获进一张图，重放时这部分几乎不再有逐内核的提交成本，省下的时间就直接变成了更高的 token 生成速率。换句话说，融合负责"把内核变少、变规整"，CUDA Graph 负责"把这批规整的内核以极低成本喷给硬件"，二者一前一后，缺一不可：只融合不入图，仍要逐个提交；只入图不融合，捕获的内核又多又杂，收益有限。</p>
+<p>还要记住一个层次关系：融合与图都属于"<strong>编排层</strong>"的优化，它们不生产内核，只决定内核怎么被组织和调用。真正的内核实现住在更底层——要么是<span class="mono">第38课</span>里随包预编译好的 AOT 算子，要么是<span class="mono">第39课</span>里按需即时编译的 JIT 算子。理解这条分工，能帮你在排查性能问题时迅速定位：是某个内核本身慢（该去看 AOT/JIT 实现与 kernel 调优），还是内核没被融合、没被入图导致启动开销爆炸（该去看融合路径与图捕获范围）。</p>
+
+<div class="cols"><div class="col"><strong>融合友好（静态形状，可入图）</strong><ul><li><span class="mono">SiluAndMul</span> 等逐元素融合：形状由隐藏维决定，固定</li><li><span class="mono">fused_add_rmsnorm</span>：残差 + 归一，形状确定</li><li>fused qk-norm + RoPE：固定头维与序列布局</li><li>这些可被一并捕获进同一张图，重放零提交开销</li></ul></div><div class="col"><strong>打断图（依赖数据 / 动态形状）</strong><ul><li>变长输入、动态 batch/seq 形状的算子</li><li>"看数据再决定分支"的 host 侧控制流</li><li>必须留在捕获区之外，或用分段图夹在小图之间</li><li>以 eager 即时执行，避免破坏已捕获的静态子段</li></ul></div></div>
+
+<h2>四、把它们落到一段真实代码上</h2>
+<p>下面这段是 SGLang 中 <span class="mono">SiluAndMul</span> 的浓缩版。请重点对比两个前向：<span class="mono">forward_native</span> 是"<strong>两趟 + 临时张量</strong>"的参考实现，<span class="mono">forward_cuda</span> 是"<strong>一个 kernel 同时做 silu 与乘</strong>"的融合实现。后者写出的 <span class="mono">out</span> 只在最后落一次显存，silu 的中间结果全程留在寄存器，因此访存更少、启动更少，且形状固定——正好是 CUDA Graph 喜欢的样子。</p>
+<p>注意 <span class="mono">forward_native</span> 里那行 <span class="mono">F.silu(x[..., :d]) * x[..., d:]</span>：它把张量从隐藏维的中点切成前后两半，前半是门控（gate）、后半是上投影（up）。表达式先算 silu，PyTorch 会为这个中间结果分配一块显存并写入，随后乘法再把它读回来——这就是那一次多余的临时张量往返。而 <span class="mono">forward_cuda</span> 先用 <span class="mono">torch.empty</span> 备好输出缓冲，再调用 <span class="mono">silu_and_mul(x, out)</span> 这个自定义算子，它最终落到 <span class="mono">torch.ops.sgl_kernel.silu_and_mul</span>，在 GPU 上以单趟方式同时完成切分、silu 与逐元素乘。输出缓冲尺寸只依赖于隐藏维的一半 <span class="mono">d</span>，是个静态值，因此这个内核在解码时形状固定、可以被安心地捕获进图反复重放。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>融合 Fuse</h4><p class="mono">SiluAndMul</p><p>把多个小算子合成一个 kernel，消除临时张量与多次启动。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>定形 Fix shape</h4><p class="mono">static shape</p><p>融合后的内核形状静态、行为确定，满足图的前提。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>捕获 Capture</h4><p class="mono">CUDA Graph</p><p>把这串静态内核录成一张图（第27课）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>重放 Replay</h4><p class="mono">replay</p><p>每步解码直接重放，CPU 提交开销近乎为零。</p></div></div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/activation.py ::SiluAndMul</span><span class="ln">未融合：两趟 + 临时张量；融合：一个 kernel 同时做 silu 与乘</span></div><pre>class SiluAndMul(MultiPlatformOp):
+    # gate-and-up activation: split x in half, then silu(gate) * up
+
+    def forward_native(self, x):        # reference: TWO ops + a temporary in HBM
+        d = x.shape[-1] // 2
+        return F.silu(x[..., :d]) * x[..., d:]
+
+    def forward_cuda(self, x):          # FUSED: one kernel does silu AND mul
+        d = x.shape[-1] // 2
+        out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
+        silu_and_mul(x, out)            # -&gt; torch.ops.sgl_kernel.silu_and_mul
+        return out</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><strong>融合</strong>把多个小算子合成一个内核，消除中间临时张量的 <span class="mono">HBM</span> 往返，并把多次<strong>启动开销</strong>压成一次。</li>
+<li><span class="mono">SiluAndMul</span> 的 <span class="mono">forward_native</span> 是"先 silu 再乘"的两趟参考实现；<span class="mono">forward_cuda</span> 在一个 kernel 里同时做，数据留在寄存器。</li>
+<li>SGLang 常见融合：<span class="mono">SiluAndMul</span>、<span class="mono">fused_add_rmsnorm</span>（第36课）、fused qk-norm+RoPE。</li>
+<li><strong>CUDA Graph</strong>（第27课）捕获固定内核序列再重放，几乎零提交开销，但要求<strong>静态形状、无数据依赖分支</strong>。</li>
+<li>融合后形状固定的内核<strong>图友好</strong>；动态/数据依赖的算子须留在捕获区外，或用<strong>分段/可打断图</strong>夹在小图之间以 eager 执行。</li>
+<li><strong>少 + 融 + 静态 → 捕获一次 → 反复重放</strong>，是带宽受限解码阶段（第4课）吞吐的关键；内核本体来自第38课（AOT）/ 第39课（JIT）。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 把多个小算子<strong>融合（fusion）</strong>成一个内核，最直接节省的两样东西是什么？</div>
+  <ol class="opts">
+    <li>注意力的序列长度上限</li>
+    <li>模型参数量与显存总占用</li>
+    <li>量化所需的校准数据集大小</li>
+    <li><strong>中间临时张量的 HBM 往返（写出又读回）+ 多次内核启动开销</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。融合把相邻算子合在一个内核里，silu 这类中间结果留在<strong>寄存器</strong>而非写回 <span class='mono'>HBM</span> 再读出，省掉访存往返；同时多次启动被压成一次，省掉启动开销。它不改变参数量、序列上限或量化数据。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <strong>CUDA Graph</strong>（第27课，捕获/重放）对被捕获的内核序列有什么<strong>硬性要求</strong>？</div>
+  <ol class="opts">
+    <li><strong>形状必须静态、且不能有依赖数据的控制流（host 侧分支）</strong></li>
+    <li>所有算子都必须用 FP8 量化</li>
+    <li>每次重放都要重新编译内核</li>
+    <li>必须运行在多卡张量并行下才能捕获</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。图捕获记录的是固定指针与启动参数，因此<strong>形状必须静态、无数据依赖分支</strong>，否则录下的图对不上。它与量化、并行度无关，且重放正是为了<strong>免去</strong>重新提交/编译。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 遇到<strong>动态形状或数据依赖分支</strong>的算子，SGLang 如何既享受图的低开销又不被它们拖累？</div>
+  <ol class="opts">
+    <li>彻底放弃 CUDA Graph，整条前向都用 eager</li>
+    <li>强行把动态算子也塞进同一张图，靠运气重放</li>
+    <li>把动态形状一律 padding 到最大值，从不分段</li>
+    <li><strong>用分段/可打断图：捕获静态子段，动态部分夹在小图之间以 eager 即时执行</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。分段/可打断图把前向拆成若干静态子段分别捕获，动态部分（动态形状、host 分支）在小图之间以 eager 执行，从而既保住大多数内核的零提交开销，又不破坏已捕获的静态段。把动态算子硬塞进一张图会破坏捕获，整条 eager 又丢掉收益。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>以 <span class='mono'>SiluAndMul</span> 为例，说明<strong>未融合</strong>的 <span class='mono'>forward_native</span>（先 silu 再乘）相比<strong>融合</strong>的 <span class='mono'>forward_cuda</span>（一个 kernel 同时做）多付出了哪些代价：从 <span class='mono'>HBM</span> 往返与<strong>启动开销</strong>两个角度展开，并说明这对带宽受限的解码阶段（第4课）为何重要。</li>
+    <li>解释融合与 CUDA Graph 如何<strong>配合</strong>：为什么“少 + 融 + 静态形状”的内核序列正好满足图的捕获前提，从而能<strong>捕获一次、反复重放</strong>把 CPU 提交开销降到近零；再说明被融合/捕获的内核本体来自第38课（AOT）与第39课（JIT）这一事实意味着什么。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">In this lesson we drop all the way down from the "algorithm layer" to the "kernel layer" and study two hardware-level speedups — <strong>operator fusion</strong> and <strong>CUDA graphs (capture/replay)</strong> — and, crucially, how they <strong>cooperate</strong> to push decode throughput to the limit. Fusion attacks "too many memory trips and too many launches per computation"; CUDA graphs attack "the CPU keeps submitting kernels, and submission itself becomes the bottleneck." Stacked together, they give SGLang's decode path its near-zero-overhead kernel pipeline.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div><p>Think of one kernel launch as "a round trip to the warehouse." <strong>Unfused</strong> is like: go fetch raw material (read HBM), process it into a half-product and ship it back (write HBM), then the next step fetches that half-product again (read HBM) to keep working. The hauling alone burns huge time, and the GPU's "warehouse" (memory) bandwidth is finite. <strong>Fusion</strong> is like merging several adjacent steps into one workshop done in a single pass, keeping the half-product right on the bench (registers) instead of round-tripping to the warehouse.</p><p>And a <span class="mono">CUDA graph</span> is like recording today's whole assembly-line choreography ahead of time: each run, the foreman (CPU) need not bark every command — just <strong>play the recording (replay)</strong> and the machines follow. The catch: the moves must be <strong>identical</strong> every time (fixed shapes, no branch that is decided by looking at data), or the recording no longer matches.</p></div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div><p>Recall <span class="mono">Lesson 4</span>: decoding is <strong>bandwidth-bound</strong>; per-token compute utilization is low and the bottleneck is moving data and issuing instructions. So anything that <strong>cuts HBM round-trips</strong> and <strong>cuts kernel launch count</strong> converts directly into throughput. Fusion reduces both; CUDA graphs (<span class="mono">Lesson 27</span>) nearly eliminate the "CPU submission" part of the latter. The fused and captured kernels ultimately come from <span class="mono">Lesson 38 (AOT)</span> and <span class="mono">Lesson 39 (JIT)</span> — fusion and graphs merely <strong>orchestrate</strong> them better.</p></div>
+
+<h2>1. Operator fusion: merge many small kernels into one</h2>
+<p>Fusion has two core motivations. First, <strong>memory traffic (HBM round-trips)</strong>: unfused, every op reads its input from memory and writes its output back, and the next op reads it again. These intermediates (temporaries) add nothing to the final answer yet waste precious bandwidth. Second, <strong>launch overhead</strong>: every kernel launch costs a CPU submission and a GPU dispatch; in decode, where each step computes very little, launch overhead can exceed the real compute.</p>
+<p>Take SGLang's archetypal <span class="mono">SiluAndMul</span> (gate-and-up activation, gate×up). The unfused reference <span class="mono">forward_native</span> does it in <strong>two steps — silu THEN multiply</strong>: run <span class="mono">F.silu(gate)</span> on the first half into a temporary written to HBM, then read it back and multiply elementwise with the second half <span class="mono">up</span>. That is <strong>two kernel passes plus one extra temporary written and read</strong>. The fused <span class="mono">forward_cuda</span> does silu AND multiply in <strong>one kernel</strong>: once data is in registers, the silu result stays in <strong>registers</strong> for the multiply, never spilling to memory, writing only the final output once.</p>
+<p>SGLang has many similar fusions: <span class="mono">fused_add_rmsnorm</span> (residual-add fused with RMSNorm into one kernel, see <span class="mono">Lesson 36</span>), and fusing q/k normalization with RoPE (fused qk-norm+rope). Their common trait: <strong>kill the "write-out-then-read-back" intermediate inside registers/shared memory</strong>, and collapse several launches into one.</p>
+
+<div class="flow"><div class="node">read gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">write temp (HBM)</div><div class="arrow">→</div><div class="node">read temp + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
+<div class="flow"><div class="node">read x (HBM)</div><div class="arrow">→</div><div class="node">fused kernel: silu &amp; mul in registers</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
+
+<h2>2. CUDA graphs: capture once, replay many times</h2>
+<p>Recall <span class="mono">Lesson 27</span>: a CUDA graph records a <strong>fixed sequence of kernel launches</strong> (capture), and then each decode step just <strong>replays</strong> that graph with almost no CPU-side submission overhead. This matters enormously for decode, because each step computes so little that per-kernel CPU submission balloons into the dominant cost.</p>
+<p>But CUDA graphs impose two hard constraints: <strong>shapes must be static</strong> and <strong>no data-dependent control branching</strong>. Capture records concrete pointers and launch parameters; if next time a tensor's shape changes, or the program "looks at data to decide which branch to take," the recorded graph no longer applies. Hence: <strong>fixed-shape, deterministic fused kernels are inherently graph-friendly</strong>; ops whose <strong>shapes vary, or that branch on the host side</strong>, must stay <strong>outside</strong> the captured region.</p>
+<p>SGLang's answer is <strong>piecewise / breakable graphs (<span class="mono">Lesson 27</span>)</strong>: split the forward into several "static sub-spans," capture each as a small graph, and run the dynamic bits in between (dynamic shapes, host-side branches) <strong>eagerly</strong>. This way you get near-zero launch overhead on most kernels without being held back by the few dynamic ops.</p>
+
+<table class="t"><tr><th>Fused op</th><th>Why fuse it</th></tr>
+<tr><td><span class="mono">SiluAndMul</span> (gate×up activation)</td><td>Drops the silu temporary's HBM write/read; two passes become one, one launch</td></tr>
+<tr><td><span class="mono">fused_add_rmsnorm</span> (residual-add + RMSNorm, Lesson 36)</td><td>Sum stays in registers and is normalized in place; saves a round-trip and a launch</td></tr>
+<tr><td>fused qk-norm + RoPE</td><td>Normalization and rotary embedding in one kernel; less traffic, fewer submissions</td></tr>
+<tr><td>Fixed-shape kernels after fusion</td><td>Static shape → graph-friendly → capturable/replayable by a CUDA graph</td></tr></table>
+
+<h2>3. How they cooperate: fewer + fused + static → capture → replay</h2>
+<p>Chaining the two ideas, the logic is clean: first use <strong>fusion</strong> to shrink the kernel count and erase intermediate traffic, so most kernels in the forward are both <strong>few</strong> and <strong>fixed-shape</strong>; such a kernel sequence exactly satisfies the CUDA graph's static premise, so you can <strong>capture once</strong> and then <strong>replay</strong> it every decode step, driving the "CPU submits each kernel" cost to nearly zero. For the bandwidth-bound, launch-sensitive decode stage (<span class="mono">Lesson 4</span>), this is a key reason throughput can climb.</p>
+<p>For ops that truly cannot be made static (e.g. some dynamic shapes or data-dependent branches), hand them to <strong>piecewise graphs</strong>: keep them outside the captured region, run them eagerly, and capture/replay the remaining static sub-spans as usual. Note these kernels are not conjured from nowhere — they come from <span class="mono">Lesson 38</span>'s AOT-precompiled kernels and <span class="mono">Lesson 39</span>'s JIT kernels; fusion and graphs merely <strong>orchestrate</strong> them more cheaply and quickly at a higher level.</p>
+
+<div class="cols"><div class="col"><strong>Fusion-friendly (static shape, capturable)</strong><ul><li><span class="mono">SiluAndMul</span> and other elementwise fusions: shape set by hidden dim, fixed</li><li><span class="mono">fused_add_rmsnorm</span>: residual + norm, deterministic shape</li><li>fused qk-norm + RoPE: fixed head dim and sequence layout</li><li>These can be captured together into one graph, replayed with zero submission cost</li></ul></div><div class="col"><strong>Graph-breaking (data-dependent / dynamic shape)</strong><ul><li>Ops with variable-length input or dynamic batch/seq shapes</li><li>Host-side control branching that "branches after looking at data"</li><li>Must stay outside the captured region, or sit between small graphs in a piecewise graph</li><li>Run eagerly so the captured static sub-spans are not broken</li></ul></div></div>
+
+<h2>4. Grounding it in real code</h2>
+<p>Below is a condensed version of SGLang's <span class="mono">SiluAndMul</span>. Focus on the two forwards: <span class="mono">forward_native</span> is the "<strong>two passes + a temporary</strong>" reference, while <span class="mono">forward_cuda</span> is the "<strong>one kernel does silu and multiply</strong>" fused version. The latter writes <span class="mono">out</span> to memory only once at the end, keeping silu's intermediate in registers throughout — less traffic, fewer launches, and a fixed shape, exactly what a CUDA graph likes.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Fuse</h4><p class="mono">SiluAndMul</p><p>Merge several small ops into one kernel; kill temporaries and extra launches.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Fix shape</h4><p class="mono">static shape</p><p>The fused kernel is static-shaped and deterministic, meeting the graph premise.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Capture</h4><p class="mono">CUDA Graph</p><p>Record this static kernel run into a graph (Lesson 27).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p class="mono">replay</p><p>Each decode step replays it; CPU submission cost near zero.</p></div></div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/activation.py ::SiluAndMul</span><span class="ln">unfused: two passes + a temporary; fused: one kernel does silu and multiply</span></div><pre>class SiluAndMul(MultiPlatformOp):
+    # gate-and-up activation: split x in half, then silu(gate) * up
+
+    def forward_native(self, x):        # reference: TWO ops + a temporary in HBM
+        d = x.shape[-1] // 2
+        return F.silu(x[..., :d]) * x[..., d:]
+
+    def forward_cuda(self, x):          # FUSED: one kernel does silu AND mul
+        d = x.shape[-1] // 2
+        out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
+        silu_and_mul(x, out)            # -&gt; torch.ops.sgl_kernel.silu_and_mul
+        return out</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><strong>Fusion</strong> merges several small ops into one kernel, eliminating intermediate temporaries' <span class="mono">HBM</span> round-trips and collapsing many <strong>launches</strong> into one.</li>
+<li><span class="mono">SiluAndMul</span>'s <span class="mono">forward_native</span> is the "silu then multiply" two-pass reference; <span class="mono">forward_cuda</span> does both in one kernel with data kept in registers.</li>
+<li>Common SGLang fusions: <span class="mono">SiluAndMul</span>, <span class="mono">fused_add_rmsnorm</span> (Lesson 36), fused qk-norm+RoPE.</li>
+<li><strong>CUDA graphs</strong> (Lesson 27) capture a fixed kernel sequence and replay it with near-zero submission cost, but require <strong>static shapes and no data-dependent branches</strong>.</li>
+<li>Fixed-shape fused kernels are <strong>graph-friendly</strong>; dynamic/data-dependent ops must stay outside the captured region, or sit between small graphs in a <strong>piecewise/breakable graph</strong>, run eagerly.</li>
+<li><strong>Fewer + fused + static → capture once → replay</strong> is key to bandwidth-bound decode throughput (Lesson 4); the kernels themselves come from Lesson 38 (AOT) / Lesson 39 (JIT).</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. When several small ops are <strong>fused</strong> into one kernel, what two things are most directly saved?</div>
+  <ol class="opts">
+    <li>The maximum sequence length of attention</li>
+    <li>Model parameter count and total memory footprint</li>
+    <li>The size of the calibration dataset needed for quantization</li>
+    <li><strong>The intermediate temporary's HBM round-trips (write-out then read-back) + multiple kernel launch overheads</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Fusion merges adjacent ops into one kernel; intermediates like silu stay in <strong>registers</strong> instead of being written to <span class='mono'>HBM</span> and read back, saving round-trips, while several launches collapse into one, saving launch overhead. It changes neither parameter count, sequence limits, nor quantization data.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What <strong>hard requirement</strong> does a <strong>CUDA graph</strong> (Lesson 27, capture/replay) impose on the captured kernel sequence?</div>
+  <ol class="opts">
+    <li><strong>Shapes must be static and there must be no data-dependent control flow (host-side branches)</strong></li>
+    <li>Every op must be FP8-quantized</li>
+    <li>Each replay must recompile the kernels</li>
+    <li>It can only be captured under multi-GPU tensor parallelism</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Capture records fixed pointers and launch parameters, so <strong>shapes must be static with no data-dependent branches</strong>, else the recorded graph no longer matches. It is unrelated to quantization or parallelism, and replay exists precisely to <strong>avoid</strong> re-submission/recompilation.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. For ops with <strong>dynamic shapes or data-dependent branches</strong>, how does SGLang still enjoy the graph's low overhead without being held back?</div>
+  <ol class="opts">
+    <li>Abandon CUDA graphs entirely and run the whole forward eagerly</li>
+    <li>Force the dynamic ops into the same graph and hope the replay works</li>
+    <li>Always pad dynamic shapes to the maximum and never split</li>
+    <li><strong>Use piecewise/breakable graphs: capture the static sub-spans and run the dynamic bits eagerly between the small graphs</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Piecewise/breakable graphs split the forward into static sub-spans captured separately, running the dynamic parts (dynamic shapes, host branches) eagerly between the small graphs, keeping zero-submission cost on most kernels without breaking the captured spans. Forcing dynamic ops into one graph breaks capture, and going fully eager forfeits the benefit.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Using <span class='mono'>SiluAndMul</span>, explain what extra cost the <strong>unfused</strong> <span class='mono'>forward_native</span> (silu then multiply) pays versus the <strong>fused</strong> <span class='mono'>forward_cuda</span> (one kernel does both): develop it from both <span class='mono'>HBM</span> round-trips and <strong>launch overhead</strong>, and explain why this matters for the bandwidth-bound decode stage (Lesson 4).</li>
+    <li>Explain how fusion and CUDA graphs <strong>cooperate</strong>: why a 'fewer + fused + static-shape' kernel sequence exactly meets the graph's capture premise so it can be <strong>captured once and replayed</strong> to drive CPU submission cost near zero; then explain what it means that the fused/captured kernels themselves come from Lesson 38 (AOT) and Lesson 39 (JIT).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="40-attention-kernel-dissection.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">关键 attention kernel 剖析</span><span class="lang-en">Dissecting an attention kernel</span></div></a><a class="next" href="42-multi-hardware-backends.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">多硬件后端</span><span class="lang-en">Multi-hardware backends</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

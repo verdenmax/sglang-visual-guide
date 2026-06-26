@@ -2722,6 +2722,376 @@ QUIZZES = {
             },
         ],
     },
+    "38-sgl-kernel-overview.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "为什么 SGLang 要把热路径核函数放进一个<strong>独立的 sgl-kernel 工程</strong>、用 <strong>AOT</strong> 预编译成 <span class='mono'>.so</span> 随 wheel 发布，而不是启动时现编？",
+                    "en": "Why does SGLang put hot-path kernels in a <strong>separate sgl-kernel project</strong> and <strong>AOT</strong>-compile them into a <span class='mono'>.so</span> shipped in the wheel, instead of compiling at startup?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>CUDA kernel 经 nvcc 编译/链接要几分钟，若每次启动现编延迟无法接受；把稳定通用的 kernel 提前编进 .so，装好即用、启动零编译开销</strong>，这正契合第 4 课解码带宽受限、kernel 质量直接决定吞吐",
+                        "en": "<strong>A CUDA kernel takes minutes to compile/link via nvcc; compiling on every startup is unacceptable. Pre-compiling stable, general kernels into the .so means install-and-go with zero startup compile cost</strong>, fitting Lesson 4's bandwidth-bound decode where kernel quality decides throughput",
+                    },
+                    {"zh": "因为 Python 不能调用 C++ 代码，必须先编成独立可执行文件", "en": "Because Python cannot call C++ code, so it must be built into a standalone executable first"},
+                    {"zh": "为了让每个用户在自己机器上重新训练模型权重", "en": "To let each user re-train the model weights on their own machine"},
+                    {"zh": "因为 PyTorch 不支持自定义算子，只能走子进程", "en": "Because PyTorch does not support custom ops, so a subprocess is the only option"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "AOT 的核心动机是<strong>把编译挪到发布时</strong>：nvcc 编译耗时几分钟，提前编进 wheel 里的 <span class='mono'>.so</span> 就能启动零开销。Python 当然能通过 <span class='mono'>torch.ops</span> 调 C++/CUDA，PyTorch 也明确支持自定义算子,与训练权重、子进程都无关。",
+                    "en": "AOT's core motivation is <strong>moving compilation to release time</strong>: nvcc takes minutes, so pre-compiling into the wheel's <span class='mono'>.so</span> gives zero startup overhead. Python certainly can call C++/CUDA via <span class='mono'>torch.ops</span>, and PyTorch explicitly supports custom ops; this has nothing to do with re-training weights or subprocesses.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>sgl-kernel/python/sgl_kernel/</span> 下的薄包装（如 <span class='mono'>attention.py</span> 的 <span class='mono'>merge_state_v2</span>）<strong>主要负责什么</strong>？",
+                    "en": "What is the <strong>main job</strong> of the thin wrappers under <span class='mono'>sgl-kernel/python/sgl_kernel/</span> (e.g. <span class='mono'>merge_state_v2</span> in <span class='mono'>attention.py</span>)?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>做形状/dtype 校验与规整、按需分配输出张量，然后把活儿转交给 <span class='mono'>torch.ops.sgl_kernel.&lt;name&gt;</span></strong>——包装薄如纸，真正的算法在编译好的 csrc kernel 里",
+                        "en": "<strong>Validate/normalize shapes and dtypes, allocate output tensors as needed, then forward to <span class='mono'>torch.ops.sgl_kernel.&lt;name&gt;</span></strong> — the wrapper is paper-thin, the real algorithm is in the compiled csrc kernel",
+                    },
+                    {"zh": "在 Python 里用纯 Python 循环实现完整的注意力计算", "en": "Implement the full attention computation with pure-Python loops"},
+                    {"zh": "在运行时用 nvcc 重新编译整个 .so", "en": "Re-compile the entire .so with nvcc at runtime"},
+                    {"zh": "负责把模型权重从磁盘加载进显存", "en": "Load the model weights from disk into device memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "薄包装只做三件小事:dtype 转换/校验、分配输出、<span class='mono'>torch.ops</span> 转交,几乎不含算法逻辑。它<strong>不</strong>在 Python 里算注意力(那在 kernel 里),不在运行时重编 AOT 的 .so,也不负责加载权重。",
+                    "en": "A thin wrapper does just three small things: dtype cast/validate, allocate outputs, forward to <span class='mono'>torch.ops</span>, with almost no algorithmic logic. It does <strong>not</strong> compute attention in Python (that's in the kernel), does not re-compile the AOT .so at runtime, and does not load weights.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "Python 代码最终是<strong>通过什么机制</strong>跳进编译进 <span class='mono'>.so</span> 的 C++/CUDA kernel 的？",
+                    "en": "Through <strong>what mechanism</strong> does Python code ultimately jump into the C++/CUDA kernel compiled into the <span class='mono'>.so</span>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>注册胶水 <span class='mono'>common_extension.cc</span> 用 <span class='mono'>TORCH_LIBRARY</span> 把每个 kernel 注册成 PyTorch 自定义算子，挂在 <span class='mono'>torch.ops.sgl_kernel.*</span> 命名空间下，Python 由此直接调入原生代码</strong>",
+                        "en": "<strong>The registration glue <span class='mono'>common_extension.cc</span> uses <span class='mono'>TORCH_LIBRARY</span> to register each kernel as a PyTorch custom op under the <span class='mono'>torch.ops.sgl_kernel.*</span> namespace, through which Python calls straight into native code</strong>",
+                    },
+                    {"zh": "通过 HTTP 请求把张量发到一个本地 GPU 服务进程", "en": "By sending tensors over HTTP to a local GPU service process"},
+                    {"zh": "通过把 Python 代码翻译成 CUDA 源码再编译", "en": "By transpiling the Python code into CUDA source and compiling it"},
+                    {"zh": "通过 ctypes 直接 dlopen 一个匿名 .so，绕过 PyTorch", "en": "By dlopen-ing an anonymous .so directly via ctypes, bypassing PyTorch"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "kernel 经 <span class='mono'>common_extension.cc</span>(及 rocm/musa 变体)用 <span class='mono'>TORCH_LIBRARY</span> 注册成 <span class='mono'>torch.ops.sgl_kernel.*</span>,这是 Python 进入原生代码的标准门。它不走 HTTP,不在运行时翻译 Python,也不绕开 PyTorch 裸 dlopen。",
+                    "en": "Kernels are registered via <span class='mono'>common_extension.cc</span> (and rocm/musa variants) using <span class='mono'>TORCH_LIBRARY</span> as <span class='mono'>torch.ops.sgl_kernel.*</span>, the standard door from Python into native code. It is not HTTP, not runtime transpilation of Python, and not a bare dlopen bypassing PyTorch.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用 <span class='mono'>merge_state_v2</span> 为例，描述 sgl-kernel 的<strong>通用调用模式</strong>：薄 Python 包装(dtype 转换 + 输出分配) → <span class='mono'>torch.ops.sgl_kernel.&lt;name&gt;</span> → 编译进 .so 的 csrc kernel。并说明这个算子在做什么(合并两段 split-KV 的部分注意力状态 v/s)，以及为什么把「校验/分配」留在 Python、把「计算」留在 kernel 是合理的分层。",
+                "en": "Using <span class='mono'>merge_state_v2</span> as the example, describe sgl-kernel's <strong>general calling pattern</strong>: thin Python wrapper (dtype cast + output allocation) → <span class='mono'>torch.ops.sgl_kernel.&lt;name&gt;</span> → the csrc kernel compiled into the .so. Explain what the op does (merging two split-KV partial attention states v/s), and why keeping 'validate/allocate' in Python and 'compute' in the kernel is a sound layering.",
+            },
+            {
+                "zh": "对比 <strong>AOT</strong> 与 <strong>JIT</strong>(第 39 课前瞻)两条编译路线:各自适合什么样的 kernel、各自的启动/首次开销与改动代价(AOT 改动要重打整个 wheel,JIT 可即时生效)如何?并结合 <span class='mono'>csrc/</span> 的目录划分(attention/gemm/moe/quantization 等)与第 33–36 课的上层,说明为什么 sgl-kernel 是整个推理引擎的性能地基。",
+                "en": "Contrast the <strong>AOT</strong> and <strong>JIT</strong> (Lesson 39 preview) compile paths: what kind of kernel each suits, and their startup/first-time costs and change costs (AOT requires re-packing the whole wheel, JIT can take effect instantly). Then, drawing on <span class='mono'>csrc/</span>'s directory split (attention/gemm/moe/quantization, etc.) and the Lesson 33–36 upper layers, explain why sgl-kernel is the performance foundation of the whole inference engine.",
+            },
+        ],
+    },
+    "39-jit-kernel.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 <span class='mono'>jit_kernel</span> 这条 <strong>JIT（运行时即时编译）</strong>路线里，<span class='mono'>load_jit(...)</span> 第一次和后续调用的开销有何不同？",
+                    "en": "On the <span class='mono'>jit_kernel</span> <strong>JIT (runtime just-in-time)</strong> path, how does the cost of the first <span class='mono'>load_jit(...)</span> call differ from later calls?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>首次调用付一次性 nvcc 编译成本，随后把编好的 .so 按唯一标记缓存；后续调用命中缓存直接复用、不再重编，与 AOT 同速</strong>",
+                        "en": "<strong>The first call pays a one-time nvcc compile cost, then caches the built .so by a unique marker; later calls hit the cache and reuse it with no recompile, as fast as AOT</strong>",
+                    },
+                    {"zh": "每次调用都会重新编译一遍源码，所以永远比 AOT 慢", "en": "Every call recompiles the source, so it is always slower than AOT"},
+                    {"zh": "首次调用不编译，要等到第二次调用才触发 nvcc", "en": "The first call does not compile; nvcc is only triggered on the second call"},
+                    {"zh": "它完全不编译，直接解释执行 CUDA 源码", "en": "It never compiles and just interprets the CUDA source directly"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "JIT 的精髓是<strong>编译一次、之后复用</strong>：首次现场跑 nvcc 付一次成本，之后命中按唯一标记缓存的 <span class='mono'>.so</span>，和 AOT 一样快。它绝不是每次重编，也不是解释执行。",
+                    "en": "The essence of JIT is <strong>compile once, reuse later</strong>: the first call runs nvcc on the spot for a one-time cost, then later calls hit the <span class='mono'>.so</span> cached by a unique marker, as fast as AOT. It does not recompile each time, nor interpret.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>load_jit</span> 中的一个 <strong>wrapper</strong> 是 <span class='mono'>(export_name, kernel_name)</span> 二元组，它的作用是什么？",
+                    "en": "A <strong>wrapper</strong> in <span class='mono'>load_jit</span> is an <span class='mono'>(export_name, kernel_name)</span> tuple. What is its role?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>把一个面向 Python 的可调用名字映射到底层某个 C++/CUDA 核类</strong>，编译后即可从 Python 调用该核",
+                        "en": "<strong>It maps a Python-facing callable name to some underlying C++/CUDA kernel class</strong>, so after compilation the kernel can be called from Python",
+                    },
+                    {"zh": "它指定该核要在哪块 GPU 上运行", "en": "It specifies which GPU the kernel should run on"},
+                    {"zh": "它是缓存 .so 用的文件系统路径", "en": "It is the filesystem path used to cache the .so"},
+                    {"zh": "它声明该核所需的最小显存大小", "en": "It declares the minimum VRAM the kernel needs"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "wrapper 做的是<strong>名字到核类的映射</strong>：<span class='mono'>export_name</span> 是 Python 侧可调用名，<span class='mono'>kernel_name</span> 是 C++/CUDA 核类。它和运行设备、缓存路径、显存声明都无关。",
+                    "en": "A wrapper does <strong>name-to-kernel-class mapping</strong>: <span class='mono'>export_name</span> is the Python-side callable name, <span class='mono'>kernel_name</span> is the C++/CUDA kernel class. It has nothing to do with device, cache path, or VRAM.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在为新算子选择 <strong>AOT（sgl-kernel，第38课）</strong>还是 <strong>JIT（jit_kernel）</strong>时，下列哪种判断<strong>最合理</strong>？",
+                    "en": "When choosing <strong>AOT (sgl-kernel, Lesson 38)</strong> vs <strong>JIT (jit_kernel)</strong> for a new op, which judgment is <strong>most sound</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>稳定、高频、要求开箱即用、且部署环境可能没有编译器 → AOT；实验性、需按 GPU 架构定制 codegen、想避免 wheel 膨胀 → JIT</strong>",
+                        "en": "<strong>Stable, hot, must be ready out of the box, and deploy env may lack a compiler → AOT; experimental, needs architecture-specific codegen, wants to avoid wheel bloat → JIT</strong>",
+                    },
+                    {"zh": "永远选 JIT，因为它没有任何代价", "en": "Always choose JIT because it has no cost"},
+                    {"zh": "永远选 AOT，因为 JIT 无法达到与编译核相同的性能", "en": "Always choose AOT because JIT can never match compiled-kernel performance"},
+                    {"zh": "随便选，二者在分发与首调延迟上完全等价", "en": "Pick either; the two are fully equivalent in shipping and first-call latency"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "选择本质是权衡：AOT 开箱即用、零首调延迟但 wheel 大且需提前枚举架构；JIT 灵活、wheel 瘦但有首调编译延迟且需工具链。命中缓存后 JIT 与 AOT 同速，所以并非“JIT 永远慢”，也不是“二者等价”。",
+                    "en": "The choice is a trade-off: AOT is ready out of the box with zero first-call latency but a large wheel and pre-enumerated architectures; JIT is flexible with a slim wheel but has first-call compile latency and needs a toolchain. After a cache hit JIT equals AOT, so it is neither 'always slower' nor 'equivalent'.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用一句话解释 <span class='mono'>load_jit</span> 的“<strong>按需编译 + 缓存 .so</strong>”机制，并说明唯一标记（marker）在缓存复用中的作用，以及为什么这种设计能让 JIT 在保留灵活性的同时仍保持高性能。",
+                "en": "In one sentence explain <span class='mono'>load_jit</span>'s '<strong>compile on demand + cache the .so</strong>' mechanism, the role of the unique marker in cache reuse, and why this design lets JIT stay high-performance while keeping flexibility.",
+            },
+            {
+                "zh": "对比 <strong>AOT</strong> 与 <strong>JIT</strong> 两条编译路线“殊途同归”的地方与分歧点：两者最终都成为指向已编译核的 <span class='mono'>torch.ops</span> 风格调用，差别只在“何时/如何构建与分发”。结合 <span class='mono'>activation.py</span> 按 dtype 建模块、<span class='mono'>norm.py</span> 的 JIT <span class='mono'>fused_add_rmsnorm</span>（第36课所用），说明各自适合什么样的 kernel。",
+                "en": "Contrast where <strong>AOT</strong> and <strong>JIT</strong> 'reach the same destination' yet diverge: both become <span class='mono'>torch.ops</span>-style callables into compiled kernels, differing only in 'when/how they're built and shipped'. Using <span class='mono'>activation.py</span> building per-dtype modules and <span class='mono'>norm.py</span>'s JIT <span class='mono'>fused_add_rmsnorm</span> (used by Lesson 36), explain what kind of kernel each suits.",
+            },
+        ],
+    },
+    "40-attention-kernel-dissection.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 <strong>decode（解码）</strong>注意力核函数里，紧接着拿到一行 Q 之后，核函数真正做的<strong>第一步</strong>是什么？",
+                    "en": "In a <strong>decode</strong> attention kernel, right after receiving one row of Q, what is the kernel's true <strong>first step</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>用 <span class='mono'>page_table</span> 从分页 KV 缓存里收集（gather）该序列散落在非连续页上的 K、V 块</strong>，之后才做 Q·Kᵀ → softmax → ·V",
+                        "en": "<strong>Use the <span class='mono'>page_table</span> to gather this sequence's K/V blocks scattered across non-contiguous pages from the paged KV cache</strong>, and only then do Q·Kᵀ → softmax → ·V",
+                    },
+                    {"zh": "立刻把整条序列的完整注意力分数矩阵物化到显存", "en": "Immediately materialise the full attention score matrix for the whole sequence in memory"},
+                    {"zh": "先对 V 做一次全量归一化，再去读 K", "en": "First fully normalise V, then read K"},
+                    {"zh": "把 KV 从分页布局复制成一整块连续显存再开始算", "en": "Copy KV from the paged layout into one contiguous block before computing"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "decode 的真正第一步是<strong>收集而非相乘</strong>：KV 被分页缓存切成非连续页，核函数靠 <span class='mono'>page_table</span> 把逻辑块翻译成物理页地址并 gather 回来，之后才进入点积与归一。它不会物化整张分数矩阵，也不会先复制成连续显存。",
+                    "en": "The true first step in decode is <strong>gather, not multiply</strong>: the paged cache stores KV in non-contiguous pages, so the kernel uses the <span class='mono'>page_table</span> to translate logical blocks to physical page addresses and gather them before any dot product. It does not materialise the full score matrix nor pre-copy into contiguous memory.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<strong>在线 softmax（FlashAttention 风格）</strong>之所以能在<strong>分块 tiling</strong> 流式处理时仍算出正确的归一化，关键机制是什么？",
+                    "en": "What is the key mechanism that lets <strong>online softmax (FlashAttention-style)</strong> still produce a correct normalisation while processing in <strong>tiles</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>维护运行最大值（running max）+ 运行分母（累计指数和），每来一个瓦片就按指数比例修正旧累计值，一遍流式扫描即得等价结果</strong>",
+                        "en": "<strong>Keep a running max + a running denominator (accumulated exp sum), rescaling the old totals by an exponential factor for each new tile, getting an equivalent result in one streaming pass</strong>",
+                    },
+                    {"zh": "先把所有瓦片的分数全部存下来，最后统一做一次标准 softmax", "en": "Store all tiles' scores first, then do one standard softmax at the end"},
+                    {"zh": "对每个瓦片各自独立做 softmax，再简单求平均", "en": "Do an independent softmax per tile, then just average them"},
+                    {"zh": "跳过求最大值的步骤，直接对原始分数取指数", "en": "Skip computing the max and just exponentiate the raw scores"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "在线 softmax 的核心是<strong>两个运行累计量</strong>：运行最大值与运行分母。新瓦片到来时用其局部最大值缩放之前的累计结果再加入贡献，因此无需存全部分数、一遍扫完即与全局 softmax 等价。逐瓦片独立 softmax 求平均是错误的，也不能跳过求最大值。",
+                    "en": "Online softmax hinges on <strong>two running quantities</strong>: a running max and a running denominator. When a new tile arrives, it rescales the previously accumulated result by the new local max and adds the contribution, so it needs no full score storage and one pass equals a global softmax. Per-tile independent softmax then averaging is wrong, and the max step cannot be skipped.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于 <strong>prefill（预填充）核函数</strong>与 <strong>decode 核函数</strong>的差异，下列哪种描述<strong>最准确</strong>？",
+                    "en": "Which description of the difference between the <strong>prefill kernel</strong> and the <strong>decode kernel</strong> is <strong>most accurate</strong>?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>prefill 查询位置很多、是又宽又厚的类 GEMM 稠密计算（偏算力）；decode 每步只有一个查询位置、又瘦又长、以按 page_table 在 KV 上 gather 为主（受带宽限制）</strong>",
+                        "en": "<strong>Prefill has many query positions and is a wide, thick GEMM-like dense compute (compute-leaning); decode has one query position per step, is skinny and long, dominated by page_table gather over KV (bandwidth-bound)</strong>",
+                    },
+                    {"zh": "两者完全相同，只是 decode 跑在更快的 GPU 上", "en": "They are identical; decode just runs on a faster GPU"},
+                    {"zh": "prefill 受带宽限制，decode 受算力限制", "en": "Prefill is bandwidth-bound and decode is compute-bound"},
+                    {"zh": "decode 每步要处理 prompt 的全部 token，所以比 prefill 更稠密", "en": "Decode processes all prompt tokens each step, so it is denser than prefill"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "两者形状与瓶颈相反：prefill 是对很多查询位置的类 GEMM 稠密大计算，偏算力；decode 每步仅一个查询位置，主体是 KV gather，受显存带宽限制（第4课）。所以 SGLang 为它们走不同核函数路径，绝非相同，也不是“prefill 受带宽限制”。",
+                    "en": "Their shapes and bottlenecks are opposite: prefill is a GEMM-like dense compute over many query positions (compute-leaning); decode has one query position per step and is dominated by KV gather, bandwidth-bound (Lesson 4). Hence SGLang takes different kernel paths; they are not identical, and prefill is not the bandwidth-bound one.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用自己的话描述一次 decode 注意力核函数的完整主线：从拿到一行 Q 开始，如何用 <span class='mono'>page_table</span> 从分页 KV 缓存收集非连续的 K、V，如何用<strong>分块 tiling</strong> 把瓦片流进 SRAM，并用<strong>在线 softmax</strong> 一遍算完 Q·Kᵀ → softmax → ·V。说明为什么这套设计本质上是“围绕带宽做减法”。",
+                "en": "In your own words, trace the full main line of one decode attention kernel: starting from one row of Q, how it uses the <span class='mono'>page_table</span> to gather non-contiguous K/V from the paged KV cache, how it streams tiles into SRAM via <strong>tiling</strong>, and how <strong>online softmax</strong> computes Q·Kᵀ → softmax → ·V in one pass. Explain why this design is essentially 'subtraction around bandwidth'.",
+            },
+            {
+                "zh": "结合 MLA（DeepSeek 风格）的真实皱褶说明 <span class='mono'>cutlass_mla_decode</span> 的封装做了什么：KV 为何存成压缩潜变量（<span class='mono'>D_latent=512</span>）+ rope（<span class='mono'>D_rope=64</span>），为什么要把头数补齐到 <span class='mono'>MAX_HEADS=128</span> 再派发给编译核函数，以及它和注意力后端（第33课）、CUDA Graph（第41课）的关系。",
+                "en": "Using MLA's (DeepSeek-style) real wrinkle, explain what the <span class='mono'>cutlass_mla_decode</span> wrapper does: why KV is stored as a compressed latent (<span class='mono'>D_latent=512</span>) + rope (<span class='mono'>D_rope=64</span>), why heads are padded to <span class='mono'>MAX_HEADS=128</span> before dispatching to the compiled kernel, and how it relates to attention backends (Lesson 33) and CUDA Graph (Lesson 41).",
+            },
+        ],
+    },
+    "41-operator-fusion-and-cuda-graph.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "把多个小算子<strong>融合（fusion）</strong>成一个内核，最直接节省的两样东西是什么？",
+                    "en": "When several small ops are <strong>fused</strong> into one kernel, what two things are most directly saved?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>中间临时张量的 HBM 往返（写出又读回）+ 多次内核启动开销</strong>",
+                        "en": "<strong>The intermediate temporary's HBM round-trips (write-out then read-back) + multiple kernel launch overheads</strong>",
+                    },
+                    {"zh": "模型参数量与显存总占用", "en": "Model parameter count and total memory footprint"},
+                    {"zh": "注意力的序列长度上限", "en": "The maximum sequence length of attention"},
+                    {"zh": "量化所需的校准数据集大小", "en": "The size of the calibration dataset needed for quantization"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "融合把相邻算子合在一个内核里，silu 这类中间结果留在<strong>寄存器</strong>而非写回 <span class='mono'>HBM</span> 再读出，省掉访存往返；同时多次启动被压成一次，省掉启动开销。它不改变参数量、序列上限或量化数据。",
+                    "en": "Fusion merges adjacent ops into one kernel; intermediates like silu stay in <strong>registers</strong> instead of being written to <span class='mono'>HBM</span> and read back, saving round-trips, while several launches collapse into one, saving launch overhead. It changes neither parameter count, sequence limits, nor quantization data.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<strong>CUDA Graph</strong>（第27课，捕获/重放）对被捕获的内核序列有什么<strong>硬性要求</strong>？",
+                    "en": "What <strong>hard requirement</strong> does a <strong>CUDA graph</strong> (Lesson 27, capture/replay) impose on the captured kernel sequence?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>形状必须静态、且不能有依赖数据的控制流（host 侧分支）</strong>",
+                        "en": "<strong>Shapes must be static and there must be no data-dependent control flow (host-side branches)</strong>",
+                    },
+                    {"zh": "所有算子都必须用 FP8 量化", "en": "Every op must be FP8-quantized"},
+                    {"zh": "必须运行在多卡张量并行下才能捕获", "en": "It can only be captured under multi-GPU tensor parallelism"},
+                    {"zh": "每次重放都要重新编译内核", "en": "Each replay must recompile the kernels"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "图捕获记录的是固定指针与启动参数，因此<strong>形状必须静态、无数据依赖分支</strong>，否则录下的图对不上。它与量化、并行度无关，且重放正是为了<strong>免去</strong>重新提交/编译。",
+                    "en": "Capture records fixed pointers and launch parameters, so <strong>shapes must be static with no data-dependent branches</strong>, else the recorded graph no longer matches. It is unrelated to quantization or parallelism, and replay exists precisely to <strong>avoid</strong> re-submission/recompilation.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "遇到<strong>动态形状或数据依赖分支</strong>的算子，SGLang 如何既享受图的低开销又不被它们拖累？",
+                    "en": "For ops with <strong>dynamic shapes or data-dependent branches</strong>, how does SGLang still enjoy the graph's low overhead without being held back?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>用分段/可打断图：捕获静态子段，动态部分夹在小图之间以 eager 即时执行</strong>",
+                        "en": "<strong>Use piecewise/breakable graphs: capture the static sub-spans and run the dynamic bits eagerly between the small graphs</strong>",
+                    },
+                    {"zh": "强行把动态算子也塞进同一张图，靠运气重放", "en": "Force the dynamic ops into the same graph and hope the replay works"},
+                    {"zh": "彻底放弃 CUDA Graph，整条前向都用 eager", "en": "Abandon CUDA graphs entirely and run the whole forward eagerly"},
+                    {"zh": "把动态形状一律 padding 到最大值，从不分段", "en": "Always pad dynamic shapes to the maximum and never split"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "分段/可打断图把前向拆成若干静态子段分别捕获，动态部分（动态形状、host 分支）在小图之间以 eager 执行，从而既保住大多数内核的零提交开销，又不破坏已捕获的静态段。把动态算子硬塞进一张图会破坏捕获，整条 eager 又丢掉收益。",
+                    "en": "Piecewise/breakable graphs split the forward into static sub-spans captured separately, running the dynamic parts (dynamic shapes, host branches) eagerly between the small graphs, keeping zero-submission cost on most kernels without breaking the captured spans. Forcing dynamic ops into one graph breaks capture, and going fully eager forfeits the benefit.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "以 <span class='mono'>SiluAndMul</span> 为例，说明<strong>未融合</strong>的 <span class='mono'>forward_native</span>（先 silu 再乘）相比<strong>融合</strong>的 <span class='mono'>forward_cuda</span>（一个 kernel 同时做）多付出了哪些代价：从 <span class='mono'>HBM</span> 往返与<strong>启动开销</strong>两个角度展开，并说明这对带宽受限的解码阶段（第4课）为何重要。",
+                "en": "Using <span class='mono'>SiluAndMul</span>, explain what extra cost the <strong>unfused</strong> <span class='mono'>forward_native</span> (silu then multiply) pays versus the <strong>fused</strong> <span class='mono'>forward_cuda</span> (one kernel does both): develop it from both <span class='mono'>HBM</span> round-trips and <strong>launch overhead</strong>, and explain why this matters for the bandwidth-bound decode stage (Lesson 4).",
+            },
+            {
+                "zh": "解释融合与 CUDA Graph 如何<strong>配合</strong>：为什么“少 + 融 + 静态形状”的内核序列正好满足图的捕获前提，从而能<strong>捕获一次、反复重放</strong>把 CPU 提交开销降到近零；再说明被融合/捕获的内核本体来自第38课（AOT）与第39课（JIT）这一事实意味着什么。",
+                "en": "Explain how fusion and CUDA graphs <strong>cooperate</strong>: why a 'fewer + fused + static-shape' kernel sequence exactly meets the graph's capture premise so it can be <strong>captured once and replayed</strong> to drive CPU submission cost near zero; then explain what it means that the fused/captured kernels themselves come from Lesson 38 (AOT) and Lesson 39 (JIT).",
+            },
+        ],
+    },
+    "42-multi-hardware-backends.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "<strong>平台抽象</strong>（基类 <span class='mono'>SRTPlatform</span>）的作用是什么？",
+                    "en": "What is the role of the <strong>platform abstraction</strong> (the base class <span class='mono'>SRTPlatform</span>)?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>让一套引擎跑遍多种芯片：每种芯片子类化它并提供工厂方法、能力标志与生命周期钩子</strong>",
+                        "en": "<strong>Let one engine run on many chips: each chip subclasses it and provides factory methods, capability flags, and lifecycle hooks</strong>",
+                    },
+                    {"zh": "把模型权重压缩成 FP8 以节省显存", "en": "Compress model weights to FP8 to save memory"},
+                    {"zh": "决定哪个请求先被调度执行", "en": "Decide which request gets scheduled first"},
+                    {"zh": "为每块芯片重写整个调度器与模型代码", "en": "Rewrite the entire scheduler and model code for each chip"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "<span class='mono'>SRTPlatform</span>（在 <span class='mono'>srt/platforms/interface.py</span>）声明每芯片必须回答的工厂方法（如 <span class='mono'>get_default_attention_backend()</span>）、能力标志与钩子（如 <span class='mono'>apply_server_args_defaults()</span>）；各芯片子类化它（<span class='mono'>CudaSRTPlatform</span> 等）。它既不做量化也不做调度，更不是为每块芯片重写上层。",
+                    "en": "<span class='mono'>SRTPlatform</span> (in <span class='mono'>srt/platforms/interface.py</span>) declares the per-chip factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>), capability flags, and hooks (e.g. <span class='mono'>apply_server_args_defaults()</span>) every chip must answer; each chip subclasses it (<span class='mono'>CudaSRTPlatform</span>, etc.). It neither quantizes nor schedules, and certainly does not rewrite the upper layers per chip.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 SGLang 里，下面哪一项是<strong>每芯片专属、必须替换</strong>的，而不是可移植的？",
+                    "en": "In SGLang, which of the following is <strong>per-chip and must be swapped</strong>, rather than portable?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>内核（第38/39课）、注意力后端（第33课）与平台钩子</strong>",
+                        "en": "<strong>The kernels (Lessons 38/39), the attention backend (Lesson 33), and the platform hooks</strong>",
+                    },
+                    {"zh": "调度器（第18课）", "en": "The scheduler (Lesson 18)"},
+                    {"zh": "模型结构（第26课）", "en": "The model structure (Lesson 26)"},
+                    {"zh": "输入输出（IO）流程", "en": "The input/output (IO) flow"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "上层是<strong>硬件无关</strong>的：调度器、模型、IO 流程换芯片时原样复用。真正按芯片替换的只有内核（AOT/JIT）、注意力后端和平台钩子，移植新硬件主要就是补齐这一小撮。",
+                    "en": "The upper layers are <strong>hardware-agnostic</strong>: the scheduler, model, and IO flow are reused as-is when chips change. Only the kernels (AOT/JIT), the attention backend, and the platform hooks are truly swapped per chip — porting new hardware is mainly filling in that small handful.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<strong>能力标志</strong>（如 <span class='mono'>support_cuda_graph</span>、<span class='mono'>supports_fp8</span>）让上层能做什么？",
+                    "en": "What do <strong>capability flags</strong> (e.g. <span class='mono'>support_cuda_graph</span>, <span class='mono'>supports_fp8</span>) let the upper layers do?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>询问“这块芯片能否做 X”，并据此自适应（如不支持 CUDA Graph 就退回逐算子执行）</strong>",
+                        "en": "<strong>Ask 'can this chip do X' and adapt accordingly (e.g. fall back to per-operator execution when CUDA Graph isn't supported)</strong>",
+                    },
+                    {"zh": "强制所有芯片都必须支持同一套特性", "en": "Force every chip to support the exact same feature set"},
+                    {"zh": "把上层代码按芯片拆成多份分别维护", "en": "Split the upper-layer code into per-chip copies to maintain separately"},
+                    {"zh": "在运行时重新编译整个模型", "en": "Recompile the entire model at runtime"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "能力标志是布尔判断，让上层统一地问“能不能做 X”，得到否定回答就走兜底路径（如退回 eager），而不是为每块芯片写一堆 if-else 或直接崩溃。它不强制统一特性，也不需要拆分或重编上层。",
+                    "en": "Capability flags are boolean judgments letting upper layers uniformly ask 'can you do X' and take a fallback path (e.g. revert to eager) on a 'no', instead of writing piles of if-else per chip or crashing outright. They neither force a uniform feature set nor require splitting or recompiling the upper layers.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用“旅行充电器 + 转换头”的类比，解释 <span class='mono'>SRTPlatform</span> 这层平台抽象如何让上层（调度器第18课、模型第26课）保持<strong>硬件无关</strong>：说明工厂方法（如 <span class='mono'>get_default_attention_backend()</span>、<span class='mono'>get_graph_runner_cls()</span>）与生命周期钩子（<span class='mono'>apply_server_args_defaults()</span>）各自把“具体芯片的能力”翻译成什么统一接口，以及为什么这能把“移植新硬件”从大事变成小事。",
+                "en": "Using the 'travel charger + adapter head' analogy, explain how the <span class='mono'>SRTPlatform</span> platform-abstraction layer keeps the upper layers (scheduler Lesson 18, model Lesson 26) <strong>hardware-agnostic</strong>: spell out what uniform interface the factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>, <span class='mono'>get_graph_runner_cls()</span>) and the lifecycle hook (<span class='mono'>apply_server_args_defaults()</span>) each translate 'a specific chip's capability' into, and why this turns 'porting new hardware' from a big job into a small one.",
+            },
+            {
+                "zh": "结合 <span class='mono'>srt/platforms/</span> 与 <span class='mono'>srt/hardware_backend/</span> 两棵树，说明 SGLang 支持的硬件谱系（NVIDIA、AMD、昇腾 NPU、Intel XPU、摩尔线程 MUSA、苹果 MLX、CPU）是如何组织的；并解释“把每芯片专属的那一小撮（内核第38/39课、注意力后端第33课、平台钩子）隔离好，上层就能复用”为何是“从单卡到跨硬件大型集群”的工程基础（呼应第62课“一切皆可插拔”主题）。",
+                "en": "Using the two trees <span class='mono'>srt/platforms/</span> and <span class='mono'>srt/hardware_backend/</span>, describe how SGLang's hardware lineup (NVIDIA, AMD, Ascend NPU, Intel XPU, Moore Threads MUSA, Apple MLX, CPU) is organized; then explain why 'isolating the small handful that is per-chip (kernels Lessons 38/39, attention backend Lesson 33, platform hooks) so the upper layers can be reused' is the engineering basis for 'single GPU to cross-hardware large clusters' (echoing Lesson 62's 'everything is pluggable' theme).",
+            },
+        ],
+    },
 }
 
 

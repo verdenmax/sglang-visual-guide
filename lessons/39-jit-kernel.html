@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>39 · JIT kernel / JIT kernels - SGLang 图解教程</title>
+<meta name="description" content="第九部分 · 内核与硬件｜JIT kernel - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="39 · JIT kernel / JIT kernels - SGLang 图解教程">
+<meta property="og:description" content="第九部分 · 内核与硬件｜JIT kernel - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="39 · JIT kernel / JIT kernels - SGLang 图解教程">
+<meta name="twitter:description" content="第九部分 · 内核与硬件｜JIT kernel - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第九部分 · 内核与硬件</span><span class="lang-en">Part 9 · Kernels &amp; hardware</span></span>
+    <span class="pill">39 / 42</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:92%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第九部分 · 内核与硬件</span><span class="lang-en">Part 9 · Kernels &amp; hardware</span></div>
+    <h1><span class="lang-zh">JIT kernel</span><span class="lang-en">JIT kernels</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">第38课我们看到 <span class="mono">sgl-kernel</span> 走的是 AOT（提前编译）路线：核在打包 wheel 时就被 <span class="mono">nvcc</span> 编进二进制。本课的主角 <span class="mono">python/sglang/jit_kernel/</span> 走的是另一条路——<strong>运行时按需即时编译</strong>（JIT，Just-In-Time）。它不在 wheel 里预先塞进每一个核，而是等到真正需要时，才在本机现场把 C++/CUDA 源码编译成 <span class="mono">.so</span>，然后把结果缓存起来反复复用。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div> AOT 像是工厂出货前就把所有口味的蛋糕全部烤好装箱：你买到就能吃，但箱子又大又重，而且工厂得提前猜你要哪些口味。JIT 则像家里的烤箱：第一次想吃某个口味时，你现场按配方烤一炉，要等一会儿；但烤好之后放进冰箱，之后再想吃就直接取出来，和现成的一样快。烤箱（编译工具链）必须在你家里，配方（源码）也得带着，但你不用背着一整箱蛋糕到处走。</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div> 无论 AOT 还是 JIT，最终都变成一组可以从 Python 直接调用、指向已编译 GPU 核的 <span class="mono">torch.ops</span> 风格调用。两者的差别不在“结果是什么”，而在“何时、如何被构建与分发”。AOT 把编译成本前置到发布阶段、换取开箱即用；JIT 把编译成本推迟到首次调用、换取灵活性与更瘦的 wheel。SGLang 同时拥有这两条路径，让稳定高频的核走 AOT、实验性或需按架构定制的核走 JIT。</div>
+
+<h2>一、什么是 JIT 内核路径</h2>
+<p><span class="mono">jit_kernel</span> 模块的核心思想是：把小巧的 C++/CUDA 核当作“源码 + 配方”随包携带，而不是预先编译进二进制。当某个算子第一次被用到时，模块才现场调用编译器把它构建成一个 PyTorch 扩展模块。这样做的直接好处是 wheel 不会因为塞进各种架构、各种数据类型的核而急剧膨胀。比如 <span class="mono">jit_kernel/activation.py</span> 会在首次使用时，按当前的数据类型现场构建一个对应的 JIT 模块；<span class="mono">jit_kernel/norm.py</span> 则提供了一个 JIT 版的 <span class="mono">fused_add_rmsnorm</span>，正是第36课讲 RMSNorm 快速路径时所依赖的那个融合核。</p>
+<p>这里值得展开说说“wheel 膨胀”的来由。一个核往往不是只有一个版本：它可能要为 fp16、bf16、fp8 等多种数据类型各编一份，还可能为不同的 GPU 计算能力（如 sm80、sm90）各编一份，再叠加上各种形状或开关的组合，编译产物会以乘法的方式急剧增长。如果全走 AOT，这些组合都得提前枚举并塞进 <span class="mono">.so</span>，wheel 体积会迅速变得难以接受，而其中绝大多数组合在某次具体部署里根本用不到。JIT 的思路恰好相反：发布物里只放精简的源码，真正要用哪个组合，就在现场为那一个组合编译并缓存——把空间成本换成了一次性的时间成本，且只为实际跑到的代码路径付费。</p>
+<p>这两个模块很能说明 JIT 的“按需”特性。<span class="mono">activation.py</span> 并不是一上来就把所有数据类型的激活核都编出来，而是等到某个具体 dtype 第一次被用到，才为它构建对应的 JIT 模块——用到 fp16 就编 fp16 的，用到 bf16 就编 bf16 的，没用到的就根本不花编译时间。这种“谁触发、才编谁”的策略，把编译成本精确地花在真正会跑的代码路径上。<span class="mono">norm.py</span> 的 <span class="mono">fused_add_rmsnorm</span> 则是一个典型的融合核：它把“残差相加”与“RMSNorm 归一化”两步合进一个 GPU 核里，少一次显存往返。第36课的 RMSNorm 快速路径正是调用了它——这说明 JIT 路径并不是边角料，而是实实在在地服务于主干推理流程中的关键算子。</p>
+<p>为什么不全部走 AOT？因为现实中很多核并不“稳定且通用”。有的算子还在实验阶段、接口经常变；有的核需要根据 GPU 架构生成不同的代码（JIT 路径会查询当前架构，例如通过 <span class="mono">get_jit_cuda_arch</span> 拿到计算能力），再据此选择指令与模板；还有的核要用运行期才知道的形状或开关来参数化。把这些都提前枚举进 wheel 既不现实也太臃肿，交给 JIT 在现场按需生成才是更合适的策略。</p>
+<p>换个角度看，AOT 与 JIT 并不是互相取代的对手，而是分工协作的两条流水线。SGLang 把那些被高频调用、形态固定、对启动延迟敏感的核交给 <span class="mono">sgl-kernel</span> 提前编进二进制；把那些还在演化、依赖具体硬件特性、或只在特定数据类型/形状下才会触发的核留给 <span class="mono">jit_kernel</span> 现场构建。这种“按核的生命周期与稳定程度分流”的设计，让发布物保持精简，又不牺牲对前沿硬件与新算子的快速适配能力。理解 JIT 路径，本质上就是理解“把编译这件事从发布阶段挪到运行阶段”所带来的全部好处与代价。</p>
+
+<h2>二、load_jit 的工作机制：编译一次，之后复用</h2>
+<p>整个 JIT 路径的统一入口是 <span class="mono">load_jit(...)</span>。你给它一组 C++/CUDA 源码文件，再给它一组“包装器”（wrapper）：每个包装器是一个 <span class="mono">(export_name, kernel_name)</span> 二元组，把一个面向 Python 的可调用名字，映射到底层某个 C++/CUDA 核类。<span class="mono">load_jit</span> 据此编译出一个 torch 扩展模块，并且把构建好的 <span class="mono">.so</span> 按一个唯一标记（marker）缓存起来。除了源码与包装器，它还接受一些可选参数：额外的编译标志、额外的头文件搜索路径、外部依赖（例如 <span class="mono">cutlass</span>）、构建目录等，让现场编译能对接到所需的第三方库与定制选项。</p>
+<p>关键在于这个缓存：<strong>第一次调用要付一次性的编译成本</strong>（真正跑一遍 <span class="mono">nvcc</span>，可能要几秒到几十秒），但只要标记命中，<strong>后续调用就直接复用缓存里的 <span class="mono">.so</span></strong>，完全不再重新编译。也就是说，第一次慢，之后就和 AOT 一样快。这个“编译一次、之后永远复用”的设计，是 JIT 在保留灵活性的同时还能保持高性能的根本原因。唯一标记保证了不同的核、不同的参数组合各自对应各自的缓存条目，互不串味——当你改了源码、换了架构或切换了关键编译开关，标记随之改变，于是会触发一次新的编译并生成一份新的缓存，而不会错误地复用旧产物。</p>
+<p>从调用者的视角看，这一切几乎是透明的：你只管调用由包装器导出的那个 Python 名字，第一次会“卡”一下（因为在编译），之后就顺畅得感觉不到 JIT 的存在。<span class="mono">load_jit</span> 最终返回的是已加载的扩展 Module，里面挂着按 <span class="mono">export_name</span> 暴露出来的可调用核；上层代码拿到它，就像调用任何普通的已编译算子一样使用。</p>
+<p>这里还有一个容易被忽略的细节：缓存通常落在磁盘上的某个构建目录，因此“编译一次、之后复用”的好处不只局限于单次进程内，跨进程、甚至跨多次启动也能受益。只要源码、架构与关键编译选项没变（也就是唯一标记不变），新进程第一次用到这个核时，会直接发现磁盘上已经有现成的 <span class="mono">.so</span>，于是跳过编译直接加载。这意味着在同一台机器上反复启动服务时，真正付出 <span class="mono">nvcc</span> 编译成本的往往只有最初的那一次；之后无论重启多少回，都是秒级加载。理解这一层，你就明白为什么 JIT 在生产里其实没那么“可怕”——首调延迟是一次性的，而缓存是持久的。</p>
+
+<h2>三、为什么要 JIT：灵活性与代价</h2>
+<p>JIT 的核心卖点是灵活性。第一，实验性算子可以随改随用，不必每次都重新发版打 wheel。第二，可以做架构特定的代码生成：查询到具体 GPU 架构后，再决定用哪套模板、开哪些编译标志，从而把每块卡的性能榨到更尽。第三，核可以用运行期的形状或标志来参数化，适配千变万化的输入。第四，wheel 不会臃肿——源码很小，编译产物按需生成并缓存在本地，发布物保持精简。</p>
+<p>这四点里，“架构特定的代码生成”尤其能体现 JIT 的价值。同一个算法在不同代的 GPU 上，最优实现往往不一样：新架构可能提供了新的张量核指令、更大的共享内存、或不同的内存层级，针对它们手写或生成专门的代码，才能把硬件吃透。AOT 想覆盖这些差异，就得为每种架构各编一份并全部塞进 wheel；而 JIT 只需在运行时查到“我现在跑在哪种架构上”，再为它现编一份最合身的核。对一个要长期跟进前沿硬件的推理引擎来说，这种“随硬件而变”的能力极其宝贵——它意味着新卡一上市，不必苦等下一个发版周期，就能在上面跑起来并逐步调优。</p>
+<p>当然，灵活不是没有代价。最直接的代价是首次调用的编译延迟：第一次用到某个核时，必须停下来等 <span class="mono">nvcc</span> 把它编出来。其次，运行环境里必须真的装着一套可用的编译工具链（编译器、CUDA 头文件等），否则现场编译会直接失败——而 AOT 的二进制则没有这个前提。所以是否选 JIT，本质上是在“灵活与瘦身”和“开箱即用、零首调延迟”之间做权衡。</p>
+<p>把这份代价放到 SGLang 的真实场景里看会更清楚。服务通常是长时间运行的：一个推理进程可能要服务几小时甚至几天，那么把首次调用那一两秒的编译成本摊到漫长的服务周期里，几乎可以忽略不计；而它换来的是“同一份代码能在不同架构的卡上各自编出最优核”的能力。反过来，如果是对冷启动极度敏感、或者部署在没有编译器的精简镜像里的场景，JIT 的首调延迟与工具链依赖就会变成真正的痛点——这时候 AOT 才是更稳妥的选择。所以这道选择题没有放之四海皆准的答案，只有结合“核的稳定程度、调用频率、部署环境、对启动延迟的容忍度”之后的最优解。</p>
+
+<h2>四、AOT 与 JIT 殊途同归</h2>
+<p>把第38课和本课放在一起看会更清楚：AOT（<span class="mono">sgl-kernel</span>）和 JIT（<span class="mono">jit_kernel</span>）最终都落到“从 Python 调用一个已编译 GPU 核”。它们的终点相同，分歧只在路上——AOT 在打 wheel 时就把核编好、随二进制分发，安装即用；JIT 把源码随包带着，等首次调用时才在本机编译并缓存。理解了这一点，你就能在设计新算子时做出正确取舍：稳定、高频、要求零依赖即用的核交给 AOT；实验性强、需按架构定制、或不想撑大 wheel 的核交给 JIT。两者并存，正是 SGLang 内核体系兼顾性能与灵活的工程智慧。</p>
+<p>更进一步说，这两条路并非彼此孤立。一个核常常先以 JIT 形式诞生：在 <span class="mono">jit_kernel</span> 里快速迭代、按架构试验、跑通正确性与性能之后，如果它逐渐稳定下来、被高频复用，就可以“毕业”到 <span class="mono">sgl-kernel</span> 走 AOT，固化进 wheel 享受零首调延迟。反过来，前沿硬件刚发布、新指令还在打磨时，JIT 又能让 SGLang 第一时间在上面跑起来，而不必等下一次发版。正因为终点统一（都是指向已编译核的 <span class="mono">torch.ops</span> 风格调用），上层代码几乎无需关心某个算子究竟来自 AOT 还是 JIT——这层抽象，正是把“何时编译、如何分发”的复杂度封装起来、让引擎既快又灵活的关键。</p>
+<p>总结一句：JIT 不是 AOT 的替代品，而是它的互补。第38课的 <span class="mono">sgl-kernel</span> 负责把最稳定、最热的核固化进二进制，换取开箱即用与零首调延迟；本课的 <span class="mono">jit_kernel</span> 负责在运行时按需现场编译那些实验性、需按架构定制、或形状多变的核，换取灵活与瘦身。两条路最终都汇入同一套 <span class="mono">torch.ops</span> 风格调用，共同撑起 SGLang 的内核性能地基，也共同体现了大型推理系统在性能与灵活之间求取平衡的工程智慧。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>首次调用 <span class="mono">load_jit</span></h4><p>目标 <span class="mono">.so</span> 尚不存在，缓存里查不到对应标记。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>现场编译</h4><p>调用 <span class="mono">nvcc</span> 编译 C++/CUDA 源码，付一次性成本（几秒到几十秒）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>写入缓存</h4><p>把编译好的 <span class="mono">.so</span> 按唯一标记（marker）存进缓存。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>后续复用</h4><p>之后的调用命中缓存，直接复用 <span class="mono">.so</span>，不再重新编译，与 AOT 同速。</p></div></div>
+</div>
+
+<div class="cols">
+  <div class="col"><strong>AOT（sgl-kernel，第38课）</strong>：打 wheel 时就用 <span class="mono">nvcc</span> 把核全部编进二进制。安装即可用，首次调用零编译延迟；但 wheel 体积大、各种架构组合需要提前枚举。</div>
+  <div class="col"><strong>JIT（jit_kernel，本课）</strong>：运行时按需编译，首次调用付一次 <span class="mono">nvcc</span> 成本，之后命中缓存与 AOT 同速；wheel 不臃肿、可按 GPU 架构与运行期形状灵活生成，但要求本机有编译工具链。</div>
+</div>
+
+<table class="t">
+  <tr><th>判断标准</th><th>选择</th></tr>
+  <tr><td>核稳定、被高频复用、要求开箱即用</td><td>AOT（sgl-kernel）</td></tr>
+  <tr><td>实验性算子，接口频繁迭代</td><td>JIT（jit_kernel）</td></tr>
+  <tr><td>需按 GPU 架构定制代码生成</td><td>JIT</td></tr>
+  <tr><td>部署环境没有编译器工具链</td><td>AOT</td></tr>
+  <tr><td>想避免 wheel 体积膨胀</td><td>JIT</td></tr>
+</table>
+
+<div class="flow">
+  <div class="node">C++/CUDA 源码 + wrappers</div>
+  <div class="arrow">→</div>
+  <div class="node"><span class="mono">nvcc</span> 编译</div>
+  <div class="arrow">→</div>
+  <div class="node">缓存 <span class="mono">.so</span>（按唯一标记）</div>
+  <div class="arrow">→</div>
+  <div class="node"><span class="mono">torch.ops</span> 风格调用</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/jit_kernel/utils.py ::load_jit</span><span class="ln">按需编译 + 缓存 .so：编译一次，之后复用</span></div><pre>def load_jit(
+    *args,                         # unique marker identifying this kernel (distinct per kernel)
+    cpp_files=None, cuda_files=None,
+    cpp_wrappers=None, cuda_wrappers=None,   # each is a (export_name, kernel_name) tuple
+    extra_cuda_cflags=None, extra_include_paths=None,
+    extra_dependencies=None,       # e.g. "cutlass"
+    build_directory=None,
+    header_only=True,
+):
+    # Build a JIT module from C++/CUDA source ON DEMAND, then cache the
+    # compiled .so so later calls reuse it (compile once, reuse forever).
+    # A wrapper (export_name, kernel_name) maps the Python-facing name to
+    # the C++/CUDA kernel class. Returns the loaded extension Module.
+    ...
+</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div><ul>
+<li><span class="mono">jit_kernel/</span> 在运行时按需编译小型 C++/CUDA 核，而不是像第38课的 <span class="mono">sgl-kernel</span> 那样提前编进 wheel。</li>
+<li>核心入口 <span class="mono">load_jit(...)</span>：传入源码 + 包装器（每个是 <span class="mono">(export_name, kernel_name)</span> 二元组），编出 torch 扩展并按唯一标记缓存 <span class="mono">.so</span>。</li>
+<li><strong>编译一次、之后复用</strong>：首次调用付一次 <span class="mono">nvcc</span> 成本，命中缓存后与 AOT 同速。</li>
+<li>选 JIT 的理由：灵活（实验性算子、架构特定 codegen、运行期参数化）、wheel 不臃肿；代价是首调延迟 + 需要编译工具链。</li>
+<li><span class="mono">activation.py</span> 首次使用时按 dtype 建 JIT 模块；<span class="mono">norm.py</span> 提供 JIT 版 <span class="mono">fused_add_rmsnorm</span>（第36课 RMSNorm 快速路径所用）。</li>
+<li>AOT 与 JIT 殊途同归：都成为指向已编译核的 <span class="mono">torch.ops</span> 风格调用，差别只在“何时、如何构建与分发”。</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 <span class='mono'>jit_kernel</span> 这条 <strong>JIT（运行时即时编译）</strong>路线里，<span class='mono'>load_jit(...)</span> 第一次和后续调用的开销有何不同？</div>
+  <ol class="opts">
+    <li>每次调用都会重新编译一遍源码，所以永远比 AOT 慢</li>
+    <li>它完全不编译，直接解释执行 CUDA 源码</li>
+    <li>首次调用不编译，要等到第二次调用才触发 nvcc</li>
+    <li><strong>首次调用付一次性 nvcc 编译成本，随后把编好的 .so 按唯一标记缓存；后续调用命中缓存直接复用、不再重编，与 AOT 同速</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。JIT 的精髓是<strong>编译一次、之后复用</strong>：首次现场跑 nvcc 付一次成本，之后命中按唯一标记缓存的 <span class='mono'>.so</span>，和 AOT 一样快。它绝不是每次重编，也不是解释执行。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <span class='mono'>load_jit</span> 中的一个 <strong>wrapper</strong> 是 <span class='mono'>(export_name, kernel_name)</span> 二元组，它的作用是什么？</div>
+  <ol class="opts">
+    <li>它是缓存 .so 用的文件系统路径</li>
+    <li>它指定该核要在哪块 GPU 上运行</li>
+    <li>它声明该核所需的最小显存大小</li>
+    <li><strong>把一个面向 Python 的可调用名字映射到底层某个 C++/CUDA 核类</strong>，编译后即可从 Python 调用该核</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。wrapper 做的是<strong>名字到核类的映射</strong>：<span class='mono'>export_name</span> 是 Python 侧可调用名，<span class='mono'>kernel_name</span> 是 C++/CUDA 核类。它和运行设备、缓存路径、显存声明都无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 在为新算子选择 <strong>AOT（sgl-kernel，第38课）</strong>还是 <strong>JIT（jit_kernel）</strong>时，下列哪种判断<strong>最合理</strong>？</div>
+  <ol class="opts">
+    <li>永远选 AOT，因为 JIT 无法达到与编译核相同的性能</li>
+    <li>永远选 JIT，因为它没有任何代价</li>
+    <li><strong>稳定、高频、要求开箱即用、且部署环境可能没有编译器 → AOT；实验性、需按 GPU 架构定制 codegen、想避免 wheel 膨胀 → JIT</strong></li>
+    <li>随便选，二者在分发与首调延迟上完全等价</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。选择本质是权衡：AOT 开箱即用、零首调延迟但 wheel 大且需提前枚举架构；JIT 灵活、wheel 瘦但有首调编译延迟且需工具链。命中缓存后 JIT 与 AOT 同速，所以并非“JIT 永远慢”，也不是“二者等价”。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用一句话解释 <span class='mono'>load_jit</span> 的“<strong>按需编译 + 缓存 .so</strong>”机制，并说明唯一标记（marker）在缓存复用中的作用，以及为什么这种设计能让 JIT 在保留灵活性的同时仍保持高性能。</li>
+    <li>对比 <strong>AOT</strong> 与 <strong>JIT</strong> 两条编译路线“殊途同归”的地方与分歧点：两者最终都成为指向已编译核的 <span class='mono'>torch.ops</span> 风格调用，差别只在“何时/如何构建与分发”。结合 <span class='mono'>activation.py</span> 按 dtype 建模块、<span class='mono'>norm.py</span> 的 JIT <span class='mono'>fused_add_rmsnorm</span>（第36课所用），说明各自适合什么样的 kernel。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">In Lesson 38 we saw that <span class="mono">sgl-kernel</span> follows the AOT (ahead-of-time) route: kernels are compiled by <span class="mono">nvcc</span> into the binary when the wheel is built. This lesson's star, <span class="mono">python/sglang/jit_kernel/</span>, takes the other road—<strong>just-in-time compilation at runtime, on demand</strong> (JIT). Instead of stuffing every kernel into the wheel up front, it compiles the C++/CUDA source into a <span class="mono">.so</span> on the local machine only when actually needed, then caches the result for reuse.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div> AOT is like a factory baking every flavor of cake before shipping and packing them all in a box: you can eat the moment you buy, but the box is big and heavy, and the factory has to guess in advance which flavors you'll want. JIT is like the oven at home: the first time you want a flavor you bake a batch from the recipe, which takes a while; but once baked, you put it in the fridge and any later craving is served instantly, as fast as ready-made. The oven (compiler toolchain) must be in your home and you must carry the recipe (source), but you don't haul a whole box of cakes around.</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div> Whether AOT or JIT, both end up as a set of <span class="mono">torch.ops</span>-style callables that invoke compiled GPU kernels directly from Python. The difference isn't "what the result is" but "when and how it gets built and shipped." AOT front-loads the compile cost to release time in exchange for being ready out of the box; JIT defers the compile cost to first call in exchange for flexibility and a slimmer wheel. SGLang keeps both paths so stable, hot kernels go AOT while experimental or architecture-specific ones go JIT.</div>
+
+<h2>1. What the JIT kernel path is</h2>
+<p>The core idea of the <span class="mono">jit_kernel</span> module is to ship small C++/CUDA kernels as "source + recipe" rather than pre-compiled into the binary. The first time an op is used, the module invokes the compiler on the spot to build it into a PyTorch extension module. The immediate payoff is that the wheel doesn't bloat from packing kernels for every architecture and dtype. For example, <span class="mono">jit_kernel/activation.py</span> builds a corresponding JIT module per dtype on first use; <span class="mono">jit_kernel/norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span>—exactly the fused kernel the RMSNorm fast path from Lesson 36 relies on.</p>
+<p>It is worth unpacking where "wheel bloat" comes from. A kernel often has more than one version: it may need a separate build for each dtype (fp16, bf16, fp8, etc.), a separate build for each GPU compute capability (e.g. sm80, sm90), and on top of that the combinations of shapes and flags, so the compiled artifacts grow multiplicatively. If everything went AOT, all these combinations would have to be enumerated up front and packed into the <span class="mono">.so</span>, making the wheel quickly unacceptable in size—while the vast majority of those combinations are never used in any given deployment. JIT takes the opposite approach: the release contains only the slim source, and whichever combination is actually needed gets compiled and cached on the spot for that one combination—trading a space cost for a one-time time cost, and paying only for the code paths that actually run.</p>
+<p>These two modules illustrate JIT's "on demand" nature well. <span class="mono">activation.py</span> does not compile activation kernels for every dtype up front; instead, only when a concrete dtype is first used does it build the corresponding JIT module—use fp16 and it compiles the fp16 one, use bf16 and it compiles the bf16 one, and unused ones cost no compile time at all. This "compile only what is triggered" strategy spends the compile cost precisely on the code paths that actually run. <span class="mono">norm.py</span>'s <span class="mono">fused_add_rmsnorm</span> is a typical fused kernel: it merges the "residual add" and "RMSNorm normalization" steps into one GPU kernel, saving a round trip to memory. Lesson 36's RMSNorm fast path calls exactly this—showing the JIT path is not a side note but genuinely serves a key op in the main inference pipeline.</p>
+<p>Why not make everything AOT? Because in practice many kernels are not "stable and general." Some ops are still experimental with changing interfaces; some kernels need different code per GPU architecture (the JIT path queries the current architecture, e.g. via <span class="mono">get_jit_cuda_arch</span> to get the compute capability) and picks instructions and templates accordingly; some kernels must be parameterized by shapes or flags known only at runtime. Enumerating all of these into the wheel up front is both unrealistic and bloated, so letting JIT generate them on demand is the better strategy.</p>
+<p>Seen from another angle, AOT and JIT are not rivals replacing each other but two cooperating pipelines. SGLang hands the hot, fixed-shape, startup-latency-sensitive kernels to <span class="mono">sgl-kernel</span> to be compiled into the binary ahead of time; it leaves the still-evolving, hardware-feature-dependent, or only-for-specific-dtype/shape kernels to <span class="mono">jit_kernel</span> to build on the spot. This "route by a kernel's lifecycle and stability" design keeps the release lean without sacrificing fast adaptation to cutting-edge hardware and new ops. Understanding the JIT path is essentially understanding all the benefits and costs of "moving compilation from release time to runtime."</p>
+
+<h2>2. How load_jit works: compile once, reuse later</h2>
+<p>The unified entry to the whole JIT path is <span class="mono">load_jit(...)</span>. You give it a set of C++/CUDA source files plus a set of "wrappers": each wrapper is an <span class="mono">(export_name, kernel_name)</span> tuple mapping a Python-facing callable name to some underlying C++/CUDA kernel class. From these, <span class="mono">load_jit</span> compiles a torch extension module and caches the built <span class="mono">.so</span> keyed by a unique marker. Besides source and wrappers, it accepts optional parameters: extra compile flags, extra include search paths, external dependencies (e.g. <span class="mono">cutlass</span>), a build directory, and so on, so the on-the-spot compilation can hook into the needed third-party libraries and custom options.</p>
+<p>The cache is the key. <strong>The first call pays a one-time compile cost</strong> (an actual <span class="mono">nvcc</span> run, possibly seconds to tens of seconds), but as long as the marker hits, <strong>later calls reuse the cached <span class="mono">.so</span> directly</strong> with no recompilation. In other words: slow the first time, then as fast as AOT. This "compile once, reuse forever" design is exactly why JIT can keep its flexibility while still being high-performance. The unique marker ensures different kernels and different parameter combinations each map to their own cache entry without cross-contamination—when you change the source, switch architecture, or flip a key compile flag, the marker changes accordingly, triggering a fresh compilation and a new cache entry instead of wrongly reusing the old artifact.</p>
+<p>From the caller's viewpoint this is almost transparent: you just call the Python name exported by a wrapper, the first call "stalls" briefly (because it's compiling), and afterwards it's so smooth you don't feel JIT is there at all. What <span class="mono">load_jit</span> ultimately returns is the loaded extension Module, carrying the callable kernels exposed under their <span class="mono">export_name</span>; upper-layer code takes it and uses it just like any ordinary compiled op.</p>
+<p>There is also an easily-overlooked detail: the cache usually lives in a build directory on disk, so the "compile once, reuse later" benefit is not limited to a single process—it carries across processes and even across multiple restarts. As long as the source, architecture, and key compile options are unchanged (i.e. the unique marker is unchanged), the first time a new process uses the kernel it simply finds a ready-made <span class="mono">.so</span> already on disk and loads it, skipping compilation. This means that when you restart the service repeatedly on the same machine, the actual <span class="mono">nvcc</span> compile cost is usually paid only the very first time; no matter how many times you restart afterwards, it's a sub-second load. Once you understand this, you see why JIT is not so "scary" in production—the first-call latency is one-time, while the cache is persistent.</p>
+
+<h2>3. Why JIT: flexibility and its cost</h2>
+<p>JIT's core selling point is flexibility. First, experimental ops can be changed and used freely without re-releasing a wheel each time. Second, it enables architecture-specific code generation: after querying the concrete GPU architecture, it decides which templates and compile flags to use, squeezing more performance out of each card. Third, kernels can be parameterized by runtime shapes or flags, adapting to ever-changing inputs. Fourth, the wheel stays slim—source is tiny, the compiled artifact is generated on demand and cached locally, keeping the release lean.</p>
+<p>Of these four, "architecture-specific code generation" especially shows JIT's value. The optimal implementation of the same algorithm often differs across GPU generations: a new architecture may offer new tensor-core instructions, larger shared memory, or a different memory hierarchy, and only by hand-writing or generating code specialized for them can you fully exploit the hardware. For AOT to cover these differences, it must compile a separate build per architecture and pack them all into the wheel; JIT only needs to query "which architecture am I running on now" at runtime and compile a best-fitting kernel for it. For an inference engine that must keep pace with cutting-edge hardware, this "adapt to the hardware" ability is invaluable—it means when a new card hits the market, you can run on it and gradually tune without waiting for the next release cycle.</p>
+<p>Flexibility isn't free, of course. The most direct cost is first-call compile latency: the first time a kernel is used, you must stop and wait for <span class="mono">nvcc</span> to build it. Next, the runtime environment must actually have a working compiler toolchain (compiler, CUDA headers, etc.), or on-the-spot compilation simply fails—whereas an AOT binary has no such prerequisite. So choosing JIT is essentially a trade-off between "flexible and slim" and "ready out of the box with zero first-call latency."</p>
+<p>This cost is clearer in SGLang's real setting. A service is usually long-running: an inference process may serve for hours or even days, so amortizing the one-or-two-second first-call compile cost over a long serving window is practically negligible; in return you get the ability for "the same code to compile an optimal kernel on each different architecture." Conversely, in scenarios extremely sensitive to cold start, or deployed in a slim image without a compiler, JIT's first-call latency and toolchain dependency become real pain points—there, AOT is the safer choice. So this question has no one-size-fits-all answer, only the best solution after weighing "kernel stability, call frequency, deployment environment, and tolerance for startup latency."</p>
+
+<h2>4. AOT and JIT reach the same destination</h2>
+<p>Putting Lesson 38 and this lesson side by side makes it clearer: AOT (<span class="mono">sgl-kernel</span>) and JIT (<span class="mono">jit_kernel</span>) both end up "calling a compiled GPU kernel from Python." Their destination is the same; they only differ on the way there—AOT compiles kernels at wheel-build time and ships them with the binary, ready on install; JIT ships the source and compiles plus caches on the local machine at first call. Once you grasp this, you can make the right call when designing new ops: hand stable, hot, zero-dependency kernels to AOT; hand experimental, architecture-specific, or wheel-slimming kernels to JIT. Having both is precisely the engineering wisdom that lets SGLang's kernel system balance performance and flexibility.</p>
+<p>Going further, the two paths are not isolated. A kernel often is born as JIT first: it iterates quickly inside <span class="mono">jit_kernel</span>, is tried per architecture, and once correctness and performance are proven—if it stabilizes and is heavily reused—it can "graduate" to <span class="mono">sgl-kernel</span> on the AOT path, baked into the wheel to enjoy zero first-call latency. Conversely, when new hardware just launches and new instructions are still being polished, JIT lets SGLang run on it immediately without waiting for the next release. Precisely because the destination is unified (both are <span class="mono">torch.ops</span>-style callables into compiled kernels), upper-layer code barely needs to care whether an op comes from AOT or JIT—this abstraction, which encapsulates the complexity of "when to compile and how to ship," is the key to an engine that is both fast and flexible.</p>
+<p>In one sentence: JIT is not a replacement for AOT but its complement. Lesson 38's <span class="mono">sgl-kernel</span> bakes the most stable, hottest kernels into the binary in exchange for being ready out of the box with zero first-call latency; this lesson's <span class="mono">jit_kernel</span> compiles the experimental, architecture-specific, or shape-varying kernels on demand at runtime in exchange for flexibility and slimness. Both paths ultimately converge into the same <span class="mono">torch.ops</span>-style calls, together holding up SGLang's kernel performance foundation, and together embodying the engineering wisdom of balancing performance and flexibility in a large inference system.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>First call to <span class="mono">load_jit</span></h4><p>The target <span class="mono">.so</span> does not exist yet; the marker is not found in the cache.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Compile on the spot</h4><p>Invoke <span class="mono">nvcc</span> to compile the C++/CUDA source, paying a one-time cost (seconds to tens of seconds).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Write to cache</h4><p>Store the compiled <span class="mono">.so</span> into the cache keyed by a unique marker.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Reuse later</h4><p>Subsequent calls hit the cache and reuse the <span class="mono">.so</span> directly, no recompilation, as fast as AOT.</p></div></div>
+</div>
+
+<div class="cols">
+  <div class="col"><strong>AOT (sgl-kernel, Lesson 38)</strong>: at wheel-build time <span class="mono">nvcc</span> compiles all kernels into the binary. Ready on install, zero first-call compile latency; but the wheel is large and architecture combinations must be enumerated up front.</div>
+  <div class="col"><strong>JIT (jit_kernel, this lesson)</strong>: compiles on demand at runtime, the first call pays a one-time <span class="mono">nvcc</span> cost, then cache hits are as fast as AOT; the wheel stays slim and can be generated flexibly per GPU architecture and runtime shape, but it requires a compiler toolchain on the machine.</div>
+</div>
+
+<table class="t">
+  <tr><th>Criterion</th><th>Choice</th></tr>
+  <tr><td>Stable kernel, heavily reused, must be ready out of the box</td><td>AOT (sgl-kernel)</td></tr>
+  <tr><td>Experimental op, interface iterates frequently</td><td>JIT (jit_kernel)</td></tr>
+  <tr><td>Needs architecture-specific code generation</td><td>JIT</td></tr>
+  <tr><td>Deployment environment lacks a compiler toolchain</td><td>AOT</td></tr>
+  <tr><td>Want to avoid wheel size bloat</td><td>JIT</td></tr>
+</table>
+
+<div class="flow">
+  <div class="node">C++/CUDA source + wrappers</div>
+  <div class="arrow">→</div>
+  <div class="node"><span class="mono">nvcc</span> compile</div>
+  <div class="arrow">→</div>
+  <div class="node">cached <span class="mono">.so</span> (by unique marker)</div>
+  <div class="arrow">→</div>
+  <div class="node"><span class="mono">torch.ops</span>-style call</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/jit_kernel/utils.py ::load_jit</span><span class="ln">compile on demand + cache the .so: build once, reuse</span></div><pre>def load_jit(
+    *args,                         # unique marker identifying this kernel (distinct per kernel)
+    cpp_files=None, cuda_files=None,
+    cpp_wrappers=None, cuda_wrappers=None,   # each is a (export_name, kernel_name) tuple
+    extra_cuda_cflags=None, extra_include_paths=None,
+    extra_dependencies=None,       # e.g. "cutlass"
+    build_directory=None,
+    header_only=True,
+):
+    # Build a JIT module from C++/CUDA source ON DEMAND, then cache the
+    # compiled .so so later calls reuse it (compile once, reuse forever).
+    # A wrapper (export_name, kernel_name) maps the Python-facing name to
+    # the C++/CUDA kernel class. Returns the loaded extension Module.
+    ...
+</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div><ul>
+<li><span class="mono">jit_kernel/</span> compiles small C++/CUDA kernels on demand at runtime, instead of shipping them ahead of time in the wheel like Lesson 38's <span class="mono">sgl-kernel</span>.</li>
+<li>Core entry <span class="mono">load_jit(...)</span>: pass source + wrappers (each an <span class="mono">(export_name, kernel_name)</span> tuple), it builds a torch extension and caches the <span class="mono">.so</span> by a unique marker.</li>
+<li><strong>Compile once, reuse later</strong>: the first call pays a one-time <span class="mono">nvcc</span> cost; after a cache hit it's as fast as AOT.</li>
+<li>Reasons to pick JIT: flexibility (experimental ops, architecture-specific codegen, runtime parameterization) and no wheel bloat; the cost is first-call latency + needing a compiler toolchain.</li>
+<li><span class="mono">activation.py</span> builds a JIT module per dtype on first use; <span class="mono">norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span> (used by Lesson 36's RMSNorm fast path).</li>
+<li>AOT and JIT converge: both become <span class="mono">torch.ops</span>-style callables into compiled kernels; the difference is only "when and how they're built and shipped."</li>
+</ul></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. On the <span class='mono'>jit_kernel</span> <strong>JIT (runtime just-in-time)</strong> path, how does the cost of the first <span class='mono'>load_jit(...)</span> call differ from later calls?</div>
+  <ol class="opts">
+    <li>Every call recompiles the source, so it is always slower than AOT</li>
+    <li>It never compiles and just interprets the CUDA source directly</li>
+    <li>The first call does not compile; nvcc is only triggered on the second call</li>
+    <li><strong>The first call pays a one-time nvcc compile cost, then caches the built .so by a unique marker; later calls hit the cache and reuse it with no recompile, as fast as AOT</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The essence of JIT is <strong>compile once, reuse later</strong>: the first call runs nvcc on the spot for a one-time cost, then later calls hit the <span class='mono'>.so</span> cached by a unique marker, as fast as AOT. It does not recompile each time, nor interpret.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. A <strong>wrapper</strong> in <span class='mono'>load_jit</span> is an <span class='mono'>(export_name, kernel_name)</span> tuple. What is its role?</div>
+  <ol class="opts">
+    <li>It is the filesystem path used to cache the .so</li>
+    <li>It specifies which GPU the kernel should run on</li>
+    <li>It declares the minimum VRAM the kernel needs</li>
+    <li><strong>It maps a Python-facing callable name to some underlying C++/CUDA kernel class</strong>, so after compilation the kernel can be called from Python</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A wrapper does <strong>name-to-kernel-class mapping</strong>: <span class='mono'>export_name</span> is the Python-side callable name, <span class='mono'>kernel_name</span> is the C++/CUDA kernel class. It has nothing to do with device, cache path, or VRAM.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When choosing <strong>AOT (sgl-kernel, Lesson 38)</strong> vs <strong>JIT (jit_kernel)</strong> for a new op, which judgment is <strong>most sound</strong>?</div>
+  <ol class="opts">
+    <li>Always choose AOT because JIT can never match compiled-kernel performance</li>
+    <li>Always choose JIT because it has no cost</li>
+    <li><strong>Stable, hot, must be ready out of the box, and deploy env may lack a compiler → AOT; experimental, needs architecture-specific codegen, wants to avoid wheel bloat → JIT</strong></li>
+    <li>Pick either; the two are fully equivalent in shipping and first-call latency</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The choice is a trade-off: AOT is ready out of the box with zero first-call latency but a large wheel and pre-enumerated architectures; JIT is flexible with a slim wheel but has first-call compile latency and needs a toolchain. After a cache hit JIT equals AOT, so it is neither 'always slower' nor 'equivalent'.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In one sentence explain <span class='mono'>load_jit</span>'s '<strong>compile on demand + cache the .so</strong>' mechanism, the role of the unique marker in cache reuse, and why this design lets JIT stay high-performance while keeping flexibility.</li>
+    <li>Contrast where <strong>AOT</strong> and <strong>JIT</strong> 'reach the same destination' yet diverge: both become <span class='mono'>torch.ops</span>-style callables into compiled kernels, differing only in 'when/how they're built and shipped'. Using <span class='mono'>activation.py</span> building per-dtype modules and <span class='mono'>norm.py</span>'s JIT <span class='mono'>fused_add_rmsnorm</span> (used by Lesson 36), explain what kind of kernel each suits.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="38-sgl-kernel-overview.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">sgl-kernel 总览</span><span class="lang-en">sgl-kernel overview</span></div></a><a class="next" href="40-attention-kernel-dissection.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">关键 attention kernel 剖析</span><span class="lang-en">Dissecting an attention kernel</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
