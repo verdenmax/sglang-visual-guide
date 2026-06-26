@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>49 · 多模态 VLM 服务 / Multimodal VLM serving - SGLang 图解教程</title>
+<meta name="description" content="第十一部分 · 进阶选读｜多模态 VLM 服务 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="49 · 多模态 VLM 服务 / Multimodal VLM serving - SGLang 图解教程">
+<meta property="og:description" content="第十一部分 · 进阶选读｜多模态 VLM 服务 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="49 · 多模态 VLM 服务 / Multimodal VLM serving - SGLang 图解教程">
+<meta name="twitter:description" content="第十一部分 · 进阶选读｜多模态 VLM 服务 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十一部分 · 进阶选读</span><span class="lang-en">Part 11 · Advanced (optional)</span></span>
+    <span class="pill">49 / 52</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:94%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十一部分 · 进阶选读</span><span class="lang-en">Part 11 · Advanced (optional)</span></div>
+    <h1><span class="lang-zh">多模态 VLM 服务</span><span class="lang-en">Multimodal VLM serving</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">本课讲 SGLang 如何把一个纯文本推理引擎，变成能同时处理<strong>图像、音频、视频 + 文本</strong>的多模态视觉语言模型（VLM）引擎。核心洞见只有一句话：<strong>只需要改两处接缝（seam），其余引擎完全不动</strong>。第一处是<span class="mono">输入接缝</span>——把原始像素 / 音频转成模型张量，并在 token 流里插入<strong>占位符（placeholder）token</strong>；第二处是<span class="mono">嵌入接缝</span>——在前向计算时，跑各模态的编码器（encoder）产生媒体嵌入，再把它们<strong>缝合（scatter）</strong>到 token 嵌入流里占位符所在的位置。缝合之后，序列就只是一行普通的嵌入向量，调度器（第18课）、分页 KV（第30课）、RadixAttention（第33课）、采样器（第28课）全部照常运行。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>把文本引擎想象成一条<strong>填字游戏的横排格子</strong>。平时每个格子里填一个字（文本 token）。现在你想在句子中间嵌入一张图片，怎么办？你<strong>先用铅笔在格子里画上记号</strong>（占位符 token），告诉大家“这里以后要放图片，先占住 5 个格子”。等真正动笔时，你拿出图片，用<strong>专门的相机（ViT 编码器）</strong>把它压成几枚“图片印章”，然后<strong>精确地盖到那些画了记号的格子上</strong>，把铅笔记号替换掉。最后整排格子看起来就是一串均匀的内容——后面读句子的人根本不需要知道哪格原来是文字、哪格原来是图片，他照常一格一格往下读。这就是 VLM：<span class="mono">占位 + 在占位处织入嵌入</span>，而不是另造一台机器。</p>
+<p>这个类比里有两个细节值得多看一眼。其一，<strong>画记号的人和盖印章的人是分工的</strong>：画记号发生在“排版阶段”，要先知道这张图大概占几格；盖印章发生在“付印阶段”，此刻才真正把图片压成印章按上去。其二，<strong>记号的数量必须和印章的数量严丝合缝</strong>——你留了 5 格，相机就得恰好产出 5 枚印章，多一枚少一枚都对不上。正因为排版时就把格数定死了，后面无论是装订（拼批）、分页，还是逐格朗读（解码），都能把这段“图片区间”当成普通格子一视同仁，完全不必为图片单开一条流程。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>很多人以为支持多模态需要“重写引擎”，其实不然。语言模型的本体只认<strong>一行嵌入向量</strong>——它不在乎那一行是从文本 id 查表得来的，还是从一张图片编码而来的。所以 SGLang 的策略极其克制：把“多模态”这件事压缩成两个动作。<strong>动作一</strong>在分词 / 预处理阶段（第14课）完成，由每个模型自带的 <span class="mono">BaseMultimodalProcessor</span> 负责把媒体转张量、并往 prompt token 流里插占位符。<strong>动作二</strong>在前向入口完成，由 <span class="mono">general_mm_embed_routine</span> 负责跑编码器、并把媒体嵌入散射到占位符位置。两件事一做完，剩下的整条流水线——调度、分页 KV、注意力、采样——<strong>一行都不用改</strong>。这就是 VLM 支持“便宜”的根本原因。</p>
+<p>从更高的视角看，这是一种典型的<strong>“窄腰”架构</strong>：把所有模态的多样性压到两处接缝这条窄腰上，腰以下的引擎只面对统一的“嵌入序列”这一种抽象。图像、音频、视频，无论输入端多么千差万别，到了腰部都被翻译成同一种货币——嵌入；于是引擎核心可以只优化这一种货币的吞吐与延迟，而不必为每种模态各写一套调度与缓存。理解了这条窄腰，你就能预判很多设计问题的答案：新模态怎么加？写个处理器和编码器挂到接缝上。为什么图文混排不需要特殊批处理？因为缝合后它们都是嵌入。为什么 KV 缓存能跨请求复用同一张图的前缀？因为那张图早已变成确定的嵌入序列，与文本前缀别无二致。</p>
+</div>
+
+<h2>一、两处接缝：输入接缝与嵌入接缝</h2>
+<p>把一个文本引擎升级成 VLM 引擎，SGLang 只在两个明确的位置开口子，这两个口子就是<strong>接缝</strong>。第一处叫<strong>输入接缝（INPUT seam）</strong>，它发生在请求刚进来、还在做分词 / 预处理的阶段（第14课）。每个支持多模态的模型都带一个 <span class="mono">BaseMultimodalProcessor</span> 子类，它做两件事：一是把<strong>原始像素 / 音频波形</strong>按该模型的要求归一化、切块、变换成模型能吃的<strong>张量</strong>；二是往 prompt 的<strong>token 流里插入占位符 token</strong>——也就是在媒体应该出现的位置，塞进一串特定 id（例如一连串 <span class="mono">&lt;image&gt;</span> 占位 id），用来“占住”这张图片将要占据的槽位（slot）。注意：此刻这些占位符还只是普通的整数 id，里面并没有任何图像信息，它们只是<strong>记号</strong>。</p>
+<p>第二处叫<strong>嵌入接缝（EMBED seam）</strong>，它发生在前向计算（forward）的最前端，由 <span class="mono">general_mm_embed_routine</span> 统一处理。它先把 token id 照常查嵌入表得到文本嵌入；然后对每个模态，调用该模态的<strong>编码器</strong>（图像走 ViT，音频走音频编码器——有些编码器还自带 CUDA Graph 运行器，见第27课）算出媒体嵌入；最后把这些媒体嵌入<strong>散射（scatter）</strong>回 token 嵌入流——精确地落在那些 <span class="mono">input_ids == 该模态占位符 token</span> 的位置上。整个分发由 <span class="mono">data_embedding_funcs</span> 这张表驱动，它以 <span class="mono">placeholder_tokens</span>（占位符 token）为键，决定“哪种占位符该用哪个编码器去填”。</p>
+<p>为什么非要分成两处、而不是在一个地方一口气做完？因为这两件事天然属于<strong>两个不同的阶段</strong>，各自需要的上下文也不同。输入接缝跑在 CPU 侧的请求预处理里，它要看到的是<strong>原始字节</strong>（一张 JPEG、一段 WAV），还要决定这张图按该模型的切块规则会占多少个槽位——这些都和具体张量形状、token 排布强相关，必须在拼批（batch）之前定下来。嵌入接缝则跑在 GPU 侧的前向里，它要看到的是<strong>整批已经对齐好的 token id 张量</strong>，才能在一次散射里把所有请求、所有模态的媒体嵌入一并写进去。把职责这样切开，既让处理器可以逐模型定制（不同 VLM 的切块、归一化规则差别极大），又让嵌入缝合保持成一个通用、与具体模型无关的算子。换句话说，<strong>“怎么把媒体变成槽位”交给模型，“怎么把嵌入塞进槽位”交给引擎</strong>，边界清晰。</p>
+
+<div class="flow"><div class="node">原始图像 / 音频</div><div class="arrow">→</div><div class="node">处理器：转张量 + 插占位符 token</div><div class="arrow">→</div><div class="node">ViT / 音频编码器</div><div class="arrow">→</div><div class="node">在占位符处缝合嵌入</div><div class="arrow">→</div><div class="node">照常解码（调度 / KV / 注意力）</div></div>
+
+<h2>二、缝合发生在哪里：一行嵌入里的“图片格子”</h2>
+<p>理解 VLM 最直观的画面，是盯住前向计算入口那一行<strong>token 嵌入</strong>。假设 prompt 是“这是 [图片] 一只猫”，经过输入接缝后，token 流变成：<span class="mono">这 / 是 / IMG / IMG / IMG / 一 / 只 / 猫</span>，其中三个 <span class="mono">IMG</span> 就是占位符 token。<span class="mono">general_mm_embed_routine</span> 先把每个 id 查表得到嵌入，于是得到一整行嵌入向量；接着 ViT 把那张猫图编码成三枚媒体嵌入，<strong>替换</strong>掉那三个 <span class="mono">IMG</span> 槽位原本的占位嵌入。替换完成后，这一行里再也没有“占位符”的概念了——它就是 8 个并排的嵌入向量，前两个来自文字、中间三个来自图片、后三个又来自文字，混在一起完全均质。</p>
+
+<div class="cellgroup"><div class="cell">这</div><div class="cell">是</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell">一</div><div class="cell">只</div><div class="cell">猫</div></div>
+
+<p>上面这排格子里，带底色的三格原本是 <span class="mono">IMG</span> 占位符，现在被换成了图片嵌入（<span class="mono">img-emb</span>）。关键是：<strong>格子的数量和位置完全没变</strong>——占位符占了几格，图片嵌入就填几格。这保证了序列长度在缝合前后一致，于是下游所有按位置工作的组件（位置编码、注意力掩码、KV 槽位）都不需要任何特殊处理。</p>
+<p>这里还藏着一个常被忽略的细节：<strong>占位符的数量必须事先算准</strong>。处理器在输入接缝插占位符时，并不是随便塞几个，而是按该模型 ViT 的输出长度精确计算——一张图经过切块、池化后会产生多少个视觉 token，就插多少个占位符。如果数量对不上，缝合时散射的源（媒体嵌入）和目标（占位符槽位）就会形状不匹配，直接报错。所以输入接缝和嵌入接缝之间有一个<strong>隐含契约</strong>：处理器承诺“我为这张图留了 N 个槽位”，编码器承诺“我恰好产出 N 个嵌入”，两者由同一个占位符 token 串成一条线。正因为这个契约在预处理阶段就钉死了，下游拼批、分页、注意力才能把这段“图片区间”当成普通 token 一视同仁地处理。多图、多模态混排时也一样：每个媒体项各有自己的一段占位符，互不干扰，散射时各回各的槽位。</p>
+
+<h2>三、为什么其余引擎一行都不用改</h2>
+<p>这是本课最重要的一句话：<strong>VLM 支持 = “处理媒体 + 在占位符处织入嵌入”，而不是一台新引擎</strong>。一旦缝合完成，序列就退化成一行普通嵌入，语言模型主体根本分辨不出哪段来自图片。于是引擎的其余部分原封不动地复用：<strong>调度器</strong>（第18课）照样按 token 数排队、做连续批处理；<strong>分页 KV 缓存</strong>（第30课）照样按页分配、按 token 写入 KV；<strong>RadixAttention</strong>（第33课）照样按前缀树复用缓存、做前缀匹配；<strong>采样器</strong>（第28课）照样从 logits 里采样下一个 token。多模态信息在“嵌入接缝”处一次性融入序列后，后续没有任何一处需要知道它的存在。</p>
+<p>这种“克制”带来的工程红利非常实在。第一，<strong>复杂度被隔离</strong>：所有和模态相关的脏活——不同图片分辨率、不同音频采样率、不同模型的切块规则——全部关在处理器和编码器这两个盒子里，引擎核心保持单一职责。第二，<strong>性能优化自动继承</strong>：你为文本引擎做的连续批处理、前缀缓存复用、分页显存管理，VLM 请求一行不改地全盘享受；甚至一段“文本前缀 + 同一张图”被多个请求共享时，RadixAttention 仍能在缝合后的嵌入序列上命中前缀缓存。第三，<strong>新模型接入成本低</strong>：要支持一个新的 VLM，通常只需写一个新的 <span class="mono">BaseMultimodalProcessor</span> 子类、挂上它的编码器、在 <span class="mono">data_embedding_funcs</span> 里注册“占位符 → 编码器”的映射，引擎其余部分完全不用碰。这正是把变化点收敛到两处接缝的价值：<strong>新增的是适配器，不是引擎</strong>。</p>
+
+<div class="cols"><div class="col"><strong>VLM 专属（新增的两处接缝）</strong><ul><li>处理器：像素 / 音频 → 张量 + 插占位符</li><li>编码器：ViT / 音频编码器算媒体嵌入</li><li>缝合：在占位符位置散射嵌入</li></ul></div><div class="col"><strong>完全复用（一行不改）</strong><ul><li>调度器：连续批处理（第18课）</li><li>分页 KV 缓存：分页存取（第30课）</li><li>RadixAttention：前缀复用（第33课）</li><li>采样器：从 logits 采样（第28课）</li></ul></div></div>
+
+<h2>四、把两处接缝对到具体职责</h2>
+<p>下面这张表把两处接缝、它们所在的阶段、以及各自的职责一一对上。可以看到，<strong>输入接缝</strong>属于分词 / 预处理阶段（第14课），交付的是“张量 + 带占位符的 token 流”；<strong>嵌入接缝</strong>属于前向计算阶段，交付的是“缝合好媒体嵌入的一行向量”。两者一前一后，把媒体从“原始字节”一路接力到“可被语言模型直接消费的嵌入”，中间没有惊动引擎的任何其他部分。</p>
+<p>不妨把整条路径再完整走一遍，体会两处接缝如何接力。用户发来一条带图请求，分词器（第14课）先把文本部分切成 token，与此同时输入接缝里的处理器把图片解码、归一化、按模型规则切块成张量，并在文本 token 流的对应位置插入一串占位符 token；此刻请求带着“张量 + 含占位符的 token 序列”进入调度器（第18课）排队、拼批。轮到它前向时，嵌入接缝接手：先把整批 token id 查表得到文本嵌入，再让 ViT/音频编码器把张量编码成媒体嵌入，最后一次散射把媒体嵌入写到占位符槽位上。从这一步往后，序列就是纯粹的嵌入，分页 KV（第30课）按 token 分配缓存、RadixAttention（第33课）做前缀匹配与复用、采样器（第28课）从 logits 采样下一个 token——它们谁都不知道、也不需要知道这里曾经有过一张图。每解码出一个新 token，循环继续，直到生成结束。<strong>整条链路里，“多模态”只在最前面两处接缝短暂现身，之后彻底消融进通用的嵌入流</strong>，这就是 SGLang VLM 设计的全部精髓：用最小的改动面，换来对整套高性能基础设施的完整复用。</p>
+
+<table class="t"><tr><th>接缝</th><th>所在阶段</th><th>职责</th></tr><tr><td>输入处理器 <span class="mono">BaseMultimodalProcessor</span></td><td>分词 / 预处理（第14课）</td><td>原始像素 / 音频 → 模型张量；往 token 流插入占位符 token</td></tr><tr><td>嵌入入口 <span class="mono">general_mm_embed_routine</span></td><td>前向计算入口</td><td>跑编码器算媒体嵌入；在 <span class="mono">input_ids==占位符</span> 处散射缝合</td></tr></table>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/mm_utils.py ::general_mm_embed_routine</span><span class="ln">在占位符处把媒体嵌入拼接进 token 序列</span></div><pre>def general_mm_embed_routine(
+    input_ids,                  # prompt tokens, with PLACEHOLDER ids where media goes
+    forward_batch,
+    language_model,
+    data_embedding_funcs,       # {Modality: fn} &mdash; run that modality's encoder to embed it
+    placeholder_tokens=None,    # which token id marks each modality's slots
+    **kwargs,
+):
+    # 1) embed the text token ids normally
+    # 2) for each modality, run its encoder to get media embeddings
+    # 3) SCATTER those embeddings into the token-embedding stream at the
+    #    positions where input_ids == that modality's placeholder token
+    # 4) hand the merged embeddings to the language model; scheduler / paged KV /
+    #    attention downstream are unchanged
+    ...</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div>
+<ul>
+<li><strong>两处接缝</strong>把文本引擎变成 VLM 引擎，其余完全不动：<span class="mono">输入接缝</span> + <span class="mono">嵌入接缝</span>。</li>
+<li><strong>输入接缝</strong>由每模型的 <span class="mono">BaseMultimodalProcessor</span> 负责：原始像素 / 音频 → 张量，并往 token 流插入<strong>占位符 token</strong>。</li>
+<li><strong>嵌入接缝</strong>由 <span class="mono">general_mm_embed_routine</span> 负责：先嵌入文本，再跑各模态<strong>编码器</strong>（ViT / 音频编码器，可带 CUDA Graph，第27课），把媒体嵌入<strong>散射</strong>到占位符位置。</li>
+<li>分发由 <span class="mono">data_embedding_funcs</span> 驱动，以 <span class="mono">placeholder_tokens</span> 为键，决定哪种占位符用哪个编码器填。</li>
+<li>缝合后序列只是一行嵌入，所以<strong>调度器（第18课）/ 分页 KV（第30课）/ RadixAttention（第33课）/ 采样器（第28课）全部复用</strong>。</li>
+<li>核心洞见：VLM = <span class="mono">处理媒体 + 在占位符处织入嵌入</span>，不是一台新引擎。</li>
+<li>这是一种<strong>“窄腰”架构</strong>：所有模态在两处接缝被翻译成统一的嵌入序列，腰以下的引擎只面对这一种抽象，因而新模态只需新增适配器即可接入。</li>
+</ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 把一个纯文本引擎变成 VLM 引擎，SGLang 只动了哪两处“接缝”？</div>
+  <ol class="opts">
+    <li>RadixAttention（第33课）与采样器（第28课）</li>
+    <li>需要重写整条流水线并新增一台 VLM 专用引擎</li>
+    <li>调度器（第18课）与分页 KV 缓存（第30课）</li>
+    <li><strong>输入接缝（处理器把媒体转张量并插占位符 token）与嵌入接缝（<span class='mono'>general_mm_embed_routine</span> 跑编码器并在占位符处缝合媒体嵌入），其余引擎不动</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。VLM 支持被压缩成两处接缝：<strong>输入接缝</strong>在分词/预处理阶段（第14课）由每模型的 <span class='mono'>BaseMultimodalProcessor</span> 把原始像素/音频转张量并往 token 流插入占位符 token；<strong>嵌入接缝</strong>在前向入口由 <span class='mono'>general_mm_embed_routine</span> 跑编码器并把媒体嵌入散射到占位符位置。两处之外，调度、分页 KV、注意力、采样全部复用。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. <span class='mono'>general_mm_embed_routine</span> 究竟把媒体嵌入放到 token 序列的哪些位置？</div>
+  <ol class="opts">
+    <li>随机散布到所有文本 token 之间以增强鲁棒性</li>
+    <li>插到序列最前面，覆盖系统提示词</li>
+    <li>统一追加到序列末尾，作为额外的上下文前缀</li>
+    <li><strong>放到那些 <span class='mono'>input_ids == 该模态占位符 token</span> 的位置——由 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>placeholder_tokens</span> 为键驱动分发</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。处理器在 token 流里为每个媒体项预留了一串占位符 token。前向时 <span class='mono'>general_mm_embed_routine</span> 先正常嵌入文本 id，再跑各模态编码器得到媒体嵌入，最后<strong>精确地</strong>把它们散射到 <span class='mono'>input_ids</span> 等于该模态占位符的槽位上。分发表 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>placeholder_tokens</span> 为键，决定哪种占位符用哪个编码器填，保证位置与数量一一对应。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么缝合完媒体嵌入后，调度器、分页 KV、RadixAttention、采样器一行都不用改？</div>
+  <ol class="opts">
+    <li>因为媒体嵌入被单独存到另一块显存，不进入主序列</li>
+    <li><strong>因为缝合后序列只是一行普通嵌入向量，语言模型主体分辨不出哪段来自图片，下游所有按位置/按 token 工作的组件无需感知模态</strong></li>
+    <li>因为 VLM 关闭了连续批处理与前缀复用以简化逻辑</li>
+    <li>因为编码器已经把图片转成了文本字符串再分词</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。占位符保证缝合前后序列长度不变，缝合只是把占位嵌入替换成等量的媒体嵌入。替换后这一行是均质的嵌入向量，语言模型不在乎来源。于是调度器（第18课）照样连续批处理、分页 KV（第30课）照样按页存取、RadixAttention（第33课）照样前缀复用、采样器（第28课）照样从 logits 采样——多模态信息在嵌入接缝处一次性融入，后续无需再感知。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话讲清 VLM 的“两处接缝”如何把一台文本引擎升级成多模态引擎：<strong>输入接缝</strong>里 <span class='mono'>BaseMultimodalProcessor</span> 如何把原始像素/音频转张量并往 token 流插占位符 token（第14课）；<strong>嵌入接缝</strong>里 <span class='mono'>general_mm_embed_routine</span> 如何先嵌入文本、再跑 ViT/音频编码器、并在 <span class='mono'>input_ids==占位符</span> 处散射缝合；说明 <span class='mono'>data_embedding_funcs</span> 与 <span class='mono'>placeholder_tokens</span> 各自的角色。</li>
+    <li>解释为什么“VLM = 处理媒体 + 在占位符处织入嵌入，而不是一台新引擎”：占位符如何保证序列长度在缝合前后一致，从而让调度器（第18课）、分页 KV（第30课）、RadixAttention（第33课）、采样器（第28课）全部原样复用；再讨论若编码器自带 CUDA Graph 运行器（第27课），它如何嵌入这条路径而不打扰下游。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">This lesson shows how SGLang turns a text-only inference engine into a multimodal vision-language model (VLM) engine that can handle <strong>image, audio, video + text</strong> together. The key insight is a single sentence: <strong>you only change two seams; the rest of the engine is untouched</strong>. The first is the <span class="mono">INPUT seam</span> — turn raw pixels / audio into model tensors, and insert <strong>PLACEHOLDER tokens</strong> into the token stream. The second is the <span class="mono">EMBED seam</span> — at forward time, run each modality's encoder to produce media embeddings, then <strong>scatter</strong> them into the token-embedding stream exactly at the placeholder positions. After that splice, the sequence is just a row of ordinary embeddings, so the scheduler (L18), paged KV (L30), RadixAttention (L33), and sampler (L28) all run as usual.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture the text engine as a single <strong>row of crossword squares</strong>. Normally each square holds one character (a text token). Now you want to embed a picture in the middle of the sentence. What do you do? You <strong>first pencil in a mark</strong> (a placeholder token) to announce: "a picture goes here later — reserve 5 squares." When it's actually time to write, you take the photo, use a <strong>dedicated camera (the ViT encoder)</strong> to compress it into a few "picture stamps", and then <strong>stamp them exactly onto the squares you penciled</strong>, replacing the pencil marks. In the end the whole row looks like one even strip of content — whoever reads the sentence afterward never needs to know which square was originally text and which was a picture; they just read square by square. That is VLM: <span class="mono">reserve slots + weave embeddings in at those slots</span>, not building a new machine.</p>
+<p>Two details in this analogy deserve a second look. First, <strong>the one who pencils the marks and the one who stamps are different roles</strong>: penciling happens at the "layout stage," which must first know roughly how many squares this picture occupies; stamping happens at the "printing stage," where the picture is finally compressed into stamps and pressed down. Second, <strong>the number of marks must match the number of stamps exactly</strong> — you reserved 5 squares, so the camera must produce exactly 5 stamps; one too many or too few will not line up. Precisely because the square count is fixed at layout time, everything afterward — binding (batching), paging, or reading square by square (decoding) — can treat this "image span" as ordinary squares, with no separate pipeline for the picture.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Many assume that supporting multimodality requires "rewriting the engine." It does not. The language model's body only ever sees <strong>one row of embedding vectors</strong> — it does not care whether a row came from a text-id lookup or from encoding a picture. So SGLang's strategy is extremely restrained: compress "multimodality" into two actions. <strong>Action one</strong> happens in the tokenize / preprocess stage (L14), where each model's own <span class="mono">BaseMultimodalProcessor</span> turns media into tensors and inserts placeholders into the prompt token stream. <strong>Action two</strong> happens at the forward entry, where <span class="mono">general_mm_embed_routine</span> runs the encoders and scatters media embeddings into the placeholder positions. Once those two are done, the rest of the pipeline — scheduling, paged KV, attention, sampling — <strong>does not change a single line</strong>. That is the fundamental reason VLM support is "cheap."</p>
+<p>From a higher vantage, this is a textbook <strong>"narrow waist" architecture</strong>: all the diversity of modalities is squeezed onto the narrow waist of the two seams, and everything below the waist faces only one abstraction — a unified "embedding sequence." Image, audio, video, however wildly different at the input end, are all translated into the same currency at the waist — embeddings; so the engine core can optimize throughput and latency for just this one currency, without writing a separate scheduler and cache for each modality. Once you grasp this narrow waist, you can predict the answers to many design questions: how do you add a new modality? Write a processor and an encoder and hook them onto the seams. Why does interleaved image-text need no special batching? Because after the splice they are all embeddings. Why can the KV cache reuse the prefix of the same image across requests? Because that image has long since become a deterministic embedding sequence, no different from a text prefix.</p>
+</div>
+
+<h2>1. The two seams: the input seam and the embed seam</h2>
+<p>To upgrade a text engine into a VLM engine, SGLang only opens incisions at two precise locations; those incisions are the <strong>seams</strong>. The first is the <strong>INPUT seam</strong>, which happens when a request has just arrived and is still being tokenized / preprocessed (L14). Every multimodal-capable model carries a <span class="mono">BaseMultimodalProcessor</span> subclass that does two things: first, it normalizes, tiles, and transforms the <strong>raw pixels / audio waveform</strong> into the <strong>tensors</strong> the model expects; second, it <strong>inserts PLACEHOLDER tokens into the prompt's token stream</strong> — that is, at the position where the media should appear, it stuffs in a run of specific ids (e.g. a run of <span class="mono">&lt;image&gt;</span> placeholder ids) to "reserve" the slots this picture will occupy. Note: at this moment those placeholders are still just plain integer ids carrying no image information — they are merely <strong>marks</strong>.</p>
+<p>The second is the <strong>EMBED seam</strong>, which happens at the very front of the forward pass and is handled uniformly by <span class="mono">general_mm_embed_routine</span>. It first looks up the token ids in the embedding table as usual to get text embeddings; then, for each modality, it calls that modality's <strong>encoder</strong> (image goes through a ViT, audio through an audio encoder — some encoders even carry their own CUDA-graph runner, see L27) to compute media embeddings; finally it <strong>scatters</strong> those media embeddings back into the token-embedding stream — landing exactly on the positions where <span class="mono">input_ids == that modality's placeholder token</span>. The whole dispatch is driven by the table <span class="mono">data_embedding_funcs</span>, keyed by <span class="mono">placeholder_tokens</span>, which decides "which placeholder gets filled by which encoder."</p>
+<p>Why split this into two places instead of doing it all at once? Because these two jobs naturally belong to <strong>two different stages</strong> with different context needs. The input seam runs in CPU-side request preprocessing; it must see the <strong>raw bytes</strong> (a JPEG, a WAV clip) and decide how many slots this image will occupy under that model's tiling rules — all strongly tied to concrete tensor shapes and token layout, and all must be fixed before batching. The embed seam runs in the GPU-side forward; it must see the <strong>whole batch of aligned token-id tensors</strong> so it can, in one scatter, write the media embeddings of all requests and all modalities at once. Splitting responsibilities this way lets the processor be customized per model (different VLMs differ wildly in tiling and normalization rules) while keeping the embed splice a generic, model-agnostic operator. In other words, <strong>"how to turn media into slots" is the model's job, "how to put embeddings into slots" is the engine's job</strong> — a clean boundary.</p>
+
+<div class="flow"><div class="node">raw image / audio</div><div class="arrow">→</div><div class="node">processor: to tensors + insert placeholder tokens</div><div class="arrow">→</div><div class="node">ViT / audio encoder</div><div class="arrow">→</div><div class="node">splice embeddings at placeholders</div><div class="arrow">→</div><div class="node">normal decode (sched / KV / attention)</div></div>
+
+<h2>2. Where the splice happens: the "picture squares" inside one row of embeddings</h2>
+<p>The most intuitive picture of VLM is to stare at that one row of <strong>token embeddings</strong> at the forward entry. Suppose the prompt is "this is [picture] a cat." After the input seam, the token stream becomes: <span class="mono">this / is / IMG / IMG / IMG / a / cat</span>, where the three <span class="mono">IMG</span> are placeholder tokens. <span class="mono">general_mm_embed_routine</span> first looks up each id to get an embedding, giving a full row of embedding vectors; then the ViT encodes that cat photo into three media embeddings that <strong>replace</strong> the placeholder embeddings originally sitting in those three <span class="mono">IMG</span> slots. After the replacement, this row no longer has any notion of "placeholder" — it is just a strip of embedding vectors side by side, some from text, some from the picture, mixed together completely homogeneously.</p>
+
+<div class="cellgroup"><div class="cell">this</div><div class="cell">is</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell">a</div><div class="cell">cat</div></div>
+
+<p>In the row of squares above, the three shaded cells were originally <span class="mono">IMG</span> placeholders and are now replaced by image embeddings (<span class="mono">img-emb</span>). The key point: <strong>the count and positions of the squares do not change at all</strong> — however many slots the placeholders held, that many image embeddings fill them. This guarantees the sequence length is identical before and after the splice, so every downstream component that works by position (positional encoding, attention mask, KV slots) needs no special handling.</p>
+<p>There is an often-overlooked detail here: <strong>the number of placeholders must be computed exactly in advance</strong>. When the processor inserts placeholders at the input seam, it does not stuff in some arbitrary count — it computes it precisely from that model's ViT output length: however many visual tokens an image produces after tiling and pooling, that many placeholders go in. If the counts disagree, the scatter's source (media embeddings) and target (placeholder slots) will mismatch in shape and error out immediately. So there is an <strong>implicit contract</strong> between the input seam and the embed seam: the processor promises "I reserved N slots for this image," the encoder promises "I produce exactly N embeddings," and the same placeholder token strings the two together. Precisely because this contract is nailed down in preprocessing, downstream batching, paging, and attention can treat this "image span" as ordinary tokens with no special-casing. The same holds for multiple images and mixed modalities: each media item has its own run of placeholders, mutually disjoint, and the scatter returns each to its own slots.</p>
+
+<h2>3. Why the rest of the engine does not change a single line</h2>
+<p>This is the most important sentence of the lesson: <strong>VLM support = "process media + weave embeddings in at placeholders," not a new engine</strong>. Once the splice is done, the sequence degenerates into a row of ordinary embeddings, and the language-model body simply cannot tell which segment came from a picture. So the rest of the engine is reused untouched: the <strong>scheduler</strong> (L18) still queues by token count and does continuous batching; the <strong>paged KV cache</strong> (L30) still allocates by page and writes KV per token; <strong>RadixAttention</strong> (L33) still reuses cache by prefix tree and does prefix matching; the <strong>sampler</strong> (L28) still samples the next token from logits. Once multimodal information is fused into the sequence once at the embed seam, no later stage ever needs to know it exists.</p>
+<p>The engineering dividends of this restraint are very concrete. First, <strong>complexity is isolated</strong>: all modality-specific dirty work — varied image resolutions, varied audio sample rates, each model's tiling rules — is confined to the two boxes of processor and encoder, while the engine core keeps a single responsibility. Second, <strong>performance optimizations are inherited for free</strong>: the continuous batching, prefix-cache reuse, and paged VRAM management you built for the text engine are enjoyed wholesale by VLM requests without a line of change; even when a "text prefix + same image" is shared by multiple requests, RadixAttention can still hit the prefix cache on the spliced embedding sequence. Third, <strong>onboarding a new model is cheap</strong>: to support a new VLM you usually only write a new <span class="mono">BaseMultimodalProcessor</span> subclass, hook up its encoder, and register the "placeholder → encoder" mapping in <span class="mono">data_embedding_funcs</span> — the rest of the engine is never touched. That is exactly the value of converging the change points into two seams: <strong>what you add is an adapter, not an engine</strong>.</p>
+
+<div class="cols"><div class="col"><strong>VLM-specific (the two new seams)</strong><ul><li>processor: pixels / audio → tensors + insert placeholders</li><li>encoder: ViT / audio encoder computes media embeddings</li><li>splice: scatter embeddings at placeholder positions</li></ul></div><div class="col"><strong>Fully reused (not a line changed)</strong><ul><li>scheduler: continuous batching (L18)</li><li>paged KV cache: paged storage (L30)</li><li>RadixAttention: prefix reuse (L33)</li><li>sampler: sample from logits (L28)</li></ul></div></div>
+
+<h2>4. Mapping the two seams to concrete responsibilities</h2>
+<p>The table below maps the two seams, the stages they live in, and their respective duties one by one. You can see that the <strong>input seam</strong> belongs to the tokenize / preprocess stage (L14) and delivers "tensors + a token stream with placeholders"; the <strong>embed seam</strong> belongs to the forward stage and delivers "a row of vectors with media embeddings spliced in." Together, front and back, they relay media from "raw bytes" all the way to "embeddings the language model can directly consume," without disturbing any other part of the engine in between.</p>
+<p>Let us walk the whole path once more to feel how the two seams hand off. A user sends a request with an image; the tokenizer (L14) cuts the text part into tokens, while the processor at the input seam decodes, normalizes, and tiles the image into tensors per the model's rules, and inserts a run of placeholder tokens at the corresponding positions in the text token stream. At this point the request, carrying "tensors + a token sequence with placeholders," enters the scheduler (L18) to queue and batch. When its turn to run forward comes, the embed seam takes over: it looks up the whole batch of token ids to get text embeddings, lets the ViT/audio encoder encode the tensors into media embeddings, and in one scatter writes those media embeddings onto the placeholder slots. From this step on, the sequence is pure embeddings: paged KV (L30) allocates cache per token, RadixAttention (L33) does prefix matching and reuse, and the sampler (L28) samples the next token from logits — none of them knows, or needs to know, that an image was ever here. Each newly decoded token continues the loop until generation ends. <strong>Across the whole pipeline, "multimodality" appears only briefly at the two front seams and afterward dissolves completely into the generic embedding stream</strong> — that is the entire essence of SGLang's VLM design: the smallest change surface in exchange for full reuse of the whole high-performance infrastructure.</p>
+
+<table class="t"><tr><th>Seam</th><th>Stage</th><th>Responsibility</th></tr><tr><td>input processor <span class="mono">BaseMultimodalProcessor</span></td><td>tokenize / preprocess (L14)</td><td>raw pixels / audio → model tensors; insert placeholder tokens into the token stream</td></tr><tr><td>embed entry <span class="mono">general_mm_embed_routine</span></td><td>forward entry</td><td>run encoders to compute media embeddings; scatter-splice where <span class="mono">input_ids==placeholder</span></td></tr></table>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/mm_utils.py ::general_mm_embed_routine</span><span class="ln">splice media embeddings into the token stream at placeholder slots</span></div><pre>def general_mm_embed_routine(
+    input_ids,                  # prompt tokens, with PLACEHOLDER ids where media goes
+    forward_batch,
+    language_model,
+    data_embedding_funcs,       # {Modality: fn} &mdash; run that modality's encoder to embed it
+    placeholder_tokens=None,    # which token id marks each modality's slots
+    **kwargs,
+):
+    # 1) embed the text token ids normally
+    # 2) for each modality, run its encoder to get media embeddings
+    # 3) SCATTER those embeddings into the token-embedding stream at the
+    #    positions where input_ids == that modality's placeholder token
+    # 4) hand the merged embeddings to the language model; scheduler / paged KV /
+    #    attention downstream are unchanged
+    ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li><strong>Two seams</strong> turn a text engine into a VLM engine, with everything else untouched: the <span class="mono">input seam</span> + the <span class="mono">embed seam</span>.</li>
+<li>The <strong>input seam</strong> is handled by each model's <span class="mono">BaseMultimodalProcessor</span>: raw pixels / audio → tensors, and insert <strong>placeholder tokens</strong> into the token stream.</li>
+<li>The <strong>embed seam</strong> is handled by <span class="mono">general_mm_embed_routine</span>: embed text first, then run each modality's <strong>encoder</strong> (ViT / audio encoder, may carry CUDA Graph, L27) and <strong>scatter</strong> media embeddings into the placeholder positions.</li>
+<li>Dispatch is driven by <span class="mono">data_embedding_funcs</span>, keyed by <span class="mono">placeholder_tokens</span>, deciding which placeholder is filled by which encoder.</li>
+<li>After the splice the sequence is just a row of embeddings, so the <strong>scheduler (L18) / paged KV (L30) / RadixAttention (L33) / sampler (L28) are all reused</strong>.</li>
+<li>Core insight: VLM = <span class="mono">process media + weave embeddings in at placeholders</span>, not a new engine.</li>
+<li>This is a <strong>"narrow waist" architecture</strong>: all modalities are translated into a unified embedding sequence at the two seams, and the engine below the waist faces only this one abstraction, so a new modality only needs a new adapter to plug in.</li>
+</ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. To turn a text engine into a VLM engine, which two "seams" does SGLang change?</div>
+  <ol class="opts">
+    <li>RadixAttention (L33) and the sampler (L28)</li>
+    <li>Rewrite the whole pipeline and add a dedicated VLM-only engine</li>
+    <li>The scheduler (L18) and the paged KV cache (L30)</li>
+    <li><strong>The input seam (processor turns media into tensors and inserts placeholder tokens) and the embed seam (<span class='mono'>general_mm_embed_routine</span> runs encoders and splices media embeddings at placeholders); the rest of the engine is untouched</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. VLM support is compressed into two seams: the <strong>input seam</strong> in tokenize/preprocess (L14), where each model's <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens; and the <strong>embed seam</strong> at the forward entry, where <span class='mono'>general_mm_embed_routine</span> runs encoders and scatters media embeddings to placeholder positions. Beyond those two, scheduling, paged KV, attention, and sampling are all reused.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Where exactly does <span class='mono'>general_mm_embed_routine</span> place media embeddings in the token sequence?</div>
+  <ol class="opts">
+    <li>Scattered randomly among all text tokens to improve robustness</li>
+    <li>Prepended at the very front, overwriting the system prompt</li>
+    <li>Appended uniformly at the end of the sequence as an extra context prefix</li>
+    <li><strong>At the positions where <span class='mono'>input_ids == that modality's placeholder token</span> — dispatched by <span class='mono'>data_embedding_funcs</span> keyed on <span class='mono'>placeholder_tokens</span></strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The processor reserves a run of placeholder tokens in the token stream for each media item. At forward time <span class='mono'>general_mm_embed_routine</span> first embeds text ids normally, then runs each modality's encoder to get media embeddings, and finally <strong>precisely</strong> scatters them onto the slots where <span class='mono'>input_ids</span> equals that modality's placeholder. The table <span class='mono'>data_embedding_funcs</span>, keyed on <span class='mono'>placeholder_tokens</span>, decides which placeholder is filled by which encoder, keeping positions and counts in one-to-one correspondence.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why, after splicing media embeddings, do the scheduler, paged KV, RadixAttention, and sampler not change a single line?</div>
+  <ol class="opts">
+    <li>Because media embeddings are stored in a separate VRAM block and never enter the main sequence</li>
+    <li><strong>Because after the splice the sequence is just a row of ordinary embedding vectors; the language-model body cannot tell which segment came from a picture, so every downstream component working by position/per-token needs no modality awareness</strong></li>
+    <li>Because VLM disables continuous batching and prefix reuse to simplify the logic</li>
+    <li>Because the encoder already converts the image into a text string and re-tokenizes it</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Placeholders keep the sequence length identical before and after; the splice merely replaces placeholder embeddings with an equal number of media embeddings. Afterward the row is a homogeneous set of embedding vectors and the language model does not care about origin. So the scheduler (L18) still does continuous batching, paged KV (L30) still pages, RadixAttention (L33) still reuses prefixes, and the sampler (L28) still samples from logits — multimodal info is fused once at the embed seam and never needs to be seen again.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain how VLM's "two seams" upgrade a text engine into a multimodal one: in the <strong>input seam</strong>, how <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens into the token stream (L14); in the <strong>embed seam</strong>, how <span class='mono'>general_mm_embed_routine</span> embeds text first, then runs the ViT/audio encoder, and scatter-splices where <span class='mono'>input_ids==placeholder</span>; describe the roles of <span class='mono'>data_embedding_funcs</span> and <span class='mono'>placeholder_tokens</span>.</li>
+    <li>Explain why "VLM = process media + weave embeddings in at placeholders, not a new engine": how placeholders keep the sequence length identical before and after the splice so that the scheduler (L18), paged KV (L30), RadixAttention (L33), and sampler (L28) are all reused as-is; then discuss how, if an encoder carries its own CUDA-graph runner (L27), it fits into this path without disturbing the downstream.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="48-structured-outputs-and-jump-forward.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">结构化输出与跳跃前进</span><span class="lang-en">Structured outputs &amp; jump-forward</span></div></a><a class="next" href="50-multi-lora-batching.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">多 LoRA 批处理</span><span class="lang-en">Multi-LoRA batching</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

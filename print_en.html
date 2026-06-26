@@ -333,7 +333,7 @@ details[open] > summary { list-style: none; }
 </head>
 <body>
 <h1>SGLang Visual Guide - Print Edition</h1>
-<p style="color:var(--muted)">All 48 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
+<p style="color:var(--muted)">All 52 lessons - one page each. Use Ctrl/Cmd+P in a browser to export a PDF.</p>
 <div class="print-toc"><h2>Contents</h2>
 <ol>
   <li>What is SGLang</li>
@@ -384,6 +384,10 @@ details[open] > summary { list-style: none; }
   <li>TP/PP/EP/DP parallelism</li>
   <li>Large-scale EP & EPLB</li>
   <li>Structured outputs & jump-forward</li>
+  <li>Multimodal VLM serving</li>
+  <li>Multi-LoRA batching</li>
+  <li>RL rollout & weight sync</li>
+  <li>Diffusion models</li>
 </ol></div>
 <section class="lesson-print">
 <h1>What is SGLang</h1>
@@ -8934,6 +8938,538 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
   <ul>
     <li>In your own words, explain why constrained decoding <strong>guarantees</strong> valid output rather than just "probably valid": after compiling JSON-Schema/regex/EBNF into an FSM, how <span class='mono'>fill_vocab_mask</span> sets illegal tokens' logits (Lesson 37) to −∞ before each sampling step so the sampler (Lesson 28) cannot pick them regardless of strategy; then contrast this with "generate then validate and retry."</li>
     <li>Describe jump-forward's full payoff and mechanism: how the compressed FSM identifies "deterministic spans," how <span class='mono'>jump_forward_symbol(state)</span> emits the nailed-down string and jumps the FSM ahead to skip model forwards; explain why it is <strong>both faster and higher quality</strong>, and use <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> to show how the per-request FSM closes the loop of advance, mask, jump, and terminate.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Multimodal VLM serving</h1>
+
+<p class="lead">This lesson shows how SGLang turns a text-only inference engine into a multimodal vision-language model (VLM) engine that can handle <strong>image, audio, video + text</strong> together. The key insight is a single sentence: <strong>you only change two seams; the rest of the engine is untouched</strong>. The first is the <span class="mono">INPUT seam</span> — turn raw pixels / audio into model tensors, and insert <strong>PLACEHOLDER tokens</strong> into the token stream. The second is the <span class="mono">EMBED seam</span> — at forward time, run each modality's encoder to produce media embeddings, then <strong>scatter</strong> them into the token-embedding stream exactly at the placeholder positions. After that splice, the sequence is just a row of ordinary embeddings, so the scheduler (L18), paged KV (L30), RadixAttention (L33), and sampler (L28) all run as usual.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture the text engine as a single <strong>row of crossword squares</strong>. Normally each square holds one character (a text token). Now you want to embed a picture in the middle of the sentence. What do you do? You <strong>first pencil in a mark</strong> (a placeholder token) to announce: "a picture goes here later — reserve 5 squares." When it's actually time to write, you take the photo, use a <strong>dedicated camera (the ViT encoder)</strong> to compress it into a few "picture stamps", and then <strong>stamp them exactly onto the squares you penciled</strong>, replacing the pencil marks. In the end the whole row looks like one even strip of content — whoever reads the sentence afterward never needs to know which square was originally text and which was a picture; they just read square by square. That is VLM: <span class="mono">reserve slots + weave embeddings in at those slots</span>, not building a new machine.</p>
+<p>Two details in this analogy deserve a second look. First, <strong>the one who pencils the marks and the one who stamps are different roles</strong>: penciling happens at the "layout stage," which must first know roughly how many squares this picture occupies; stamping happens at the "printing stage," where the picture is finally compressed into stamps and pressed down. Second, <strong>the number of marks must match the number of stamps exactly</strong> — you reserved 5 squares, so the camera must produce exactly 5 stamps; one too many or too few will not line up. Precisely because the square count is fixed at layout time, everything afterward — binding (batching), paging, or reading square by square (decoding) — can treat this "image span" as ordinary squares, with no separate pipeline for the picture.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Many assume that supporting multimodality requires "rewriting the engine." It does not. The language model's body only ever sees <strong>one row of embedding vectors</strong> — it does not care whether a row came from a text-id lookup or from encoding a picture. So SGLang's strategy is extremely restrained: compress "multimodality" into two actions. <strong>Action one</strong> happens in the tokenize / preprocess stage (L14), where each model's own <span class="mono">BaseMultimodalProcessor</span> turns media into tensors and inserts placeholders into the prompt token stream. <strong>Action two</strong> happens at the forward entry, where <span class="mono">general_mm_embed_routine</span> runs the encoders and scatters media embeddings into the placeholder positions. Once those two are done, the rest of the pipeline — scheduling, paged KV, attention, sampling — <strong>does not change a single line</strong>. That is the fundamental reason VLM support is "cheap."</p>
+<p>From a higher vantage, this is a textbook <strong>"narrow waist" architecture</strong>: all the diversity of modalities is squeezed onto the narrow waist of the two seams, and everything below the waist faces only one abstraction — a unified "embedding sequence." Image, audio, video, however wildly different at the input end, are all translated into the same currency at the waist — embeddings; so the engine core can optimize throughput and latency for just this one currency, without writing a separate scheduler and cache for each modality. Once you grasp this narrow waist, you can predict the answers to many design questions: how do you add a new modality? Write a processor and an encoder and hook them onto the seams. Why does interleaved image-text need no special batching? Because after the splice they are all embeddings. Why can the KV cache reuse the prefix of the same image across requests? Because that image has long since become a deterministic embedding sequence, no different from a text prefix.</p>
+</div>
+
+<h2>1. The two seams: the input seam and the embed seam</h2>
+<p>To upgrade a text engine into a VLM engine, SGLang only opens incisions at two precise locations; those incisions are the <strong>seams</strong>. The first is the <strong>INPUT seam</strong>, which happens when a request has just arrived and is still being tokenized / preprocessed (L14). Every multimodal-capable model carries a <span class="mono">BaseMultimodalProcessor</span> subclass that does two things: first, it normalizes, tiles, and transforms the <strong>raw pixels / audio waveform</strong> into the <strong>tensors</strong> the model expects; second, it <strong>inserts PLACEHOLDER tokens into the prompt's token stream</strong> — that is, at the position where the media should appear, it stuffs in a run of specific ids (e.g. a run of <span class="mono">&lt;image&gt;</span> placeholder ids) to "reserve" the slots this picture will occupy. Note: at this moment those placeholders are still just plain integer ids carrying no image information — they are merely <strong>marks</strong>.</p>
+<p>The second is the <strong>EMBED seam</strong>, which happens at the very front of the forward pass and is handled uniformly by <span class="mono">general_mm_embed_routine</span>. It first looks up the token ids in the embedding table as usual to get text embeddings; then, for each modality, it calls that modality's <strong>encoder</strong> (image goes through a ViT, audio through an audio encoder — some encoders even carry their own CUDA-graph runner, see L27) to compute media embeddings; finally it <strong>scatters</strong> those media embeddings back into the token-embedding stream — landing exactly on the positions where <span class="mono">input_ids == that modality's placeholder token</span>. The whole dispatch is driven by the table <span class="mono">data_embedding_funcs</span>, keyed by <span class="mono">placeholder_tokens</span>, which decides "which placeholder gets filled by which encoder."</p>
+<p>Why split this into two places instead of doing it all at once? Because these two jobs naturally belong to <strong>two different stages</strong> with different context needs. The input seam runs in CPU-side request preprocessing; it must see the <strong>raw bytes</strong> (a JPEG, a WAV clip) and decide how many slots this image will occupy under that model's tiling rules — all strongly tied to concrete tensor shapes and token layout, and all must be fixed before batching. The embed seam runs in the GPU-side forward; it must see the <strong>whole batch of aligned token-id tensors</strong> so it can, in one scatter, write the media embeddings of all requests and all modalities at once. Splitting responsibilities this way lets the processor be customized per model (different VLMs differ wildly in tiling and normalization rules) while keeping the embed splice a generic, model-agnostic operator. In other words, <strong>"how to turn media into slots" is the model's job, "how to put embeddings into slots" is the engine's job</strong> — a clean boundary.</p>
+
+<div class="flow"><div class="node">raw image / audio</div><div class="arrow">→</div><div class="node">processor: to tensors + insert placeholder tokens</div><div class="arrow">→</div><div class="node">ViT / audio encoder</div><div class="arrow">→</div><div class="node">splice embeddings at placeholders</div><div class="arrow">→</div><div class="node">normal decode (sched / KV / attention)</div></div>
+
+<h2>2. Where the splice happens: the "picture squares" inside one row of embeddings</h2>
+<p>The most intuitive picture of VLM is to stare at that one row of <strong>token embeddings</strong> at the forward entry. Suppose the prompt is "this is [picture] a cat." After the input seam, the token stream becomes: <span class="mono">this / is / IMG / IMG / IMG / a / cat</span>, where the three <span class="mono">IMG</span> are placeholder tokens. <span class="mono">general_mm_embed_routine</span> first looks up each id to get an embedding, giving a full row of embedding vectors; then the ViT encodes that cat photo into three media embeddings that <strong>replace</strong> the placeholder embeddings originally sitting in those three <span class="mono">IMG</span> slots. After the replacement, this row no longer has any notion of "placeholder" — it is just a strip of embedding vectors side by side, some from text, some from the picture, mixed together completely homogeneously.</p>
+
+<div class="cellgroup"><div class="cell">this</div><div class="cell">is</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell">a</div><div class="cell">cat</div></div>
+
+<p>In the row of squares above, the three shaded cells were originally <span class="mono">IMG</span> placeholders and are now replaced by image embeddings (<span class="mono">img-emb</span>). The key point: <strong>the count and positions of the squares do not change at all</strong> — however many slots the placeholders held, that many image embeddings fill them. This guarantees the sequence length is identical before and after the splice, so every downstream component that works by position (positional encoding, attention mask, KV slots) needs no special handling.</p>
+<p>There is an often-overlooked detail here: <strong>the number of placeholders must be computed exactly in advance</strong>. When the processor inserts placeholders at the input seam, it does not stuff in some arbitrary count — it computes it precisely from that model's ViT output length: however many visual tokens an image produces after tiling and pooling, that many placeholders go in. If the counts disagree, the scatter's source (media embeddings) and target (placeholder slots) will mismatch in shape and error out immediately. So there is an <strong>implicit contract</strong> between the input seam and the embed seam: the processor promises "I reserved N slots for this image," the encoder promises "I produce exactly N embeddings," and the same placeholder token strings the two together. Precisely because this contract is nailed down in preprocessing, downstream batching, paging, and attention can treat this "image span" as ordinary tokens with no special-casing. The same holds for multiple images and mixed modalities: each media item has its own run of placeholders, mutually disjoint, and the scatter returns each to its own slots.</p>
+
+<h2>3. Why the rest of the engine does not change a single line</h2>
+<p>This is the most important sentence of the lesson: <strong>VLM support = "process media + weave embeddings in at placeholders," not a new engine</strong>. Once the splice is done, the sequence degenerates into a row of ordinary embeddings, and the language-model body simply cannot tell which segment came from a picture. So the rest of the engine is reused untouched: the <strong>scheduler</strong> (L18) still queues by token count and does continuous batching; the <strong>paged KV cache</strong> (L30) still allocates by page and writes KV per token; <strong>RadixAttention</strong> (L33) still reuses cache by prefix tree and does prefix matching; the <strong>sampler</strong> (L28) still samples the next token from logits. Once multimodal information is fused into the sequence once at the embed seam, no later stage ever needs to know it exists.</p>
+<p>The engineering dividends of this restraint are very concrete. First, <strong>complexity is isolated</strong>: all modality-specific dirty work — varied image resolutions, varied audio sample rates, each model's tiling rules — is confined to the two boxes of processor and encoder, while the engine core keeps a single responsibility. Second, <strong>performance optimizations are inherited for free</strong>: the continuous batching, prefix-cache reuse, and paged VRAM management you built for the text engine are enjoyed wholesale by VLM requests without a line of change; even when a "text prefix + same image" is shared by multiple requests, RadixAttention can still hit the prefix cache on the spliced embedding sequence. Third, <strong>onboarding a new model is cheap</strong>: to support a new VLM you usually only write a new <span class="mono">BaseMultimodalProcessor</span> subclass, hook up its encoder, and register the "placeholder → encoder" mapping in <span class="mono">data_embedding_funcs</span> — the rest of the engine is never touched. That is exactly the value of converging the change points into two seams: <strong>what you add is an adapter, not an engine</strong>.</p>
+
+<div class="cols"><div class="col"><strong>VLM-specific (the two new seams)</strong><ul><li>processor: pixels / audio → tensors + insert placeholders</li><li>encoder: ViT / audio encoder computes media embeddings</li><li>splice: scatter embeddings at placeholder positions</li></ul></div><div class="col"><strong>Fully reused (not a line changed)</strong><ul><li>scheduler: continuous batching (L18)</li><li>paged KV cache: paged storage (L30)</li><li>RadixAttention: prefix reuse (L33)</li><li>sampler: sample from logits (L28)</li></ul></div></div>
+
+<h2>4. Mapping the two seams to concrete responsibilities</h2>
+<p>The table below maps the two seams, the stages they live in, and their respective duties one by one. You can see that the <strong>input seam</strong> belongs to the tokenize / preprocess stage (L14) and delivers "tensors + a token stream with placeholders"; the <strong>embed seam</strong> belongs to the forward stage and delivers "a row of vectors with media embeddings spliced in." Together, front and back, they relay media from "raw bytes" all the way to "embeddings the language model can directly consume," without disturbing any other part of the engine in between.</p>
+<p>Let us walk the whole path once more to feel how the two seams hand off. A user sends a request with an image; the tokenizer (L14) cuts the text part into tokens, while the processor at the input seam decodes, normalizes, and tiles the image into tensors per the model's rules, and inserts a run of placeholder tokens at the corresponding positions in the text token stream. At this point the request, carrying "tensors + a token sequence with placeholders," enters the scheduler (L18) to queue and batch. When its turn to run forward comes, the embed seam takes over: it looks up the whole batch of token ids to get text embeddings, lets the ViT/audio encoder encode the tensors into media embeddings, and in one scatter writes those media embeddings onto the placeholder slots. From this step on, the sequence is pure embeddings: paged KV (L30) allocates cache per token, RadixAttention (L33) does prefix matching and reuse, and the sampler (L28) samples the next token from logits — none of them knows, or needs to know, that an image was ever here. Each newly decoded token continues the loop until generation ends. <strong>Across the whole pipeline, "multimodality" appears only briefly at the two front seams and afterward dissolves completely into the generic embedding stream</strong> — that is the entire essence of SGLang's VLM design: the smallest change surface in exchange for full reuse of the whole high-performance infrastructure.</p>
+
+<table class="t"><tr><th>Seam</th><th>Stage</th><th>Responsibility</th></tr><tr><td>input processor <span class="mono">BaseMultimodalProcessor</span></td><td>tokenize / preprocess (L14)</td><td>raw pixels / audio → model tensors; insert placeholder tokens into the token stream</td></tr><tr><td>embed entry <span class="mono">general_mm_embed_routine</span></td><td>forward entry</td><td>run encoders to compute media embeddings; scatter-splice where <span class="mono">input_ids==placeholder</span></td></tr></table>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/mm_utils.py ::general_mm_embed_routine</span><span class="ln">splice media embeddings into the token stream at placeholder slots</span></div><pre>def general_mm_embed_routine(
+    input_ids,                  # prompt tokens, with PLACEHOLDER ids where media goes
+    forward_batch,
+    language_model,
+    data_embedding_funcs,       # {Modality: fn} &mdash; run that modality's encoder to embed it
+    placeholder_tokens=None,    # which token id marks each modality's slots
+    **kwargs,
+):
+    # 1) embed the text token ids normally
+    # 2) for each modality, run its encoder to get media embeddings
+    # 3) SCATTER those embeddings into the token-embedding stream at the
+    #    positions where input_ids == that modality's placeholder token
+    # 4) hand the merged embeddings to the language model; scheduler / paged KV /
+    #    attention downstream are unchanged
+    ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li><strong>Two seams</strong> turn a text engine into a VLM engine, with everything else untouched: the <span class="mono">input seam</span> + the <span class="mono">embed seam</span>.</li>
+<li>The <strong>input seam</strong> is handled by each model's <span class="mono">BaseMultimodalProcessor</span>: raw pixels / audio → tensors, and insert <strong>placeholder tokens</strong> into the token stream.</li>
+<li>The <strong>embed seam</strong> is handled by <span class="mono">general_mm_embed_routine</span>: embed text first, then run each modality's <strong>encoder</strong> (ViT / audio encoder, may carry CUDA Graph, L27) and <strong>scatter</strong> media embeddings into the placeholder positions.</li>
+<li>Dispatch is driven by <span class="mono">data_embedding_funcs</span>, keyed by <span class="mono">placeholder_tokens</span>, deciding which placeholder is filled by which encoder.</li>
+<li>After the splice the sequence is just a row of embeddings, so the <strong>scheduler (L18) / paged KV (L30) / RadixAttention (L33) / sampler (L28) are all reused</strong>.</li>
+<li>Core insight: VLM = <span class="mono">process media + weave embeddings in at placeholders</span>, not a new engine.</li>
+<li>This is a <strong>"narrow waist" architecture</strong>: all modalities are translated into a unified embedding sequence at the two seams, and the engine below the waist faces only this one abstraction, so a new modality only needs a new adapter to plug in.</li>
+</ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. To turn a text engine into a VLM engine, which two "seams" does SGLang change?</div>
+  <ol class="opts">
+    <li>RadixAttention (L33) and the sampler (L28)</li>
+    <li>Rewrite the whole pipeline and add a dedicated VLM-only engine</li>
+    <li>The scheduler (L18) and the paged KV cache (L30)</li>
+    <li><strong>The input seam (processor turns media into tensors and inserts placeholder tokens) and the embed seam (<span class='mono'>general_mm_embed_routine</span> runs encoders and splices media embeddings at placeholders); the rest of the engine is untouched</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. VLM support is compressed into two seams: the <strong>input seam</strong> in tokenize/preprocess (L14), where each model's <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens; and the <strong>embed seam</strong> at the forward entry, where <span class='mono'>general_mm_embed_routine</span> runs encoders and scatters media embeddings to placeholder positions. Beyond those two, scheduling, paged KV, attention, and sampling are all reused.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Where exactly does <span class='mono'>general_mm_embed_routine</span> place media embeddings in the token sequence?</div>
+  <ol class="opts">
+    <li>Scattered randomly among all text tokens to improve robustness</li>
+    <li>Prepended at the very front, overwriting the system prompt</li>
+    <li>Appended uniformly at the end of the sequence as an extra context prefix</li>
+    <li><strong>At the positions where <span class='mono'>input_ids == that modality's placeholder token</span> — dispatched by <span class='mono'>data_embedding_funcs</span> keyed on <span class='mono'>placeholder_tokens</span></strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The processor reserves a run of placeholder tokens in the token stream for each media item. At forward time <span class='mono'>general_mm_embed_routine</span> first embeds text ids normally, then runs each modality's encoder to get media embeddings, and finally <strong>precisely</strong> scatters them onto the slots where <span class='mono'>input_ids</span> equals that modality's placeholder. The table <span class='mono'>data_embedding_funcs</span>, keyed on <span class='mono'>placeholder_tokens</span>, decides which placeholder is filled by which encoder, keeping positions and counts in one-to-one correspondence.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why, after splicing media embeddings, do the scheduler, paged KV, RadixAttention, and sampler not change a single line?</div>
+  <ol class="opts">
+    <li>Because media embeddings are stored in a separate VRAM block and never enter the main sequence</li>
+    <li><strong>Because after the splice the sequence is just a row of ordinary embedding vectors; the language-model body cannot tell which segment came from a picture, so every downstream component working by position/per-token needs no modality awareness</strong></li>
+    <li>Because VLM disables continuous batching and prefix reuse to simplify the logic</li>
+    <li>Because the encoder already converts the image into a text string and re-tokenizes it</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Placeholders keep the sequence length identical before and after; the splice merely replaces placeholder embeddings with an equal number of media embeddings. Afterward the row is a homogeneous set of embedding vectors and the language model does not care about origin. So the scheduler (L18) still does continuous batching, paged KV (L30) still pages, RadixAttention (L33) still reuses prefixes, and the sampler (L28) still samples from logits — multimodal info is fused once at the embed seam and never needs to be seen again.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain how VLM's "two seams" upgrade a text engine into a multimodal one: in the <strong>input seam</strong>, how <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens into the token stream (L14); in the <strong>embed seam</strong>, how <span class='mono'>general_mm_embed_routine</span> embeds text first, then runs the ViT/audio encoder, and scatter-splices where <span class='mono'>input_ids==placeholder</span>; describe the roles of <span class='mono'>data_embedding_funcs</span> and <span class='mono'>placeholder_tokens</span>.</li>
+    <li>Explain why "VLM = process media + weave embeddings in at placeholders, not a new engine": how placeholders keep the sequence length identical before and after the splice so that the scheduler (L18), paged KV (L30), RadixAttention (L33), and sampler (L28) are all reused as-is; then discuss how, if an encoder carries its own CUDA-graph runner (L27), it fits into this path without disturbing the downstream.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Multi-LoRA batching</h1>
+
+<p class="lead">One base model, dozens of "skills." <strong>Multi-LoRA batching</strong> lets you keep just <span class="mono">one</span> copy of the base weights in memory, plus a tiny <strong>adapter pool</strong>, yet serve many models each fine-tuned for a different task. The hard part is not "loading an adapter" — it is, when different requests in the <span class="mono">same</span> batch each want a different adapter, computing every request's own weight delta ΔW correctly in <span class="mono">one</span> kernel launch.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Think of the base model as the <strong>body of a power tool</strong>: the motor, handle, and battery live in the body — heavy and expensive. A LoRA adapter is like a <strong>swappable bit</strong> — each bit is small and cheap, yet it turns the same body into a "drill," a "screwdriver," or a "polisher."</p>
+<p>The dumb old way: need three functions, buy three whole tool bodies (three full models) — the warehouse (memory) fills up instantly. The smart way: <strong>one body + a box of bits</strong>. A job comes in, see which bit it needs, <span class="mono">snap it on</span>, and go. Even better, several jobs arrive at once on the line: job 1 wants drilling, job 2 wants a screw, job 3 wants drilling again — you don't disassemble the body three times; you <strong>stage</strong> all those bits at once and let the arm finish every piece with its proper bit in a single pass. That "one pass handling a batch of different bits" is exactly what multi-LoRA batching solves.</p>
+<p>The analogy stretches a little further: the bit box has finite capacity — you cannot keep every bit in the world plugged into the arm at once. So you keep on hand only the few bits "most likely to be used this round," return the unneeded ones to the box, and fetch the newly needed — which maps exactly to the runtime "load/unload adapter," and to the cap on "how many bits at most per round." The essence of the whole scheme is always the same sentence: <strong>keep just one expensive body, rotate the cheap bits on demand</strong>.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>LoRA's core math is plain: instead of retraining the huge weight matrix <span class="mono">W</span>, you learn two <strong>small matrices</strong> <span class="mono">A</span> and <span class="mono">B</span> so the effective weight becomes <span class="mono">W + B·A</span>. The rank <span class="mono">r</span> is far smaller than the matrix dimension (<span class="mono">r ≪ d</span>), so the delta ΔW = <span class="mono">B·A</span> is small and cheap. One base can carry <strong>many</strong> such adapters, each a different fine-tuned "skill." SGLang represents a single one as a <span class="mono">LoRAAdapter</span>.</p>
+<p>So the real claim of multi-LoRA is: <strong>one base + an adapter pool + batch-aware ΔW application</strong>. A single deployment can cheaply serve dozens of task-specific adapters, without spinning up a full model per fine-tune.</p>
+<p>Why is <span class="mono">B·A</span> so cheap? Let the weight dimension be <span class="mono">d×d</span>; full fine-tuning updates about <span class="mono">d²</span> parameters, whereas LoRA learns only <span class="mono">A</span> (about <span class="mono">r×d</span>) and <span class="mono">B</span> (about <span class="mono">d×r</span>), roughly <span class="mono">2·r·d</span> parameters in total. When the rank <span class="mono">r</span> is only a few dozen while the dimension <span class="mono">d</span> is a few thousand, the parameter count differs by two or three orders of magnitude. That means <strong>training cost</strong>, <strong>storage cost</strong>, and <strong>memory footprint</strong> all plunge — an adapter is small enough that dozens fit into the spare room of a single card, which is precisely what makes the "adapter pool" practical in engineering terms.</p>
+</div>
+
+<h2>Why "one base + an adapter pool"</h2>
+<p>Suppose you have N fine-tunes: one writes SQL, one does medical Q&amp;A, one summarizes legal text. The most literal deployment is N full models — but each occupies full memory while <strong>99% of their weights are identical</strong> (all derived from the same base). That is enormous waste.</p>
+<p>SGLang's approach: keep just <span class="mono">one</span> base model in memory (see <strong>Lesson 25</strong> on loading base weights), plus a <strong>LoRA memory pool</strong> holding several small adapters. For each request, take the adapter name it specifies and temporarily add the corresponding <span class="mono">B·A</span> delta onto the base output. Adapters are small, so the pool can hold many; the real constraint is <span class="mono">max_loras_per_batch</span> — it caps how many distinct adapters can coexist in <strong>one batch</strong> (bounded by pool/memory size).</p>
+<p>Better yet, adapters can be added or removed at <strong>runtime</strong>: <span class="mono">load_lora_adapter</span> adds a new skill to the pool, <span class="mono">unload_lora_adapter</span> drops an unused one to free space — all with <strong>no restart</strong>.</p>
+<p>This "hot-swap" is very practical in production. Say you ship a new customer-service-tone adapter: just load it into the pool and new requests can immediately specify it while old requests are untouched; when some adapter has gone unused for a while and is about to overflow the pool, just unload it and free the space for hotter skills. The whole process has no downtime window and needs no reloading of tens of GB of base weights — because the base is that one copy from start to finish, and what actually comes and goes is only the small delta of a few to tens of megabytes.</p>
+
+<h2>Batching is the real hard part</h2>
+<p>If every request in a batch used the same adapter, it would be easy: compute ΔW once and add it to the whole batch. But in reality requests in one batch often <strong>each want a different adapter</strong>: req1→adapterA, req2→adapterB, req3→adapterA, req4→adapterC… If you loop over adapters one by one, you degrade into many small GEMMs and shred the throughput that continuous batching (<strong>Lesson 6</strong>) worked so hard to accumulate.</p>
+<p>SGLang's key function is <span class="mono">LoRAManager.prepare_lora_batch(forward_batch)</span>. It takes the current <span class="mono">ForwardBatch</span> (<strong>Lesson 19</strong>), looks <strong>per request</strong> at which adapter each row needs, and <strong>stages and segments</strong> those adapter weights in memory so that a single <strong>segmented / grouped GEMM</strong> can apply <strong>each request's own</strong> ΔW in <span class="mono">one</span> kernel launch, rather than running a separate pass per adapter.</p>
+<p>That is what "batch-aware" means: not ignoring adapter differences and computing wrong, nor paying a loop's cost for them, but <strong>encoding the differences into the layout of one grouped matrix multiply</strong> so the GPU finishes in a single pass.</p>
+<p>It helps to put "per-adapter loop" and "grouped GEMM" side by side. With a per-adapter loop, suppose this batch has 5 distinct adapters: you launch 5 small kernels, each carrying a kernel-launch overhead and a memory round-trip, while each small kernel processes very few rows, so the GPU's compute utilization is low — exactly the "fragmentation" continuous batching most wants to avoid. A grouped GEMM instead stitches these 5 segments into <strong>one</strong> call: the launch overhead is amortized over the whole batch, memory is traversed once, and the GPU's many compute units are fed at once. The more requests and the more varied the adapters, the more this "done in one pass" wins over "looping N times."</p>
+<p>Concretely, the idea of a grouped GEMM is: slice the large batch by "which adapter" into several <strong>segments</strong>, each segment corresponding to one adapter and containing all request rows in the batch that use it. These segments are packed side by side as the input of a single kernel call, and inside the kernel each segment applies its own <span class="mono">B, A</span> matrices. So from the outside there is still just <strong>one</strong> kernel launch and one memory round-trip; from the inside, every request gets exactly the ΔW it should. This is precisely the "staging" work <span class="mono">prepare_lora_batch</span> quietly does before the forward — computing each segment's offset, length, and adapter index, turning the scattered "who wants which" into the tidy layout GPUs love.</p>
+<p>This also shows why <span class="mono">max_loras_per_batch</span> matters: more segments means more distinct adapters active in this batch, which means more weights must reside in the pool and participate in this grouped GEMM. Set it too large and the LoRA memory pool gets tight; set it too small and the scheduler may be forced to defer a request wanting the "(K+1)-th" adapter to the next batch. It is essentially a line drawn between <strong>adapter diversity</strong> and <strong>memory budget</strong>.</p>
+
+<h2>The runtime lifecycle</h2>
+<p>Stringing the whole path together: at startup <span class="mono">LoRAManager</span> receives the base model, the <span class="mono">max_loras_per_batch</span> cap, and a LoRA backend (default <span class="mono">triton</span>), and builds the memory pool. During operation, new skills enter the pool via <span class="mono">load_lora_adapter</span> and old ones leave via <span class="mono">unload_lora_adapter</span>. On each forward step the scheduler first calls <span class="mono">prepare_lora_batch</span> to stage every request's adapter for this batch, then lets the base run its normal forward and add each ΔW in the LoRA layers with a grouped GEMM. This whole mechanism lets a single deployment flexibly serve dozens of task-specific adapters, like swapping bits.</p>
+<p>One distinction worth drawing: multi-LoRA swaps a <strong>tiny delta</strong> while the base never moves; whereas the RL training in <strong>Lesson 51</strong> also "swaps weights," but it swaps the <span class="mono">whole</span> model's weights — a different scale and purpose entirely.</p>
+<p>Pull the view back to one real request: a client sends a prompt and states in the params "I want the <span class="mono">sql-expert</span> adapter." The request enters the scheduler's queue and is grouped with others into a continuous batch (Lesson 6). Before the forward begins, <span class="mono">prepare_lora_batch</span> scans every request's adapter name in this batch and finds a mix of <span class="mono">sql-expert</span>, <span class="mono">med-qa</span>, and a few pure-base requests carrying no adapter — it treats the adapter-less ones as a "zero delta" handled uniformly and segments the rest by name. When the forward reaches the LoRA-injected linear layers, it first computes the base <span class="mono">W·x</span>, then uses a grouped GEMM to add each segment's own <span class="mono">B·A·x</span>, yielding <span class="mono">(W + B·A)·x</span>. From sampling to KV cache to output, everything afterward is no different from ordinary text inference.</p>
+<p>Worth stressing: along this path "which adapter to use" is decided entirely by the parameters the request itself carries, not by a global switch hard-coded at deploy time. This means one endpoint can simultaneously serve different tenants and tasks: team A's requests carry their trained legal adapter, team B's carry a customer-service adapter, and the two are served in parallel within the same batch yet each gets the correct result. This "pick the skill per request" capability is exactly why multi-LoRA is so cost-effective in multi-tenant scenarios.</p>
+<p>Precisely because an adapter is just "a thin delta layered on top of the base," multi-LoRA is naturally compatible with the rest of SGLang: continuous batching still accumulates batches, paged KV still pages, prefix reuse still hits. LoRA only does one extra grouped addition on the few injected weight layers, and the rest of the engine is almost oblivious to "which adapter this request actually used." This low-intrusiveness is the root reason it can cheaply host dozens of fine-tunes in a single deployment.</p>
+
+<h2>Backend, batch, and correctness</h2>
+<p>When constructed, <span class="mono">LoRAManager</span> receives a <span class="mono">lora_backend</span> argument (default <span class="mono">triton</span>) that decides which kernel implementation realizes that grouped GEMM. Different backends make different performance trade-offs, but the semantics they expose are identical: given a batch's per-request adapters, the output must be equivalent to "applying each request's ΔW individually." In other words, grouping is merely a <strong>performance layout trick</strong> and must never change any request's numeric result — that is the correctness floor <span class="mono">prepare_lora_batch</span> has to guarantee.</p>
+<p>To achieve this, the staging phase must align three things: which <strong>segment</strong> each request belongs to (i.e., which adapter), each segment's <strong>start/end offset</strong> in the packed buffer, and each adapter weight's <strong>actual address</strong> in the LoRA memory pool. Once these align, the kernel can, as it walks each row, index the correct <span class="mono">A, B</span> matrices by the row's segment and compute its dedicated delta. Any misalignment lets some request silently use another's adapter — a hard bug to find, because the model does not error, it just "answers a little off."</p>
+<p>One often-overlooked detail: a batch may well mix in pure-base requests carrying no adapter. Implementations usually treat them as a special "zero adapter" or simply skip the delta step, letting requests with and without adapters coexist peacefully in one forward. This flexibility means you need not hard-route traffic by adapter; the scheduler can freely assemble any combination into a batch and push GPU utilization to the max.</p>
+<p>From a capacity-planning view, <span class="mono">max_loras_per_batch</span>, the batch size, and the adapter rank <span class="mono">r</span> together determine the LoRA memory pool's peak footprint. A larger rank and more adapters per batch make the pool eat more VRAM, leaving less for the KV cache (Lesson 30). So in real deployments these knobs are tuned jointly: let common adapters all fit into one batch to amortize overhead, yet not crowd out the KV cache and reduce achievable concurrency.</p>
+<p>To boil this lesson down to one sentence: multi-LoRA is not "making more models," it is "making the difference thin." The base is that one precious, singular tool body; the adapters are a box of cheap bits rotated on demand; and <span class="mono">prepare_lora_batch</span> plus the grouped GEMM are the robotic-arm logic that lets "each row in one batch use its own bit" finish in a single pass. Grasp these three layers — thin delta, adapter pool, batch-aware application — and you have the whole essence of SGLang's multi-LoRA.</p>
+
+<div class="flow"><div class="node">Base output<br/>W·x</div><div class="arrow">→</div><div class="node">This request's adapter<br/>ΔW = B·A</div><div class="arrow">→</div><div class="node">Add<br/>(W + B·A)·x</div><div class="arrow">→</div><div class="node">This request's<br/>adapted output</div></div>
+
+<div class="cellgroup"><div class="cell">row 1 → adapter A</div><div class="cell">row 2 → adapter B</div><div class="cell">row 3 → adapter A</div><div class="cell">row 4 → adapter C</div></div>
+
+<table class="t"><tr><th>LoRAManager method</th><th>Role</th></tr><tr><td><span class="mono">load_lora_adapter</span></td><td>Add an adapter to the memory pool at runtime</td></tr><tr><td><span class="mono">unload_lora_adapter</span></td><td>Remove an adapter from the pool to free space</td></tr><tr><td><span class="mono">prepare_lora_batch</span></td><td>For the current batch, gather each request's needed adapter and stage them for one grouped GEMM</td></tr><tr><td><span class="mono">max_loras_per_batch</span></td><td>Cap on distinct adapters that can coexist in one batch (pool/memory bound)</td></tr></table>
+
+<div class="cols"><div class="col"><strong>Naive: N full models</strong><br/>Each fine-tune runs a full set of weights; memory fills with nearly identical weights repeated — the larger N, the more waste.</div><div class="col"><strong>SGLang: 1 base + adapter pool</strong><br/>Memory holds one base plus a pool of small adapters; add ΔW per request, one deployment serving dozens of skills.</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/lora/lora_manager.py ::LoRAManager</span><span class="ln">one base + an adapter pool: different requests in one batch use different LoRAs</span></div><pre>class LoRAManager:
+    def __init__(self, base_model, ..., max_loras_per_batch, lora_backend="triton", ...):
+        # one base model + a memory pool holding up to max_loras_per_batch adapters
+        ...
+    def load_lora_adapter(self, lora_ref):     # add an adapter to the pool at runtime
+        ...
+    def unload_lora_adapter(self, lora_ref):   # drop one to free pool space
+        ...
+    def prepare_lora_batch(self, forward_batch):
+        # for THIS batch: gather which adapter each request needs and stage them so a
+        # segmented/grouped GEMM applies each request's own delta-W in one kernel
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li>A LoRA adapter is a <strong>small low-rank delta</strong>: learn two small matrices <span class="mono">A, B</span> so the effective weight is <span class="mono">W + B·A</span> with rank <span class="mono">r ≪ d</span>; one base carries many, each a fine-tuned "skill," represented in SGLang as <span class="mono">LoRAAdapter</span>.</li>
+<li>Serving N fine-tunes need not mean N full models: SGLang keeps <strong>one base + an adapter pool</strong> and applies the right adapter per request.</li>
+<li>The real hard part is <strong>batching</strong>: requests in one batch may each want a different adapter; <span class="mono">prepare_lora_batch(forward_batch)</span> gathers and stages them per request so a <strong>segmented/grouped GEMM</strong> applies each request's own ΔW in one kernel.</li>
+<li><span class="mono">max_loras_per_batch</span> caps distinct adapters coexisting in a batch (pool/memory bound); adapters are added/removed at runtime via <span class="mono">load_lora_adapter</span> / <span class="mono">unload_lora_adapter</span>, with <strong>no restart</strong>.</li>
+<li>Ties: <strong>Lesson 19</strong> ForwardBatch, <strong>Lesson 25</strong> base weights, <strong>Lesson 6</strong> continuous batching; forward-ref <strong>Lesson 51</strong> (RL also swaps weights, but the <span class="mono">whole</span> model).</li>
+</ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is a LoRA adapter, mathematically?</div>
+  <ol class="opts">
+    <li><strong>A small low-rank delta: learn two small matrices <span class='mono'>A, B</span> so the effective weight becomes <span class='mono'>W + B·A</span>, with rank <span class='mono'>r ≪ d</span>, far smaller than the matrix dimension</strong></li>
+    <li>A cached KV block used to skip prefill</li>
+    <li>A standalone full base model that merely has fewer parameters</li>
+    <li>A fresh copy of the entire weight matrix W after full fine-tuning</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. LoRA does not retrain the huge <span class='mono'>W</span>; it learns two small matrices <span class='mono'>A, B</span> so the effective weight is <span class='mono'>W + B·A</span> with rank <span class='mono'>r ≪ d</span>, making the delta ΔW=B·A small and cheap. One base carries many such adapters, each a fine-tuned skill, represented in SGLang as <span class='mono'>LoRAAdapter</span>.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. When different requests in one batch each want a different adapter, what is the real hard part of multi-LoRA?</div>
+  <ol class="opts">
+    <li>You must restart the service to switch adapters</li>
+    <li><strong>Batching: <span class='mono'>prepare_lora_batch(forward_batch)</span> gathers each request's needed adapter and stages them in memory so one <strong>segmented/grouped GEMM</strong> applies each request's own ΔW in a single kernel</strong></li>
+    <li>Looping a separate small GEMM per adapter is the optimal solution</li>
+    <li>You must spin up a full base model per adapter</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Looping per adapter degrades into many small GEMMs and shreds the throughput of continuous batching (L6). <span class='mono'>prepare_lora_batch</span> takes the current ForwardBatch (L19), sees per request which adapter each row needs, and <strong>stages/segments</strong> the weights so a single segmented/grouped GEMM applies each request's own ΔW in one kernel launch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does <span class='mono'>max_loras_per_batch</span> cap, and how are adapters added/removed at runtime?</div>
+  <ol class="opts">
+    <li><strong>It caps how many distinct adapters can coexist in one batch (pool/memory bound); adapters are added/removed at runtime via <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span>, with no restart</strong></li>
+    <li>It caps the maximum number of layers in the base model</li>
+    <li>It allows loading only one adapter at a time and requires a restart</li>
+    <li>It caps the maximum tokens each request can generate</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Adapters are small, so the pool holds many; the real constraint is <span class='mono'>max_loras_per_batch</span> — how many distinct adapters can coexist in one batch (bounded by the LoRA memory pool/VRAM). New skills enter via <span class='mono'>load_lora_adapter</span> and old ones leave via <span class='mono'>unload_lora_adapter</span>, all with no service restart.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why "one base + an adapter pool" beats N full models: how a LoRA adapter as a small low-rank delta <span class='mono'>W + B·A</span> (rank <span class='mono'>r ≪ d</span>) lets one base (L25) carry many "skills"; then describe how <span class='mono'>max_loras_per_batch</span> caps distinct adapters coexisting in a batch, and how <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> add/remove them at runtime with no restart.</li>
+    <li>Explain why batching is the real hard part of multi-LoRA: when requests in one batch each want a different adapter (req1→A, req2→B, req3→A…), how <span class='mono'>prepare_lora_batch(forward_batch)</span> takes the ForwardBatch (L19), gathers and stages adapters per request so a <strong>segmented/grouped GEMM</strong> applies each ΔW in one kernel without shredding continuous-batching throughput (L6); then contrast with L51's RL, which also swaps weights but swaps the whole model.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>RL rollout & weight sync</h1>
+
+<p class="lead">In reinforcement-learning (RL / RLHF) post-training, SGLang is not just an inference server — it doubles as the <strong>rollout engine</strong>: every training step has to regenerate samples with the <strong>weights that were just updated</strong>. This lesson lays out the "generate → score → update weights → generate again" loop, and why we must do an <strong>in-place weight hot-update</strong> via <span class="mono">update_weights_from_tensor</span> instead of restarting the server each step.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture a <strong>debate team</strong> in training camp: a contestant goes on stage and <strong>improvises an answer</strong> (that's the rollout — batched "generation" of many responses), the coach <strong>scores it and takes notes</strong> (reward + gradient), then <strong>pours the feedback straight into the contestant's head</strong> on the spot — no going home to sleep and re-memorize a script; they walk right back on stage with the new skill.</p>
+<p>If every time the coach gave feedback the contestant had to <strong>remove makeup, go back to the dorm, re-do makeup, and re-enter</strong> (restart the server, reload the checkpoint, re-warm, re-capture CUDA graphs), the whole night would be gone to logistics and barely a round would be practiced. SGLang's in-place weight update is exactly "<strong>pouring it straight into the head</strong>" — the contestant (CUDA graphs, KV pools) stays put; only the "parameters" in the head get swapped.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>Each iteration of RL post-training (PPO, GRPO, etc.) has two halves: the <strong>policy model generates many samples</strong> (the rollout — exactly the fast batched generation SGLang excels at), then the <strong>trainer scores the samples</strong> (reward) and computes a gradient that <strong>updates the policy weights</strong>. The crux: the <strong>next rollout must run with the just-updated weights</strong>, so the rollout engine's weights change every training step.</p>
+<p>SGLang makes the "server" and the "RL rollout worker" the <strong>same process</strong>, differing only by a weight-sync hook: same-GPU co-location uses <span class="mono">update_weights_from_tensor</span>, while a trainer on other GPUs uses <span class="mono">update_weights_from_distributed</span> to <strong>stream</strong> weights in over a process group (<strong>Lesson 46</strong>'s GroupCoordinator). This is why SGLang is a popular rollout backend for RL frameworks.</p>
+</div>
+
+<h2>1. The RL loop: rollout and training alternating</h2>
+<p>Unpack one RL iteration and it is really <strong>inference</strong> and <strong>training</strong> phases endlessly taking turns. In the first phase, the policy model <strong>batch-generates</strong> many answers for a batch of prompts — SGLang's home turf, with continuous batching, RadixAttention and CUDA graphs all kicking in to max out throughput. What this step produces are the trajectories that RL will "evaluate".</p>
+<p>In the second phase, the <strong>trainer</strong> steps in: it <strong>scores</strong> each sample with a reward model or rules, computes the <strong>gradient</strong> per the PPO / GRPO objective, and performs one <strong>parameter update</strong> on the policy network. Once updated, the new weights are the ones the next rollout must use. Note the <strong>coupling</strong>: the new weights the trainer computes must be promptly "fed back" into the SGLang engine that is running generation, otherwise the next rollout still samples from the old policy and training drifts.</p>
+<p>So at every training step, the rollout engine's weights <strong>get swapped once</strong>. If swapping weights is slow, the wall-clock time of the entire RL run is dragged down by it. That leads straight to the heart of this lesson: <strong>how to push new weights into a running engine quickly and correctly</strong>.</p>
+
+<div class="vflow">
+<div class="step"><div class="num">1</div><div class="sc"><h4>Rollout (generate)</h4><p>the policy model batch-samples many answers for a batch of prompts — high-throughput SGLang generation</p></div></div>
+<div class="step"><div class="num">2</div><div class="sc"><h4>Reward + gradient (trainer)</h4><p>score the samples, compute the gradient per the PPO/GRPO objective</p></div></div>
+<div class="step"><div class="num">3</div><div class="sc"><h4>update_weights (in-place hot update)</h4><p>write the freshly-trained weights into the running model's parameters</p></div></div>
+<div class="step"><div class="num">4</div><div class="sc"><h4>Next rollout</h4><p>regenerate with the just-updated weights → back to ①, the loop keeps rolling</p></div></div>
+</div>
+
+<h2>2. Why we can't restart the server every step</h2>
+<p>The naïve idea: have the trainer save a new checkpoint and just <strong>restart</strong> the SGLang server to reload it. The problem is a "cold start" is hugely expensive: it must <strong>re-read the weight files</strong> (Lesson 25's weight-loading flow), <strong>re-warm</strong>, <strong>re-capture CUDA graphs</strong>, and rebuild the KV pools. These one-time costs are tens of seconds to minutes, while RL training runs thousands to tens of thousands of steps — restarting each step means startup time would <strong>dominate</strong> actual compute, which is unacceptable.</p>
+<p>SGLang's answer is the <strong>in-place weight update</strong>: the process never restarts, CUDA graphs aren't re-captured, KV pools stay in place, and only the values in the <strong>model-parameter memory</strong> get swapped for the freshly-trained tensors. <span class="mono">update_weights_from_tensor(named_tensors, load_format=…)</span> writes the new tensors straight onto the running model's matching parameters in milliseconds, ready for the next rollout immediately.</p>
+<p>This is exactly what lets SGLang use <strong>one process</strong> as both the "serving server" and the "RL rollout worker": the code is nearly identical, the only difference being that rollout mode bolts on a <strong>weight-sync hook</strong>. We saw the same "swap the weights" idea in Lesson 50 — LoRA also swaps weights, except it swaps a <strong>tiny adapter</strong>, whereas RL here swaps the <strong>full backbone weights</strong>.</p>
+
+<div class="cols">
+<div class="col"><strong>❌ Restart the server every step</strong><br>Reload checkpoint → re-warm → re-capture CUDA graphs → rebuild KV pools. One-time cost of tens of seconds to minutes, times tens of thousands of steps = startup time crushes compute, <span class="mono">unacceptable</span>.</div>
+<div class="col"><strong>✅ In-place update_weights</strong><br>No restart, CUDA graphs / KV pools stay put, only the new tensors get written into the model-parameter memory. Done in milliseconds; the next rollout uses the new weights immediately.</div>
+</div>
+
+<h2>3. Three weight-sync entry points: local, cross-GPU, packed</h2>
+<p>The path from trainer to rollout engine depends on their physical location. If trainer and inference live on the <strong>same set of GPUs</strong> (co-located), the new tensors are already in memory, so just use <span class="mono">update_weights_from_tensor</span> to write the <span class="mono">named_tensors</span> in place onto the parameters. If the trainer lives on <strong>other GPUs</strong> (disaggregated), use <span class="mono">update_weights_from_distributed</span>, which leverages Lesson 46's <span class="mono">GroupCoordinator</span> process group to <strong>stream</strong> the weights from the trainer ranks into the inference ranks.</p>
+<p>But either way there is a shared performance trap: a large model has <strong>thousands</strong> of named tensors, and if you move them one at a time, each tensor triggers a separate copy/transfer, so the <strong>launch and transfer overhead</strong> gets multiplied thousands of times — absurdly slow. That is exactly what <span class="mono">load_format="flattened_bucket"</span> is there to solve.</p>
+<p>So selection is clear: <strong>same-GPU co-location</strong> uses from_tensor; <strong>cross-GPU disaggregation</strong> uses from_distributed; <strong>too many tensors, want to cut overhead</strong> adds the flattened_bucket packing path. They are not mutually exclusive — flattened_bucket is a <span class="mono">load_format</span> option layered on top of the first two.</p>
+
+<table class="t">
+<tr><th>Entry / mode</th><th>When to use</th><th>How it moves</th></tr>
+<tr><td><span class="mono">update_weights_from_tensor</span></td><td>Trainer and inference <strong>co-located on the same GPUs</strong>, new tensors already in local memory</td><td>Write named_tensors in place onto the running model's parameters</td></tr>
+<tr><td><span class="mono">update_weights_from_distributed</span></td><td>Trainer on <strong>other GPUs</strong>, disaggregated deployment</td><td><strong>Stream</strong> weights from trainer ranks into inference ranks via Lesson 46's process group</td></tr>
+<tr><td><span class="mono">load_format="flattened_bucket"</span></td><td>Huge number of tensors, want to minimize <strong>per-tensor overhead</strong></td><td>Pack many tensors into one contiguous buffer, transfer/copy <strong>once as a whole</strong></td></tr>
+</table>
+
+<h2>4. FlattenedTensorBucket: collapsing thousands of tensors into one copy</h2>
+<p>Why is moving tensors one by one slow? Because every copy/transfer has a <strong>fixed launch cost</strong> (kernel launch, comm handshake, etc.), and the more tensors there are the more that cost is amplified, even if each tensor is tiny. <span class="mono">FlattenedTensorBucket</span>'s idea is to first <strong>flatten many named tensors into one contiguous buffer</strong>, <strong>transfer/copy it only once</strong>, then <strong>reconstruct the individual tensors</strong> on the engine side from the recorded shapes/offsets — so the per-tensor overhead is amortized down to almost nothing.</p>
+<p>This "pack-and-ship + reconstruct-on-arrival" is a very practical optimization in distributed weight sync, especially in RL where <strong>full weights are synced every step</strong>; the overhead saved turns directly into higher training throughput. Tie the pieces together: Lessons 13/14 are the engine entrypoints, Lesson 25 is weight loading, Lesson 46 is process-group communication, Lesson 50 is LoRA's small weight swap, and this lesson is RL's full weight swap — they share the same underlying machinery. Lessons <strong>59-63</strong> will keep expanding these design themes.</p>
+
+<div class="flow">
+<div class="node">Thousands of named tensors</div>
+<div class="arrow">→</div>
+<div class="node">FlattenedTensorBucket (packed into one buffer)</div>
+<div class="arrow">→</div>
+<div class="node">One copy/transfer as a whole</div>
+<div class="arrow">→</div>
+<div class="node">Reconstruct on engine side → write into live params</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::update_weights_from_tensor</span><span class="ln">write freshly-trained weights into the running model in place, no restart</span></div><pre>def update_weights_from_tensor(
+    self,
+    named_tensors,              # [(name, tensor)] freshly-trained weights from the trainer
+    load_format=None,           # "flattened_bucket" packs many tensors into one buffer
+    **kwargs,
+):
+    if load_format == "flattened_bucket":
+        # FlattenedTensorBucket: flatten many named tensors into ONE buffer,
+        # transfer/copy once, then reconstruct on the engine side (less overhead)
+        ...
+    # write the tensors straight into the running model's parameters — no restart,
+    # CUDA graphs and KV pools stay in place
+    ...
+# update_weights_from_distributed(...) streams weights over a process group instead</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li>Each RL post-training iteration = <strong>rollout generation</strong> (high-throughput SGLang sampling) + <strong>trainer scoring, gradient, weight update</strong>, and the next rollout must run with the <strong>just-updated weights</strong>.</li>
+<li><strong>Restarting the server</strong> every step (reload checkpoint, re-warm, re-capture CUDA graphs) lets startup time crush compute — <strong>unacceptable</strong>.</li>
+<li><span class="mono">update_weights_from_tensor</span> does an <strong>in-place hot update</strong>: CUDA graphs and KV pools stay put, only the new tensors are written into the model parameters.</li>
+<li>When the trainer lives on other GPUs, <span class="mono">update_weights_from_distributed</span> <strong>streams</strong> the weights over Lesson 46's <strong>process group</strong>.</li>
+<li><span class="mono">load_format="flattened_bucket"</span> uses <span class="mono">FlattenedTensorBucket</span> to <strong>pack thousands of tensors into one buffer and move them once</strong>, then reconstruct on arrival, slashing per-tensor overhead.</li>
+<li>One SGLang process is <strong>both the serving server and the RL rollout worker</strong>, differing only by this weight-sync hook — which is why it's a popular rollout backend.</li>
+<li>In one line: <strong>generation by SGLang, training by the trainer, glued by weight sync</strong>; making that sync fast and correct rests on in-place writes plus packed transfer.</li>
+</ul>
+</div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. In RL/RLHF post-training, what are the two halves of each iteration, and why does that constrain the rollout engine?</div>
+  <ol class="opts">
+    <li>It only generates and never updates weights, so weights stay constant</li>
+    <li><strong>The policy model first <strong>generates</strong> many samples (rollout), then the trainer <strong>scores, computes a gradient and updates weights</strong>; the next rollout must use the <strong>just-updated weights</strong>, so the engine's weights change every step</strong></li>
+    <li>The two halves are prefill and decode, and weights never change</li>
+    <li>The trainer and rollout are fully independent and never share weights</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. One iteration = rollout (high-throughput SGLang <strong>generation</strong>) + trainer <strong>scoring, gradient, policy-weight update</strong>. The crux is that the next rollout must sample with the just-trained weights or training drifts, so the rollout engine's weights <strong>get swapped every training step</strong>.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does SGLang do an <strong>in-place hot update</strong> instead of <strong>restarting the server</strong> each step to load a new checkpoint?</div>
+  <ol class="opts">
+    <li>In-place update breaks CUDA graphs, so restarting is required</li>
+    <li>New weights cannot be written to VRAM, so a disk reload is mandatory</li>
+    <li><strong>A restart must reload the checkpoint, re-warm, re-capture CUDA graphs and rebuild KV pools (tens of seconds to minutes), and times thousands of steps it crushes compute; <span class='mono'>update_weights_from_tensor</span> writes new tensors straight into the running parameters while CUDA graphs/KV pools stay put</strong></li>
+    <li>Restarting is faster because it clears all caches</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Cold-start one-time costs (reload weights, warm up, re-capture CUDA graphs, rebuild KV pools) run tens of seconds or more, untenable across thousands of RL steps. In-place update keeps the process and CUDA graphs/KV pools alive, swapping only the values in the model-parameter memory for the new tensors in milliseconds, ready for the next rollout immediately.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What's the difference between <span class='mono'>update_weights_from_tensor</span> and <span class='mono'>update_weights_from_distributed</span>, and what does <span class='mono'>load_format="flattened_bucket"</span> solve?</div>
+  <ol class="opts">
+    <li>from_distributed can only move one tensor, and flattened_bucket is for quantization</li>
+    <li><strong>from_tensor is for <strong>same-GPU co-location</strong> (tensors already in local memory, written in place); from_distributed is for a trainer on <strong>other GPUs</strong>, <strong>streaming</strong> weights over Lesson 46's process group; flattened_bucket <strong>packs thousands of tensors into one buffer moved once</strong> and reconstructs on arrival, cutting per-tensor overhead</strong></li>
+    <li>They are identical, and flattened_bucket merely changes a log format</li>
+    <li>from_tensor must restart the process, and flattened_bucket is for splitting the KV cache</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Co-located on the same GPUs the new tensors are already in memory, so from_tensor writes in place; disaggregated, from_distributed streams weights from trainer ranks into inference ranks via the GroupCoordinator (L46). A large model has thousands of named tensors, and moving them one by one amplifies launch overhead thousands of times, so flattened_bucket uses <span class='mono'>FlattenedTensorBucket</span> to pack them into one contiguous buffer, transfer/copy once and reconstruct on arrival, layered as a <span class='mono'>load_format</span> on top of the first two.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain the RL "rollout↔training" loop: the policy model generates samples (rollout, exactly SGLang's batched generation), the trainer scores, computes a gradient and updates weights, and why the next rollout must use the <strong>just-updated weights</strong>; then explain why <strong>restarting the server</strong> each step (reload checkpoint, re-warm, re-capture CUDA graphs) is unacceptable while <span class='mono'>update_weights_from_tensor</span>'s in-place hot update keeps CUDA graphs and KV pools in place.</li>
+    <li>Contrast the three weight-sync paths and explain the value of <span class='mono'>FlattenedTensorBucket</span>: <span class='mono'>update_weights_from_tensor</span> (same-GPU co-location), <span class='mono'>update_weights_from_distributed</span> (cross-GPU streaming over Lesson 46's process group), and <span class='mono'>load_format="flattened_bucket"</span> (pack thousands of named tensors into one buffer moved once then reconstructed). Then contrast with Lesson 50's LoRA weight swap — both swap weights, but RL swaps the whole backbone while LoRA swaps only a small adapter — and explain why one SGLang process can be both the server and the rollout worker.</li>
+  </ul>
+</div>
+</div>
+</section>
+<section class="lesson-print">
+<h1>Diffusion models</h1>
+
+<p class="lead">This is the last lesson of Part 11, and a nice way to close the whole guide. We turn our eyes away from large language models toward a different generation task: <strong>diffusion models</strong> — image and video generation. It lives in the <span class="mono">sglang-diffusion</span> sub-project at <span class="mono">python/sglang/multimodal_gen/</span> (note: under <span class="mono">python/sglang/</span>, NOT <span class="mono">python/sglang/srt/</span>). Diffusion uses a compute pattern completely different from LLMs, yet it astonishingly <strong>reuses every bit of serving muscle you have built up along the way</strong>. The punchline of this lesson is one phrase: <strong>one stack, two paradigms</strong>.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture two painters. The first is a <strong>narrator</strong>: he tells a story one word at a time, hears the word he just said, then decides the next — that's the autoregressive LLM, emitting one token per forward and feeding it back (recall Lesson 4).</p>
+<p>The second is a <strong>darkroom developer</strong>: in front of him is photo paper covered in snowy noise, showing nothing. He doesn't draw stroke by stroke; he repeatedly dips the whole sheet into developer fluid, and each dip <strong>removes a little noise</strong>, making the picture slightly clearer. After twenty or thirty dips, a full image "emerges" out of pure noise. This developer never looks back at what he said; he keeps refining the <strong>same latent canvas</strong> over and over — exactly how diffusion works: <strong>iterative denoising</strong>.</p>
+<p>The two painters actually use the same brushes, paints and studio — only the <strong>rhythm and manner</strong> of painting differ. Replace that shared studio with the SGLang engine, and the two painting manners with autoregression and diffusion, and you've grasped the whole point of this lesson.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>An LLM is <strong>variable-length</strong>: you don't know how many tokens it will produce, each token depends on the previous one, a sequence stretched out by a feedback chain. A diffusion model is <strong>fixed-length</strong>: the step count N (say 20–50) is decided in advance, every step denoises the same latent, there is no token-level feedback — it is essentially a <strong>fixed-length refinement loop</strong>. The paradigms differ, but the serving problems to solve — fast kernels, a scheduler loop, memory management, multi-hardware, an external API — turn out to be the same set. So SGLang doesn't build a separate stack for diffusion; it <strong>borrows the same infrastructure</strong>.</p>
+<p>Keep this through-line in mind and every later detail falls into one frame: first see clearly what diffusion <em>computes</em> (iterative denoising), then which <em>three parts</em> it's made of (text encoder + DiT + VAE), and finally <em>how</em> SGLang serves a new paradigm with an old engine. Walk those three steps and you'll see why we call diffusion the best closing case for the whole guide's "everything is pluggable" idea.</p>
+</div>
+
+<h2>1. What diffusion actually does: from noise toward an image</h2>
+<p>Autoregressive generation is "word chaining": the model looks at the text generated so far, predicts the next most likely token, emits it, appends it to the sequence, feeds it back, and loops until an end token. Each forward produces exactly one token, and the sequence grows as generation proceeds.</p>
+<p>Diffusion generation is something else. It starts from a <strong>pure random noise</strong> latent, then runs the model N times. Each run — we call it a <strong>denoise step</strong> — predicts and removes a portion of the noise from the current noisy latent, nudging it one small step toward "a clean image". After N steps the latent goes from snow to a meaningful picture. There is no token popping out one by one; the whole trajectory is repeated refinement of <strong>the same latent tensor</strong>, with a fixed, predictable number of steps. This is very serving-friendly: the denoise step has the same compute shape every step — a <strong>static op graph that can be captured and replayed</strong>.</p>
+<p>Why "denoise" and not "paint"? During training, the diffusion model saw this process: take a clean image and <strong>progressively add noise</strong> until it becomes pure random noise; what the model learns is the <strong>reverse</strong> — given a noisy image and "which step we're at", predict how much noise to subtract. So at inference we run it backwards: start from pure noise and let the model "erase" the noise step by step, finally reconstructing a brand-new image that never existed before yet matches the prompt. Each step moves only a little because jumping from pure noise to a sharp image in one shot is too hard and too error-prone; sliced into dozens of small steps, the model only needs a tiny correction each step, and overall quality is far more stable.</p>
+<p>Because the step count N is fixed in advance, diffusion inference has a <strong>very regular compute graph</strong>: the same DiT, the same input shapes, the same op sequence, repeated N times unchanged. Compared to an LLM's dynamic shape — "the sequence grows as it generates and the KV cache keeps swelling" — diffusion's denoise loop is a <strong>near-perfect static loop</strong>. As you'll see, this regularity is exactly why SGLang's acceleration tricks (especially CUDA graph) plug straight in.</p>
+
+<h2>2. The three parts of a diffusion pipeline</h2>
+<p>A diffusion generation pipeline has three parts, all described by a single <span class="mono">PipelineConfig</span>:</p>
+<p>First, the <strong>text encoder(s)</strong> (there may be more than one): they turn your prompt into a <strong>conditioning</strong> vector that tells the denoiser "I want a cat wearing a hat". Second, the <strong>DiT</strong> (Diffusion Transformer): this is the <strong>denoiser</strong>, run once per denoise step — the heaviest, most central, repeatedly-invoked compute body of the pipeline. Third, the <strong>VAE</strong> (variational autoencoder): it maps back and forth between the compressed <strong>latent space</strong> and real <strong>pixel space</strong> — all the denoising happens in the small latent space (saving memory and compute), and only the final step uses the VAE to decode the latent into an actual image or video frame.</p>
+<p>There is also a key switch: <strong>classifier-free guidance</strong> (CFG). Through <span class="mono">should_use_guidance</span> and <span class="mono">embedded_cfg_scale</span>, the model pushes the result harder toward what the prompt describes — a larger scale follows the prompt more closely, but too large costs diversity and realism. That's why the same prompt at different guidance strengths yields visibly different styles.</p>
+<p>Stringing the three parts together: the prompt first becomes a set of conditioning vectors via the text encoder, and that conditioning is fed to the DiT at <strong>every denoise step</strong>, guiding it to denoise in the "right direction"; the DiT refines in latent space for N steps; finally the VAE steps in and decodes the latent into pixels in one shot. Worth stressing: nearly all the heavy compute is in the DiT's N forwards — text encoding runs once at the start, the VAE once at the end, so <strong>what really determines throughput and latency is the denoise loop</strong>. This is why all the later optimizations (CUDA graph, quantization, TeaCache step-skipping) target the denoise step: that's the hot spot.</p>
+<p><span class="mono">PipelineConfig</span> freezes this structure <strong>declaratively</strong>: <span class="mono">task_type</span> says whether this is text-to-image or image-to-video, <span class="mono">dit_config</span>/<span class="mono">vae_config</span>/<span class="mono">text_encoder_configs</span> describe the three parts, and <span class="mono">dit_precision</span> sets the denoiser's compute precision. Swapping in a different diffusion model is often just swapping a <span class="mono">PipelineConfig</span> — the upper serving code barely changes. This "config as pipeline" design is precisely what lets it plug into SGLang's existing engine so easily.</p>
+
+<h2>3. The real surprise: it reuses everything you learned</h2>
+<p>You might expect to learn a brand-new system here; quite the opposite. SGLang's diffusion serving <strong>borrows, as-is, the serving capabilities you studied throughout the guide</strong>: the same optimized <span class="mono">sgl-kernel</span> ops underneath (Lesson 38); an efficient <strong>scheduler loop</strong> to organize requests; <strong>CUDA-graph capture</strong> (Lesson 27) over that fixed-shape denoise step to crush per-step launch overhead; <strong>quantization</strong> (Lesson 35) to compress the DiT and encoders in memory; <strong>multi-hardware backends</strong> (Lesson 42: NVIDIA / AMD / Ascend NPU / Apple / Moore Threads) so one codebase runs on different chips; an <strong>OpenAI-compatible API</strong> (Lesson 15) exposed externally; and even PD-style <strong>disaggregation</strong>.</p>
+<p>On top of this general foundation, diffusion-specific optimizations layer on. The most representative is <strong>TeaCache</strong>: it <strong>caches the result of a denoise step</strong>, and when the change between adjacent steps is small enough (a threshold on accumulated L1 distance) it <strong>skips</strong> those redundant denoise steps and reuses the cache. Because diffusion is a fixed N-step refinement, later steps change less and less, so skipping some barely hurts quality while speeding things up noticeably. Such tricks "grow on top of" the general engine rather than forming a separate stack.</p>
+<p>It's worth chewing on why CUDA graph fits diffusion so well. When an LLM decodes, the sequence length changes every step and the KV cache keeps growing, so capturing a static graph takes real effort to handle dynamic shapes; diffusion's denoise step, by contrast, is <strong>fixed-shape by nature</strong> — the same DiT, the same latents, the same op chain, repeated N times unchanged. Once that step is captured as a CUDA graph, each step merely "replays" a recorded launch sequence, crushing hundreds or thousands of tiny kernel-launch overheads to almost nothing. For a denoise loop that runs twenty or thirty steps, this saving is <strong>amplified N times</strong> — a substantial gain.</p>
+<p>Quantization (Lesson 35) pays off directly here too. The DiT is often a large-parameter Transformer, and the text encoders aren't small either; quantizing them to lower precision substantially cuts memory and lets bigger diffusion models run on the same card. Multi-hardware backends (Lesson 42) mean this pipeline isn't picky about chips: NVIDIA, AMD, Ascend NPU, Apple, Moore Threads — the same model code lands on all of them. Add the OpenAI-compatible API (Lesson 15) and callers can't even tell whether a text or image model is behind it — the interface is unified, integration is near-zero cost. None of these capabilities was "rewritten specially" for diffusion; they are all existing serving muscle <strong>borrowed and used as-is</strong>.</p>
+
+<h2>4. The two paradigms side by side</h2>
+<p>The same SGLang engine serves both the autoregressive LLM that "chains one token at a time" and the diffusion model that "develops the same latent canvas repeatedly". Kernels, scheduling, memory, CUDA graph, multi-hardware, API — all shared; only the upper generation paradigm differs. This embodies SGLang's design philosophy: <strong>everything is pluggable</strong>, and new capabilities reuse the existing foundation at minimal cost.</p>
+<p>Put side by side, their "hard parts" are nicely offset and complementary: autoregression is hard because of <strong>dynamic shapes and an ever-growing KV cache</strong>, so continuous batching and prefix caching shine; diffusion is hard because <strong>the same image is run many steps over</strong>, so "static-loop optimizations" like CUDA-graph capture and TeaCache step-skipping matter most. But the foundation under both — high-performance kernels, unified scheduling and memory management, multi-hardware support, an external API — is <strong>the same one</strong>. That's why SGLang can cleanly bolt a task from the "image generation" world onto a pipeline originally serving LLMs, without rewriting the engine. For users it means the operational intuition you built deploying LLMs — how to start a server, tune concurrency, switch hardware, squeeze memory — transfers almost unchanged to diffusion, at very low learning cost.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Pure random noise</h4><p class="mono">latent</p><p>Start from a contentless Gaussian-noise latent; nothing is visible in the picture yet.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Denoise step ×N</h4><p class="mono">DiT</p><p>Run the same DiT denoiser repeatedly (e.g. 20–50 steps); each step removes a little noise, nudging the latent toward a clean image.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>VAE decode</h4><p class="mono">VAE</p><p>Decode the refined latent from compressed latent space back into real pixel space.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Final image / video</h4><p class="mono">pixels</p><p>A meaningful image or a video frame "emerges" out of pure noise.</p></div></div>
+</div>
+
+<div class="cols">
+  <div class="col"><strong>Autoregressive LLM</strong><br/>Variable-length sequence; each forward emits one token; the token is fed back, next step depends on the last; a token-level feedback chain.</div>
+  <div class="col"><strong>Diffusion model</strong><br/>Fixed N steps; each step denoises the same latent; no token feedback; a fixed-length refinement of one latent canvas.</div>
+</div>
+
+<table class="t">
+  <tr><th>Reused SGLang piece</th><th>Benefit for diffusion</th></tr>
+  <tr><td>sgl-kernel optimized ops (Lesson 38)</td><td>DiT / encoders / VAE get high-performance kernels directly</td></tr>
+  <tr><td>Efficient scheduler loop</td><td>Batches denoise requests for higher throughput</td></tr>
+  <tr><td>CUDA-graph capture (Lesson 27)</td><td>Denoise step is fixed-shape; once captured, per-step launch cost is tiny</td></tr>
+  <tr><td>Quantization (Lesson 35)</td><td>Compresses DiT and encoder memory, fits larger models</td></tr>
+  <tr><td>Multi-hardware backends (Lesson 42)</td><td>NVIDIA / AMD / Ascend / Apple / Moore Threads all covered</td></tr>
+  <tr><td>OpenAI-compatible API (Lesson 15)</td><td>Unified external interface, near-zero integration cost</td></tr>
+</table>
+
+<div class="flow">
+  <div class="node">Prompt</div>
+  <div class="arrow">→</div>
+  <div class="node">Text encoder</div>
+  <div class="arrow">→</div>
+  <div class="node">DiT denoise loop (TeaCache may skip steps)</div>
+  <div class="arrow">→</div>
+  <div class="node">VAE decode</div>
+  <div class="arrow">→</div>
+  <div class="node">Pixels</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/multimodal_gen/configs/pipeline_configs/base.py ::PipelineConfig</span><span class="ln">a diffusion pipeline = text encoders + the DiT denoiser + a VAE</span></div><pre>class PipelineConfig:
+    # base configuration for a diffusion generation pipeline
+    task_type: ModelTaskType            # e.g. text-&gt;image, image-&gt;video
+    model_path: str
+    dit_config: DiTConfig               # the Diffusion Transformer = the DENOISER (run once per step)
+    dit_precision: str = "bf16"
+    vae_config: VAEConfig               # VAE: latent &lt;-&gt; pixel space
+    text_encoder_configs: tuple         # text conditioning encoders
+    should_use_guidance: bool = True    # classifier-free guidance toward the prompt
+    embedded_cfg_scale: float = 6.0</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li><strong>Different paradigm</strong>: an autoregressive LLM emits one token per forward and feeds it back; diffusion starts from pure noise and iteratively denoises N steps, refining the same latent, with no token feedback.</li>
+<li><strong>Three parts</strong>: text encoder(s) (prompt → conditioning) + the DiT denoiser (run once per step) + the VAE (latent &lt;-&gt; pixels), all described by <span class="mono">PipelineConfig</span>.</li>
+<li><strong>Classifier-free guidance</strong>: <span class="mono">should_use_guidance</span> / <span class="mono">embedded_cfg_scale</span> steer the result toward the prompt.</li>
+<li><strong>One stack, two paradigms</strong>: reuses sgl-kernel (Lesson 38), the scheduler loop, CUDA graph (Lesson 27), quantization (Lesson 35), multi-hardware (Lesson 42), the OpenAI API (Lesson 15), and even PD disaggregation.</li>
+<li><strong>Diffusion-specific trick</strong>: TeaCache caches a step's result and skips redundant steps when the change is below threshold, speeding up with almost no quality loss — an acceleration layer on top of the general engine.</li>
+</ul>
+</div>
+
+<div class="card"><div class="tag">🏁 Part 11 wrap-up</div><p>Looking back over the whole advanced part: <strong>multimodality</strong> lets the engine understand text, image, audio and video; <strong>multi-LoRA</strong> lets one base model serve countless customized weights at once; <strong>RL weight sync</strong> hot-updates fresh training-side weights into the inference engine; and this lesson's <strong>diffusion models</strong> connect image and video generation onto the same pipeline. Four seemingly unrelated advanced capabilities, yet underneath they all <strong>reuse the same SGLang engine</strong> — the same sgl-kernel, the same scheduling and memory management, the same CUDA graph, the same multi-hardware backends and OpenAI-compatible API. This is the strongest proof of SGLang's "everything is pluggable" philosophy: make the general foundation solid, and a new capability is just a thin layer on top. With that, Part 11's advanced journey comes to a close, leaving a footnote for the whole guide — good system design lets seemingly distant capabilities elegantly share the same road.</p></div>
+
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. How does a diffusion model fundamentally differ from an autoregressive LLM?</div>
+  <ol class="opts">
+    <li>Both generate token by token, only the model differs</li>
+    <li>Diffusion also has token-level feedback, just with more steps</li>
+    <li><strong>An autoregressive LLM emits <strong>one token per forward</strong> and feeds it back, growing the sequence; a diffusion model starts from <strong>pure random noise</strong> and <strong>iteratively denoises N steps</strong>, refining the same latent with no token feedback and a fixed step count</strong></li>
+    <li>Diffusion produces the image in a single forward and never iterates</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Autoregression is variable-length chaining where each token depends on the last; diffusion is fixed-length refinement, starting from noise and removing a little each step, repeated N times (e.g. 20–50) over the same latent with no token feedback.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What do the three parts of a diffusion pipeline (<span class='mono'>PipelineConfig</span>) each do?</div>
+  <ol class="opts">
+    <li>The text encoder decodes pixels and the VAE handles conditioning</li>
+    <li>All three are denoisers, only with different precision</li>
+    <li><strong>Text encoders turn the <strong>prompt into conditioning</strong>; the <strong>DiT</strong> (Diffusion Transformer) is the <strong>denoiser</strong> run once per step; the <strong>VAE</strong> maps between <strong>latent and pixel space</strong></strong></li>
+    <li>The DiT encodes the prompt and the VAE samples noise</li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Text encoders produce conditioning; the DiT is the core denoiser run once per step; the VAE shuttles between compressed latent and real pixels, with denoising happening in latent space and only the final VAE decode producing the image. CFG (<span class='mono'>should_use_guidance</span>/<span class='mono'>embedded_cfg_scale</span>) steers toward the prompt.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which existing infrastructure does SGLang diffusion reuse, and what does TeaCache do?</div>
+  <ol class="opts">
+    <li>All infra is reused, but TeaCache increases the number of denoise steps</li>
+    <li>Diffusion builds a brand-new engine from scratch, and TeaCache adds noise</li>
+    <li>Only the API is reused, and TeaCache restarts the server</li>
+    <li><strong>Reuses <span class='mono'>sgl-kernel</span> ops, the scheduler loop, <strong>CUDA-graph capture</strong> (fixed-shape denoise step), quantization, multi-hardware backends and the OpenAI-compatible API; <strong>TeaCache</strong> caches a step's result and <strong>skips redundant denoise steps</strong> when the change is below an accumulated-L1 threshold</strong></li>
+  </ol>
+  <details class="accordion" open>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Diffusion doesn't start over; it borrows the same serving foundation: sgl-kernel (L38), the scheduler loop, CUDA graph (L27), quantization (L35), multi-hardware (L42), the OpenAI API (L15), even PD disaggregation. TeaCache is a diffusion-specific optimization layered on top: cache a denoise step's result and skip it when the change is small enough, speeding up with almost no quality loss.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain diffusion's "from noise toward an image": why it is a <strong>fixed-length N-step iterative denoise</strong> rather than autoregressive token chaining; describe the roles of the text encoder, the DiT denoiser and the VAE, and how classifier-free guidance steers the result toward the prompt.</li>
+    <li>Explain "one stack, two paradigms": list which previously learned pieces SGLang diffusion reuses (e.g. L38 sgl-kernel, L27 CUDA graph, L35 quantization, L42 multi-hardware, L15 OpenAI API), explain why the <strong>fixed-shape denoise step</strong> is especially suited to CUDA-graph capture, and how TeaCache skips redundant steps via an accumulated-L1 threshold.</li>
   </ul>
 </div>
 </div>

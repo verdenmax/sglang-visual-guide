@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>52 · 扩散模型 / Diffusion models - SGLang 图解教程</title>
+<meta name="description" content="第十一部分 · 进阶选读｜扩散模型 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="52 · 扩散模型 / Diffusion models - SGLang 图解教程">
+<meta property="og:description" content="第十一部分 · 进阶选读｜扩散模型 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="52 · 扩散模型 / Diffusion models - SGLang 图解教程">
+<meta name="twitter:description" content="第十一部分 · 进阶选读｜扩散模型 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十一部分 · 进阶选读</span><span class="lang-en">Part 11 · Advanced (optional)</span></span>
+    <span class="pill">52 / 52</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十一部分 · 进阶选读</span><span class="lang-en">Part 11 · Advanced (optional)</span></div>
+    <h1><span class="lang-zh">扩散模型</span><span class="lang-en">Diffusion models</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">这是第十一部分的最后一课，也是整份指南的一个漂亮收尾。我们要把目光从"大语言模型"挪开，看向另一类生成任务：<strong>扩散模型</strong>（diffusion models），也就是图像与视频生成。它住在 <span class="mono">sglang-diffusion</span> 子项目里，路径是 <span class="mono">python/sglang/multimodal_gen/</span>（注意是在 <span class="mono">python/sglang/</span> 之下，而不是 <span class="mono">python/sglang/srt/</span>）。扩散模型的计算范式和大语言模型完全不同，但它惊人地<strong>复用了你这一路学过的全部服务化肌肉</strong>。本课的落点就是一句话：<strong>一套引擎，两种范式</strong>。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>想象两位画家。第一位是<strong>口述者</strong>：他一个字一个字地讲故事，说完一个词，听到自己刚说的词，再决定下一个词——这就是自回归大语言模型，每次前向只吐一个 token，再把它喂回去（回顾第4课）。</p>
+<p>第二位是<strong>显影师</strong>：他面前是一张布满雪花噪点的相纸，什么也看不清。他不是一笔一笔去画，而是把整张纸反复放进显影液里，每泡一次就<strong>去掉一点点噪声</strong>，让画面稍微清晰一些。泡上二三十次之后，一张完整的图像就从纯噪声里"浮现"出来。这位显影师从不回头听自己说了什么，他做的是对<strong>同一张潜空间画布</strong>反复精修——这正是扩散模型的工作方式：<strong>迭代去噪</strong>（iterative denoising）。</p>
+<p>两位画家用的画笔、颜料、画室其实是同一套——只是作画的<strong>节奏与方式</strong>不同。把这套共用的画室换成 SGLang 引擎，把两种作画方式换成自回归与扩散，你就抓住了本课的全部精髓。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>大语言模型是<strong>变长</strong>的：你不知道它要生成多少个 token，每个 token 都依赖前一个，是一条被反馈链拉长的序列。扩散模型是<strong>定长</strong>的：步数 N（例如 20–50 步）是事先固定的，每一步都对同一个潜变量做一次去噪，没有 token 级别的反馈，本质上是一个<strong>固定长度的精修循环</strong>。范式不同，但服务化要解决的问题——高效算子、调度循环、显存管理、多硬件、对外 API——竟然是同一批。所以 SGLang 没有为扩散另起炉灶，而是<strong>把同一套基础设施借过来用</strong>。</p>
+<p>记住这条主线，本课后面的所有细节都会落到一个框架里：先看清扩散"算什么"（迭代去噪），再看清它由"哪三个零件"组成（文本编码器 + DiT + VAE），最后看清 SGLang 是"怎么用旧引擎服务新范式"的。三步走完，你就会明白为什么我们说扩散是整份指南"一切皆可插拔"理念的最佳收尾案例。</p>
+</div>
+
+<h2>一、扩散到底在做什么：从噪声走向图像</h2>
+<p>自回归生成是"接龙"：模型看一段已经生成的文字，预测下一个最可能的 token，吐出来，再把它接到序列末尾，喂回模型，循环往复，直到遇到结束符。每一次前向只产出一个 token，序列长度随生成过程不断增长。</p>
+<p>扩散生成是另一回事。它从一张<strong>纯随机噪声</strong>的潜变量出发，然后把模型运行 N 次。每一次运行——我们叫它一个<strong>去噪步</strong>（denoise step）——都从当前的含噪潜变量里预测并移除一部分噪声，让它朝"干净的图像"挪近一小步。N 步走完，潜变量就从一团雪花变成了一张有内容的图。这里没有 token 一个个往外蹦的过程，整条轨迹是对<strong>同一个潜变量张量</strong>的反复refine，步数是固定的、可预测的。这一点对服务化非常友好：去噪步的计算形状每一步都一样，是一个<strong>静态的、可被反复捕获的算子图</strong>。</p>
+<p>为什么是"去噪"而不是"作画"？训练时，扩散模型见过的是这样一个过程：把一张干净图片<strong>逐步加噪</strong>，直到它彻底变成随机噪声；模型学习的，是这个过程的<strong>逆向</strong>——给定一张含噪图和"现在处于第几步"，预测应该减掉多少噪声。于是推理时，我们就反过来用：从纯噪声起步，让模型一步步把噪声"擦掉"，最终还原出一张此前并不存在、却符合提示词描述的全新图像。每一步只走一小段，是因为一次性从纯噪声跳到清晰图太难、误差太大；切成几十小步，模型每步只需做一点点修正，整体质量就稳得多。</p>
+<p>正因为步数 N 是事先定好的，扩散推理的<strong>计算图非常规整</strong>：同一个 DiT、同样的输入形状、同样的算子序列，被原封不动地重复 N 次。相比大语言模型那种"序列越生成越长、KV 缓存不断膨胀"的动态形态，扩散的去噪循环是一个<strong>近乎完美的静态循环</strong>。后面你会看到，这种规整性正是 SGLang 各种加速手段（尤其是 CUDA Graph）能直接派上用场的根本原因。</p>
+
+<h2>二、一条扩散管线的三个零件</h2>
+<p>一条扩散生成管线由三部分组成，它们被一个 <span class="mono">PipelineConfig</span> 统一描述：</p>
+<p>第一是<strong>文本编码器</strong>（text encoder，可能不止一个）：它把你的提示词（prompt）变成<strong>条件向量</strong>（conditioning），告诉后面的去噪器"我要的是一只戴帽子的猫"。第二是 <strong>DiT</strong>（Diffusion Transformer，扩散 Transformer）：它就是那个<strong>去噪器</strong>，每一个去噪步被运行一次，是整条管线里最重、最核心、被反复调用的计算体。第三是 <strong>VAE</strong>（变分自编码器）：它负责在<strong>压缩的潜空间</strong>和真实<strong>像素空间</strong>之间来回映射——去噪全程都发生在小小的潜空间里（省显存、省算力），最后一步才用 VAE 把潜变量解码成真正的图像或视频帧。</p>
+<p>此外还有一个关键开关：<strong>无分类器引导</strong>（classifier-free guidance，CFG）。通过 <span class="mono">should_use_guidance</span> 与 <span class="mono">embedded_cfg_scale</span>，模型会把结果更用力地"推"向提示词描述的方向，scale 越大越贴合提示、但过大会损失多样性与真实感。这就是为什么同样的提示词、不同的引导强度，出图风格会明显不同。</p>
+<p>把这三个零件串起来看：提示词先经文本编码器变成一组条件向量，这组条件在<strong>每一个去噪步</strong>都被喂给 DiT，指引它往"对的方向"去噪；DiT 在潜空间里反复精修 N 步；最后 VAE 才登场，把潜变量一次性解码成像素。值得强调的是，最重的计算几乎全在 DiT 的那 N 次前向上——文本编码只在开头跑一次，VAE 只在结尾跑一次，<strong>真正决定吞吐与延迟的是去噪循环</strong>。这也解释了为什么后面所有的优化（CUDA Graph、量化、TeaCache 跳步）都瞄准去噪步：那才是热点。</p>
+<p><span class="mono">PipelineConfig</span> 把这套结构<strong>声明式地</strong>固化下来：<span class="mono">task_type</span> 说明这是文生图还是图生视频，<span class="mono">dit_config</span>/<span class="mono">vae_config</span>/<span class="mono">text_encoder_configs</span> 分别描述三个零件，<span class="mono">dit_precision</span> 指定去噪器的计算精度。换一个扩散模型，往往只是换一份 <span class="mono">PipelineConfig</span>——上层服务化代码几乎不用动。这种"配置即管线"的设计，正是它能轻松接入 SGLang 既有引擎的前提。</p>
+
+<h2>三、真正的惊喜：它复用了你学过的一切</h2>
+<p>到这里你可能以为要学一套全新的系统，恰恰相反。SGLang 的扩散服务<strong>把你整本指南学到的服务化能力原样借了过来</strong>：底层用同一套优化过的 <span class="mono">sgl-kernel</span> 算子（第38课）；用一个高效的<strong>调度循环</strong>来组织请求；对那个形状固定的去噪步做 <strong>CUDA Graph 捕获</strong>（第27课），把每一步的内核启动开销压到极低；用<strong>量化</strong>（第35课）压缩 DiT 与编码器的显存；靠<strong>多硬件后端</strong>（第42课：NVIDIA / AMD / 昇腾 NPU / Apple / 摩尔线程）让同一份代码跑在不同芯片上；对外暴露一个 <strong>OpenAI 兼容的 API</strong>（第15课）；甚至支持 PD 风格的<strong>分离式</strong>部署。</p>
+<p>在这套通用地基之上，再叠加扩散特有的优化。最有代表性的是 <strong>TeaCache</strong>：它会<strong>缓存某一去噪步的结果</strong>，当相邻步之间的变化足够小时（在累积的 L1 距离上设一个阈值），就<strong>跳过</strong>那些冗余的去噪步，直接复用缓存。因为扩散是固定 N 步的精修，越到后期每步带来的改变越小，跳过其中一部分几乎不损画质却能显著提速。这类技巧是"长在"通用引擎之上的，而不是另起一摊。</p>
+<p>这里值得再咀嚼一下 CUDA Graph 为什么对扩散特别合拍。大语言模型解码时，序列长度每步都在变，KV 缓存不断增长，捕获静态图要费不少心思去处理动态形状；而扩散的去噪步<strong>天生就是定形的</strong>——同一个 DiT、同一批潜变量、同一串算子，重复 N 次纹丝不动。把这一步捕获成 CUDA Graph 之后，每一步都只是"重放"一张录好的内核启动序列，把成百上千次零碎的 kernel launch 开销压到几乎为零。对一个要跑二三十步的去噪循环来说，这种省法会被<strong>放大 N 倍</strong>，收益非常可观。</p>
+<p>量化（第35课）在这里同样直接受用。DiT 往往是参数量很大的 Transformer，文本编码器也不小，把它们量化到更低精度，能显著压低显存占用、让更大的扩散模型在同一张卡上跑起来。多硬件后端（第42课）则意味着这条扩散管线不挑芯片：NVIDIA、AMD、昇腾 NPU、Apple、摩尔线程，同一份模型代码都能落地。再加上 OpenAI 兼容的 API（第15课），调用方甚至感觉不到背后是文本模型还是图像模型——接口是统一的，接入成本极低。这些能力没有一项是为扩散"专门重写"的，全是把现成的服务化肌肉<strong>借过来即用</strong>。</p>
+
+<h2>四、把两种范式并排看</h2>
+<p>同一套 SGLang 引擎，既服务"一个字一个字往外接"的自回归大语言模型，也服务"对一张潜空间画布反复显影"的扩散模型。算子、调度、显存、CUDA Graph、多硬件、API——这些都是共享的；不同的只是上层的生成范式。这正是 SGLang 设计哲学的体现：<strong>一切皆可插拔</strong>，新能力以最小代价复用既有地基。</p>
+<p>把两者并排，你会发现它们的"难点"恰好错位、互补：自回归难在<strong>动态形状与不断增长的 KV 缓存</strong>，于是连续批处理、前缀缓存这些手段大显身手；扩散难在<strong>同一张图要被反复跑很多步</strong>，于是 CUDA Graph 捕获、TeaCache 跳步这类"静态循环优化"价值最大。但支撑它们的底层——高性能算子、统一的调度与显存管理、多硬件适配、对外 API——是<strong>同一套</strong>。这就是为什么 SGLang 能在不重写引擎的前提下，把一个本属于"图像生成"世界的任务，干净利落地接到原本服务大语言模型的流水线上。对使用者而言，这意味着你之前为部署 LLM 学到的那套运维直觉——怎么开服务、怎么调并发、怎么换硬件、怎么压显存——几乎可以原样迁移到扩散场景，学习成本极低。</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>纯随机噪声</h4><p class="mono">latent</p><p>从一团毫无内容的高斯噪声潜变量出发，此刻画面里什么也看不出来。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>去噪步 ×N</h4><p class="mono">DiT</p><p>反复运行同一个 DiT 去噪器（如 20–50 步），每一步去掉一点点噪声，让潜变量朝干净图像挪近一小步。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>VAE 解码</h4><p class="mono">VAE</p><p>把精修完成的潜变量从压缩潜空间解码回真实像素空间。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>最终图像 / 视频</h4><p class="mono">pixels</p><p>一张有内容的图像或一段视频帧从纯噪声里“浮现”出来。</p></div></div>
+</div>
+
+<div class="cols">
+  <div class="col"><strong>自回归 LLM</strong><br/>变长序列；每次前向只吐一个 token；把 token 喂回去，下一步依赖上一步；有 token 级反馈链。</div>
+  <div class="col"><strong>扩散模型</strong><br/>定长 N 步；每步对同一个潜变量去噪；无 token 反馈；是对一张潜空间画布的固定长度精修。</div>
+</div>
+
+<table class="t">
+  <tr><th>复用的 SGLang 部件</th><th>对扩散的好处</th></tr>
+  <tr><td>sgl-kernel 优化算子（第38课）</td><td>DiT / 编码器 / VAE 直接吃到高性能内核</td></tr>
+  <tr><td>高效调度循环</td><td>批量编排去噪请求，吞吐更高</td></tr>
+  <tr><td>CUDA Graph 捕获（第27课）</td><td>去噪步形状固定，捕获后每步启动开销极低</td></tr>
+  <tr><td>量化（第35课）</td><td>压缩 DiT 与编码器显存，跑得起更大模型</td></tr>
+  <tr><td>多硬件后端（第42课）</td><td>NVIDIA / AMD / 昇腾 / Apple / 摩尔线程通吃</td></tr>
+  <tr><td>OpenAI 兼容 API（第15课）</td><td>对外接口统一，接入成本极低</td></tr>
+</table>
+
+<div class="flow">
+  <div class="node">提示词</div>
+  <div class="arrow">→</div>
+  <div class="node">文本编码器</div>
+  <div class="arrow">→</div>
+  <div class="node">DiT 去噪循环（TeaCache 可跳过步）</div>
+  <div class="arrow">→</div>
+  <div class="node">VAE 解码</div>
+  <div class="arrow">→</div>
+  <div class="node">像素</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/multimodal_gen/configs/pipeline_configs/base.py ::PipelineConfig</span><span class="ln">扩散管线 = 文本编码器 + DiT 去噪器 + VAE</span></div><pre>class PipelineConfig:
+    # base configuration for a diffusion generation pipeline
+    task_type: ModelTaskType            # e.g. text-&gt;image, image-&gt;video
+    model_path: str
+    dit_config: DiTConfig               # the Diffusion Transformer = the DENOISER (run once per step)
+    dit_precision: str = "bf16"
+    vae_config: VAEConfig               # VAE: latent &lt;-&gt; pixel space
+    text_encoder_configs: tuple         # text conditioning encoders
+    should_use_guidance: bool = True    # classifier-free guidance toward the prompt
+    embedded_cfg_scale: float = 6.0</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div>
+<ul>
+<li><strong>不同范式</strong>：自回归 LLM 每次前向吐一个 token 再喂回；扩散模型从纯噪声出发、迭代去噪 N 步，对同一个潜变量反复精修，无 token 反馈。</li>
+<li><strong>三个零件</strong>：文本编码器（把提示词变条件）+ DiT 去噪器（每步运行一次）+ VAE（潜空间 &lt;-&gt; 像素），由 <span class="mono">PipelineConfig</span> 统一描述。</li>
+<li><strong>无分类器引导</strong>：<span class="mono">should_use_guidance</span> / <span class="mono">embedded_cfg_scale</span> 把结果推向提示词。</li>
+<li><strong>一套引擎，两种范式</strong>：复用 sgl-kernel（第38课）、调度循环、CUDA Graph（第27课）、量化（第35课）、多硬件（第42课）、OpenAI API（第15课）乃至 PD 分离。</li>
+<li><strong>扩散特有优化</strong>：TeaCache 缓存去噪步结果，变化小于阈值时跳过冗余步，提速而几乎不损画质，是叠在通用引擎之上的加速层。</li>
+</ul>
+</div>
+
+<div class="card"><div class="tag">🏁 第十一部分小结</div><p>回望整个进阶部分：<strong>多模态</strong>让引擎读懂图文音视频，<strong>多 LoRA</strong>让一份基座同时服务无数定制权重，<strong>RL 权重同步</strong>把训练侧的新权重热更新进推理引擎，而本课的<strong>扩散模型</strong>把图像视频生成接到了同一条流水线上。四种看似毫不相干的进阶能力，落到底层却<strong>复用着同一套 SGLang 引擎</strong>——同样的 sgl-kernel、同样的调度与显存管理、同样的 CUDA Graph、同样的多硬件后端与 OpenAI 兼容 API。这正是 SGLang"一切皆可插拔"哲学最有力的证明：把通用地基做扎实，新能力就只是在上面薄薄地叠一层。至此，第十一部分的进阶之旅画上句号，也为整份指南留下一句注脚——好的系统设计，让看似遥远的能力都能优雅地共享同一条道路。</p></div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 扩散模型的生成方式和自回归 LLM 有什么本质不同？</div>
+  <ol class="opts">
+    <li>两者都一个 token 一个 token 地生成，只是模型不同</li>
+    <li>扩散模型也有 token 级反馈，只是步数更多</li>
+    <li><strong>自回归 LLM 每次前向<strong>吐一个 token</strong> 再喂回，序列变长；扩散模型从<strong>纯随机噪声</strong>出发，<strong>迭代去噪 N 步</strong>，对同一个潜变量反复精修，无 token 反馈，步数固定</strong></li>
+    <li>扩散模型一次前向直接出图，从不迭代</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。自回归是变长的接龙，每个 token 依赖上一个；扩散是定长精修，从噪声出发，每一步去掉一点噪声，对同一个潜变量重复 N 次（如 20–50 步），没有 token 级反馈。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 一条扩散管线（<span class='mono'>PipelineConfig</span>）的三个零件分别负责什么？</div>
+  <ol class="opts">
+    <li>文本编码器负责解码像素，VAE 负责条件</li>
+    <li>三者都是去噪器，只是精度不同</li>
+    <li><strong>文本编码器把<strong>提示词变条件</strong>；<strong>DiT</strong>（扩散 Transformer）是<strong>去噪器</strong>，每个去噪步运行一次；<strong>VAE</strong> 在<strong>潜空间与像素空间</strong>之间映射</strong></li>
+    <li>DiT 负责编码提示词，VAE 负责采样噪声</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。文本编码器产出 conditioning；DiT 是核心去噪器，每步跑一次；VAE 在压缩潜空间与真实像素之间往返，去噪全程在潜空间、最后才用 VAE 解码成图。无分类器引导（<span class='mono'>should_use_guidance</span>/<span class='mono'>embedded_cfg_scale</span>）把结果推向提示词。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. SGLang 扩散服务复用了哪些既有基础设施，TeaCache 又做了什么？</div>
+  <ol class="opts">
+    <li>复用全部基础设施，但 TeaCache 会增加去噪步数</li>
+    <li>扩散服务从零另起一套引擎，TeaCache 用来扩大噪声</li>
+    <li>只复用 API，TeaCache 用来重启服务器</li>
+    <li><strong>复用 <span class='mono'>sgl-kernel</span> 算子、调度循环、<strong>CUDA Graph 捕获</strong>（去噪步形状固定）、量化、多硬件后端、OpenAI 兼容 API；<strong>TeaCache</strong> 缓存某步结果，变化小于阈值（累积 L1 距离）时<strong>跳过冗余去噪步</strong></strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。扩散没有另起炉灶，而是借用同一套服务化地基：sgl-kernel（第38课）、调度循环、CUDA Graph（第27课）、量化（第35课）、多硬件（第42课）、OpenAI API（第15课）乃至 PD 分离。TeaCache 是叠在上面的扩散特有优化：缓存去噪步结果，变化足够小就跳过，提速而几乎不损画质。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话讲清扩散模型的“从噪声走向图像”：为什么它是<strong>定长 N 步迭代去噪</strong>而不是自回归的 token 接龙；说明文本编码器、DiT 去噪器、VAE 三个零件各自的角色，以及无分类器引导如何把结果推向提示词。</li>
+    <li>解释“一套引擎，两种范式”：列出 SGLang 扩散服务复用了哪些你前面学过的部件（如第38课 sgl-kernel、第27课 CUDA Graph、第35课量化、第42课多硬件、第15课 OpenAI API），并说明为什么<strong>去噪步形状固定</strong>特别适合 CUDA Graph 捕获，以及 TeaCache 如何通过累积 L1 距离阈值跳过冗余步。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">This is the last lesson of Part 11, and a nice way to close the whole guide. We turn our eyes away from large language models toward a different generation task: <strong>diffusion models</strong> — image and video generation. It lives in the <span class="mono">sglang-diffusion</span> sub-project at <span class="mono">python/sglang/multimodal_gen/</span> (note: under <span class="mono">python/sglang/</span>, NOT <span class="mono">python/sglang/srt/</span>). Diffusion uses a compute pattern completely different from LLMs, yet it astonishingly <strong>reuses every bit of serving muscle you have built up along the way</strong>. The punchline of this lesson is one phrase: <strong>one stack, two paradigms</strong>.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Picture two painters. The first is a <strong>narrator</strong>: he tells a story one word at a time, hears the word he just said, then decides the next — that's the autoregressive LLM, emitting one token per forward and feeding it back (recall Lesson 4).</p>
+<p>The second is a <strong>darkroom developer</strong>: in front of him is photo paper covered in snowy noise, showing nothing. He doesn't draw stroke by stroke; he repeatedly dips the whole sheet into developer fluid, and each dip <strong>removes a little noise</strong>, making the picture slightly clearer. After twenty or thirty dips, a full image "emerges" out of pure noise. This developer never looks back at what he said; he keeps refining the <strong>same latent canvas</strong> over and over — exactly how diffusion works: <strong>iterative denoising</strong>.</p>
+<p>The two painters actually use the same brushes, paints and studio — only the <strong>rhythm and manner</strong> of painting differ. Replace that shared studio with the SGLang engine, and the two painting manners with autoregression and diffusion, and you've grasped the whole point of this lesson.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>An LLM is <strong>variable-length</strong>: you don't know how many tokens it will produce, each token depends on the previous one, a sequence stretched out by a feedback chain. A diffusion model is <strong>fixed-length</strong>: the step count N (say 20–50) is decided in advance, every step denoises the same latent, there is no token-level feedback — it is essentially a <strong>fixed-length refinement loop</strong>. The paradigms differ, but the serving problems to solve — fast kernels, a scheduler loop, memory management, multi-hardware, an external API — turn out to be the same set. So SGLang doesn't build a separate stack for diffusion; it <strong>borrows the same infrastructure</strong>.</p>
+<p>Keep this through-line in mind and every later detail falls into one frame: first see clearly what diffusion <em>computes</em> (iterative denoising), then which <em>three parts</em> it's made of (text encoder + DiT + VAE), and finally <em>how</em> SGLang serves a new paradigm with an old engine. Walk those three steps and you'll see why we call diffusion the best closing case for the whole guide's "everything is pluggable" idea.</p>
+</div>
+
+<h2>1. What diffusion actually does: from noise toward an image</h2>
+<p>Autoregressive generation is "word chaining": the model looks at the text generated so far, predicts the next most likely token, emits it, appends it to the sequence, feeds it back, and loops until an end token. Each forward produces exactly one token, and the sequence grows as generation proceeds.</p>
+<p>Diffusion generation is something else. It starts from a <strong>pure random noise</strong> latent, then runs the model N times. Each run — we call it a <strong>denoise step</strong> — predicts and removes a portion of the noise from the current noisy latent, nudging it one small step toward "a clean image". After N steps the latent goes from snow to a meaningful picture. There is no token popping out one by one; the whole trajectory is repeated refinement of <strong>the same latent tensor</strong>, with a fixed, predictable number of steps. This is very serving-friendly: the denoise step has the same compute shape every step — a <strong>static op graph that can be captured and replayed</strong>.</p>
+<p>Why "denoise" and not "paint"? During training, the diffusion model saw this process: take a clean image and <strong>progressively add noise</strong> until it becomes pure random noise; what the model learns is the <strong>reverse</strong> — given a noisy image and "which step we're at", predict how much noise to subtract. So at inference we run it backwards: start from pure noise and let the model "erase" the noise step by step, finally reconstructing a brand-new image that never existed before yet matches the prompt. Each step moves only a little because jumping from pure noise to a sharp image in one shot is too hard and too error-prone; sliced into dozens of small steps, the model only needs a tiny correction each step, and overall quality is far more stable.</p>
+<p>Because the step count N is fixed in advance, diffusion inference has a <strong>very regular compute graph</strong>: the same DiT, the same input shapes, the same op sequence, repeated N times unchanged. Compared to an LLM's dynamic shape — "the sequence grows as it generates and the KV cache keeps swelling" — diffusion's denoise loop is a <strong>near-perfect static loop</strong>. As you'll see, this regularity is exactly why SGLang's acceleration tricks (especially CUDA graph) plug straight in.</p>
+
+<h2>2. The three parts of a diffusion pipeline</h2>
+<p>A diffusion generation pipeline has three parts, all described by a single <span class="mono">PipelineConfig</span>:</p>
+<p>First, the <strong>text encoder(s)</strong> (there may be more than one): they turn your prompt into a <strong>conditioning</strong> vector that tells the denoiser "I want a cat wearing a hat". Second, the <strong>DiT</strong> (Diffusion Transformer): this is the <strong>denoiser</strong>, run once per denoise step — the heaviest, most central, repeatedly-invoked compute body of the pipeline. Third, the <strong>VAE</strong> (variational autoencoder): it maps back and forth between the compressed <strong>latent space</strong> and real <strong>pixel space</strong> — all the denoising happens in the small latent space (saving memory and compute), and only the final step uses the VAE to decode the latent into an actual image or video frame.</p>
+<p>There is also a key switch: <strong>classifier-free guidance</strong> (CFG). Through <span class="mono">should_use_guidance</span> and <span class="mono">embedded_cfg_scale</span>, the model pushes the result harder toward what the prompt describes — a larger scale follows the prompt more closely, but too large costs diversity and realism. That's why the same prompt at different guidance strengths yields visibly different styles.</p>
+<p>Stringing the three parts together: the prompt first becomes a set of conditioning vectors via the text encoder, and that conditioning is fed to the DiT at <strong>every denoise step</strong>, guiding it to denoise in the "right direction"; the DiT refines in latent space for N steps; finally the VAE steps in and decodes the latent into pixels in one shot. Worth stressing: nearly all the heavy compute is in the DiT's N forwards — text encoding runs once at the start, the VAE once at the end, so <strong>what really determines throughput and latency is the denoise loop</strong>. This is why all the later optimizations (CUDA graph, quantization, TeaCache step-skipping) target the denoise step: that's the hot spot.</p>
+<p><span class="mono">PipelineConfig</span> freezes this structure <strong>declaratively</strong>: <span class="mono">task_type</span> says whether this is text-to-image or image-to-video, <span class="mono">dit_config</span>/<span class="mono">vae_config</span>/<span class="mono">text_encoder_configs</span> describe the three parts, and <span class="mono">dit_precision</span> sets the denoiser's compute precision. Swapping in a different diffusion model is often just swapping a <span class="mono">PipelineConfig</span> — the upper serving code barely changes. This "config as pipeline" design is precisely what lets it plug into SGLang's existing engine so easily.</p>
+
+<h2>3. The real surprise: it reuses everything you learned</h2>
+<p>You might expect to learn a brand-new system here; quite the opposite. SGLang's diffusion serving <strong>borrows, as-is, the serving capabilities you studied throughout the guide</strong>: the same optimized <span class="mono">sgl-kernel</span> ops underneath (Lesson 38); an efficient <strong>scheduler loop</strong> to organize requests; <strong>CUDA-graph capture</strong> (Lesson 27) over that fixed-shape denoise step to crush per-step launch overhead; <strong>quantization</strong> (Lesson 35) to compress the DiT and encoders in memory; <strong>multi-hardware backends</strong> (Lesson 42: NVIDIA / AMD / Ascend NPU / Apple / Moore Threads) so one codebase runs on different chips; an <strong>OpenAI-compatible API</strong> (Lesson 15) exposed externally; and even PD-style <strong>disaggregation</strong>.</p>
+<p>On top of this general foundation, diffusion-specific optimizations layer on. The most representative is <strong>TeaCache</strong>: it <strong>caches the result of a denoise step</strong>, and when the change between adjacent steps is small enough (a threshold on accumulated L1 distance) it <strong>skips</strong> those redundant denoise steps and reuses the cache. Because diffusion is a fixed N-step refinement, later steps change less and less, so skipping some barely hurts quality while speeding things up noticeably. Such tricks "grow on top of" the general engine rather than forming a separate stack.</p>
+<p>It's worth chewing on why CUDA graph fits diffusion so well. When an LLM decodes, the sequence length changes every step and the KV cache keeps growing, so capturing a static graph takes real effort to handle dynamic shapes; diffusion's denoise step, by contrast, is <strong>fixed-shape by nature</strong> — the same DiT, the same latents, the same op chain, repeated N times unchanged. Once that step is captured as a CUDA graph, each step merely "replays" a recorded launch sequence, crushing hundreds or thousands of tiny kernel-launch overheads to almost nothing. For a denoise loop that runs twenty or thirty steps, this saving is <strong>amplified N times</strong> — a substantial gain.</p>
+<p>Quantization (Lesson 35) pays off directly here too. The DiT is often a large-parameter Transformer, and the text encoders aren't small either; quantizing them to lower precision substantially cuts memory and lets bigger diffusion models run on the same card. Multi-hardware backends (Lesson 42) mean this pipeline isn't picky about chips: NVIDIA, AMD, Ascend NPU, Apple, Moore Threads — the same model code lands on all of them. Add the OpenAI-compatible API (Lesson 15) and callers can't even tell whether a text or image model is behind it — the interface is unified, integration is near-zero cost. None of these capabilities was "rewritten specially" for diffusion; they are all existing serving muscle <strong>borrowed and used as-is</strong>.</p>
+
+<h2>4. The two paradigms side by side</h2>
+<p>The same SGLang engine serves both the autoregressive LLM that "chains one token at a time" and the diffusion model that "develops the same latent canvas repeatedly". Kernels, scheduling, memory, CUDA graph, multi-hardware, API — all shared; only the upper generation paradigm differs. This embodies SGLang's design philosophy: <strong>everything is pluggable</strong>, and new capabilities reuse the existing foundation at minimal cost.</p>
+<p>Put side by side, their "hard parts" are nicely offset and complementary: autoregression is hard because of <strong>dynamic shapes and an ever-growing KV cache</strong>, so continuous batching and prefix caching shine; diffusion is hard because <strong>the same image is run many steps over</strong>, so "static-loop optimizations" like CUDA-graph capture and TeaCache step-skipping matter most. But the foundation under both — high-performance kernels, unified scheduling and memory management, multi-hardware support, an external API — is <strong>the same one</strong>. That's why SGLang can cleanly bolt a task from the "image generation" world onto a pipeline originally serving LLMs, without rewriting the engine. For users it means the operational intuition you built deploying LLMs — how to start a server, tune concurrency, switch hardware, squeeze memory — transfers almost unchanged to diffusion, at very low learning cost.</p>
+
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Pure random noise</h4><p class="mono">latent</p><p>Start from a contentless Gaussian-noise latent; nothing is visible in the picture yet.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Denoise step ×N</h4><p class="mono">DiT</p><p>Run the same DiT denoiser repeatedly (e.g. 20–50 steps); each step removes a little noise, nudging the latent toward a clean image.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>VAE decode</h4><p class="mono">VAE</p><p>Decode the refined latent from compressed latent space back into real pixel space.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Final image / video</h4><p class="mono">pixels</p><p>A meaningful image or a video frame "emerges" out of pure noise.</p></div></div>
+</div>
+
+<div class="cols">
+  <div class="col"><strong>Autoregressive LLM</strong><br/>Variable-length sequence; each forward emits one token; the token is fed back, next step depends on the last; a token-level feedback chain.</div>
+  <div class="col"><strong>Diffusion model</strong><br/>Fixed N steps; each step denoises the same latent; no token feedback; a fixed-length refinement of one latent canvas.</div>
+</div>
+
+<table class="t">
+  <tr><th>Reused SGLang piece</th><th>Benefit for diffusion</th></tr>
+  <tr><td>sgl-kernel optimized ops (Lesson 38)</td><td>DiT / encoders / VAE get high-performance kernels directly</td></tr>
+  <tr><td>Efficient scheduler loop</td><td>Batches denoise requests for higher throughput</td></tr>
+  <tr><td>CUDA-graph capture (Lesson 27)</td><td>Denoise step is fixed-shape; once captured, per-step launch cost is tiny</td></tr>
+  <tr><td>Quantization (Lesson 35)</td><td>Compresses DiT and encoder memory, fits larger models</td></tr>
+  <tr><td>Multi-hardware backends (Lesson 42)</td><td>NVIDIA / AMD / Ascend / Apple / Moore Threads all covered</td></tr>
+  <tr><td>OpenAI-compatible API (Lesson 15)</td><td>Unified external interface, near-zero integration cost</td></tr>
+</table>
+
+<div class="flow">
+  <div class="node">Prompt</div>
+  <div class="arrow">→</div>
+  <div class="node">Text encoder</div>
+  <div class="arrow">→</div>
+  <div class="node">DiT denoise loop (TeaCache may skip steps)</div>
+  <div class="arrow">→</div>
+  <div class="node">VAE decode</div>
+  <div class="arrow">→</div>
+  <div class="node">Pixels</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/multimodal_gen/configs/pipeline_configs/base.py ::PipelineConfig</span><span class="ln">a diffusion pipeline = text encoders + the DiT denoiser + a VAE</span></div><pre>class PipelineConfig:
+    # base configuration for a diffusion generation pipeline
+    task_type: ModelTaskType            # e.g. text-&gt;image, image-&gt;video
+    model_path: str
+    dit_config: DiTConfig               # the Diffusion Transformer = the DENOISER (run once per step)
+    dit_precision: str = "bf16"
+    vae_config: VAEConfig               # VAE: latent &lt;-&gt; pixel space
+    text_encoder_configs: tuple         # text conditioning encoders
+    should_use_guidance: bool = True    # classifier-free guidance toward the prompt
+    embedded_cfg_scale: float = 6.0</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li><strong>Different paradigm</strong>: an autoregressive LLM emits one token per forward and feeds it back; diffusion starts from pure noise and iteratively denoises N steps, refining the same latent, with no token feedback.</li>
+<li><strong>Three parts</strong>: text encoder(s) (prompt → conditioning) + the DiT denoiser (run once per step) + the VAE (latent &lt;-&gt; pixels), all described by <span class="mono">PipelineConfig</span>.</li>
+<li><strong>Classifier-free guidance</strong>: <span class="mono">should_use_guidance</span> / <span class="mono">embedded_cfg_scale</span> steer the result toward the prompt.</li>
+<li><strong>One stack, two paradigms</strong>: reuses sgl-kernel (Lesson 38), the scheduler loop, CUDA graph (Lesson 27), quantization (Lesson 35), multi-hardware (Lesson 42), the OpenAI API (Lesson 15), and even PD disaggregation.</li>
+<li><strong>Diffusion-specific trick</strong>: TeaCache caches a step's result and skips redundant steps when the change is below threshold, speeding up with almost no quality loss — an acceleration layer on top of the general engine.</li>
+</ul>
+</div>
+
+<div class="card"><div class="tag">🏁 Part 11 wrap-up</div><p>Looking back over the whole advanced part: <strong>multimodality</strong> lets the engine understand text, image, audio and video; <strong>multi-LoRA</strong> lets one base model serve countless customized weights at once; <strong>RL weight sync</strong> hot-updates fresh training-side weights into the inference engine; and this lesson's <strong>diffusion models</strong> connect image and video generation onto the same pipeline. Four seemingly unrelated advanced capabilities, yet underneath they all <strong>reuse the same SGLang engine</strong> — the same sgl-kernel, the same scheduling and memory management, the same CUDA graph, the same multi-hardware backends and OpenAI-compatible API. This is the strongest proof of SGLang's "everything is pluggable" philosophy: make the general foundation solid, and a new capability is just a thin layer on top. With that, Part 11's advanced journey comes to a close, leaving a footnote for the whole guide — good system design lets seemingly distant capabilities elegantly share the same road.</p></div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. How does a diffusion model fundamentally differ from an autoregressive LLM?</div>
+  <ol class="opts">
+    <li>Both generate token by token, only the model differs</li>
+    <li>Diffusion also has token-level feedback, just with more steps</li>
+    <li><strong>An autoregressive LLM emits <strong>one token per forward</strong> and feeds it back, growing the sequence; a diffusion model starts from <strong>pure random noise</strong> and <strong>iteratively denoises N steps</strong>, refining the same latent with no token feedback and a fixed step count</strong></li>
+    <li>Diffusion produces the image in a single forward and never iterates</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Autoregression is variable-length chaining where each token depends on the last; diffusion is fixed-length refinement, starting from noise and removing a little each step, repeated N times (e.g. 20–50) over the same latent with no token feedback.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What do the three parts of a diffusion pipeline (<span class='mono'>PipelineConfig</span>) each do?</div>
+  <ol class="opts">
+    <li>The text encoder decodes pixels and the VAE handles conditioning</li>
+    <li>All three are denoisers, only with different precision</li>
+    <li><strong>Text encoders turn the <strong>prompt into conditioning</strong>; the <strong>DiT</strong> (Diffusion Transformer) is the <strong>denoiser</strong> run once per step; the <strong>VAE</strong> maps between <strong>latent and pixel space</strong></strong></li>
+    <li>The DiT encodes the prompt and the VAE samples noise</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Text encoders produce conditioning; the DiT is the core denoiser run once per step; the VAE shuttles between compressed latent and real pixels, with denoising happening in latent space and only the final VAE decode producing the image. CFG (<span class='mono'>should_use_guidance</span>/<span class='mono'>embedded_cfg_scale</span>) steers toward the prompt.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which existing infrastructure does SGLang diffusion reuse, and what does TeaCache do?</div>
+  <ol class="opts">
+    <li>All infra is reused, but TeaCache increases the number of denoise steps</li>
+    <li>Diffusion builds a brand-new engine from scratch, and TeaCache adds noise</li>
+    <li>Only the API is reused, and TeaCache restarts the server</li>
+    <li><strong>Reuses <span class='mono'>sgl-kernel</span> ops, the scheduler loop, <strong>CUDA-graph capture</strong> (fixed-shape denoise step), quantization, multi-hardware backends and the OpenAI-compatible API; <strong>TeaCache</strong> caches a step's result and <strong>skips redundant denoise steps</strong> when the change is below an accumulated-L1 threshold</strong></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Diffusion doesn't start over; it borrows the same serving foundation: sgl-kernel (L38), the scheduler loop, CUDA graph (L27), quantization (L35), multi-hardware (L42), the OpenAI API (L15), even PD disaggregation. TeaCache is a diffusion-specific optimization layered on top: cache a denoise step's result and skip it when the change is small enough, speeding up with almost no quality loss.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain diffusion's "from noise toward an image": why it is a <strong>fixed-length N-step iterative denoise</strong> rather than autoregressive token chaining; describe the roles of the text encoder, the DiT denoiser and the VAE, and how classifier-free guidance steers the result toward the prompt.</li>
+    <li>Explain "one stack, two paradigms": list which previously learned pieces SGLang diffusion reuses (e.g. L38 sgl-kernel, L27 CUDA graph, L35 quantization, L42 multi-hardware, L15 OpenAI API), explain why the <strong>fixed-shape denoise step</strong> is especially suited to CUDA-graph capture, and how TeaCache skips redundant steps via an accumulated-L1 threshold.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="51-rl-rollout-and-weight-sync.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">RL Rollout 与权重同步</span><span class="lang-en">RL rollout &amp; weight sync</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

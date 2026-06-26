@@ -143,6 +143,14 @@ PAGES = [
      "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
     ("48-structured-outputs-and-jump-forward.html", "结构化输出与跳跃前进", "Structured outputs & jump-forward",
      "第十部分 · 性能创新专题", "Part 10 · Performance innovations"),
+    ("49-multimodal-vlm-serving.html", "多模态 VLM 服务", "Multimodal VLM serving",
+     "第十一部分 · 进阶选读", "Part 11 · Advanced (optional)"),
+    ("50-multi-lora-batching.html", "多 LoRA 批处理", "Multi-LoRA batching",
+     "第十一部分 · 进阶选读", "Part 11 · Advanced (optional)"),
+    ("51-rl-rollout-and-weight-sync.html", "RL Rollout 与权重同步", "RL rollout & weight sync",
+     "第十一部分 · 进阶选读", "Part 11 · Advanced (optional)"),
+    ("52-diffusion-models.html", "扩散模型", "Diffusion models",
+     "第十一部分 · 进阶选读", "Part 11 · Advanced (optional)"),
 ]
 
 
@@ -688,6 +696,14 @@ SUBTITLES = {
                                         "expert load gets skewed · EPLB periodically rebalances placement · essential for big MoE"),
     "48-structured-outputs-and-jump-forward.html": ("语法 FSM 屏蔽 logits 保证合法 · 确定段跳跃前进 · 免调模型",
                                                     "a grammar FSM masks logits to stay valid · jump-forward over fixed spans · skip the model"),
+    "49-multimodal-vlm-serving.html": ("处理器把媒体变占位符 · 编码器出嵌入再拼接进序列 · 之后引擎照常跑",
+                                       "the processor turns media into placeholders · the encoder's embeddings are spliced in · then the engine runs as usual"),
+    "50-multi-lora-batching.html": ("一个底座 + 一池小适配器 · 同批不同请求用不同 LoRA · 分组 GEMM 一次算",
+                                    "one base + a pool of small adapters · different requests in one batch use different LoRAs · grouped GEMM in one pass"),
+    "51-rl-rollout-and-weight-sync.html": ("SGLang 当 RL 的 rollout 引擎 · 原地热更权重免重启 · 打包张量加速同步",
+                                           "SGLang as the RL rollout engine · in-place weight updates without restart · bucket tensors to speed the sync"),
+    "52-diffusion-models.html": ("扩散是迭代去噪不是自回归 · 复用 sgl-kernel/调度/CUDA Graph · 一套栈两种范式",
+                                 "diffusion is iterative denoising, not autoregression · reuses sgl-kernel/scheduler/CUDA graph · one stack, two paradigms"),
 }
 
 

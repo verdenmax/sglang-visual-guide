@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('sgvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>50 · 多 LoRA 批处理 / Multi-LoRA batching - SGLang 图解教程</title>
+<meta name="description" content="第十一部分 · 进阶选读｜多 LoRA 批处理 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#7c48e6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzdjNDhlNicvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE0JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5TZzwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SGLang 图解教程">
+<meta property="og:title" content="50 · 多 LoRA 批处理 / Multi-LoRA batching - SGLang 图解教程">
+<meta property="og:description" content="第十一部分 · 进阶选读｜多 LoRA 批处理 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="50 · 多 LoRA 批处理 / Multi-LoRA batching - SGLang 图解教程">
+<meta name="twitter:description" content="第十一部分 · 进阶选读｜多 LoRA 批处理 - SGLang 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --teal: #0d9488; --teal-soft: #d7f3ef;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #a98af0; --accent-soft: #241a3e; --accent-ink: #c9b6f7;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --teal: #5ed0c4; --teal-soft: #0d2e2a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (vector rows / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (write vs read, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.timeline .tl-row { display: flex; align-items: flex-start; gap: .6rem; padding: .12rem 0; }
+.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: .45rem; }
+.timeline .tl-t { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent-ink); min-width: 2.4rem; font-size: .82rem; flex-shrink: 0; margin-top: .18rem; }
+.timeline .tl-c { font-size: .9rem; color: var(--muted); }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+/* --- hand-drawn figure (inline SVG illustrations) --- */
+.fig { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1rem .85rem; box-shadow: var(--shadow); text-align: center; }
+.fig svg { max-width: 100%; height: auto; display: block; margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif; }
+.fig svg text { fill: var(--ink); }
+.fig .figcap { margin: .72rem auto 0; font-size: .8rem; color: var(--muted); line-height: 1.55; max-width: 46rem; }
+.fig .figcap b { color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">⚡ <b class="lang-zh">SGLang 图解教程</b><b class="lang-en">SGLang Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第十一部分 · 进阶选读</span><span class="lang-en">Part 11 · Advanced (optional)</span></span>
+    <span class="pill">50 / 52</span>
+    <button class="langtoggle" onclick="sgvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:96%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第十一部分 · 进阶选读</span><span class="lang-en">Part 11 · Advanced (optional)</span></div>
+    <h1><span class="lang-zh">多 LoRA 批处理</span><span class="lang-en">Multi-LoRA batching</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead">一个底座模型，几十种"技能"。<strong>多 LoRA 批处理（Multi-LoRA batching）</strong>让你只在显存里保留<span class="mono">一份</span>基座权重，外加一个小小的<strong>适配器池（adapter pool）</strong>，就能同时服务大量针对不同任务微调出来的模型。难点不在"加载适配器"，而在"同一个批次里不同请求各要各的适配器"时，如何用<span class="mono">一次</span>内核启动把每个请求自己的增量权重 ΔW 都算对。</p>
+
+<div class="card analogy"><div class="tag">🔌 生活类比</div>
+<p>把基座模型想成一台<strong>电动工具的主机</strong>：电机、把手、电池都在主机里，又重又贵。而 LoRA 适配器就像一个个<strong>可换的钻头/批头</strong>——每个钻头很小、很便宜，却让同一台主机分别变成"打孔机""螺丝刀""抛光机"。</p>
+<p>过去的笨办法是：要三种功能就买三台完整的主机（三份完整模型），仓库（显存）立刻被占满。聪明的办法是：<strong>一台主机 + 一盒批头</strong>。来活儿了，看这一单需要哪个批头，<span class="mono">装上</span>就干。更妙的是流水线上同时来了好几单：第一单要打孔、第二单要拧螺丝、第三单又要打孔——你不是把主机拆三遍，而是<strong>一次</strong>把这几个批头都摆好，让机械臂在一趟动作里把每个工件按它该用的批头加工完。这"一趟动作处理一批不同批头的活儿"，正是多 LoRA 批处理要解决的事。</p>
+<p>这个类比还能再延伸一点：批头盒的容量是有限的，你不可能把全世界的批头都同时插在机械臂上等着用。所以现场只保留"这一轮最可能用到"的那几个批头，用完不需要的就收回盒子、把新需要的拿出来——这正对应运行时的"装载/卸载适配器"，以及"同一轮最多摆几个批头"的上限。整套办法的精髓始终是同一句话：<strong>贵的主机只留一台，便宜的批头按需轮换</strong>。</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 宏观理解</div>
+<p>LoRA 的核心数学很朴素：不去重新训练庞大的权重矩阵 <span class="mono">W</span>，而是学两个<strong>小矩阵</strong> <span class="mono">A</span> 和 <span class="mono">B</span>，让有效权重变成 <span class="mono">W + B·A</span>。这里的秩 <span class="mono">r</span> 远小于矩阵的维度（<span class="mono">r ≪ d</span>），所以 <span class="mono">B·A</span> 这个增量 ΔW 又小又便宜。一个基座可以挂<strong>许多</strong>这样的适配器，每个代表一种被微调出来的"技能"。SGLang 把单个适配器表示为 <span class="mono">LoRAAdapter</span>。</p>
+<p>于是多 LoRA 的真正主张是：<strong>一份基座 + 一个适配器池 + 批次感知的 ΔW 应用</strong>。一次部署就能廉价地服务几十个针对具体任务的适配器，而不必为每个微调各起一份完整模型。</p>
+<p>为什么 <span class="mono">B·A</span> 会这么便宜？设权重维度是 <span class="mono">d×d</span>，全量微调要更新约 <span class="mono">d²</span> 个参数；而 LoRA 只学 <span class="mono">A</span>（约 <span class="mono">r×d</span>）和 <span class="mono">B</span>（约 <span class="mono">d×r</span>），合计约 <span class="mono">2·r·d</span> 个参数。当秩 <span class="mono">r</span> 只有几十、而维度 <span class="mono">d</span> 是几千时，参数量会差出两三个数量级。这意味着<strong>训练成本</strong>、<strong>存储成本</strong>、<strong>显存占用</strong>都随之骤降——一个适配器小到可以几十个一起塞进一块卡的余量里，这正是"适配器池"在工程上成立的前提。</p>
+</div>
+
+<h2>为什么"一份基座 + 适配器池"</h2>
+<p>假设你有 N 个微调版本：一个会写 SQL、一个会医疗问答、一个会法律摘要。最直白的部署是起 N 份完整模型——但每份都要完整地占据显存，而它们之间<strong>99% 的权重是一模一样的</strong>（都源自同一个基座）。这是巨大的浪费。</p>
+<p>SGLang 的做法是：显存里只放<span class="mono">一份</span>基座模型（参见 <strong>第25课</strong> 讲的基座权重加载），另外维护一个 <strong>LoRA 内存池</strong>，池子里放着若干个小适配器。每来一个请求，就根据它指定的适配器名，把对应的 <span class="mono">B·A</span> 增量临时叠加到基座输出上。适配器很小，所以池子能装下很多个；真正的约束是 <span class="mono">max_loras_per_batch</span>——它限定<strong>同一个批次</strong>里最多能共存多少个不同的适配器（受池子/显存大小限制）。</p>
+<p>更棒的是，适配器可以在<strong>运行时</strong>动态增删：通过 <span class="mono">load_lora_adapter</span> 往池子里加一个新技能，通过 <span class="mono">unload_lora_adapter</span> 把不用的踢出去腾地方——全程<strong>不需要重启</strong>服务。</p>
+<p>这种"热插拔"在生产里非常实用。比如你上线了一个新的客服话术适配器，只需把它装进池子，新请求立刻就能指定使用，老请求毫不受影响；当某个适配器很久没人用、又快撑爆池子时，把它卸载即可，腾出的空间留给更热门的技能。整个过程没有停机窗口，也不需要重新加载几十 GB 的基座权重——因为基座从头到尾就是那一份，真正进出的只是几兆到几十兆的小增量。</p>
+
+<h2>批处理才是真正的难点</h2>
+<p>如果一个批次里所有请求都用同一个适配器，那事情很简单：把 ΔW 算一遍，加到整批上即可。但现实是——同一批里的请求往往<strong>各要各的适配器</strong>：req1 要 adapterA、req2 要 adapterB、req3 又要 adapterA、req4 要 adapterC……如果按适配器一个一个循环处理，就退化成了多次小 GEMM，把连续批处理（<strong>第6课</strong>）辛辛苦苦攒起来的吞吐又拆散了。</p>
+<p>SGLang 的关键函数是 <span class="mono">LoRAManager.prepare_lora_batch(forward_batch)</span>。它接过当前的 <span class="mono">ForwardBatch</span>（<strong>第19课</strong>），<strong>逐请求</strong>看清每一行需要哪个适配器，把这些适配器的权重在内存里<strong>摆放/分段（stage &amp; segment）</strong>好，使得后续可以用一次<strong>分段 / 分组 GEMM（segmented / grouped GEMM）</strong>，在<span class="mono">一次</span>内核启动里就把每个请求<strong>各自的</strong> ΔW 都应用上去，而不是为每个适配器单独跑一趟。</p>
+<p>这就是"批次感知"的含义：不是无视适配器差异硬算，也不是为差异付出循环的代价，而是把差异<strong>编码进一次分组矩阵乘法的布局里</strong>，让 GPU 一趟搞定。</p>
+<p>不妨把"逐适配器循环"和"分组 GEMM"放在一起比较。逐适配器循环时，假设这批里有 5 个不同适配器，就要发起 5 次小内核，每次都伴随一次内核启动开销、一次显存读写，而每个小内核处理的行数又很少，GPU 的算力利用率很低——这恰恰是连续批处理最想避免的"碎片化"。分组 GEMM 则把这 5 段拼成<strong>一次</strong>调用：启动开销摊到整批、显存只走一遍、GPU 的众多计算单元被同时喂饱。请求数越多、适配器越杂，这种"一趟做完"相对于"循环 N 趟"的优势就越明显。</p>
+<p>具体一点说，分组 GEMM（grouped GEMM）的思路是：把一个大批次按"用哪个适配器"切成若干<strong>段（segment）</strong>，每一段对应一个适配器、包含该批里所有用到它的请求行。这些段被并排打包成一次内核调用的输入，内核内部对每一段套用它自己的 <span class="mono">B、A</span> 矩阵。于是从外部看，仍然只有<strong>一次</strong>内核启动、一次显存往返；从内部看，每个请求都精确地拿到了它该有的 ΔW。这正是 <span class="mono">prepare_lora_batch</span> 要在前向之前默默做好的"摆放"工作——计算每段的偏移、长度、对应的适配器索引，把零散的"谁要谁"整理成 GPU 喜欢的规整布局。</p>
+<p>这里也能看出 <span class="mono">max_loras_per_batch</span> 为什么重要：段数越多，意味着这一批里活跃的不同适配器越多，需要常驻在池子里、参与这次分组 GEMM 的权重也越多。把它设得过大，会让 LoRA 内存池吃紧；设得过小，则可能逼迫调度器把"想用第 K+1 个适配器"的请求推迟到下一批。它本质上是在<strong>适配器多样性</strong>与<strong>显存预算</strong>之间画的一条线。</p>
+
+<h2>运行时的生命周期</h2>
+<p>把整条链路串起来：服务启动时，<span class="mono">LoRAManager</span> 拿到基座模型、<span class="mono">max_loras_per_batch</span> 上限和一个 LoRA 后端（默认 <span class="mono">triton</span>），建立起内存池。运营过程中，新技能通过 <span class="mono">load_lora_adapter</span> 进池、旧技能通过 <span class="mono">unload_lora_adapter</span> 出池。每一步前向，调度器先调用 <span class="mono">prepare_lora_batch</span> 为这一批摆好各请求的适配器，再让基座按常规跑前向、在 LoRA 层用分组 GEMM 叠加各自 ΔW。整套机制让单一部署能像换批头一样，灵活地服务几十种任务专用适配器。</p>
+<p>需要区分的是：多 LoRA 换的是<strong>小小的增量</strong>，基座始终不动；而后面 <strong>第51课</strong> 讲的 RL 训练里也会"换权重"，但换的是<span class="mono">整个</span>模型的权重，量级与目的都完全不同。</p>
+<p>把视角拉回到一次真实请求：客户端发来一段提示词，并在参数里写明"我要用 <span class="mono">sql-expert</span> 这个适配器"。请求进入调度器排队、与其他请求一起被组成连续批（第6课）。前向开始前，<span class="mono">prepare_lora_batch</span> 扫一遍这批里每个请求的适配器名，发现里面混着 <span class="mono">sql-expert</span>、<span class="mono">med-qa</span>、还有几条不带适配器的纯基座请求——它把不带适配器的当作"零增量"统一处理，把带适配器的按名分段。前向跑到注入了 LoRA 的那些线性层时，先算基座的 <span class="mono">W·x</span>，再用分组 GEMM 把每段各自的 <span class="mono">B·A·x</span> 加上去，得到 <span class="mono">(W + B·A)·x</span>。从采样、KV 缓存到输出，后面的一切都和普通文本推理没有区别。</p>
+<p>值得强调的是，这条路径里"用哪个适配器"完全由请求自己携带的参数决定，而不是由部署时写死的全局开关决定。这意味着同一个端点可以同时面向不同租户、不同任务：A 团队的请求带上他们训练的法律适配器，B 团队的请求带上客服适配器，二者在同一批里被并行服务，却各自得到正确的结果。这种"按请求选技能"的能力，正是多 LoRA 在多租户场景下极具性价比的根源。</p>
+<p>正因为适配器只是"叠加在基座之上的一层薄增量"，多 LoRA 与 SGLang 其余的机制天然兼容：连续批处理照常攒批、分页 KV 照常按页存取、前缀复用照常命中。LoRA 只在少数被注入的权重层上多做一次分组加法，其余引擎对"这条请求到底用了哪个适配器"几乎无感。这种"低侵入"正是它能在一份部署里廉价托管几十个微调版本的根本原因。</p>
+
+<h2>后端、批与正确性</h2>
+<p><span class="mono">LoRAManager</span> 在构造时会接收一个 <span class="mono">lora_backend</span> 参数（默认 <span class="mono">triton</span>），它决定那次分组 GEMM 用什么内核实现来落地。不同后端在性能上各有取舍，但对外暴露的语义是一致的：给定一批请求各自的适配器，输出必须等价于"逐请求单独套用它的 ΔW"。换句话说，分组只是<strong>性能优化的布局技巧</strong>，绝不能改变每个请求的数值结果——这是 <span class="mono">prepare_lora_batch</span> 必须保证的正确性底线。</p>
+<p>为了做到这一点，摆放阶段要把三件事对齐：每个请求<strong>属于哪一段</strong>（即用哪个适配器）、每一段在打包缓冲里的<strong>起止偏移</strong>、以及每个适配器权重在 LoRA 内存池里的<strong>实际地址</strong>。这三者一旦对齐，内核就能在遍历每一行时，按它所属段去索引正确的 <span class="mono">A、B</span> 矩阵，算出专属的增量。任何一处错位，都会让某个请求悄悄用上别人的适配器——这类 bug 难查，因为模型不会报错，只会"答得有点不对味"。</p>
+<p>还有一个常被忽略的细节：同一批里完全可以混入"不带任何适配器"的纯基座请求。实现上通常把它们当成一个特殊的"零号适配器"或直接跳过增量那一步，从而让带与不带适配器的请求在同一次前向里和平共处。这种灵活性意味着你不必把流量按适配器硬性分流，而可以让调度器自由地把任意组合凑成一批，把 GPU 利用率推到最高。</p>
+<p>从容量规划的角度看，<span class="mono">max_loras_per_batch</span> 与批大小、适配器秩 <span class="mono">r</span> 共同决定了 LoRA 内存池的峰值占用。秩越大、同批适配器越多，池子就越吃显存，留给 KV 缓存（第30课）的空间就越少。因此在实际部署里，这几个旋钮往往要联合调优：既要让常用适配器都能进得了同一批以摊薄开销，又不能挤占了 KV 缓存导致可并发的请求数下降。</p>
+<p>把这一课收束成一句话：多 LoRA 不是"把模型变多"，而是"把差异变薄"。基座是那台贵重而唯一的主机，适配器是一盒按需轮换的廉价批头，而 <span class="mono">prepare_lora_batch</span> 与分组 GEMM 则是让"同一批里各用各的批头"能在一趟动作里完成的那套机械臂逻辑。理解了这三层——薄增量、适配器池、批次感知的应用——你就抓住了 SGLang 多 LoRA 的全部要义。</p>
+
+<div class="flow"><div class="node">基座输出<br/>W·x</div><div class="arrow">→</div><div class="node">本请求适配器<br/>ΔW = B·A</div><div class="arrow">→</div><div class="node">叠加<br/>(W + B·A)·x</div><div class="arrow">→</div><div class="node">该请求的<br/>适配后输出</div></div>
+
+<div class="cellgroup"><div class="cell">行1 → 适配器 A</div><div class="cell">行2 → 适配器 B</div><div class="cell">行3 → 适配器 A</div><div class="cell">行4 → 适配器 C</div></div>
+
+<table class="t"><tr><th>LoRAManager 方法</th><th>作用</th></tr><tr><td><span class="mono">load_lora_adapter</span></td><td>运行时往内存池里加入一个适配器</td></tr><tr><td><span class="mono">unload_lora_adapter</span></td><td>从池中移除一个适配器以释放空间</td></tr><tr><td><span class="mono">prepare_lora_batch</span></td><td>为当前批次逐请求收集所需适配器并摆放，供一次分组 GEMM 使用</td></tr><tr><td><span class="mono">max_loras_per_batch</span></td><td>限定同一批次内可共存的不同适配器数量（池/显存上限）</td></tr></table>
+
+<div class="cols"><div class="col"><strong>笨办法：N 份完整模型</strong><br/>每个微调各起一份完整权重，显存被几乎相同的权重重复占满，N 越大越浪费。</div><div class="col"><strong>SGLang：1 份基座 + 适配器池</strong><br/>显存只放一份基座，外加一池小适配器；按请求叠加 ΔW，一份部署服务几十种技能。</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/lora/lora_manager.py ::LoRAManager</span><span class="ln">一个底座 + 适配器池：同批不同请求各用各的 LoRA</span></div><pre>class LoRAManager:
+    def __init__(self, base_model, ..., max_loras_per_batch, lora_backend="triton", ...):
+        # one base model + a memory pool holding up to max_loras_per_batch adapters
+        ...
+    def load_lora_adapter(self, lora_ref):     # add an adapter to the pool at runtime
+        ...
+    def unload_lora_adapter(self, lora_ref):   # drop one to free pool space
+        ...
+    def prepare_lora_batch(self, forward_batch):
+        # for THIS batch: gather which adapter each request needs and stage them so a
+        # segmented/grouped GEMM applies each request's own delta-W in one kernel
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 本课要点</div>
+<ul>
+<li>LoRA 适配器是一个<strong>低秩小增量</strong>：学两个小矩阵 <span class="mono">A、B</span>，让有效权重为 <span class="mono">W + B·A</span>，秩 <span class="mono">r ≪ d</span>；一份基座可挂许多个，每个是一种微调"技能"，SGLang 记为 <span class="mono">LoRAAdapter</span>。</li>
+<li>服务 N 个微调不必起 N 份完整模型：SGLang 保留<strong>一份基座 + 一个适配器池</strong>，按请求应用对应适配器。</li>
+<li>真正的难点是<strong>批处理</strong>：同批请求可能各要各的适配器，<span class="mono">prepare_lora_batch(forward_batch)</span> 逐请求收集并摆放，使<strong>分段/分组 GEMM</strong> 能在一次内核里应用每个请求各自的 ΔW。</li>
+<li><span class="mono">max_loras_per_batch</span> 限定同批可共存的不同适配器数（池/显存约束）；适配器可经 <span class="mono">load_lora_adapter</span> / <span class="mono">unload_lora_adapter</span> 在运行时增删，<strong>无需重启</strong>。</li>
+<li>关联：<strong>第19课</strong> ForwardBatch、<strong>第25课</strong> 基座权重、<strong>第6课</strong> 连续批处理；前瞻 <strong>第51课</strong>（RL 也换权重，但换的是<span class="mono">整个</span>模型）。</li>
+</ul>
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 一个 LoRA 适配器在数学上到底是什么？</div>
+  <ol class="opts">
+    <li><strong>一个低秩小增量：学两个小矩阵 <span class='mono'>A、B</span>，让有效权重变为 <span class='mono'>W + B·A</span>，其秩 <span class='mono'>r ≪ d</span>，远小于矩阵维度</strong></li>
+    <li>一段缓存的 KV，用来跳过 prefill</li>
+    <li>一份独立的完整基座模型，只是参数更少</li>
+    <li>对整个权重矩阵 W 重新做全量微调后的新副本</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。LoRA 不重训庞大的 <span class='mono'>W</span>，而是学两个小矩阵 <span class='mono'>A、B</span>，让有效权重为 <span class='mono'>W + B·A</span>，秩 <span class='mono'>r ≪ d</span>，所以增量 ΔW=B·A 又小又便宜。一份基座可挂许多这样的适配器，每个是一种微调“技能”，SGLang 记为 <span class='mono'>LoRAAdapter</span>。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 同一个批次里不同请求各要各的适配器时，多 LoRA 真正的难点是什么？</div>
+  <ol class="opts">
+    <li>需要重启服务才能切换适配器</li>
+    <li><strong>批处理：<span class='mono'>prepare_lora_batch(forward_batch)</span> 逐请求收集所需适配器并在内存里摆放，使一次<strong>分段/分组 GEMM</strong> 能在一个内核里应用每个请求各自的 ΔW</strong></li>
+    <li>把每个适配器单独循环跑一趟小 GEMM 才是最优解</li>
+    <li>必须为每个适配器各起一份完整基座模型</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。若按适配器逐个循环，就退化成多次小 GEMM，把连续批处理（第6课）的吞吐拆散。<span class='mono'>prepare_lora_batch</span> 接过当前 ForwardBatch（第19课），逐请求看清每行需要哪个适配器，把权重<strong>分段摆放</strong>，使后续一次分段/分组 GEMM 就在一次内核启动里把每个请求各自的 ΔW 都应用上去。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. <span class='mono'>max_loras_per_batch</span> 限定的是什么？适配器如何在运行时增删？</div>
+  <ol class="opts">
+    <li><strong>它限定同一批次内可共存的不同适配器数量（池/显存上限）；适配器经 <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> 在运行时增删，无需重启</strong></li>
+    <li>它限定基座模型的最大层数</li>
+    <li>它限定一次只能加载一个适配器，且需重启</li>
+    <li>它限定每个请求能生成的最大 token 数</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。适配器很小，池子能装很多个；真正约束是 <span class='mono'>max_loras_per_batch</span>——同一批次内最多共存多少个不同适配器（受 LoRA 内存池/显存限制）。新技能用 <span class='mono'>load_lora_adapter</span> 进池、旧技能用 <span class='mono'>unload_lora_adapter</span> 出池，全程不需重启服务。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>用你自己的话讲清“一份基座 + 适配器池”为什么比起 N 份完整模型更省：LoRA 适配器作为低秩小增量 <span class='mono'>W + B·A</span>（秩 <span class='mono'>r ≪ d</span>）如何让一份基座（第25课）挂许多“技能”；再说明 <span class='mono'>max_loras_per_batch</span> 限定同批可共存的适配器数，以及 <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> 如何在运行时增删而无需重启。</li>
+    <li>解释批处理为何是多 LoRA 的真正难点：当同批请求各要各的适配器（req1→A、req2→B、req3→A…）时，<span class='mono'>prepare_lora_batch(forward_batch)</span> 如何接过 ForwardBatch（第19课）逐请求收集并摆放适配器，使<strong>分段/分组 GEMM</strong> 在一次内核里应用各自 ΔW，从而不拆散连续批处理（第6课）的吞吐；再对比第51课的 RL 也换权重，但换的是整个模型。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead">One base model, dozens of "skills." <strong>Multi-LoRA batching</strong> lets you keep just <span class="mono">one</span> copy of the base weights in memory, plus a tiny <strong>adapter pool</strong>, yet serve many models each fine-tuned for a different task. The hard part is not "loading an adapter" — it is, when different requests in the <span class="mono">same</span> batch each want a different adapter, computing every request's own weight delta ΔW correctly in <span class="mono">one</span> kernel launch.</p>
+
+<div class="card analogy"><div class="tag">🔌 Analogy</div>
+<p>Think of the base model as the <strong>body of a power tool</strong>: the motor, handle, and battery live in the body — heavy and expensive. A LoRA adapter is like a <strong>swappable bit</strong> — each bit is small and cheap, yet it turns the same body into a "drill," a "screwdriver," or a "polisher."</p>
+<p>The dumb old way: need three functions, buy three whole tool bodies (three full models) — the warehouse (memory) fills up instantly. The smart way: <strong>one body + a box of bits</strong>. A job comes in, see which bit it needs, <span class="mono">snap it on</span>, and go. Even better, several jobs arrive at once on the line: job 1 wants drilling, job 2 wants a screw, job 3 wants drilling again — you don't disassemble the body three times; you <strong>stage</strong> all those bits at once and let the arm finish every piece with its proper bit in a single pass. That "one pass handling a batch of different bits" is exactly what multi-LoRA batching solves.</p>
+<p>The analogy stretches a little further: the bit box has finite capacity — you cannot keep every bit in the world plugged into the arm at once. So you keep on hand only the few bits "most likely to be used this round," return the unneeded ones to the box, and fetch the newly needed — which maps exactly to the runtime "load/unload adapter," and to the cap on "how many bits at most per round." The essence of the whole scheme is always the same sentence: <strong>keep just one expensive body, rotate the cheap bits on demand</strong>.</p>
+</div>
+
+<div class="card macro"><div class="tag">🌍 The big picture</div>
+<p>LoRA's core math is plain: instead of retraining the huge weight matrix <span class="mono">W</span>, you learn two <strong>small matrices</strong> <span class="mono">A</span> and <span class="mono">B</span> so the effective weight becomes <span class="mono">W + B·A</span>. The rank <span class="mono">r</span> is far smaller than the matrix dimension (<span class="mono">r ≪ d</span>), so the delta ΔW = <span class="mono">B·A</span> is small and cheap. One base can carry <strong>many</strong> such adapters, each a different fine-tuned "skill." SGLang represents a single one as a <span class="mono">LoRAAdapter</span>.</p>
+<p>So the real claim of multi-LoRA is: <strong>one base + an adapter pool + batch-aware ΔW application</strong>. A single deployment can cheaply serve dozens of task-specific adapters, without spinning up a full model per fine-tune.</p>
+<p>Why is <span class="mono">B·A</span> so cheap? Let the weight dimension be <span class="mono">d×d</span>; full fine-tuning updates about <span class="mono">d²</span> parameters, whereas LoRA learns only <span class="mono">A</span> (about <span class="mono">r×d</span>) and <span class="mono">B</span> (about <span class="mono">d×r</span>), roughly <span class="mono">2·r·d</span> parameters in total. When the rank <span class="mono">r</span> is only a few dozen while the dimension <span class="mono">d</span> is a few thousand, the parameter count differs by two or three orders of magnitude. That means <strong>training cost</strong>, <strong>storage cost</strong>, and <strong>memory footprint</strong> all plunge — an adapter is small enough that dozens fit into the spare room of a single card, which is precisely what makes the "adapter pool" practical in engineering terms.</p>
+</div>
+
+<h2>Why "one base + an adapter pool"</h2>
+<p>Suppose you have N fine-tunes: one writes SQL, one does medical Q&amp;A, one summarizes legal text. The most literal deployment is N full models — but each occupies full memory while <strong>99% of their weights are identical</strong> (all derived from the same base). That is enormous waste.</p>
+<p>SGLang's approach: keep just <span class="mono">one</span> base model in memory (see <strong>Lesson 25</strong> on loading base weights), plus a <strong>LoRA memory pool</strong> holding several small adapters. For each request, take the adapter name it specifies and temporarily add the corresponding <span class="mono">B·A</span> delta onto the base output. Adapters are small, so the pool can hold many; the real constraint is <span class="mono">max_loras_per_batch</span> — it caps how many distinct adapters can coexist in <strong>one batch</strong> (bounded by pool/memory size).</p>
+<p>Better yet, adapters can be added or removed at <strong>runtime</strong>: <span class="mono">load_lora_adapter</span> adds a new skill to the pool, <span class="mono">unload_lora_adapter</span> drops an unused one to free space — all with <strong>no restart</strong>.</p>
+<p>This "hot-swap" is very practical in production. Say you ship a new customer-service-tone adapter: just load it into the pool and new requests can immediately specify it while old requests are untouched; when some adapter has gone unused for a while and is about to overflow the pool, just unload it and free the space for hotter skills. The whole process has no downtime window and needs no reloading of tens of GB of base weights — because the base is that one copy from start to finish, and what actually comes and goes is only the small delta of a few to tens of megabytes.</p>
+
+<h2>Batching is the real hard part</h2>
+<p>If every request in a batch used the same adapter, it would be easy: compute ΔW once and add it to the whole batch. But in reality requests in one batch often <strong>each want a different adapter</strong>: req1→adapterA, req2→adapterB, req3→adapterA, req4→adapterC… If you loop over adapters one by one, you degrade into many small GEMMs and shred the throughput that continuous batching (<strong>Lesson 6</strong>) worked so hard to accumulate.</p>
+<p>SGLang's key function is <span class="mono">LoRAManager.prepare_lora_batch(forward_batch)</span>. It takes the current <span class="mono">ForwardBatch</span> (<strong>Lesson 19</strong>), looks <strong>per request</strong> at which adapter each row needs, and <strong>stages and segments</strong> those adapter weights in memory so that a single <strong>segmented / grouped GEMM</strong> can apply <strong>each request's own</strong> ΔW in <span class="mono">one</span> kernel launch, rather than running a separate pass per adapter.</p>
+<p>That is what "batch-aware" means: not ignoring adapter differences and computing wrong, nor paying a loop's cost for them, but <strong>encoding the differences into the layout of one grouped matrix multiply</strong> so the GPU finishes in a single pass.</p>
+<p>It helps to put "per-adapter loop" and "grouped GEMM" side by side. With a per-adapter loop, suppose this batch has 5 distinct adapters: you launch 5 small kernels, each carrying a kernel-launch overhead and a memory round-trip, while each small kernel processes very few rows, so the GPU's compute utilization is low — exactly the "fragmentation" continuous batching most wants to avoid. A grouped GEMM instead stitches these 5 segments into <strong>one</strong> call: the launch overhead is amortized over the whole batch, memory is traversed once, and the GPU's many compute units are fed at once. The more requests and the more varied the adapters, the more this "done in one pass" wins over "looping N times."</p>
+<p>Concretely, the idea of a grouped GEMM is: slice the large batch by "which adapter" into several <strong>segments</strong>, each segment corresponding to one adapter and containing all request rows in the batch that use it. These segments are packed side by side as the input of a single kernel call, and inside the kernel each segment applies its own <span class="mono">B, A</span> matrices. So from the outside there is still just <strong>one</strong> kernel launch and one memory round-trip; from the inside, every request gets exactly the ΔW it should. This is precisely the "staging" work <span class="mono">prepare_lora_batch</span> quietly does before the forward — computing each segment's offset, length, and adapter index, turning the scattered "who wants which" into the tidy layout GPUs love.</p>
+<p>This also shows why <span class="mono">max_loras_per_batch</span> matters: more segments means more distinct adapters active in this batch, which means more weights must reside in the pool and participate in this grouped GEMM. Set it too large and the LoRA memory pool gets tight; set it too small and the scheduler may be forced to defer a request wanting the "(K+1)-th" adapter to the next batch. It is essentially a line drawn between <strong>adapter diversity</strong> and <strong>memory budget</strong>.</p>
+
+<h2>The runtime lifecycle</h2>
+<p>Stringing the whole path together: at startup <span class="mono">LoRAManager</span> receives the base model, the <span class="mono">max_loras_per_batch</span> cap, and a LoRA backend (default <span class="mono">triton</span>), and builds the memory pool. During operation, new skills enter the pool via <span class="mono">load_lora_adapter</span> and old ones leave via <span class="mono">unload_lora_adapter</span>. On each forward step the scheduler first calls <span class="mono">prepare_lora_batch</span> to stage every request's adapter for this batch, then lets the base run its normal forward and add each ΔW in the LoRA layers with a grouped GEMM. This whole mechanism lets a single deployment flexibly serve dozens of task-specific adapters, like swapping bits.</p>
+<p>One distinction worth drawing: multi-LoRA swaps a <strong>tiny delta</strong> while the base never moves; whereas the RL training in <strong>Lesson 51</strong> also "swaps weights," but it swaps the <span class="mono">whole</span> model's weights — a different scale and purpose entirely.</p>
+<p>Pull the view back to one real request: a client sends a prompt and states in the params "I want the <span class="mono">sql-expert</span> adapter." The request enters the scheduler's queue and is grouped with others into a continuous batch (Lesson 6). Before the forward begins, <span class="mono">prepare_lora_batch</span> scans every request's adapter name in this batch and finds a mix of <span class="mono">sql-expert</span>, <span class="mono">med-qa</span>, and a few pure-base requests carrying no adapter — it treats the adapter-less ones as a "zero delta" handled uniformly and segments the rest by name. When the forward reaches the LoRA-injected linear layers, it first computes the base <span class="mono">W·x</span>, then uses a grouped GEMM to add each segment's own <span class="mono">B·A·x</span>, yielding <span class="mono">(W + B·A)·x</span>. From sampling to KV cache to output, everything afterward is no different from ordinary text inference.</p>
+<p>Worth stressing: along this path "which adapter to use" is decided entirely by the parameters the request itself carries, not by a global switch hard-coded at deploy time. This means one endpoint can simultaneously serve different tenants and tasks: team A's requests carry their trained legal adapter, team B's carry a customer-service adapter, and the two are served in parallel within the same batch yet each gets the correct result. This "pick the skill per request" capability is exactly why multi-LoRA is so cost-effective in multi-tenant scenarios.</p>
+<p>Precisely because an adapter is just "a thin delta layered on top of the base," multi-LoRA is naturally compatible with the rest of SGLang: continuous batching still accumulates batches, paged KV still pages, prefix reuse still hits. LoRA only does one extra grouped addition on the few injected weight layers, and the rest of the engine is almost oblivious to "which adapter this request actually used." This low-intrusiveness is the root reason it can cheaply host dozens of fine-tunes in a single deployment.</p>
+
+<h2>Backend, batch, and correctness</h2>
+<p>When constructed, <span class="mono">LoRAManager</span> receives a <span class="mono">lora_backend</span> argument (default <span class="mono">triton</span>) that decides which kernel implementation realizes that grouped GEMM. Different backends make different performance trade-offs, but the semantics they expose are identical: given a batch's per-request adapters, the output must be equivalent to "applying each request's ΔW individually." In other words, grouping is merely a <strong>performance layout trick</strong> and must never change any request's numeric result — that is the correctness floor <span class="mono">prepare_lora_batch</span> has to guarantee.</p>
+<p>To achieve this, the staging phase must align three things: which <strong>segment</strong> each request belongs to (i.e., which adapter), each segment's <strong>start/end offset</strong> in the packed buffer, and each adapter weight's <strong>actual address</strong> in the LoRA memory pool. Once these align, the kernel can, as it walks each row, index the correct <span class="mono">A, B</span> matrices by the row's segment and compute its dedicated delta. Any misalignment lets some request silently use another's adapter — a hard bug to find, because the model does not error, it just "answers a little off."</p>
+<p>One often-overlooked detail: a batch may well mix in pure-base requests carrying no adapter. Implementations usually treat them as a special "zero adapter" or simply skip the delta step, letting requests with and without adapters coexist peacefully in one forward. This flexibility means you need not hard-route traffic by adapter; the scheduler can freely assemble any combination into a batch and push GPU utilization to the max.</p>
+<p>From a capacity-planning view, <span class="mono">max_loras_per_batch</span>, the batch size, and the adapter rank <span class="mono">r</span> together determine the LoRA memory pool's peak footprint. A larger rank and more adapters per batch make the pool eat more VRAM, leaving less for the KV cache (Lesson 30). So in real deployments these knobs are tuned jointly: let common adapters all fit into one batch to amortize overhead, yet not crowd out the KV cache and reduce achievable concurrency.</p>
+<p>To boil this lesson down to one sentence: multi-LoRA is not "making more models," it is "making the difference thin." The base is that one precious, singular tool body; the adapters are a box of cheap bits rotated on demand; and <span class="mono">prepare_lora_batch</span> plus the grouped GEMM are the robotic-arm logic that lets "each row in one batch use its own bit" finish in a single pass. Grasp these three layers — thin delta, adapter pool, batch-aware application — and you have the whole essence of SGLang's multi-LoRA.</p>
+
+<div class="flow"><div class="node">Base output<br/>W·x</div><div class="arrow">→</div><div class="node">This request's adapter<br/>ΔW = B·A</div><div class="arrow">→</div><div class="node">Add<br/>(W + B·A)·x</div><div class="arrow">→</div><div class="node">This request's<br/>adapted output</div></div>
+
+<div class="cellgroup"><div class="cell">row 1 → adapter A</div><div class="cell">row 2 → adapter B</div><div class="cell">row 3 → adapter A</div><div class="cell">row 4 → adapter C</div></div>
+
+<table class="t"><tr><th>LoRAManager method</th><th>Role</th></tr><tr><td><span class="mono">load_lora_adapter</span></td><td>Add an adapter to the memory pool at runtime</td></tr><tr><td><span class="mono">unload_lora_adapter</span></td><td>Remove an adapter from the pool to free space</td></tr><tr><td><span class="mono">prepare_lora_batch</span></td><td>For the current batch, gather each request's needed adapter and stage them for one grouped GEMM</td></tr><tr><td><span class="mono">max_loras_per_batch</span></td><td>Cap on distinct adapters that can coexist in one batch (pool/memory bound)</td></tr></table>
+
+<div class="cols"><div class="col"><strong>Naive: N full models</strong><br/>Each fine-tune runs a full set of weights; memory fills with nearly identical weights repeated — the larger N, the more waste.</div><div class="col"><strong>SGLang: 1 base + adapter pool</strong><br/>Memory holds one base plus a pool of small adapters; add ΔW per request, one deployment serving dozens of skills.</div></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/lora/lora_manager.py ::LoRAManager</span><span class="ln">one base + an adapter pool: different requests in one batch use different LoRAs</span></div><pre>class LoRAManager:
+    def __init__(self, base_model, ..., max_loras_per_batch, lora_backend="triton", ...):
+        # one base model + a memory pool holding up to max_loras_per_batch adapters
+        ...
+    def load_lora_adapter(self, lora_ref):     # add an adapter to the pool at runtime
+        ...
+    def unload_lora_adapter(self, lora_ref):   # drop one to free pool space
+        ...
+    def prepare_lora_batch(self, forward_batch):
+        # for THIS batch: gather which adapter each request needs and stage them so a
+        # segmented/grouped GEMM applies each request's own delta-W in one kernel
+        ...</pre></div>
+
+<div class="card key"><div class="tag">📌 Key points</div>
+<ul>
+<li>A LoRA adapter is a <strong>small low-rank delta</strong>: learn two small matrices <span class="mono">A, B</span> so the effective weight is <span class="mono">W + B·A</span> with rank <span class="mono">r ≪ d</span>; one base carries many, each a fine-tuned "skill," represented in SGLang as <span class="mono">LoRAAdapter</span>.</li>
+<li>Serving N fine-tunes need not mean N full models: SGLang keeps <strong>one base + an adapter pool</strong> and applies the right adapter per request.</li>
+<li>The real hard part is <strong>batching</strong>: requests in one batch may each want a different adapter; <span class="mono">prepare_lora_batch(forward_batch)</span> gathers and stages them per request so a <strong>segmented/grouped GEMM</strong> applies each request's own ΔW in one kernel.</li>
+<li><span class="mono">max_loras_per_batch</span> caps distinct adapters coexisting in a batch (pool/memory bound); adapters are added/removed at runtime via <span class="mono">load_lora_adapter</span> / <span class="mono">unload_lora_adapter</span>, with <strong>no restart</strong>.</li>
+<li>Ties: <strong>Lesson 19</strong> ForwardBatch, <strong>Lesson 25</strong> base weights, <strong>Lesson 6</strong> continuous batching; forward-ref <strong>Lesson 51</strong> (RL also swaps weights, but the <span class="mono">whole</span> model).</li>
+</ul>
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is a LoRA adapter, mathematically?</div>
+  <ol class="opts">
+    <li><strong>A small low-rank delta: learn two small matrices <span class='mono'>A, B</span> so the effective weight becomes <span class='mono'>W + B·A</span>, with rank <span class='mono'>r ≪ d</span>, far smaller than the matrix dimension</strong></li>
+    <li>A cached KV block used to skip prefill</li>
+    <li>A standalone full base model that merely has fewer parameters</li>
+    <li>A fresh copy of the entire weight matrix W after full fine-tuning</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. LoRA does not retrain the huge <span class='mono'>W</span>; it learns two small matrices <span class='mono'>A, B</span> so the effective weight is <span class='mono'>W + B·A</span> with rank <span class='mono'>r ≪ d</span>, making the delta ΔW=B·A small and cheap. One base carries many such adapters, each a fine-tuned skill, represented in SGLang as <span class='mono'>LoRAAdapter</span>.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. When different requests in one batch each want a different adapter, what is the real hard part of multi-LoRA?</div>
+  <ol class="opts">
+    <li>You must restart the service to switch adapters</li>
+    <li><strong>Batching: <span class='mono'>prepare_lora_batch(forward_batch)</span> gathers each request's needed adapter and stages them in memory so one <strong>segmented/grouped GEMM</strong> applies each request's own ΔW in a single kernel</strong></li>
+    <li>Looping a separate small GEMM per adapter is the optimal solution</li>
+    <li>You must spin up a full base model per adapter</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Looping per adapter degrades into many small GEMMs and shreds the throughput of continuous batching (L6). <span class='mono'>prepare_lora_batch</span> takes the current ForwardBatch (L19), sees per request which adapter each row needs, and <strong>stages/segments</strong> the weights so a single segmented/grouped GEMM applies each request's own ΔW in one kernel launch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does <span class='mono'>max_loras_per_batch</span> cap, and how are adapters added/removed at runtime?</div>
+  <ol class="opts">
+    <li><strong>It caps how many distinct adapters can coexist in one batch (pool/memory bound); adapters are added/removed at runtime via <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span>, with no restart</strong></li>
+    <li>It caps the maximum number of layers in the base model</li>
+    <li>It allows loading only one adapter at a time and requires a restart</li>
+    <li>It caps the maximum tokens each request can generate</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Adapters are small, so the pool holds many; the real constraint is <span class='mono'>max_loras_per_batch</span> — how many distinct adapters can coexist in one batch (bounded by the LoRA memory pool/VRAM). New skills enter via <span class='mono'>load_lora_adapter</span> and old ones leave via <span class='mono'>unload_lora_adapter</span>, all with no service restart.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>In your own words, explain why "one base + an adapter pool" beats N full models: how a LoRA adapter as a small low-rank delta <span class='mono'>W + B·A</span> (rank <span class='mono'>r ≪ d</span>) lets one base (L25) carry many "skills"; then describe how <span class='mono'>max_loras_per_batch</span> caps distinct adapters coexisting in a batch, and how <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> add/remove them at runtime with no restart.</li>
+    <li>Explain why batching is the real hard part of multi-LoRA: when requests in one batch each want a different adapter (req1→A, req2→B, req3→A…), how <span class='mono'>prepare_lora_batch(forward_batch)</span> takes the ForwardBatch (L19), gathers and stages adapters per request so a <strong>segmented/grouped GEMM</strong> applies each ΔW in one kernel without shredding continuous-batching throughput (L6); then contrast with L51's RL, which also swaps weights but swaps the whole model.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="49-multimodal-vlm-serving.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">多模态 VLM 服务</span><span class="lang-en">Multimodal VLM serving</span></div></a><a class="next" href="51-rl-rollout-and-weight-sync.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">RL Rollout 与权重同步</span><span class="lang-en">RL rollout &amp; weight sync</span></div></a></div>
+</div>
+<script>
+function sgvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('sgvg-lang',l);}catch(e){}
+}
+function sgvgToggleLang(){
+  sgvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

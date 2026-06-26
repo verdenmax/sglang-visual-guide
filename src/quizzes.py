@@ -3536,6 +3536,302 @@ QUIZZES = {
             },
         ],
     },
+    "49-multimodal-vlm-serving.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "把一个纯文本引擎变成 VLM 引擎，SGLang 只动了哪两处“接缝”？",
+                    "en": "To turn a text engine into a VLM engine, which two \"seams\" does SGLang change?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>输入接缝（处理器把媒体转张量并插占位符 token）与嵌入接缝（<span class='mono'>general_mm_embed_routine</span> 跑编码器并在占位符处缝合媒体嵌入），其余引擎不动</strong>",
+                        "en": "<strong>The input seam (processor turns media into tensors and inserts placeholder tokens) and the embed seam (<span class='mono'>general_mm_embed_routine</span> runs encoders and splices media embeddings at placeholders); the rest of the engine is untouched</strong>",
+                    },
+                    {"zh": "调度器（第18课）与分页 KV 缓存（第30课）", "en": "The scheduler (L18) and the paged KV cache (L30)"},
+                    {"zh": "RadixAttention（第33课）与采样器（第28课）", "en": "RadixAttention (L33) and the sampler (L28)"},
+                    {"zh": "需要重写整条流水线并新增一台 VLM 专用引擎", "en": "Rewrite the whole pipeline and add a dedicated VLM-only engine"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "VLM 支持被压缩成两处接缝：<strong>输入接缝</strong>在分词/预处理阶段（第14课）由每模型的 <span class='mono'>BaseMultimodalProcessor</span> 把原始像素/音频转张量并往 token 流插入占位符 token；<strong>嵌入接缝</strong>在前向入口由 <span class='mono'>general_mm_embed_routine</span> 跑编码器并把媒体嵌入散射到占位符位置。两处之外，调度、分页 KV、注意力、采样全部复用。",
+                    "en": "VLM support is compressed into two seams: the <strong>input seam</strong> in tokenize/preprocess (L14), where each model's <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens; and the <strong>embed seam</strong> at the forward entry, where <span class='mono'>general_mm_embed_routine</span> runs encoders and scatters media embeddings to placeholder positions. Beyond those two, scheduling, paged KV, attention, and sampling are all reused.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>general_mm_embed_routine</span> 究竟把媒体嵌入放到 token 序列的哪些位置？",
+                    "en": "Where exactly does <span class='mono'>general_mm_embed_routine</span> place media embeddings in the token sequence?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>放到那些 <span class='mono'>input_ids == 该模态占位符 token</span> 的位置——由 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>placeholder_tokens</span> 为键驱动分发</strong>",
+                        "en": "<strong>At the positions where <span class='mono'>input_ids == that modality's placeholder token</span> — dispatched by <span class='mono'>data_embedding_funcs</span> keyed on <span class='mono'>placeholder_tokens</span></strong>",
+                    },
+                    {"zh": "统一追加到序列末尾，作为额外的上下文前缀", "en": "Appended uniformly at the end of the sequence as an extra context prefix"},
+                    {"zh": "插到序列最前面，覆盖系统提示词", "en": "Prepended at the very front, overwriting the system prompt"},
+                    {"zh": "随机散布到所有文本 token 之间以增强鲁棒性", "en": "Scattered randomly among all text tokens to improve robustness"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "处理器在 token 流里为每个媒体项预留了一串占位符 token。前向时 <span class='mono'>general_mm_embed_routine</span> 先正常嵌入文本 id，再跑各模态编码器得到媒体嵌入，最后<strong>精确地</strong>把它们散射到 <span class='mono'>input_ids</span> 等于该模态占位符的槽位上。分发表 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>placeholder_tokens</span> 为键，决定哪种占位符用哪个编码器填，保证位置与数量一一对应。",
+                    "en": "The processor reserves a run of placeholder tokens in the token stream for each media item. At forward time <span class='mono'>general_mm_embed_routine</span> first embeds text ids normally, then runs each modality's encoder to get media embeddings, and finally <strong>precisely</strong> scatters them onto the slots where <span class='mono'>input_ids</span> equals that modality's placeholder. The table <span class='mono'>data_embedding_funcs</span>, keyed on <span class='mono'>placeholder_tokens</span>, decides which placeholder is filled by which encoder, keeping positions and counts in one-to-one correspondence.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么缝合完媒体嵌入后，调度器、分页 KV、RadixAttention、采样器一行都不用改？",
+                    "en": "Why, after splicing media embeddings, do the scheduler, paged KV, RadixAttention, and sampler not change a single line?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>因为缝合后序列只是一行普通嵌入向量，语言模型主体分辨不出哪段来自图片，下游所有按位置/按 token 工作的组件无需感知模态</strong>",
+                        "en": "<strong>Because after the splice the sequence is just a row of ordinary embedding vectors; the language-model body cannot tell which segment came from a picture, so every downstream component working by position/per-token needs no modality awareness</strong>",
+                    },
+                    {"zh": "因为媒体嵌入被单独存到另一块显存，不进入主序列", "en": "Because media embeddings are stored in a separate VRAM block and never enter the main sequence"},
+                    {"zh": "因为编码器已经把图片转成了文本字符串再分词", "en": "Because the encoder already converts the image into a text string and re-tokenizes it"},
+                    {"zh": "因为 VLM 关闭了连续批处理与前缀复用以简化逻辑", "en": "Because VLM disables continuous batching and prefix reuse to simplify the logic"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "占位符保证缝合前后序列长度不变，缝合只是把占位嵌入替换成等量的媒体嵌入。替换后这一行是均质的嵌入向量，语言模型不在乎来源。于是调度器（第18课）照样连续批处理、分页 KV（第30课）照样按页存取、RadixAttention（第33课）照样前缀复用、采样器（第28课）照样从 logits 采样——多模态信息在嵌入接缝处一次性融入，后续无需再感知。",
+                    "en": "Placeholders keep the sequence length identical before and after; the splice merely replaces placeholder embeddings with an equal number of media embeddings. Afterward the row is a homogeneous set of embedding vectors and the language model does not care about origin. So the scheduler (L18) still does continuous batching, paged KV (L30) still pages, RadixAttention (L33) still reuses prefixes, and the sampler (L28) still samples from logits — multimodal info is fused once at the embed seam and never needs to be seen again.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话讲清 VLM 的“两处接缝”如何把一台文本引擎升级成多模态引擎：<strong>输入接缝</strong>里 <span class='mono'>BaseMultimodalProcessor</span> 如何把原始像素/音频转张量并往 token 流插占位符 token（第14课）；<strong>嵌入接缝</strong>里 <span class='mono'>general_mm_embed_routine</span> 如何先嵌入文本、再跑 ViT/音频编码器、并在 <span class='mono'>input_ids==占位符</span> 处散射缝合；说明 <span class='mono'>data_embedding_funcs</span> 与 <span class='mono'>placeholder_tokens</span> 各自的角色。",
+                "en": "In your own words, explain how VLM's \"two seams\" upgrade a text engine into a multimodal one: in the <strong>input seam</strong>, how <span class='mono'>BaseMultimodalProcessor</span> turns raw pixels/audio into tensors and inserts placeholder tokens into the token stream (L14); in the <strong>embed seam</strong>, how <span class='mono'>general_mm_embed_routine</span> embeds text first, then runs the ViT/audio encoder, and scatter-splices where <span class='mono'>input_ids==placeholder</span>; describe the roles of <span class='mono'>data_embedding_funcs</span> and <span class='mono'>placeholder_tokens</span>.",
+            },
+            {
+                "zh": "解释为什么“VLM = 处理媒体 + 在占位符处织入嵌入，而不是一台新引擎”：占位符如何保证序列长度在缝合前后一致，从而让调度器（第18课）、分页 KV（第30课）、RadixAttention（第33课）、采样器（第28课）全部原样复用；再讨论若编码器自带 CUDA Graph 运行器（第27课），它如何嵌入这条路径而不打扰下游。",
+                "en": "Explain why \"VLM = process media + weave embeddings in at placeholders, not a new engine\": how placeholders keep the sequence length identical before and after the splice so that the scheduler (L18), paged KV (L30), RadixAttention (L33), and sampler (L28) are all reused as-is; then discuss how, if an encoder carries its own CUDA-graph runner (L27), it fits into this path without disturbing the downstream.",
+            },
+        ],
+    },
+    "50-multi-lora-batching.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "一个 LoRA 适配器在数学上到底是什么？",
+                    "en": "What is a LoRA adapter, mathematically?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>一个低秩小增量：学两个小矩阵 <span class='mono'>A、B</span>，让有效权重变为 <span class='mono'>W + B·A</span>，其秩 <span class='mono'>r ≪ d</span>，远小于矩阵维度</strong>",
+                        "en": "<strong>A small low-rank delta: learn two small matrices <span class='mono'>A, B</span> so the effective weight becomes <span class='mono'>W + B·A</span>, with rank <span class='mono'>r ≪ d</span>, far smaller than the matrix dimension</strong>",
+                    },
+                    {"zh": "对整个权重矩阵 W 重新做全量微调后的新副本", "en": "A fresh copy of the entire weight matrix W after full fine-tuning"},
+                    {"zh": "一份独立的完整基座模型，只是参数更少", "en": "A standalone full base model that merely has fewer parameters"},
+                    {"zh": "一段缓存的 KV，用来跳过 prefill", "en": "A cached KV block used to skip prefill"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LoRA 不重训庞大的 <span class='mono'>W</span>，而是学两个小矩阵 <span class='mono'>A、B</span>，让有效权重为 <span class='mono'>W + B·A</span>，秩 <span class='mono'>r ≪ d</span>，所以增量 ΔW=B·A 又小又便宜。一份基座可挂许多这样的适配器，每个是一种微调“技能”，SGLang 记为 <span class='mono'>LoRAAdapter</span>。",
+                    "en": "LoRA does not retrain the huge <span class='mono'>W</span>; it learns two small matrices <span class='mono'>A, B</span> so the effective weight is <span class='mono'>W + B·A</span> with rank <span class='mono'>r ≪ d</span>, making the delta ΔW=B·A small and cheap. One base carries many such adapters, each a fine-tuned skill, represented in SGLang as <span class='mono'>LoRAAdapter</span>.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "同一个批次里不同请求各要各的适配器时，多 LoRA 真正的难点是什么？",
+                    "en": "When different requests in one batch each want a different adapter, what is the real hard part of multi-LoRA?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>批处理：<span class='mono'>prepare_lora_batch(forward_batch)</span> 逐请求收集所需适配器并在内存里摆放，使一次<strong>分段/分组 GEMM</strong> 能在一个内核里应用每个请求各自的 ΔW</strong>",
+                        "en": "<strong>Batching: <span class='mono'>prepare_lora_batch(forward_batch)</span> gathers each request's needed adapter and stages them in memory so one <strong>segmented/grouped GEMM</strong> applies each request's own ΔW in a single kernel</strong>",
+                    },
+                    {"zh": "把每个适配器单独循环跑一趟小 GEMM 才是最优解", "en": "Looping a separate small GEMM per adapter is the optimal solution"},
+                    {"zh": "必须为每个适配器各起一份完整基座模型", "en": "You must spin up a full base model per adapter"},
+                    {"zh": "需要重启服务才能切换适配器", "en": "You must restart the service to switch adapters"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "若按适配器逐个循环，就退化成多次小 GEMM，把连续批处理（第6课）的吞吐拆散。<span class='mono'>prepare_lora_batch</span> 接过当前 ForwardBatch（第19课），逐请求看清每行需要哪个适配器，把权重<strong>分段摆放</strong>，使后续一次分段/分组 GEMM 就在一次内核启动里把每个请求各自的 ΔW 都应用上去。",
+                    "en": "Looping per adapter degrades into many small GEMMs and shreds the throughput of continuous batching (L6). <span class='mono'>prepare_lora_batch</span> takes the current ForwardBatch (L19), sees per request which adapter each row needs, and <strong>stages/segments</strong> the weights so a single segmented/grouped GEMM applies each request's own ΔW in one kernel launch.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>max_loras_per_batch</span> 限定的是什么？适配器如何在运行时增删？",
+                    "en": "What does <span class='mono'>max_loras_per_batch</span> cap, and how are adapters added/removed at runtime?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>它限定同一批次内可共存的不同适配器数量（池/显存上限）；适配器经 <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> 在运行时增删，无需重启</strong>",
+                        "en": "<strong>It caps how many distinct adapters can coexist in one batch (pool/memory bound); adapters are added/removed at runtime via <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span>, with no restart</strong>",
+                    },
+                    {"zh": "它限定基座模型的最大层数", "en": "It caps the maximum number of layers in the base model"},
+                    {"zh": "它限定每个请求能生成的最大 token 数", "en": "It caps the maximum tokens each request can generate"},
+                    {"zh": "它限定一次只能加载一个适配器，且需重启", "en": "It allows loading only one adapter at a time and requires a restart"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "适配器很小，池子能装很多个；真正约束是 <span class='mono'>max_loras_per_batch</span>——同一批次内最多共存多少个不同适配器（受 LoRA 内存池/显存限制）。新技能用 <span class='mono'>load_lora_adapter</span> 进池、旧技能用 <span class='mono'>unload_lora_adapter</span> 出池，全程不需重启服务。",
+                    "en": "Adapters are small, so the pool holds many; the real constraint is <span class='mono'>max_loras_per_batch</span> — how many distinct adapters can coexist in one batch (bounded by the LoRA memory pool/VRAM). New skills enter via <span class='mono'>load_lora_adapter</span> and old ones leave via <span class='mono'>unload_lora_adapter</span>, all with no service restart.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话讲清“一份基座 + 适配器池”为什么比起 N 份完整模型更省：LoRA 适配器作为低秩小增量 <span class='mono'>W + B·A</span>（秩 <span class='mono'>r ≪ d</span>）如何让一份基座（第25课）挂许多“技能”；再说明 <span class='mono'>max_loras_per_batch</span> 限定同批可共存的适配器数，以及 <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> 如何在运行时增删而无需重启。",
+                "en": "In your own words, explain why \"one base + an adapter pool\" beats N full models: how a LoRA adapter as a small low-rank delta <span class='mono'>W + B·A</span> (rank <span class='mono'>r ≪ d</span>) lets one base (L25) carry many \"skills\"; then describe how <span class='mono'>max_loras_per_batch</span> caps distinct adapters coexisting in a batch, and how <span class='mono'>load_lora_adapter</span> / <span class='mono'>unload_lora_adapter</span> add/remove them at runtime with no restart.",
+            },
+            {
+                "zh": "解释批处理为何是多 LoRA 的真正难点：当同批请求各要各的适配器（req1→A、req2→B、req3→A…）时，<span class='mono'>prepare_lora_batch(forward_batch)</span> 如何接过 ForwardBatch（第19课）逐请求收集并摆放适配器，使<strong>分段/分组 GEMM</strong> 在一次内核里应用各自 ΔW，从而不拆散连续批处理（第6课）的吞吐；再对比第51课的 RL 也换权重，但换的是整个模型。",
+                "en": "Explain why batching is the real hard part of multi-LoRA: when requests in one batch each want a different adapter (req1→A, req2→B, req3→A…), how <span class='mono'>prepare_lora_batch(forward_batch)</span> takes the ForwardBatch (L19), gathers and stages adapters per request so a <strong>segmented/grouped GEMM</strong> applies each ΔW in one kernel without shredding continuous-batching throughput (L6); then contrast with L51's RL, which also swaps weights but swaps the whole model.",
+            },
+        ],
+    },
+    "51-rl-rollout-and-weight-sync.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 RL/RLHF 后训练里，每一轮迭代的两半各是什么？为什么对 rollout 引擎有特殊约束？",
+                    "en": "In RL/RLHF post-training, what are the two halves of each iteration, and why does that constrain the rollout engine?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>策略模型先<strong>生成</strong>大量样本（rollout），训练器再<strong>打分算梯度并更新权重</strong>；下一轮 rollout 必须用<strong>刚更新的权重</strong>，所以引擎权重每步都要变</strong>",
+                        "en": "<strong>The policy model first <strong>generates</strong> many samples (rollout), then the trainer <strong>scores, computes a gradient and updates weights</strong>; the next rollout must use the <strong>just-updated weights</strong>, so the engine's weights change every step</strong>",
+                    },
+                    {"zh": "两半分别是预填充与解码，权重始终不变", "en": "The two halves are prefill and decode, and weights never change"},
+                    {"zh": "只做生成、从不更新权重，所以权重恒定", "en": "It only generates and never updates weights, so weights stay constant"},
+                    {"zh": "训练器和 rollout 完全独立，互不依赖权重", "en": "The trainer and rollout are fully independent and never share weights"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "一轮迭代 = rollout（SGLang 高吞吐<strong>生成</strong>）+ 训练器<strong>打分、算梯度、更新策略权重</strong>。关键耦合是：下一轮 rollout 必须用刚训好的权重采样，否则训练跑偏，所以 rollout 引擎的权重<strong>每个训练步都要换一次</strong>。",
+                    "en": "One iteration = rollout (high-throughput SGLang <strong>generation</strong>) + trainer <strong>scoring, gradient, policy-weight update</strong>. The crux is that the next rollout must sample with the just-trained weights or training drifts, so the rollout engine's weights <strong>get swapped every training step</strong>.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 SGLang 不每个训练步都<strong>重启服务器</strong>来加载新 checkpoint，而是做<strong>原地热更新</strong>？",
+                    "en": "Why does SGLang do an <strong>in-place hot update</strong> instead of <strong>restarting the server</strong> each step to load a new checkpoint?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>重启要重载 checkpoint、重新预热、重捕 CUDA Graph、重建 KV 池，几十秒～分钟级，乘以上万步会压垮计算；<span class='mono'>update_weights_from_tensor</span> 把新张量直接写进运行中的参数，CUDA Graph/KV 池原地不动</strong>",
+                        "en": "<strong>A restart must reload the checkpoint, re-warm, re-capture CUDA graphs and rebuild KV pools (tens of seconds to minutes), and times thousands of steps it crushes compute; <span class='mono'>update_weights_from_tensor</span> writes new tensors straight into the running parameters while CUDA graphs/KV pools stay put</strong>",
+                    },
+                    {"zh": "重启更快，因为能清空所有缓存", "en": "Restarting is faster because it clears all caches"},
+                    {"zh": "原地更新会破坏 CUDA Graph，所以只能重启", "en": "In-place update breaks CUDA graphs, so restarting is required"},
+                    {"zh": "新权重无法写进显存，只能从磁盘重载", "en": "New weights cannot be written to VRAM, so a disk reload is mandatory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "冷启动的一次性开销（重载权重、预热、重捕 CUDA Graph、重建 KV 池）动辄几十秒以上，RL 上万步根本扛不住。原地更新让进程不重启、CUDA Graph 与 KV 池保留，只把模型参数显存里的数值换成新张量，毫秒级完成，下一轮 rollout 立即可用。",
+                    "en": "Cold-start one-time costs (reload weights, warm up, re-capture CUDA graphs, rebuild KV pools) run tens of seconds or more, untenable across thousands of RL steps. In-place update keeps the process and CUDA graphs/KV pools alive, swapping only the values in the model-parameter memory for the new tensors in milliseconds, ready for the next rollout immediately.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "<span class='mono'>update_weights_from_tensor</span> 与 <span class='mono'>update_weights_from_distributed</span> 的区别，以及 <span class='mono'>load_format=\"flattened_bucket\"</span> 解决什么？",
+                    "en": "What's the difference between <span class='mono'>update_weights_from_tensor</span> and <span class='mono'>update_weights_from_distributed</span>, and what does <span class='mono'>load_format=\"flattened_bucket\"</span> solve?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>from_tensor 用于<strong>同卡共置</strong>（张量已在本地显存，直接原地写）；from_distributed 用于训练器在<strong>别的 GPU</strong>，经第46课进程组<strong>流式</strong>传权重；flattened_bucket 把<strong>成千张量打包成一块 buffer 整体一次搬运</strong>再到岸重建，降低逐张量开销</strong>",
+                        "en": "<strong>from_tensor is for <strong>same-GPU co-location</strong> (tensors already in local memory, written in place); from_distributed is for a trainer on <strong>other GPUs</strong>, <strong>streaming</strong> weights over Lesson 46's process group; flattened_bucket <strong>packs thousands of tensors into one buffer moved once</strong> and reconstructs on arrival, cutting per-tensor overhead</strong>",
+                    },
+                    {"zh": "两者完全相同，flattened_bucket 只是改个日志格式", "en": "They are identical, and flattened_bucket merely changes a log format"},
+                    {"zh": "from_distributed 只能传一个张量，flattened_bucket 用于压缩精度", "en": "from_distributed can only move one tensor, and flattened_bucket is for quantization"},
+                    {"zh": "from_tensor 必须重启进程，flattened_bucket 用于切分 KV 缓存", "en": "from_tensor must restart the process, and flattened_bucket is for splitting the KV cache"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "共置同卡时新张量已在显存，from_tensor 直接原地写；分离部署时 from_distributed 经 GroupCoordinator（第46课）把权重从训练 rank 流式传进推理 rank。大模型有上万命名张量，逐个搬会把发起开销放大几千倍，flattened_bucket 用 <span class='mono'>FlattenedTensorBucket</span> 拼成一块连续 buffer、整体一次传输/拷贝、再到岸重建，作为 <span class='mono'>load_format</span> 叠加在前两者之上。",
+                    "en": "Co-located on the same GPUs the new tensors are already in memory, so from_tensor writes in place; disaggregated, from_distributed streams weights from trainer ranks into inference ranks via the GroupCoordinator (L46). A large model has thousands of named tensors, and moving them one by one amplifies launch overhead thousands of times, so flattened_bucket uses <span class='mono'>FlattenedTensorBucket</span> to pack them into one contiguous buffer, transfer/copy once and reconstruct on arrival, layered as a <span class='mono'>load_format</span> on top of the first two.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话讲清 RL 的“rollout↔训练”闭环：策略模型生成样本（rollout，正是 SGLang 擅长的批量生成）、训练器打分算梯度更新权重，为什么下一轮 rollout 必须用<strong>刚更新的权重</strong>；再说明为何每步<strong>重启服务器</strong>（重载 checkpoint、重新预热、重捕 CUDA Graph）不可接受，而 <span class='mono'>update_weights_from_tensor</span> 的原地热更新让 CUDA Graph 与 KV 池原地不动。",
+                "en": "In your own words, explain the RL \"rollout↔training\" loop: the policy model generates samples (rollout, exactly SGLang's batched generation), the trainer scores, computes a gradient and updates weights, and why the next rollout must use the <strong>just-updated weights</strong>; then explain why <strong>restarting the server</strong> each step (reload checkpoint, re-warm, re-capture CUDA graphs) is unacceptable while <span class='mono'>update_weights_from_tensor</span>'s in-place hot update keeps CUDA graphs and KV pools in place.",
+            },
+            {
+                "zh": "对比三种权重同步路径并说明 <span class='mono'>FlattenedTensorBucket</span> 的价值：<span class='mono'>update_weights_from_tensor</span>（同卡共置）、<span class='mono'>update_weights_from_distributed</span>（跨卡经第46课进程组流式传）、<span class='mono'>load_format=\"flattened_bucket\"</span>（把上万命名张量打包成一块 buffer 整体一次搬运再重建）。再把它和第50课 LoRA 换权重做对比——同样是换权重，但 RL 换的是整个主干、LoRA 只换小 adapter，并说明为何同一个 SGLang 进程能既当服务器又当 rollout worker。",
+                "en": "Contrast the three weight-sync paths and explain the value of <span class='mono'>FlattenedTensorBucket</span>: <span class='mono'>update_weights_from_tensor</span> (same-GPU co-location), <span class='mono'>update_weights_from_distributed</span> (cross-GPU streaming over Lesson 46's process group), and <span class='mono'>load_format=\"flattened_bucket\"</span> (pack thousands of named tensors into one buffer moved once then reconstructed). Then contrast with Lesson 50's LoRA weight swap — both swap weights, but RL swaps the whole backbone while LoRA swaps only a small adapter — and explain why one SGLang process can be both the server and the rollout worker.",
+            },
+        ],
+    },
+    "52-diffusion-models.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "扩散模型的生成方式和自回归 LLM 有什么本质不同？",
+                    "en": "How does a diffusion model fundamentally differ from an autoregressive LLM?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>自回归 LLM 每次前向<strong>吐一个 token</strong> 再喂回，序列变长；扩散模型从<strong>纯随机噪声</strong>出发，<strong>迭代去噪 N 步</strong>，对同一个潜变量反复精修，无 token 反馈，步数固定</strong>",
+                        "en": "<strong>An autoregressive LLM emits <strong>one token per forward</strong> and feeds it back, growing the sequence; a diffusion model starts from <strong>pure random noise</strong> and <strong>iteratively denoises N steps</strong>, refining the same latent with no token feedback and a fixed step count</strong>",
+                    },
+                    {"zh": "两者都一个 token 一个 token 地生成，只是模型不同", "en": "Both generate token by token, only the model differs"},
+                    {"zh": "扩散模型也有 token 级反馈，只是步数更多", "en": "Diffusion also has token-level feedback, just with more steps"},
+                    {"zh": "扩散模型一次前向直接出图，从不迭代", "en": "Diffusion produces the image in a single forward and never iterates"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "自回归是变长的接龙，每个 token 依赖上一个；扩散是定长精修，从噪声出发，每一步去掉一点噪声，对同一个潜变量重复 N 次（如 20–50 步），没有 token 级反馈。",
+                    "en": "Autoregression is variable-length chaining where each token depends on the last; diffusion is fixed-length refinement, starting from noise and removing a little each step, repeated N times (e.g. 20–50) over the same latent with no token feedback.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一条扩散管线（<span class='mono'>PipelineConfig</span>）的三个零件分别负责什么？",
+                    "en": "What do the three parts of a diffusion pipeline (<span class='mono'>PipelineConfig</span>) each do?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>文本编码器把<strong>提示词变条件</strong>；<strong>DiT</strong>（扩散 Transformer）是<strong>去噪器</strong>，每个去噪步运行一次；<strong>VAE</strong> 在<strong>潜空间与像素空间</strong>之间映射</strong>",
+                        "en": "<strong>Text encoders turn the <strong>prompt into conditioning</strong>; the <strong>DiT</strong> (Diffusion Transformer) is the <strong>denoiser</strong> run once per step; the <strong>VAE</strong> maps between <strong>latent and pixel space</strong></strong>",
+                    },
+                    {"zh": "三者都是去噪器，只是精度不同", "en": "All three are denoisers, only with different precision"},
+                    {"zh": "DiT 负责编码提示词，VAE 负责采样噪声", "en": "The DiT encodes the prompt and the VAE samples noise"},
+                    {"zh": "文本编码器负责解码像素，VAE 负责条件", "en": "The text encoder decodes pixels and the VAE handles conditioning"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "文本编码器产出 conditioning；DiT 是核心去噪器，每步跑一次；VAE 在压缩潜空间与真实像素之间往返，去噪全程在潜空间、最后才用 VAE 解码成图。无分类器引导（<span class='mono'>should_use_guidance</span>/<span class='mono'>embedded_cfg_scale</span>）把结果推向提示词。",
+                    "en": "Text encoders produce conditioning; the DiT is the core denoiser run once per step; the VAE shuttles between compressed latent and real pixels, with denoising happening in latent space and only the final VAE decode producing the image. CFG (<span class='mono'>should_use_guidance</span>/<span class='mono'>embedded_cfg_scale</span>) steers toward the prompt.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SGLang 扩散服务复用了哪些既有基础设施，TeaCache 又做了什么？",
+                    "en": "Which existing infrastructure does SGLang diffusion reuse, and what does TeaCache do?",
+                },
+                "opts": [
+                    {
+                        "zh": "<strong>复用 <span class='mono'>sgl-kernel</span> 算子、调度循环、<strong>CUDA Graph 捕获</strong>（去噪步形状固定）、量化、多硬件后端、OpenAI 兼容 API；<strong>TeaCache</strong> 缓存某步结果，变化小于阈值（累积 L1 距离）时<strong>跳过冗余去噪步</strong></strong>",
+                        "en": "<strong>Reuses <span class='mono'>sgl-kernel</span> ops, the scheduler loop, <strong>CUDA-graph capture</strong> (fixed-shape denoise step), quantization, multi-hardware backends and the OpenAI-compatible API; <strong>TeaCache</strong> caches a step's result and <strong>skips redundant denoise steps</strong> when the change is below an accumulated-L1 threshold</strong>",
+                    },
+                    {"zh": "扩散服务从零另起一套引擎，TeaCache 用来扩大噪声", "en": "Diffusion builds a brand-new engine from scratch, and TeaCache adds noise"},
+                    {"zh": "只复用 API，TeaCache 用来重启服务器", "en": "Only the API is reused, and TeaCache restarts the server"},
+                    {"zh": "复用全部基础设施，但 TeaCache 会增加去噪步数", "en": "All infra is reused, but TeaCache increases the number of denoise steps"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "扩散没有另起炉灶，而是借用同一套服务化地基：sgl-kernel（第38课）、调度循环、CUDA Graph（第27课）、量化（第35课）、多硬件（第42课）、OpenAI API（第15课）乃至 PD 分离。TeaCache 是叠在上面的扩散特有优化：缓存去噪步结果，变化足够小就跳过，提速而几乎不损画质。",
+                    "en": "Diffusion doesn't start over; it borrows the same serving foundation: sgl-kernel (L38), the scheduler loop, CUDA graph (L27), quantization (L35), multi-hardware (L42), the OpenAI API (L15), even PD disaggregation. TeaCache is a diffusion-specific optimization layered on top: cache a denoise step's result and skip it when the change is small enough, speeding up with almost no quality loss.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "用你自己的话讲清扩散模型的“从噪声走向图像”：为什么它是<strong>定长 N 步迭代去噪</strong>而不是自回归的 token 接龙；说明文本编码器、DiT 去噪器、VAE 三个零件各自的角色，以及无分类器引导如何把结果推向提示词。",
+                "en": "In your own words, explain diffusion's \"from noise toward an image\": why it is a <strong>fixed-length N-step iterative denoise</strong> rather than autoregressive token chaining; describe the roles of the text encoder, the DiT denoiser and the VAE, and how classifier-free guidance steers the result toward the prompt.",
+            },
+            {
+                "zh": "解释“一套引擎，两种范式”：列出 SGLang 扩散服务复用了哪些你前面学过的部件（如第38课 sgl-kernel、第27课 CUDA Graph、第35课量化、第42课多硬件、第15课 OpenAI API），并说明为什么<strong>去噪步形状固定</strong>特别适合 CUDA Graph 捕获，以及 TeaCache 如何通过累积 L1 距离阈值跳过冗余步。",
+                "en": "Explain \"one stack, two paradigms\": list which previously learned pieces SGLang diffusion reuses (e.g. L38 sgl-kernel, L27 CUDA graph, L35 quantization, L42 multi-hardware, L15 OpenAI API), explain why the <strong>fixed-shape denoise step</strong> is especially suited to CUDA-graph capture, and how TeaCache skips redundant steps via an accumulated-L1 threshold.",
+            },
+        ],
+    },
 }
 
 
