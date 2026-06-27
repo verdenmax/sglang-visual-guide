@@ -61,7 +61,7 @@ LESSON_49 = {"zh": r"""
     <rect x="756" y="124" width="38" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="775" y="154" text-anchor="middle" style="font-weight:700;font-size:12px">LLM</text>
   </svg>
-  <div class="figcap"><b>图 A · 媒体 → 占位符 → 编码器 → 缝合</b> — 处理器把图像转张量并在 token 流插入 <span class="mono">&lt;image&gt;×N</span> 占位符；视觉编码器并行产出 N 个图像嵌入；在模型输入处，占位槽被这些嵌入替换，随后 LLM 照常前向。</div>
+  <div class="figcap"><b>图 1 · 媒体 → 占位符 → 编码器 → 缝合</b> — 处理器把图像转张量并在 token 流插入 <span class="mono">&lt;image&gt;×N</span> 占位符；视觉编码器并行产出 N 个图像嵌入；在模型输入处，占位槽被这些嵌入替换，随后 LLM 照常前向。</div>
 </div>
 
 <h2>二、缝合发生在哪里：一行嵌入里的“图片格子”</h2>
@@ -100,7 +100,7 @@ LESSON_49 = {"zh": r"""
     <text x="103" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">文本 token 嵌入</text>
     <text x="678" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">文本 token 嵌入</text>
   </svg>
-  <div class="figcap"><b>图 B · 一行嵌入：占位槽填入图像嵌入</b> — 同一行 token 嵌入里，多数槽位是文本 token 嵌入；中间一段连续的占位槽（异色）由视觉编码器的 k 个图像块嵌入填充，形成 文本 · [图块嵌入 × k] · 文本。</div>
+  <div class="figcap"><b>图 2 · 一行嵌入：占位槽填入图像嵌入</b> — 同一行 token 嵌入里，多数槽位是文本 token 嵌入；中间一段连续的占位槽（异色）由视觉编码器的 k 个图像块嵌入填充，形成 文本 · [图块嵌入 × k] · 文本。</div>
 </div>
 
 <p>举个具体例子：一张 <span class="mono">448×448</span> 的图片经处理器切块后，可能展开成约 <strong>256 个占位符 token</strong>，视觉编码器随后正好产出 <strong>256 个图像块嵌入</strong>，一一填进这些连续槽位——数量严丝合缝。再换个角度看可扩展性：要让同一台引擎服务一个新的 VLM，往往只需<strong>替换处理器 + 视觉塔（vision tower）</strong>这两个盒子，调度器、分页 KV、注意力、采样器一行都不改，新模型就能跑起来。</p>
@@ -213,7 +213,7 @@ LESSON_49 = {"zh": r"""
     <rect x="756" y="124" width="38" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="775" y="154" text-anchor="middle" style="font-weight:700;font-size:12px">LLM</text>
   </svg>
-  <div class="figcap"><b>Fig A · media → placeholders → encoder → splice</b> — the processor turns the image into tensors and inserts <span class="mono">&lt;image&gt;×N</span> placeholders into the token stream; the vision encoder produces N image embeddings in parallel; at the model input the placeholder slots are replaced by those embeddings, then the LLM runs forward as usual.</div>
+  <div class="figcap"><b>Fig 1 · media → placeholders → encoder → splice</b> — the processor turns the image into tensors and inserts <span class="mono">&lt;image&gt;×N</span> placeholders into the token stream; the vision encoder produces N image embeddings in parallel; at the model input the placeholder slots are replaced by those embeddings, then the LLM runs forward as usual.</div>
 </div>
 
 <h2>2. Where the splice happens: the "picture squares" inside one row of embeddings</h2>
@@ -252,7 +252,7 @@ LESSON_49 = {"zh": r"""
     <text x="103" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
     <text x="678" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
   </svg>
-  <div class="figcap"><b>Fig B · one embedding row: image embeddings fill the slots</b> — in one row of token embeddings, most slots are text-token embeddings; a contiguous run of placeholder slots (different color) is filled by the vision encoder's k image-patch embeddings, forming text · [img emb × k] · text.</div>
+  <div class="figcap"><b>Fig 2 · one embedding row: image embeddings fill the slots</b> — in one row of token embeddings, most slots are text-token embeddings; a contiguous run of placeholder slots (different color) is filled by the vision encoder's k image-patch embeddings, forming text · [img emb × k] · text.</div>
 </div>
 
 <p>A concrete example: a single <span class="mono">448×448</span> image, after the processor tiles it, might expand to about <strong>256 placeholder tokens</strong>, and the vision encoder then produces exactly <strong>256 image-patch embeddings</strong> that fill those contiguous slots one-for-one — the counts line up exactly. Seen from the scalability angle: to make the same engine serve a brand-new VLM, you usually only swap the two boxes <strong>processor + vision tower</strong>; the scheduler, paged KV, attention, and sampler are not touched at all, and the new model runs.</p>

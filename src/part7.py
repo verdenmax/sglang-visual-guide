@@ -544,7 +544,7 @@ LESSON_30 = {"zh": r"""
     <text x="450" y="98" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">槽位号 #12 → 指向数据（间接寻址）</text>
     <text x="430" y="206" style="fill:var(--faint);font-size:12px">同一个槽位号 #12 在每层各取一格 K/V，一次分配跨层通用</text>
   </svg>
-  <div class="figcap"><b>图 3 · 两个池：ReqToToken（索引）+ TokenToKV（数据）</b> — 左表按请求行与位置查出 token 槽位号，右边按这些槽位号在每层的 K/V 缓冲里取数据；箭头是那条"先查编号、再凭编号取货"的两级间接链路。</div>
+  <div class="figcap"><b>图 1 · 两个池：ReqToToken（索引）+ TokenToKV（数据）</b> — 左表按请求行与位置查出 token 槽位号，右边按这些槽位号在每层的 K/V 缓冲里取数据；箭头是那条"先查编号、再凭编号取货"的两级间接链路。</div>
 </div>
 
 <h2>分配器：开机预留、入批发槽、驱逐回收</h2>
@@ -612,7 +612,7 @@ LESSON_30 = {"zh": r"""
     <text x="520" y="250" style="fill:var(--amber);font-size:12px">X 完成，2 页归还清单 · 占用 2/6 ↓</text>
     <text x="70" y="296" style="fill:var(--faint);font-size:12px">虚线框 = 刚归还、回到 free list 的页；分配以页为固定粒度，回收只改清单、不动张量。</text>
   </svg>
-  <div class="figcap"><b>图 4 · 按页分配、用完即还（占用随时间变化）</b> — 同一排固定大小的 KV 页随时间被请求陆续申领（占用上升），请求完成后其页归还空闲清单（占用下降）；空闲与占用分别标色，总页数开机即钉死。</div>
+  <div class="figcap"><b>图 2 · 按页分配、用完即还（占用随时间变化）</b> — 同一排固定大小的 KV 页随时间被请求陆续申领（占用上升），请求完成后其页归还空闲清单（占用下降）；空闲与占用分别标色，总页数开机即钉死。</div>
 </div>
 
 <h2>为什么拆成两张表，而不是合成一张</h2>
@@ -800,7 +800,7 @@ while each request's ledger only tracks "which numbers are mine," indifferent to
     <text x="450" y="92" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slot id #12 → points at data (indirection)</text>
     <text x="430" y="206" style="fill:var(--faint);font-size:12px">slot #12 picks one K/V cell per layer — reused across layers</text>
   </svg>
-  <div class="figcap"><b>Fig 3 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
+  <div class="figcap"><b>Fig 1 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
 </div>
 
 <h2>The allocator: pre-reserve, hand out on admit, reclaim on evict</h2>
@@ -864,7 +864,7 @@ So the small allocator is the <strong>master valve of the memory budget</strong>
     <text x="520" y="250" style="fill:var(--amber);font-size:12px">X finishes, 2 pages returned · used 2/6 ↓</text>
     <text x="70" y="296" style="fill:var(--faint);font-size:12px">dashed = pages just returned to the free list; allocation is per fixed-size page, freeing only edits the list, never the tensors.</text>
   </svg>
-  <div class="figcap"><b>Fig 4 · Paged alloc on growth, free on finish (occupancy over time)</b> — the same row of fixed-size KV pages is claimed by requests as they decode (occupancy rises), then a finished request's pages return to the free list (occupancy drops); free vs used are color coded, total pages nailed at startup.</div>
+  <div class="figcap"><b>Fig 2 · Paged alloc on growth, free on finish (occupancy over time)</b> — the same row of fixed-size KV pages is claimed by requests as they decode (occupancy rises), then a finished request's pages return to the free list (occupancy drops); free vs used are color coded, total pages nailed at startup.</div>
 </div>
 
 <h2>Why split into two tables, not merge into one</h2>
@@ -1407,7 +1407,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
     <text x="24" y="272" style="fill:var(--red);font-size:12px">红：最久未访问的冷叶，先被 free</text>
     <text x="430" y="272" style="fill:var(--teal);font-size:12px">青：lock&gt;0 在用链，驱逐看不见</text>
   </svg>
-  <div class="figcap"><b>图 32·1 · LRU 驱逐冷叶，锁定的在用节点幸存</b> — 显存告急时，最久未访问、<span class="mono">lock_ref=0</span> 的冷叶（红）被选中并 <span class="mono">free</span> 回池；而 <span class="mono">lock_ref&gt;0</span> 的在用前缀链（青）即便更老也绝不被驱逐。释放冷叶后其父节点变成新叶、上浮为下一候选。</div>
+  <div class="figcap"><b>图 1 · LRU 驱逐冷叶，锁定的在用节点幸存</b> — 显存告急时，最久未访问、<span class="mono">lock_ref=0</span> 的冷叶（红）被选中并 <span class="mono">free</span> 回池；而 <span class="mono">lock_ref&gt;0</span> 的在用前缀链（青）即便更老也绝不被驱逐。释放冷叶后其父节点变成新叶、上浮为下一候选。</div>
 </div>
 
 <h2>命中率：这一切的回报，以及那笔取舍</h2>
@@ -1446,7 +1446,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
     <text x="112" y="84" style="fill:var(--teal);font-size:12px">命中率越高</text>
     <text x="112" y="102" style="fill:var(--teal);font-size:12px">→ 需重算的 prefill token 越少</text>
   </svg>
-  <div class="figcap"><b>图 32·2 · 命中率越高，吞吐越高</b> — 横轴是前缀缓存命中率（0%→90%），纵轴是吞吐（tokens/s）。命中率上升 → 需要重算的 prefill token 减少 → 吞吐随之爬升；命中率越高，要预填的 token 越少，这正是驱逐与缓存机制最终兑换出的回报。</div>
+  <div class="figcap"><b>图 2 · 命中率越高，吞吐越高</b> — 横轴是前缀缓存命中率（0%→90%），纵轴是吞吐（tokens/s）。命中率上升 → 需要重算的 prefill token 减少 → 吞吐随之爬升；命中率越高，要预填的 token 越少，这正是驱逐与缓存机制最终兑换出的回报。</div>
 </div>
 
 <p>真正决定"清谁"的那行代码出奇地短——驱逐策略的全部分歧，就浓缩在 <span class="mono">get_priority</span> 返回什么：</p>
@@ -1606,7 +1606,7 @@ This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight refer
     <text x="24" y="272" style="fill:var(--red);font-size:12px">red: oldest cold leaf → freed first</text>
     <text x="430" y="272" style="fill:var(--teal);font-size:12px">teal: lock&gt;0 chain survives evict</text>
   </svg>
-  <div class="figcap"><b>Fig 32·1 · LRU evicts cold leaves; locked in-use nodes survive</b> — under memory pressure the oldest-untouched, <span class="mono">lock_ref=0</span> cold leaf (red) is selected and <span class="mono">free</span>d back to the pool; the in-use prefix chain with <span class="mono">lock_ref&gt;0</span> (teal) is never evicted even if older. After a leaf is freed its parent becomes a new leaf and floats up as the next candidate.</div>
+  <div class="figcap"><b>Fig 1 · LRU evicts cold leaves; locked in-use nodes survive</b> — under memory pressure the oldest-untouched, <span class="mono">lock_ref=0</span> cold leaf (red) is selected and <span class="mono">free</span>d back to the pool; the in-use prefix chain with <span class="mono">lock_ref&gt;0</span> (teal) is never evicted even if older. After a leaf is freed its parent becomes a new leaf and floats up as the next candidate.</div>
 </div>
 
 <h2>Hit rate: the payoff, and that one trade</h2>
@@ -1643,7 +1643,7 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
     <text x="112" y="84" style="fill:var(--teal);font-size:12px">higher hit rate</text>
     <text x="112" y="102" style="fill:var(--teal);font-size:12px">→ fewer prefill tokens to recompute</text>
   </svg>
-  <div class="figcap"><b>Fig 32·2 · higher hit rate, higher throughput</b> — x is the prefix cache hit rate (0%→90%), y is throughput (tokens/s). As hit rate rises, the recomputed prefill tokens fall, so throughput climbs; a higher hit rate means fewer tokens to prefill — exactly the payoff that eviction and caching ultimately buy.</div>
+  <div class="figcap"><b>Fig 2 · higher hit rate, higher throughput</b> — x is the prefix cache hit rate (0%→90%), y is throughput (tokens/s). As hit rate rises, the recomputed prefill tokens fall, so throughput climbs; a higher hit rate means fewer tokens to prefill — exactly the payoff that eviction and caching ultimately buy.</div>
 </div>
 
 <p>The line that actually decides "who to clear" is surprisingly short — a strategy's entire difference is condensed into what <span class="mono">get_priority</span> returns:</p>

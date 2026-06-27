@@ -99,7 +99,7 @@ LESSON_24 = {
     <text x="704" y="128" text-anchor="middle" style="font-weight:700;fill:var(--teal)">logits</text>
     <text x="704" y="150" text-anchor="middle" style="font-size:11px;fill:var(--muted)">下一个 token 的分布</text>
   </svg>
-  <div class="figcap"><b>图 24·1 · 一次前向</b> — ModelRunner 拿到一个 ForwardBatch（input_ids / positions / seq_lens / out_cache_loc），从左到右跑过模型的层堆叠（嵌入 → N 层解码层 → norm + lm_head），最后产出下一个 token 的 logits。</div>
+  <div class="figcap"><b>图 1 · 一次前向</b> — ModelRunner 拿到一个 ForwardBatch（input_ids / positions / seq_lens / out_cache_loc），从左到右跑过模型的层堆叠（嵌入 → N 层解码层 → norm + lm_head），最后产出下一个 token 的 logits。</div>
 </div>
 
 <p>这套字段并不是凭空设计的，它直接对应源码里 <span class="mono">ForwardBatch</span> 这个数据类——一次前向所需的全部输入，被打包进同一个结构体里：</p>
@@ -196,7 +196,7 @@ ModelRunner 再调 <span class="mono">sample()</span> 把 logits 交给采样器
     <rect x="396" y="236" width="200" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="496" y="266" text-anchor="middle" style="font-weight:700;fill:var(--teal)">一次 forward 吃下整批</text>
   </svg>
-  <div class="figcap"><b>图 24·2 · 一个批装下两种请求</b> — 一条 EXTEND/预填充（200 token）和三条 DECODE/解码（各 1 token）被打进同一个 ForwardBatch，<span class="mono">input_ids</span> 长度 = 200+1+1+1 = 203，由一次前向一口气算完。</div>
+  <div class="figcap"><b>图 2 · 一个批装下两种请求</b> — 一条 EXTEND/预填充（200 token）和三条 DECODE/解码（各 1 token）被打进同一个 ForwardBatch，<span class="mono">input_ids</span> 长度 = 200+1+1+1 = 203，由一次前向一口气算完。</div>
 </div>
 
 <p>举个具体例子：把 <strong>3 条解码请求</strong>（每条只算 1 个新 token）和 <strong>1 条 200 token 的预填充</strong>请求拼进<strong>同一个 ForwardBatch</strong>，<span class="mono">input_ids</span> 的长度就是 <span class="mono">200 + 1 + 1 + 1 = 203</span>。预填充那段的 <span class="mono">forward_mode</span> 是 <span class="mono">EXTEND</span>（一次喂进 200 个 token），三条解码则是 <span class="mono">DECODE</span>（每条只追加 1 个 token）；它们共用同一次前向、同一份注意力元数据，由 GPU 一口气算完，这正是连续批处理（第 21 课）把预填充和解码混批跑的样子。</p>
@@ -328,7 +328,7 @@ ForwardBatch records "<strong>how the GPU computes this step</strong>".</p>
     <text x="704" y="128" text-anchor="middle" style="font-weight:700;fill:var(--teal)">logits</text>
     <text x="704" y="150" text-anchor="middle" style="font-size:11px;fill:var(--muted)">next-token dist</text>
   </svg>
-  <div class="figcap"><b>Fig 24·1 · one forward</b> — ModelRunner takes a ForwardBatch (input_ids / positions / seq_lens / out_cache_loc), runs left-to-right through the model's layer stack (embed → N decoder layers → norm + lm_head), and finally produces next-token logits.</div>
+  <div class="figcap"><b>Fig 1 · one forward</b> — ModelRunner takes a ForwardBatch (input_ids / positions / seq_lens / out_cache_loc), runs left-to-right through the model's layer stack (embed → N decoder layers → norm + lm_head), and finally produces next-token logits.</div>
 </div>
 
 <p>These fields aren't invented out of thin air; they map directly onto the <span class="mono">ForwardBatch</span> dataclass in the source — every input of a single forward pass, packed into one struct:</p>
@@ -460,7 +460,7 @@ whole pipeline happens right here</strong>.</p>
     <rect x="396" y="236" width="200" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="496" y="266" text-anchor="middle" style="font-weight:700;fill:var(--teal)">one forward consumes it all</text>
   </svg>
-  <div class="figcap"><b>Fig 24·2 · one batch holds both kinds</b> — one EXTEND/prefill (200 tokens) and three DECODE/decode (1 token each) are packed into a single ForwardBatch; <span class="mono">input_ids</span> length = 200+1+1+1 = 203, consumed by one forward pass.</div>
+  <div class="figcap"><b>Fig 2 · one batch holds both kinds</b> — one EXTEND/prefill (200 tokens) and three DECODE/decode (1 token each) are packed into a single ForwardBatch; <span class="mono">input_ids</span> length = 200+1+1+1 = 203, consumed by one forward pass.</div>
 </div>
 
 <p>A concrete example: pack <strong>3 decode requests</strong> (each computing just 1 new token) and <strong>1 prefill of 200 tokens</strong> into <strong>one ForwardBatch</strong>, and <span class="mono">input_ids</span> has length <span class="mono">200 + 1 + 1 + 1 = 203</span>. The prefill segment's <span class="mono">forward_mode</span> is <span class="mono">EXTEND</span> (200 tokens fed at once), while the three decodes are <span class="mono">DECODE</span> (one appended token each); they share a single forward pass and one set of attention metadata, computed by the GPU in one shot — exactly how continuous batching (Lesson 21) runs prefill and decode mixed together.</p>
@@ -1087,7 +1087,7 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
     <polygon points="380,330 375,322 385,322" style="fill:var(--muted)"/>
     <text x="430" y="334" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">→ logits</text>
   </svg>
-  <div class="figcap"><b>图 26·1 · 解码器模型的层栈</b> — 一个 SGLang 模型就是把 <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span>（每层 = self_attn + MLP，配 RMSNorm 与残差）→ 末端 <span class="mono">norm</span> → <span class="mono">lm_head</span> 竖着叠起来。Llama-2-7B 就是 32 层、hidden 4096 的这样一摞。</div>
+  <div class="figcap"><b>图 1 · 解码器模型的层栈</b> — 一个 SGLang 模型就是把 <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span>（每层 = self_attn + MLP，配 RMSNorm 与残差）→ 末端 <span class="mono">norm</span> → <span class="mono">lm_head</span> 竖着叠起来。Llama-2-7B 就是 32 层、hidden 4096 的这样一摞。</div>
 </div>
 
 <h2>一层里发生了什么：跟着残差走一遍</h2>
@@ -1151,7 +1151,7 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
     <text x="510" y="206" text-anchor="middle" style="fill:var(--ink);font-size:11px">KV 缓存 + 分页 + 注意力后端在此接入</text>
     <text x="510" y="221" text-anchor="middle" style="fill:var(--muted);font-size:11px">由 forward_batch 驱动（第 33 课）</text>
   </svg>
-  <div class="figcap"><b>图 26·2 · forward() 把注意力委托给 self.attn</b> — <span class="mono">LlamaAttention.forward</span> 自己只做投影、拆分、RoPE 这些"对齐张量"的活，真正的注意力计算交给高亮的 <span class="mono">self.attn</span>（<span class="mono">RadixAttention</span>）——这正是 KV 缓存与注意力后端插进来的<strong>缝</strong>，由 <span class="mono">forward_batch</span> 驱动。</div>
+  <div class="figcap"><b>图 2 · forward() 把注意力委托给 self.attn</b> — <span class="mono">LlamaAttention.forward</span> 自己只做投影、拆分、RoPE 这些"对齐张量"的活，真正的注意力计算交给高亮的 <span class="mono">self.attn</span>（<span class="mono">RadixAttention</span>）——这正是 KV 缓存与注意力后端插进来的<strong>缝</strong>，由 <span class="mono">forward_batch</span> 驱动。</div>
 </div>
 
 <div class="codefile">
@@ -1326,7 +1326,7 @@ forward_batch)</span> returning logits, and <span class="mono">load_weights</spa
     <polygon points="380,330 375,322 385,322" style="fill:var(--muted)"/>
     <text x="430" y="334" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">→ logits</text>
   </svg>
-  <div class="figcap"><b>Fig 26·1 · A decoder model's layer stack</b> — a SGLang model just stacks <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span> (each = self_attn + MLP, with RMSNorm and residual) → final <span class="mono">norm</span> → <span class="mono">lm_head</span> vertically. Llama-2-7B is exactly such a stack of 32 layers with hidden 4096.</div>
+  <div class="figcap"><b>Fig 1 · A decoder model's layer stack</b> — a SGLang model just stacks <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span> (each = self_attn + MLP, with RMSNorm and residual) → final <span class="mono">norm</span> → <span class="mono">lm_head</span> vertically. Llama-2-7B is exactly such a stack of 32 layers with hidden 4096.</div>
 </div>
 
 <h2>What happens in one layer: follow the residual</h2>
@@ -1391,7 +1391,7 @@ the model only "computes tensors right," while "which KV-pool slots to read/writ
     <text x="510" y="206" text-anchor="middle" style="fill:var(--ink);font-size:11px">KV cache + paging + attention backend plug in here</text>
     <text x="510" y="221" text-anchor="middle" style="fill:var(--muted);font-size:11px">driven by forward_batch (Lesson 33)</text>
   </svg>
-  <div class="figcap"><b>Fig 26·2 · forward() delegates attention to self.attn</b> — <span class="mono">LlamaAttention.forward</span> itself only does the "line up the tensors" work — projection, split, RoPE — and hands the real attention compute to the highlighted <span class="mono">self.attn</span> (<span class="mono">RadixAttention</span>). That is the <strong>seam</strong> where the KV cache and attention backend plug in, driven by <span class="mono">forward_batch</span>.</div>
+  <div class="figcap"><b>Fig 2 · forward() delegates attention to self.attn</b> — <span class="mono">LlamaAttention.forward</span> itself only does the "line up the tensors" work — projection, split, RoPE — and hands the real attention compute to the highlighted <span class="mono">self.attn</span> (<span class="mono">RadixAttention</span>). That is the <strong>seam</strong> where the KV cache and attention backend plug in, driven by <span class="mono">forward_batch</span>.</div>
 </div>
 
 <div class="codefile">

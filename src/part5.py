@@ -657,7 +657,7 @@ LESSON_19 = {"zh": r"""
     <path d="M540 214 l-10 -5 v10 z" style="fill:var(--teal)"/>
     <text x="548" y="218" class="mono" style="font-size:11px;fill:var(--teal)">+1 每拍</text>
   </svg>
-  <div class="figcap"><b>图 19A · 一个 Req 的状态流转</b> — waiting 排队 → running 先 prefill 吃整段 prompt、再逐步 decode 每拍 +1 → finished（命中 stop 或达到 length）；其间这条 Req 始终携带 origin_input_ids 与不断增长的 output_ids。</div>
+  <div class="figcap"><b>图 1 · 一个 Req 的状态流转</b> — waiting 排队 → running 先 prefill 吃整段 prompt、再逐步 decode 每拍 +1 → finished（命中 stop 或达到 length）；其间这条 Req 始终携带 origin_input_ids 与不断增长的 output_ids。</div>
 </div>
 
 <div class="codefile">
@@ -747,7 +747,7 @@ LESSON_19 = {"zh": r"""
     <rect x="356" y="252" width="180" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="446" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">out_cache_loc</text>
   </svg>
-  <div class="figcap"><b>图 19B · ScheduleBatch 打包多个 Req</b> — 几条长度不一的 Req（A/B/C）被装进同一个 ScheduleBatch，由模型一次前向算完；批里那几样张量 input_ids、positions、out_cache_loc 是这一拍全员共享、用完即弃的。</div>
+  <div class="figcap"><b>图 2 · ScheduleBatch 打包多个 Req</b> — 几条长度不一的 Req（A/B/C）被装进同一个 ScheduleBatch，由模型一次前向算完；批里那几样张量 input_ids、positions、out_cache_loc 是这一拍全员共享、用完即弃的。</div>
 </div>
 
 <p>
@@ -941,7 +941,7 @@ and its KV slots are freed. Here is its whole life.
     <path d="M540 214 l-10 -5 v10 z" style="fill:var(--teal)"/>
     <text x="548" y="218" class="mono" style="font-size:11px;fill:var(--teal)">+1 / beat</text>
   </svg>
-  <div class="figcap"><b>Fig 19A · A Req's lifecycle</b> — waiting in queue → running, first prefill eats the whole prompt, then decode adds +1 each beat → finished (hits stop, or reaches length); throughout, the Req keeps carrying origin_input_ids and a growing output_ids.</div>
+  <div class="figcap"><b>Fig 1 · A Req's lifecycle</b> — waiting in queue → running, first prefill eats the whole prompt, then decode adds +1 each beat → finished (hits stop, or reaches length); throughout, the Req keeps carrying origin_input_ids and a growing output_ids.</div>
 </div>
 
 <div class="codefile">
@@ -1018,7 +1018,7 @@ other fields are tensors <strong>laid out temporarily</strong> for the forward p
     <rect x="356" y="252" width="180" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="446" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">out_cache_loc</text>
   </svg>
-  <div class="figcap"><b>Fig 19B · ScheduleBatch packs several Reqs</b> — a few different-length Reqs (A/B/C) are placed into one ScheduleBatch and computed by the model in a single forward; the batch's tensors input_ids, positions, out_cache_loc are shared by everyone this beat and discarded after use.</div>
+  <div class="figcap"><b>Fig 2 · ScheduleBatch packs several Reqs</b> — a few different-length Reqs (A/B/C) are placed into one ScheduleBatch and computed by the model in a single forward; the batch's tensors input_ids, positions, out_cache_loc are shared by everyone this beat and discarded after use.</div>
 </div>
 
 <h2>3. Key fields at a glance: what each holds, what role it plays</h2>
@@ -2619,7 +2619,7 @@ LESSON_23 = {"zh": r"""
     <rect x="568" y="258" width="40" height="14" rx="3" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
     <text x="588" y="269" text-anchor="middle" class="mono" style="font-size:9.5px">r2</text>
   </svg>
-  <div class="figcap"><b>图 23A · DP：请求按副本分流</b> — 请求流进入只做分发的 <span class="mono">DataParallelController</span>，按 <span class="mono">round_robin</span> 顺序 <span class="mono">0→1→2→0</span> 扇出到 N 个<strong>完整副本</strong>（每个都自带调度器+TP+KV+一整份模型）；副本 0/1/2 各自持有不同请求（r3 回绕落回副本 0），控制器全程不碰 GPU。</div>
+  <div class="figcap"><b>图 1 · DP：请求按副本分流</b> — 请求流进入只做分发的 <span class="mono">DataParallelController</span>，按 <span class="mono">round_robin</span> 顺序 <span class="mono">0→1→2→0</span> 扇出到 N 个<strong>完整副本</strong>（每个都自带调度器+TP+KV+一整份模型）；副本 0/1/2 各自持有不同请求（r3 回绕落回副本 0），控制器全程不碰 GPU。</div>
 </div>
 
 <p>举两个具体数字落地。<strong><span class="mono">--dp-size 4</span></strong> 表示开 4 个完整副本（副本 0/1/2/3），控制器把请求按 <span class="mono">0→1→2→3→0</span> 的顺序轮流投递、周而复始；
@@ -2707,7 +2707,7 @@ GPU 利用率惨不忍睹——这就是<strong>流水线气泡（pipeline bubbl
     <text x="662" y="172" style="font-size:11px;fill:var(--muted)">稳态</text>
     <text x="662" y="240" style="font-size:11px;fill:var(--muted)">排空</text>
   </svg>
-  <div class="figcap"><b>图 23B · PP：层分成阶段、微批流水</b> — 模型层切成 <span class="mono">S0/S1/S2</span> 三段放在三张卡，micro-batch <span class="mono">mb0/mb1/mb2</span> 沿对角线错峰流动；<span class="mono">t0–t1</span> 是只有部分段在忙的<strong>填充</strong>气泡、<span class="mono">t2</span> 是三段全忙的<strong>稳态</strong>、<span class="mono">t3–t4</span> 是尾部<strong>排空</strong>气泡。micro-batch 越多，稳态占比越高、气泡越薄。</div>
+  <div class="figcap"><b>图 2 · PP：层分成阶段、微批流水</b> — 模型层切成 <span class="mono">S0/S1/S2</span> 三段放在三张卡，micro-batch <span class="mono">mb0/mb1/mb2</span> 沿对角线错峰流动；<span class="mono">t0–t1</span> 是只有部分段在忙的<strong>填充</strong>气泡、<span class="mono">t2</span> 是三段全忙的<strong>稳态</strong>、<span class="mono">t3–t4</span> 是尾部<strong>排空</strong>气泡。micro-batch 越多，稳态占比越高、气泡越薄。</div>
 </div>
 
 <p>看懂这张错峰图，就抓住了 PP 的灵魂：<strong>同一时刻，不同 stage 在处理不同的 micro-batch。</strong>
@@ -2882,7 +2882,7 @@ or load-aware by in-flight requests/tokens), <strong>forwards the request as-is<
     <rect x="568" y="258" width="40" height="14" rx="3" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
     <text x="588" y="269" text-anchor="middle" class="mono" style="font-size:9.5px">r2</text>
   </svg>
-  <div class="figcap"><b>Fig 23A · DP: requests split across replicas</b> — the request stream enters the dispatch-only <span class="mono">DataParallelController</span>, fanned out in <span class="mono">round_robin</span> order <span class="mono">0→1→2→0</span> to N <strong>full replicas</strong> (each with its own scheduler+TP+KV+a full model); replicas 0/1/2 each hold different requests (r3 wraps back to replica 0), and the controller never touches the GPU.</div>
+  <div class="figcap"><b>Fig 1 · DP: requests split across replicas</b> — the request stream enters the dispatch-only <span class="mono">DataParallelController</span>, fanned out in <span class="mono">round_robin</span> order <span class="mono">0→1→2→0</span> to N <strong>full replicas</strong> (each with its own scheduler+TP+KV+a full model); replicas 0/1/2 each hold different requests (r3 wraps back to replica 0), and the controller never touches the GPU.</div>
 </div>
 
 <p>Two concrete numbers to ground this. <strong><span class="mono">--dp-size 4</span></strong> spins up 4 full replicas (replica 0/1/2/3), and the controller hands requests out in <span class="mono">0→1→2→3→0</span> order, round and round;
@@ -2959,7 +2959,7 @@ and GPU utilization is dismal—this is the <strong>pipeline bubble</strong>. Th
     <text x="662" y="172" style="font-size:11px;fill:var(--muted)">steady</text>
     <text x="662" y="240" style="font-size:11px;fill:var(--muted)">drain</text>
   </svg>
-  <div class="figcap"><b>Fig 23B · PP: layers as stages, micro-batches pipelined</b> — model layers split into <span class="mono">S0/S1/S2</span> on three cards, micro-batches <span class="mono">mb0/mb1/mb2</span> flowing diagonally and staggered; <span class="mono">t0–t1</span> are the <strong>fill</strong> bubble with only some stages busy, <span class="mono">t2</span> is the all-stages-busy <strong>steady state</strong>, and <span class="mono">t3–t4</span> are the tail <strong>drain</strong> bubble. More micro-batches ⇒ higher steady-state fraction, thinner bubble.</div>
+  <div class="figcap"><b>Fig 2 · PP: layers as stages, micro-batches pipelined</b> — model layers split into <span class="mono">S0/S1/S2</span> on three cards, micro-batches <span class="mono">mb0/mb1/mb2</span> flowing diagonally and staggered; <span class="mono">t0–t1</span> are the <strong>fill</strong> bubble with only some stages busy, <span class="mono">t2</span> is the all-stages-busy <strong>steady state</strong>, and <span class="mono">t3–t4</span> are the tail <strong>drain</strong> bubble. More micro-batches ⇒ higher steady-state fraction, thinner bubble.</div>
 </div>
 
 <p>Grasp this staggered figure and you've got PP's soul: <strong>at any instant, different stages process different micro-batches.</strong>

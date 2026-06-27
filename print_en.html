@@ -1878,7 +1878,7 @@ still doing real work.</p>
     <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
   </svg>
-  <div class="figcap"><b>Fig A · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
+  <div class="figcap"><b>Fig 1 · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
 </div>
 
 <div class="card"><div class="tag">🔢 A concrete example</div>
@@ -1961,7 +1961,7 @@ consecutive steps: the finished (✓) are replaced by newcomers (★), so the ba
     <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="522" y="254" style="font-size:11px;fill:var(--muted)">just finished ✓</text>
   </svg>
-  <div class="figcap"><b>Fig B · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
+  <div class="figcap"><b>Fig 2 · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
 </div>
 
 <h2>Why it wins: back to "memory-bound"</h2>
@@ -2474,7 +2474,7 @@ The higher the hit rate, the bigger the win — that's where RadixAttention's va
     <rect x="170" y="200" width="368" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="354" y="221" text-anchor="middle" style="fill:var(--teal);font-weight:700">Cache hit: save 500 tokens of prefill, compute only 20</text>
   </svg>
-  <div class="figcap"><b>Fig · Compute saved by a cache hit</b> — request 2 reuses request 1's prefix KV (dashed = reused, zero recompute) and pays compute only for its 20 new tokens. e.g. a 520-token request computes only 20 — about <b>96%</b> of prefill is skipped.</div>
+  <div class="figcap"><b>Fig 1 · Compute saved by a cache hit</b> — request 2 reuses request 1's prefix KV (dashed = reused, zero recompute) and pays compute only for its 20 new tokens. e.g. a 520-token request computes only 20 — about <b>96%</b> of prefill is skipped.</div>
 </div>
 
 <h2>RadixAttention: store KV in a radix tree</h2>
@@ -2507,7 +2507,7 @@ and each <strong>edge</strong> carries a run of consecutive tokens plus the corr
     <text x="560" y="238" text-anchor="middle" style="fill:var(--ink)">Question B: translate to French</text>
     <text x="560" y="253" text-anchor="middle" style="fill:var(--blue);font-size:11px">divergent suffix · computed apart</text>
   </svg>
-  <div class="figcap"><b>Fig · Radix tree (shared prefix)</b> — two requests share one system-prompt prefix (accent = stored once, computed once) and fork only where the user questions truly differ. e.g. 12 shared tokens; after a hit the second request only builds a branch for its unique suffix.</div>
+  <div class="figcap"><b>Fig 2 · Radix tree (shared prefix)</b> — two requests share one system-prompt prefix (accent = stored once, computed once) and fork only where the user questions truly differ. e.g. 12 shared tokens; after a hit the second request only builds a branch for its unique suffix.</div>
 </div>
 
 <p><strong>Splitting an edge</strong> is the essence of a radix tree. Suppose the tree already holds <span class="mono">"You are a helpful assistant. Translate"</span>,
@@ -3267,7 +3267,7 @@ Grasp these two modes and you hold the main axis of the SGLang front end — <st
     <text x="560" y="262" text-anchor="middle">graph / plan</text>
     <text x="560" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">parallelize · cache prefix</text>
   </svg>
-  <div class="figcap"><b>Fig · interpreter vs tracer</b> — the interpreter treats the program as "instructions to obey now," running it <strong>node by node, eagerly</strong> and calling the backend at each gen; the tracer treats it as "a blueprint to study," <strong>statically expanding it into a graph first</strong> so <strong>independent branches run in parallel</strong>, handing the runtime something to optimize.</div>
+  <div class="figcap"><b>Fig 1 · interpreter vs tracer</b> — the interpreter treats the program as "instructions to obey now," running it <strong>node by node, eagerly</strong> and calling the backend at each gen; the tracer treats it as "a blueprint to study," <strong>statically expanding it into a graph first</strong> so <strong>independent branches run in parallel</strong>, handing the runtime something to optimize.</div>
 </div>
 
 <h2>The interpret path: how StreamExecutor drives a program</h2>
@@ -3301,7 +3301,7 @@ The key idea: <strong>interpreting is "produce as you go"</strong> — text and 
     <text x="620" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
     <text x="380" y="292" text-anchor="middle" style="fill:var(--muted);font-size:12px">three branches run concurrently, sharing the same prefix KV (Lesson 7)</text>
   </svg>
-  <div class="figcap"><b>Fig · executing forks in parallel</b> — while StreamExecutor runs, <span class="mono">fork</span> splits the stream into 3 <strong>parallel lanes</strong> that <strong>share the same parent prefix</strong> and each <strong>call the backend</strong> concurrently.</div>
+  <div class="figcap"><b>Fig 2 · executing forks in parallel</b> — while StreamExecutor runs, <span class="mono">fork</span> splits the stream into 3 <strong>parallel lanes</strong> that <strong>share the same parent prefix</strong> and each <strong>call the backend</strong> concurrently.</div>
 </div>
 
 <div class="layers">
@@ -5666,7 +5666,7 @@ and its KV slots are freed. Here is its whole life.
     <path d="M540 214 l-10 -5 v10 z" style="fill:var(--teal)"/>
     <text x="548" y="218" class="mono" style="font-size:11px;fill:var(--teal)">+1 / beat</text>
   </svg>
-  <div class="figcap"><b>Fig 19A · A Req's lifecycle</b> — waiting in queue → running, first prefill eats the whole prompt, then decode adds +1 each beat → finished (hits stop, or reaches length); throughout, the Req keeps carrying origin_input_ids and a growing output_ids.</div>
+  <div class="figcap"><b>Fig 1 · A Req's lifecycle</b> — waiting in queue → running, first prefill eats the whole prompt, then decode adds +1 each beat → finished (hits stop, or reaches length); throughout, the Req keeps carrying origin_input_ids and a growing output_ids.</div>
 </div>
 
 <div class="codefile">
@@ -5743,7 +5743,7 @@ other fields are tensors <strong>laid out temporarily</strong> for the forward p
     <rect x="356" y="252" width="180" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="446" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">out_cache_loc</text>
   </svg>
-  <div class="figcap"><b>Fig 19B · ScheduleBatch packs several Reqs</b> — a few different-length Reqs (A/B/C) are placed into one ScheduleBatch and computed by the model in a single forward; the batch's tensors input_ids, positions, out_cache_loc are shared by everyone this beat and discarded after use.</div>
+  <div class="figcap"><b>Fig 2 · ScheduleBatch packs several Reqs</b> — a few different-length Reqs (A/B/C) are placed into one ScheduleBatch and computed by the model in a single forward; the batch's tensors input_ids, positions, out_cache_loc are shared by everyone this beat and discarded after use.</div>
 </div>
 
 <h2>3. Key fields at a glance: what each holds, what role it plays</h2>
@@ -6785,7 +6785,7 @@ or load-aware by in-flight requests/tokens), <strong>forwards the request as-is<
     <rect x="568" y="258" width="40" height="14" rx="3" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
     <text x="588" y="269" text-anchor="middle" class="mono" style="font-size:9.5px">r2</text>
   </svg>
-  <div class="figcap"><b>Fig 23A · DP: requests split across replicas</b> — the request stream enters the dispatch-only <span class="mono">DataParallelController</span>, fanned out in <span class="mono">round_robin</span> order <span class="mono">0→1→2→0</span> to N <strong>full replicas</strong> (each with its own scheduler+TP+KV+a full model); replicas 0/1/2 each hold different requests (r3 wraps back to replica 0), and the controller never touches the GPU.</div>
+  <div class="figcap"><b>Fig 1 · DP: requests split across replicas</b> — the request stream enters the dispatch-only <span class="mono">DataParallelController</span>, fanned out in <span class="mono">round_robin</span> order <span class="mono">0→1→2→0</span> to N <strong>full replicas</strong> (each with its own scheduler+TP+KV+a full model); replicas 0/1/2 each hold different requests (r3 wraps back to replica 0), and the controller never touches the GPU.</div>
 </div>
 
 <p>Two concrete numbers to ground this. <strong><span class="mono">--dp-size 4</span></strong> spins up 4 full replicas (replica 0/1/2/3), and the controller hands requests out in <span class="mono">0→1→2→3→0</span> order, round and round;
@@ -6862,7 +6862,7 @@ and GPU utilization is dismal—this is the <strong>pipeline bubble</strong>. Th
     <text x="662" y="172" style="font-size:11px;fill:var(--muted)">steady</text>
     <text x="662" y="240" style="font-size:11px;fill:var(--muted)">drain</text>
   </svg>
-  <div class="figcap"><b>Fig 23B · PP: layers as stages, micro-batches pipelined</b> — model layers split into <span class="mono">S0/S1/S2</span> on three cards, micro-batches <span class="mono">mb0/mb1/mb2</span> flowing diagonally and staggered; <span class="mono">t0–t1</span> are the <strong>fill</strong> bubble with only some stages busy, <span class="mono">t2</span> is the all-stages-busy <strong>steady state</strong>, and <span class="mono">t3–t4</span> are the tail <strong>drain</strong> bubble. More micro-batches ⇒ higher steady-state fraction, thinner bubble.</div>
+  <div class="figcap"><b>Fig 2 · PP: layers as stages, micro-batches pipelined</b> — model layers split into <span class="mono">S0/S1/S2</span> on three cards, micro-batches <span class="mono">mb0/mb1/mb2</span> flowing diagonally and staggered; <span class="mono">t0–t1</span> are the <strong>fill</strong> bubble with only some stages busy, <span class="mono">t2</span> is the all-stages-busy <strong>steady state</strong>, and <span class="mono">t3–t4</span> are the tail <strong>drain</strong> bubble. More micro-batches ⇒ higher steady-state fraction, thinner bubble.</div>
 </div>
 
 <p>Grasp this staggered figure and you've got PP's soul: <strong>at any instant, different stages process different micro-batches.</strong>
@@ -7098,7 +7098,7 @@ ForwardBatch records "<strong>how the GPU computes this step</strong>".</p>
     <text x="704" y="128" text-anchor="middle" style="font-weight:700;fill:var(--teal)">logits</text>
     <text x="704" y="150" text-anchor="middle" style="font-size:11px;fill:var(--muted)">next-token dist</text>
   </svg>
-  <div class="figcap"><b>Fig 24·1 · one forward</b> — ModelRunner takes a ForwardBatch (input_ids / positions / seq_lens / out_cache_loc), runs left-to-right through the model's layer stack (embed → N decoder layers → norm + lm_head), and finally produces next-token logits.</div>
+  <div class="figcap"><b>Fig 1 · one forward</b> — ModelRunner takes a ForwardBatch (input_ids / positions / seq_lens / out_cache_loc), runs left-to-right through the model's layer stack (embed → N decoder layers → norm + lm_head), and finally produces next-token logits.</div>
 </div>
 
 <p>These fields aren't invented out of thin air; they map directly onto the <span class="mono">ForwardBatch</span> dataclass in the source — every input of a single forward pass, packed into one struct:</p>
@@ -7230,7 +7230,7 @@ whole pipeline happens right here</strong>.</p>
     <rect x="396" y="236" width="200" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="496" y="266" text-anchor="middle" style="font-weight:700;fill:var(--teal)">one forward consumes it all</text>
   </svg>
-  <div class="figcap"><b>Fig 24·2 · one batch holds both kinds</b> — one EXTEND/prefill (200 tokens) and three DECODE/decode (1 token each) are packed into a single ForwardBatch; <span class="mono">input_ids</span> length = 200+1+1+1 = 203, consumed by one forward pass.</div>
+  <div class="figcap"><b>Fig 2 · one batch holds both kinds</b> — one EXTEND/prefill (200 tokens) and three DECODE/decode (1 token each) are packed into a single ForwardBatch; <span class="mono">input_ids</span> length = 200+1+1+1 = 203, consumed by one forward pass.</div>
 </div>
 
 <p>A concrete example: pack <strong>3 decode requests</strong> (each computing just 1 new token) and <strong>1 prefill of 200 tokens</strong> into <strong>one ForwardBatch</strong>, and <span class="mono">input_ids</span> has length <span class="mono">200 + 1 + 1 + 1 = 203</span>. The prefill segment's <span class="mono">forward_mode</span> is <span class="mono">EXTEND</span> (200 tokens fed at once), while the three decodes are <span class="mono">DECODE</span> (one appended token each); they share a single forward pass and one set of attention metadata, computed by the GPU in one shot — exactly how continuous batching (Lesson 21) runs prefill and decode mixed together.</p>
@@ -7731,7 +7731,7 @@ forward_batch)</span> returning logits, and <span class="mono">load_weights</spa
     <polygon points="380,330 375,322 385,322" style="fill:var(--muted)"/>
     <text x="430" y="334" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">→ logits</text>
   </svg>
-  <div class="figcap"><b>Fig 26·1 · A decoder model's layer stack</b> — a SGLang model just stacks <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span> (each = self_attn + MLP, with RMSNorm and residual) → final <span class="mono">norm</span> → <span class="mono">lm_head</span> vertically. Llama-2-7B is exactly such a stack of 32 layers with hidden 4096.</div>
+  <div class="figcap"><b>Fig 1 · A decoder model's layer stack</b> — a SGLang model just stacks <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span> (each = self_attn + MLP, with RMSNorm and residual) → final <span class="mono">norm</span> → <span class="mono">lm_head</span> vertically. Llama-2-7B is exactly such a stack of 32 layers with hidden 4096.</div>
 </div>
 
 <h2>What happens in one layer: follow the residual</h2>
@@ -7796,7 +7796,7 @@ the model only "computes tensors right," while "which KV-pool slots to read/writ
     <text x="510" y="206" text-anchor="middle" style="fill:var(--ink);font-size:11px">KV cache + paging + attention backend plug in here</text>
     <text x="510" y="221" text-anchor="middle" style="fill:var(--muted);font-size:11px">driven by forward_batch (Lesson 33)</text>
   </svg>
-  <div class="figcap"><b>Fig 26·2 · forward() delegates attention to self.attn</b> — <span class="mono">LlamaAttention.forward</span> itself only does the "line up the tensors" work — projection, split, RoPE — and hands the real attention compute to the highlighted <span class="mono">self.attn</span> (<span class="mono">RadixAttention</span>). That is the <strong>seam</strong> where the KV cache and attention backend plug in, driven by <span class="mono">forward_batch</span>.</div>
+  <div class="figcap"><b>Fig 2 · forward() delegates attention to self.attn</b> — <span class="mono">LlamaAttention.forward</span> itself only does the "line up the tensors" work — projection, split, RoPE — and hands the real attention compute to the highlighted <span class="mono">self.attn</span> (<span class="mono">RadixAttention</span>). That is the <strong>seam</strong> where the KV cache and attention backend plug in, driven by <span class="mono">forward_batch</span>.</div>
 </div>
 
 <div class="codefile">
@@ -8835,7 +8835,7 @@ while each request's ledger only tracks "which numbers are mine," indifferent to
     <text x="450" y="92" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slot id #12 → points at data (indirection)</text>
     <text x="430" y="206" style="fill:var(--faint);font-size:12px">slot #12 picks one K/V cell per layer — reused across layers</text>
   </svg>
-  <div class="figcap"><b>Fig 3 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
+  <div class="figcap"><b>Fig 1 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
 </div>
 
 <h2>The allocator: pre-reserve, hand out on admit, reclaim on evict</h2>
@@ -8899,7 +8899,7 @@ So the small allocator is the <strong>master valve of the memory budget</strong>
     <text x="520" y="250" style="fill:var(--amber);font-size:12px">X finishes, 2 pages returned · used 2/6 ↓</text>
     <text x="70" y="296" style="fill:var(--faint);font-size:12px">dashed = pages just returned to the free list; allocation is per fixed-size page, freeing only edits the list, never the tensors.</text>
   </svg>
-  <div class="figcap"><b>Fig 4 · Paged alloc on growth, free on finish (occupancy over time)</b> — the same row of fixed-size KV pages is claimed by requests as they decode (occupancy rises), then a finished request's pages return to the free list (occupancy drops); free vs used are color coded, total pages nailed at startup.</div>
+  <div class="figcap"><b>Fig 2 · Paged alloc on growth, free on finish (occupancy over time)</b> — the same row of fixed-size KV pages is claimed by requests as they decode (occupancy rises), then a finished request's pages return to the free list (occupancy drops); free vs used are color coded, total pages nailed at startup.</div>
 </div>
 
 <h2>Why split into two tables, not merge into one</h2>
@@ -9366,7 +9366,7 @@ This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight refer
     <text x="24" y="272" style="fill:var(--red);font-size:12px">red: oldest cold leaf → freed first</text>
     <text x="430" y="272" style="fill:var(--teal);font-size:12px">teal: lock&gt;0 chain survives evict</text>
   </svg>
-  <div class="figcap"><b>Fig 32·1 · LRU evicts cold leaves; locked in-use nodes survive</b> — under memory pressure the oldest-untouched, <span class="mono">lock_ref=0</span> cold leaf (red) is selected and <span class="mono">free</span>d back to the pool; the in-use prefix chain with <span class="mono">lock_ref&gt;0</span> (teal) is never evicted even if older. After a leaf is freed its parent becomes a new leaf and floats up as the next candidate.</div>
+  <div class="figcap"><b>Fig 1 · LRU evicts cold leaves; locked in-use nodes survive</b> — under memory pressure the oldest-untouched, <span class="mono">lock_ref=0</span> cold leaf (red) is selected and <span class="mono">free</span>d back to the pool; the in-use prefix chain with <span class="mono">lock_ref&gt;0</span> (teal) is never evicted even if older. After a leaf is freed its parent becomes a new leaf and floats up as the next candidate.</div>
 </div>
 
 <h2>Hit rate: the payoff, and that one trade</h2>
@@ -9403,7 +9403,7 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
     <text x="112" y="84" style="fill:var(--teal);font-size:12px">higher hit rate</text>
     <text x="112" y="102" style="fill:var(--teal);font-size:12px">→ fewer prefill tokens to recompute</text>
   </svg>
-  <div class="figcap"><b>Fig 32·2 · higher hit rate, higher throughput</b> — x is the prefix cache hit rate (0%→90%), y is throughput (tokens/s). As hit rate rises, the recomputed prefill tokens fall, so throughput climbs; a higher hit rate means fewer tokens to prefill — exactly the payoff that eviction and caching ultimately buy.</div>
+  <div class="figcap"><b>Fig 2 · higher hit rate, higher throughput</b> — x is the prefix cache hit rate (0%→90%), y is throughput (tokens/s). As hit rate rises, the recomputed prefill tokens fall, so throughput climbs; a higher hit rate means fewer tokens to prefill — exactly the payoff that eviction and caching ultimately buy.</div>
 </div>
 
 <p>The line that actually decides "who to clear" is surprisingly short — a strategy's entire difference is condensed into what <span class="mono">get_priority</span> returns:</p>
@@ -9854,7 +9854,7 @@ That is why people say MoE "<strong>scales parameters, not per-token compute</st
     <line x1="670" y1="147" x2="700" y2="147" style="stroke:var(--line);stroke-width:1.5"/>
     <text x="706" y="151" style="fill:var(--muted);font-size:12px">output</text>
   </svg>
-  <div class="figcap"><b>Fig 3 · The router sends each token to its top-k experts</b> — the router scores all 8 experts but <strong>keeps only top-k=2</strong> (here E2, E5) to actually compute; the rest <strong>do nothing</strong> for this token. The output is combined by gate weights <span class="mono">0.6·E2 + 0.4·E5</span>.</div>
+  <div class="figcap"><b>Fig 1 · The router sends each token to its top-k experts</b> — the router scores all 8 experts but <strong>keeps only top-k=2</strong> (here E2, E5) to actually compute; the rest <strong>do nothing</strong> for this token. The output is combined by gate weights <span class="mono">0.6·E2 + 0.4·E5</span>.</div>
 </div>
 
 <div class="fig">
@@ -9875,7 +9875,7 @@ That is why people say MoE "<strong>scales parameters, not per-token compute</st
     <text x="611" y="143" style="fill:var(--teal);font-size:11px">only k</text>
     <text x="410" y="196" style="fill:var(--teal);font-weight:700;font-size:12px">capacity soars, compute pinned by top-k</text>
   </svg>
-  <div class="figcap"><b>Fig 4 · Dense (all params) vs sparse MoE (only k experts)</b> — a dense FFN <strong>welds capacity to per-token compute</strong>, so both rise together; a sparse MoE owns a <strong>huge expert pool</strong> (capacity soars) yet each token activates only <span class="mono">k of N</span> → <strong>compute stays small, pinned by top-k</strong>.</div>
+  <div class="figcap"><b>Fig 2 · Dense (all params) vs sparse MoE (only k experts)</b> — a dense FFN <strong>welds capacity to per-token compute</strong>, so both rise together; a sparse MoE owns a <strong>huge expert pool</strong> (capacity soars) yet each token activates only <span class="mono">k of N</span> → <strong>compute stays small, pinned by top-k</strong>.</div>
 </div>
 
 <h2>One MoE forward: route → group → grouped GEMM → weighted combine</h2>
@@ -10077,7 +10077,7 @@ single-request decode. Third, on hardware with low-precision compute (FP8 on H10
     <text x="197" y="197" text-anchor="middle" style="font-size:12px">×¼</text>
     <text x="20" y="234" style="fill:var(--faint);font-size:12px">smaller = less VRAM + bandwidth</text>
   </svg>
-  <div class="figcap"><b>Fig A · bit-width vs memory: fp16 vs fp8 vs int4</b> — same weights: fp16 is 2 bytes/param (baseline), fp8 halves it (1 byte), int4 is a quarter (0.5 byte); smaller = less VRAM and memory bandwidth.</div>
+  <div class="figcap"><b>Fig 1 · bit-width vs memory: fp16 vs fp8 vs int4</b> — same weights: fp16 is 2 bytes/param (baseline), fp8 halves it (1 byte), int4 is a quarter (0.5 byte); smaller = less VRAM and memory bandwidth.</div>
 </div>
 
 <div class="card detail">
@@ -10116,7 +10116,7 @@ single-request decode. Third, on hardware with low-precision compute (FP8 on H10
     <text x="706" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">GEMM</text>
     <text x="12" y="214" style="fill:var(--faint);font-size:12px">HBM stores only low-bit weights + scales; restore on use</text>
   </svg>
-  <div class="figcap"><b>Fig B · quantize → store low-bit → dequantize on use</b> — high-precision weights are quantized (pick a scale, cast to fp8/int4) into compact low-bit weights (with their scales); at compute they're dequantized (or fed to a low-bit kernel) back to a usable range for the matmul.</div>
+  <div class="figcap"><b>Fig 2 · quantize → store low-bit → dequantize on use</b> — high-precision weights are quantized (pick a scale, cast to fp8/int4) into compact low-bit weights (with their scales); at compute they're dequantized (or fed to a low-bit kernel) back to a usable range for the matmul.</div>
 </div>
 
 <h2>The formats: from FP8 to AWQ/GPTQ</h2>
@@ -11595,7 +11595,7 @@ and the real engineering complexity is tucked inside them.</p>
     <rect x="534" y="234" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="647" y="257" text-anchor="middle" class="mono" style="font-size:13px">CANN</text>
   </svg>
-  <div class="figcap"><b>Fig A · Three bands</b> — the upper tiers are hardware-agnostic (scheduler / model / attention abstraction); the middle is the SRTPlatform seam (capability flags + device ops), where hardware specifics live; the bottom is per-chip kernels (CUDA / HIP / CANN…).</div>
+  <div class="figcap"><b>Fig 1 · Three bands</b> — the upper tiers are hardware-agnostic (scheduler / model / attention abstraction); the middle is the SRTPlatform seam (capability flags + device ops), where hardware specifics live; the bottom is per-chip kernels (CUDA / HIP / CANN…).</div>
 </div>
 
 <table class="t">
@@ -11646,7 +11646,7 @@ and the real engineering complexity is tucked inside them.</p>
     <text x="670" y="278" text-anchor="middle" style="font-size:11px;fill:var(--muted)">hardware_backend</text>
     <text x="670" y="298" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✗ · graph ✗</text>
   </svg>
-  <div class="figcap"><b>Fig B · One engine → many chips</b> — the same SGLang engine fans out to NVIDIA (CUDA), AMD (ROCm), Ascend NPU, Intel XPU, MUSA, MLX; CUDA/ROCm are SRTPlatform subclasses under <span class="mono">platforms/</span> (real flags; ROCm currently keeps the conservative base defaults), while NPU/XPU/MUSA/MLX integrate via <span class="mono">hardware_backend/</span> (flags illustrative); the engine adapts using flags like supports_fp8 / support_cuda_graph.</div>
+  <div class="figcap"><b>Fig 2 · One engine → many chips</b> — the same SGLang engine fans out to NVIDIA (CUDA), AMD (ROCm), Ascend NPU, Intel XPU, MUSA, MLX; CUDA/ROCm are SRTPlatform subclasses under <span class="mono">platforms/</span> (real flags; ROCm currently keeps the conservative base defaults), while NPU/XPU/MUSA/MLX integrate via <span class="mono">hardware_backend/</span> (flags illustrative); the engine adapts using flags like supports_fp8 / support_cuda_graph.</div>
 </div>
 
 <div class="cols">
@@ -13088,7 +13088,7 @@ class ExpertLocationMetadata:
     <rect x="756" y="124" width="38" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="775" y="154" text-anchor="middle" style="font-weight:700;font-size:12px">LLM</text>
   </svg>
-  <div class="figcap"><b>Fig A · media → placeholders → encoder → splice</b> — the processor turns the image into tensors and inserts <span class="mono">&lt;image&gt;×N</span> placeholders into the token stream; the vision encoder produces N image embeddings in parallel; at the model input the placeholder slots are replaced by those embeddings, then the LLM runs forward as usual.</div>
+  <div class="figcap"><b>Fig 1 · media → placeholders → encoder → splice</b> — the processor turns the image into tensors and inserts <span class="mono">&lt;image&gt;×N</span> placeholders into the token stream; the vision encoder produces N image embeddings in parallel; at the model input the placeholder slots are replaced by those embeddings, then the LLM runs forward as usual.</div>
 </div>
 
 <h2>2. Where the splice happens: the "picture squares" inside one row of embeddings</h2>
@@ -13127,7 +13127,7 @@ class ExpertLocationMetadata:
     <text x="103" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
     <text x="678" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
   </svg>
-  <div class="figcap"><b>Fig B · one embedding row: image embeddings fill the slots</b> — in one row of token embeddings, most slots are text-token embeddings; a contiguous run of placeholder slots (different color) is filled by the vision encoder's k image-patch embeddings, forming text · [img emb × k] · text.</div>
+  <div class="figcap"><b>Fig 2 · one embedding row: image embeddings fill the slots</b> — in one row of token embeddings, most slots are text-token embeddings; a contiguous run of placeholder slots (different color) is filled by the vision encoder's k image-patch embeddings, forming text · [img emb × k] · text.</div>
 </div>
 
 <p>A concrete example: a single <span class="mono">448×448</span> image, after the processor tiles it, might expand to about <strong>256 placeholder tokens</strong>, and the vision encoder then produces exactly <strong>256 image-patch embeddings</strong> that fill those contiguous slots one-for-one — the counts line up exactly. Seen from the scalability angle: to make the same engine serve a brand-new VLM, you usually only swap the two boxes <strong>processor + vision tower</strong>; the scheduler, paged KV, attention, and sampler are not touched at all, and the new model runs.</p>
@@ -15179,7 +15179,7 @@ class RadixCache(BasePrefixCache):
     <text x="484" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
     <text x="560" y="231" style="fill:var(--teal);font-weight:700;font-size:13px">CPU ‖ GPU busy</text>
   </svg>
-  <div class="figcap"><b>Fig 59-1 · CPU bubbles hidden behind the forward</b> — serial: the GPU idles during CPU schedule and processing (the bubble); overlap: the CPU runs concurrently with the GPU forward, the GPU runs back-to-back, the bubbles vanish.</div>
+  <div class="figcap"><b>Fig 1 · CPU bubbles hidden behind the forward</b> — serial: the GPU idles during CPU schedule and processing (the bubble); overlap: the CPU runs concurrently with the GPU forward, the GPU runs back-to-back, the bubbles vanish.</div>
 </div>
 
 <div class="fig">
@@ -15213,7 +15213,7 @@ class RadixCache(BasePrefixCache):
     <text x="565" y="213" text-anchor="middle" class="mono" style="font-size:11px">proc B2</text>
     <text x="20" y="258" style="fill:var(--accent-ink);font-weight:700;font-size:13px">one beat: build N+1 ‖ forward N ‖ process N-1</text>
   </svg>
-  <div class="figcap"><b>Fig 59-2 · the overlap pipeline</b> — build, forward, and process lanes are each staggered one step apart; once in steady state (t4), a single beat has the CPU build batch N+1, the GPU run forward N, and the CPU process batch N-1—all three always in parallel.</div>
+  <div class="figcap"><b>Fig 2 · the overlap pipeline</b> — build, forward, and process lanes are each staggered one step apart; once in steady state (t4), a single beat has the CPU build batch N+1, the GPU run forward N, and the CPU process batch N-1—all three always in parallel.</div>
 </div>
 
 <h2>3. The other beads: chunked prefill, CUDA graphs, process split</h2>

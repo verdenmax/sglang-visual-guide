@@ -595,7 +595,7 @@ LESSON_05 = {
     <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
   </svg>
-  <div class="figcap"><b>图 A · 静态 vs 连续批处理时间线</b> — 上：静态批处理里早早完成的请求只能占着槽位空转，整批被最慢的 R4 拖到底；下：连续批处理一旦有请求完成，新请求立刻补进同一槽位，时间线被填满，GPU 持续满载。</div>
+  <div class="figcap"><b>图 1 · 静态 vs 连续批处理时间线</b> — 上：静态批处理里早早完成的请求只能占着槽位空转，整批被最慢的 R4 拖到底；下：连续批处理一旦有请求完成，新请求立刻补进同一槽位，时间线被填满，GPU 持续满载。</div>
 </div>
 
 <div class="card"><div class="tag">🔢 一个具体的例子</div>
@@ -680,7 +680,7 @@ LESSON_05 = {
     <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="522" y="254" style="font-size:11px;fill:var(--muted)">刚完成 ✓</text>
   </svg>
-  <div class="figcap"><b>图 B · 请求随到随走</b> — 列是相邻的调度步、行是 4 个批槽。蓝＝运行中，橙＝本步新加入（★），红＝本步刚完成（✓）。R3、R4、R1 先后完成腾出槽位，R5、R6、R7 中途补入——批次不靠整批排空，而是逐槽流动。</div>
+  <div class="figcap"><b>图 2 · 请求随到随走</b> — 列是相邻的调度步、行是 4 个批槽。蓝＝运行中，橙＝本步新加入（★），红＝本步刚完成（✓）。R3、R4、R1 先后完成腾出槽位，R5、R6、R7 中途补入——批次不靠整批排空，而是逐槽流动。</div>
 </div>
 
 <h2>为什么它能赢：回到"访存密集"</h2>
@@ -866,7 +866,7 @@ still doing real work.</p>
     <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
   </svg>
-  <div class="figcap"><b>Fig A · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
+  <div class="figcap"><b>Fig 1 · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
 </div>
 
 <div class="card"><div class="tag">🔢 A concrete example</div>
@@ -949,7 +949,7 @@ consecutive steps: the finished (✓) are replaced by newcomers (★), so the ba
     <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="522" y="254" style="font-size:11px;fill:var(--muted)">just finished ✓</text>
   </svg>
-  <div class="figcap"><b>Fig B · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
+  <div class="figcap"><b>Fig 2 · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
 </div>
 
 <h2>Why it wins: back to "memory-bound"</h2>
@@ -1614,7 +1614,7 @@ LESSON_07 = {
     <rect x="170" y="200" width="368" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="354" y="221" text-anchor="middle" style="fill:var(--teal);font-weight:700">命中缓存：省下 500 token 的 prefill，只算 20 token</text>
   </svg>
-  <div class="figcap"><b>图 · 命中缓存省下的计算</b> — 请求 2 复用请求 1 的前缀 KV（虚线＝复用、零重算），只为它新增的 20 个 token 付出计算。例：一条 520 token 的请求只算 20，约 <b>96%</b> 的 prefill 被省掉。</div>
+  <div class="figcap"><b>图 1 · 命中缓存省下的计算</b> — 请求 2 复用请求 1 的前缀 KV（虚线＝复用、零重算），只为它新增的 20 个 token 付出计算。例：一条 520 token 的请求只算 20，约 <b>96%</b> 的 prefill 被省掉。</div>
 </div>
 
 <h2>RadixAttention：把 KV 存进基数树</h2>
@@ -1647,7 +1647,7 @@ LESSON_07 = {
     <text x="560" y="238" text-anchor="middle" style="fill:var(--ink)">问题 B：翻成法语</text>
     <text x="560" y="253" text-anchor="middle" style="fill:var(--blue);font-size:11px">发散后缀 · 各算各的</text>
   </svg>
-  <div class="figcap"><b>图 · 基数树（共享前缀）</b> — 两条请求共用同一段 system prompt 前缀（强调色，只存一份、只算一次），在真正不同的用户问题处分叉成两支。例：共享 12 个 token，命中后第二条请求只需为它独有的后缀新建一支分支。</div>
+  <div class="figcap"><b>图 2 · 基数树（共享前缀）</b> — 两条请求共用同一段 system prompt 前缀（强调色，只存一份、只算一次），在真正不同的用户问题处分叉成两支。例：共享 12 个 token，命中后第二条请求只需为它独有的后缀新建一支分支。</div>
 </div>
 
 <p>"<strong>分裂边</strong>"是基数树的精髓所在。设树里已存着 <span class="mono">"You are a helpful assistant. Translate"</span> 这一长串，
@@ -1810,7 +1810,7 @@ The higher the hit rate, the bigger the win — that's where RadixAttention's va
     <rect x="170" y="200" width="368" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="354" y="221" text-anchor="middle" style="fill:var(--teal);font-weight:700">Cache hit: save 500 tokens of prefill, compute only 20</text>
   </svg>
-  <div class="figcap"><b>Fig · Compute saved by a cache hit</b> — request 2 reuses request 1's prefix KV (dashed = reused, zero recompute) and pays compute only for its 20 new tokens. e.g. a 520-token request computes only 20 — about <b>96%</b> of prefill is skipped.</div>
+  <div class="figcap"><b>Fig 1 · Compute saved by a cache hit</b> — request 2 reuses request 1's prefix KV (dashed = reused, zero recompute) and pays compute only for its 20 new tokens. e.g. a 520-token request computes only 20 — about <b>96%</b> of prefill is skipped.</div>
 </div>
 
 <h2>RadixAttention: store KV in a radix tree</h2>
@@ -1843,7 +1843,7 @@ and each <strong>edge</strong> carries a run of consecutive tokens plus the corr
     <text x="560" y="238" text-anchor="middle" style="fill:var(--ink)">Question B: translate to French</text>
     <text x="560" y="253" text-anchor="middle" style="fill:var(--blue);font-size:11px">divergent suffix · computed apart</text>
   </svg>
-  <div class="figcap"><b>Fig · Radix tree (shared prefix)</b> — two requests share one system-prompt prefix (accent = stored once, computed once) and fork only where the user questions truly differ. e.g. 12 shared tokens; after a hit the second request only builds a branch for its unique suffix.</div>
+  <div class="figcap"><b>Fig 2 · Radix tree (shared prefix)</b> — two requests share one system-prompt prefix (accent = stored once, computed once) and fork only where the user questions truly differ. e.g. 12 shared tokens; after a hit the second request only builds a branch for its unique suffix.</div>
 </div>
 
 <p><strong>Splitting an edge</strong> is the essence of a radix tree. Suppose the tree already holds <span class="mono">"You are a helpful assistant. Translate"</span>,

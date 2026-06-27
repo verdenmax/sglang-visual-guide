@@ -1284,7 +1284,7 @@ LESSON_42 = {"zh": r"""
     <rect x="534" y="234" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="647" y="257" text-anchor="middle" class="mono" style="font-size:13px">CANN</text>
   </svg>
-  <div class="figcap"><b>图 A · 三条横带</b> — 上层硬件无关（调度器 / 模型 / 注意力抽象）；中间是 SRTPlatform 分界线（能力标志 + 设备操作），硬件细节只住在这里；底层是每芯片内核（CUDA / HIP / CANN…）。</div>
+  <div class="figcap"><b>图 1 · 三条横带</b> — 上层硬件无关（调度器 / 模型 / 注意力抽象）；中间是 SRTPlatform 分界线（能力标志 + 设备操作），硬件细节只住在这里；底层是每芯片内核（CUDA / HIP / CANN…）。</div>
 </div>
 
 <table class="t">
@@ -1335,7 +1335,7 @@ LESSON_42 = {"zh": r"""
     <text x="670" y="278" text-anchor="middle" style="font-size:11px;fill:var(--muted)">hardware_backend</text>
     <text x="670" y="298" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✗ · graph ✗</text>
   </svg>
-  <div class="figcap"><b>图 B · 一个引擎 → 多种芯片</b> — 同一个 SGLang 引擎扇出到 NVIDIA(CUDA)、AMD(ROCm)、昇腾 NPU、Intel XPU、MUSA、MLX；其中 CUDA/ROCm 是 <span class="mono">platforms/</span> 下的 SRTPlatform 子类（标志为真实值，ROCm 当前保守地沿用基类默认），NPU/XPU/MUSA/MLX 则经 <span class="mono">hardware_backend/</span> 接入（标志为示意）；引擎据 supports_fp8 / support_cuda_graph 等能力标志自适应。</div>
+  <div class="figcap"><b>图 2 · 一个引擎 → 多种芯片</b> — 同一个 SGLang 引擎扇出到 NVIDIA(CUDA)、AMD(ROCm)、昇腾 NPU、Intel XPU、MUSA、MLX；其中 CUDA/ROCm 是 <span class="mono">platforms/</span> 下的 SRTPlatform 子类（标志为真实值，ROCm 当前保守地沿用基类默认），NPU/XPU/MUSA/MLX 则经 <span class="mono">hardware_backend/</span> 接入（标志为示意）；引擎据 supports_fp8 / support_cuda_graph 等能力标志自适应。</div>
 </div>
 
 <div class="cols">
@@ -1452,7 +1452,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
     <rect x="534" y="234" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="647" y="257" text-anchor="middle" class="mono" style="font-size:13px">CANN</text>
   </svg>
-  <div class="figcap"><b>Fig A · Three bands</b> — the upper tiers are hardware-agnostic (scheduler / model / attention abstraction); the middle is the SRTPlatform seam (capability flags + device ops), where hardware specifics live; the bottom is per-chip kernels (CUDA / HIP / CANN…).</div>
+  <div class="figcap"><b>Fig 1 · Three bands</b> — the upper tiers are hardware-agnostic (scheduler / model / attention abstraction); the middle is the SRTPlatform seam (capability flags + device ops), where hardware specifics live; the bottom is per-chip kernels (CUDA / HIP / CANN…).</div>
 </div>
 
 <table class="t">
@@ -1503,7 +1503,7 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
     <text x="670" y="278" text-anchor="middle" style="font-size:11px;fill:var(--muted)">hardware_backend</text>
     <text x="670" y="298" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✗ · graph ✗</text>
   </svg>
-  <div class="figcap"><b>Fig B · One engine → many chips</b> — the same SGLang engine fans out to NVIDIA (CUDA), AMD (ROCm), Ascend NPU, Intel XPU, MUSA, MLX; CUDA/ROCm are SRTPlatform subclasses under <span class="mono">platforms/</span> (real flags; ROCm currently keeps the conservative base defaults), while NPU/XPU/MUSA/MLX integrate via <span class="mono">hardware_backend/</span> (flags illustrative); the engine adapts using flags like supports_fp8 / support_cuda_graph.</div>
+  <div class="figcap"><b>Fig 2 · One engine → many chips</b> — the same SGLang engine fans out to NVIDIA (CUDA), AMD (ROCm), Ascend NPU, Intel XPU, MUSA, MLX; CUDA/ROCm are SRTPlatform subclasses under <span class="mono">platforms/</span> (real flags; ROCm currently keeps the conservative base defaults), while NPU/XPU/MUSA/MLX integrate via <span class="mono">hardware_backend/</span> (flags illustrative); the engine adapts using flags like supports_fp8 / support_cuda_graph.</div>
 </div>
 
 <div class="cols">
