@@ -414,7 +414,7 @@ LESSON_54 = {"zh": r"""
     <text x="34" y="120" style="font-size:12px;fill:var(--muted)">请求流 →</text>
     <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
     <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">知结果，不知原因</text>
-    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
     <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler：看见过程</text>
     <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
     <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
@@ -556,7 +556,7 @@ class BenchmarkMetrics:
     <text x="34" y="120" style="font-size:12px;fill:var(--muted)">requests →</text>
     <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
     <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">outcome, not why</text>
-    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
     <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler: see the process</text>
     <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
     <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
@@ -663,11 +663,11 @@ LESSON_55 = {"zh": r"""
 
 <p>举两个具体例子：一个采样辅助函数的单元测试只需 <span class="mono">import</span> 它、喂一组 logits、断言挑出的 token 对不对，整个过程在毫秒级完成、完全不碰 GPU；而一个端到端准确率测试会先用 <span class="mono">popen_launch_server</span> 拉起服务器，再在 <span class="mono">GSM8K</span> 数据集上跑一遍，断言得分高于某个阈值（比如 0.8）才算通过。下面这个辅助函数就是端到端测试的「起服务器」入口：</p>
 
-<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">起一个真实服务器子进程，轮询 /health 直到就绪</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">起一个真实服务器子进程，轮询 /health_generate 直到就绪</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
                         other_args=None, ...):
     # spawn a REAL server subprocess:
-    #   python -m sglang.launch_server --model-path model ...other_args
-    # then poll /health until ready (or raise on `timeout`). e2e tests
+    #   sglang serve --model-path model ...other_args
+    # then poll /health_generate until ready (or raise on `timeout`). e2e tests
     # hit this server over HTTP, then tear it down.
     ...
     return process</pre></div>
@@ -811,11 +811,11 @@ LESSON_55 = {"zh": r"""
 
 <p>Two concrete examples: a unit test for a sampling helper just <span class="mono">import</span>s it, feeds a set of logits, and asserts the chosen token is right—all in milliseconds, never touching a GPU; an e2e accuracy test instead calls <span class="mono">popen_launch_server</span> to bring up a server, runs the <span class="mono">GSM8K</span> dataset through it, and passes only if the score is above a threshold (say 0.8). The helper below is exactly that "launch a server" entry point for e2e tests:</p>
 
-<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">spawn a real server subprocess, poll /health until ready</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">spawn a real server subprocess, poll /health_generate until ready</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
                         other_args=None, ...):
     # spawn a REAL server subprocess:
-    #   python -m sglang.launch_server --model-path model ...other_args
-    # then poll /health until ready (or raise on `timeout`). e2e tests
+    #   sglang serve --model-path model ...other_args
+    # then poll /health_generate until ready (or raise on `timeout`). e2e tests
     # hit this server over HTTP, then tear it down.
     ...
     return process</pre></div>
