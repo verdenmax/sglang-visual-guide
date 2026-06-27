@@ -168,8 +168,8 @@ QUIZZES = {
                 },
                 "opts": [
                     {
-                        "zh": "Scheduler 子进程握着 GPU：它持有 TpWorker/ModelRunner 做前向，张量并行时每个 TP rank 各起一个；两个 Manager 只是一进一出的“翻译官”",
-                        "en": "The Scheduler subprocess holds the GPU: it owns TpWorker/ModelRunner for the forward (one per TP rank under tensor parallelism); the two Managers are just in/out translators",
+                        "zh": "Scheduler 子进程握着 GPU：它持有 TpModelWorker/ModelRunner 做前向，张量并行时每个 TP rank 各起一个；两个 Manager 只是一进一出的“翻译官”",
+                        "en": "The Scheduler subprocess holds the GPU: it owns TpModelWorker/ModelRunner for the forward (one per TP rank under tensor parallelism); the two Managers are just in/out translators",
                     },
                     {"zh": "TokenizerManager 握着 GPU，Scheduler 只在 CPU 上排队", "en": "TokenizerManager holds the GPU; the Scheduler only queues on the CPU"},
                     {"zh": "DetokenizerManager 握着 GPU 做模型前向", "en": "DetokenizerManager holds the GPU and runs the model forward"},
@@ -1300,8 +1300,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "调度器“只决策、不计算”：组批和收尾是 CPU 上的轻量记账，唯独 <code>run_batch</code> 把批交给 TpWorker→ModelRunner 在 GPU 上 forward（第 24 课）。normal 版严格串行，CPU 忙时 GPU 闲、反之亦然。由于循环速度直接给吞吐封顶，第 21 课的 overlap 版用结果队列把上一步收尾推迟、与本步 GPU 计算重叠，从而把 CPU 时间藏起来。",
-                    "en": "The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.",
+                    "zh": "调度器“只决策、不计算”：组批和收尾是 CPU 上的轻量记账，唯独 <code>run_batch</code> 把批交给 TpModelWorker→ModelRunner 在 GPU 上 forward（第 24 课）。normal 版严格串行，CPU 忙时 GPU 闲、反之亦然。由于循环速度直接给吞吐封顶，第 21 课的 overlap 版用结果队列把上一步收尾推迟、与本步 GPU 计算重叠，从而把 CPU 时间藏起来。",
+                    "en": "The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpModelWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.",
                 },
             },
         ],
@@ -1695,8 +1695,8 @@ QUIZZES = {
                 },
                 "opts": [
                     {
-                        "zh": "调度器<strong>只决策不计算</strong>（收请求、组批、定策略），每步调 <code>run_batch</code> 把活儿派下去；<strong>ModelRunner 才把一批 token 真正在 GPU 上算成 logits</strong>——它是“决策→计算”的那道边界，<strong>每个 TP rank 一个</strong>，由 TpWorker 持有",
-                        "en": "The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpWorker",
+                        "zh": "调度器<strong>只决策不计算</strong>（收请求、组批、定策略），每步调 <code>run_batch</code> 把活儿派下去；<strong>ModelRunner 才把一批 token 真正在 GPU 上算成 logits</strong>——它是“决策→计算”的那道边界，<strong>每个 TP rank 一个</strong>，由 TpModelWorker 持有",
+                        "en": "The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpModelWorker",
                     },
                     {"zh": "调度器既决策又亲自跑前向，ModelRunner 只负责采样出 token", "en": "The scheduler both decides and runs the forward itself; ModelRunner only samples the token"},
                     {"zh": "整个进程共用一个 ModelRunner，所有 TP rank 都调它", "en": "The whole process shares one ModelRunner that all TP ranks call"},
@@ -1704,8 +1704,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "第五部分讲的都是调度器“怎么决策”，它<strong>从不碰 GPU</strong>；真正把 token 算成 logits 的是 ModelRunner。调用链是 <code>run_batch</code> → TpWorker → 它独占的 ModelRunner，<strong>每个 TP rank 一个</strong>，各算模型一片再靠集合通信拼齐。所以它是“决策变计算”的边界，而不是共享单例，也不管接请求/分词。",
-                    "en": "Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.",
+                    "zh": "第五部分讲的都是调度器“怎么决策”，它<strong>从不碰 GPU</strong>；真正把 token 算成 logits 的是 ModelRunner。调用链是 <code>run_batch</code> → TpModelWorker → 它独占的 ModelRunner，<strong>每个 TP rank 一个</strong>，各算模型一片再靠集合通信拼齐。所以它是“决策变计算”的边界，而不是共享单例，也不管接请求/分词。",
+                    "en": "Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpModelWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.",
                 },
             },
             {
@@ -1751,8 +1751,8 @@ QUIZZES = {
         ],
         "open": [
             {
-                "zh": "用“车间机台操作工”的类比，完整讲清一次前向在 ModelRunner 里怎么走完。请逐一覆盖：①调用链——第 18 课调度器 <code>run_batch</code> → TpWorker → <strong>每 rank 一个</strong>的 ModelRunner，以及为什么 8 个 rank 必须<strong>步调一致</strong>跑同一批（集合通信会死锁）；②ModelRunner 先把 <code>ScheduleBatch</code> 翻成 <code>ForwardBatch</code>，并说明 <code>positions/forward_mode/</code>注意力元数据/<code>out_cache_loc</code> 各驱动了什么；③前向内部 <strong>嵌入 → N 层解码层（注意力读写 KV 池、命中时复用 RadixAttention 前缀，第 7 课）→ 末端归一 + <code>lm_head</code> → logits</strong>，并指出 <strong>logits→token</strong> 的转折点（<code>sample()</code> 交给第 28 课采样器）发生在哪一步。",
-                "en": "Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.",
+                "zh": "用“车间机台操作工”的类比，完整讲清一次前向在 ModelRunner 里怎么走完。请逐一覆盖：①调用链——第 18 课调度器 <code>run_batch</code> → TpModelWorker → <strong>每 rank 一个</strong>的 ModelRunner，以及为什么 8 个 rank 必须<strong>步调一致</strong>跑同一批（集合通信会死锁）；②ModelRunner 先把 <code>ScheduleBatch</code> 翻成 <code>ForwardBatch</code>，并说明 <code>positions/forward_mode/</code>注意力元数据/<code>out_cache_loc</code> 各驱动了什么；③前向内部 <strong>嵌入 → N 层解码层（注意力读写 KV 池、命中时复用 RadixAttention 前缀，第 7 课）→ 末端归一 + <code>lm_head</code> → logits</strong>，并指出 <strong>logits→token</strong> 的转折点（<code>sample()</code> 交给第 28 课采样器）发生在哪一步。",
+                "en": "Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpModelWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.",
             },
             {
                 "zh": "围绕 <strong>EXTEND vs DECODE</strong> 展开，把“同一个 forward 的两种性格”讲透，并说明它如何决定 Part 6 后续几课的脉络。请说明：①两者在 token 数、形状规整度、瓶颈（预填充<strong>计算密集</strong> vs 解码<strong>访存密集</strong>）上的差异；②为什么解码适合 <strong>CUDA Graph 重放</strong>（第 27 课）而预填充多走即时/分块（第 22 课）；③为什么 ModelRunner 还要<strong>同时</strong>握住模型（第 25/26 课）、KV 池（第 30 课）、注意力后端（第 33 课）乃至草稿模型（第 43 课），并据此说明 Part 6 接下来分别拆解的是哪几样零件。",

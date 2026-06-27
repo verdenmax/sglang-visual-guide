@@ -1091,7 +1091,7 @@ it belongs to, which future lesson it maps to. This locating habit pays off acro
 <div class="quiz">
   <div class="qn">2. At run time the engine forks into three processes talking over ZMQ IPC. Which statement about who holds the GPU is correct?</div>
   <ol class="opts">
-    <li>The Scheduler subprocess holds the GPU: it owns TpWorker/ModelRunner for the forward (one per TP rank under tensor parallelism); the two Managers are just in/out translators</li>
+    <li>The Scheduler subprocess holds the GPU: it owns TpModelWorker/ModelRunner for the forward (one per TP rank under tensor parallelism); the two Managers are just in/out translators</li>
     <li>All three processes share the same GPU memory with no clear division</li>
     <li>DetokenizerManager holds the GPU and runs the model forward</li>
     <li>TokenizerManager holds the GPU; the Scheduler only queues on the CPU</li>
@@ -5564,7 +5564,7 @@ composition is reshuffled every revolution</strong>.</p>
   </ol>
   <details class="accordion" open>
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The scheduler 'decides, never computes': batching and finishing are light CPU accounting, while only <code>run_batch</code> hands the batch to TpModelWorker→ModelRunner for GPU forward (Lesson 24). The normal loop is strictly serial — CPU busy means GPU idle and vice versa. Since loop speed caps throughput, Lesson 21's overlap version defers the previous step's finishing via a result queue to overlap this step's GPU compute, hiding the CPU time.</div></div></div>
   </details>
 </div>
 <div class="card spark">
@@ -7299,13 +7299,13 @@ boundary, one per rank, holding model + KV pool + attention backend</strong>" �
   <div class="qn">1. In SGLang, what is the responsibility boundary between <code>ModelRunner</code> and the scheduler (Lesson 18)?</div>
   <ol class="opts">
     <li>ModelRunner receives HTTP requests and tokenizes; the scheduler does the forward</li>
-    <li>The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpWorker</li>
+    <li>The scheduler <strong>only decides, never computes</strong> (receive, batch, set policy) and calls <code>run_batch</code> each step to dispatch work; <strong>ModelRunner is what actually turns a batch of tokens into logits on the GPU</strong> — it is the decide→compute boundary, <strong>one per TP rank</strong>, owned by the TpModelWorker</li>
     <li>The scheduler both decides and runs the forward itself; ModelRunner only samples the token</li>
     <li>The whole process shares one ModelRunner that all TP ranks call</li>
   </ol>
   <details class="accordion" open>
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Part 5 is all about how the scheduler decides; it <strong>never touches the GPU</strong>. What turns tokens into logits is ModelRunner. The chain is <code>run_batch</code> → TpModelWorker → the one ModelRunner it owns, <strong>one per TP rank</strong>, each computing a slice and stitching via collectives. So it is the decide→compute boundary, not a shared singleton, and it doesn't ingest requests/tokenize.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -7337,7 +7337,7 @@ boundary, one per rank, holding model + KV pool + attention backend</strong>" �
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.</li>
+    <li>Using the 'machine operator on the floor' analogy, fully explain how one forward runs through ModelRunner. Cover each: (1) the call chain — scheduler <code>run_batch</code> (Lesson 18) → TpModelWorker → the <strong>one-per-rank</strong> ModelRunner, and why 8 ranks must run the same batch in <strong>lockstep</strong> (collectives deadlock otherwise); (2) ModelRunner first translates <code>ScheduleBatch</code> into <code>ForwardBatch</code>, and what <code>positions/forward_mode/</code>attention metadata/<code>out_cache_loc</code> each drive; (3) the forward internals <strong>embed → N decoder layers (attention reads/writes the KV pool, reusing a RadixAttention prefix on a hit, Lesson 7) → final norm + <code>lm_head</code> → logits</strong>, and where the <strong>logits→token</strong> turning point (<code>sample()</code> handing off to the Lesson 28 Sampler) happens.</li>
     <li>Centered on <strong>EXTEND vs DECODE</strong>, fully explain the 'two personalities of one forward' and how it shapes the rest of Part 6. Explain: (1) their differences in token count, shape regularity, and bottleneck (prefill <strong>compute-bound</strong> vs decode <strong>memory-bound</strong>); (2) why decode suits <strong>CUDA-graph replay</strong> (Lesson 27) while prefill mostly runs eager/chunked (Lesson 22); (3) why ModelRunner must hold the model (Lessons 25/26), KV pool (Lesson 30), attention backend (Lesson 33), and even a draft model (Lesson 43) <strong>all at once</strong>, and from that, which parts the rest of Part 6 takes apart one by one.</li>
   </ul>
 </div>
