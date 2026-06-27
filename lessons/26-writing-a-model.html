@@ -397,6 +397,39 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
   <div class="layer l-app"><div class="lh"><span class="badge">出口</span><span class="name">lm_head</span></div><div class="ld">把末端 hidden 投影到词表维，得到 <strong>logits</strong>（可与嵌入共享权重）。</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="解码器模型的层栈：embed_tokens 经过 N 层 LlamaDecoderLayer（每层含 self_attn 与 MLP，配 RMSNorm 与残差）再到末端 norm、lm_head，最后得到 logits">
+    <rect x="255" y="20" width="250" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="380" y="40" text-anchor="middle" class="mono" style="font-size:12px">embed_tokens</text>
+    <line x1="380" y1="50" x2="380" y2="68" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,72 375,64 385,64" style="fill:var(--muted)"/>
+    <rect x="170" y="72" width="420" height="142" rx="8" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="186" y="92" style="font-weight:700;fill:var(--accent-ink);font-size:13px">N × LlamaDecoderLayer</text>
+    <rect x="520" y="78" width="60" height="22" rx="11" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="550" y="93" text-anchor="middle" class="mono" style="font-size:11px">× 32</text>
+    <rect x="190" y="104" width="180" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="280" y="124" text-anchor="middle" style="font-size:12px">RMSNorm + self_attn</text>
+    <text x="280" y="142" text-anchor="middle" style="fill:var(--muted);font-size:11px">注意力子层</text>
+    <rect x="394" y="104" width="176" height="48" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="482" y="124" text-anchor="middle" style="font-size:12px">RMSNorm + MLP</text>
+    <text x="482" y="142" text-anchor="middle" style="fill:var(--muted);font-size:11px">前馈子层</text>
+    <text x="380" y="182" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">+ 残差 (residual) × 2，逐层向下传递</text>
+    <text x="380" y="202" text-anchor="middle" style="fill:var(--faint);font-size:11px">Llama-2-7B：32 层 · hidden 4096</text>
+    <line x1="380" y1="214" x2="380" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,236 375,228 385,228" style="fill:var(--muted)"/>
+    <rect x="265" y="236" width="230" height="28" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="380" y="255" text-anchor="middle" class="mono" style="font-size:12px">norm (RMSNorm)</text>
+    <line x1="380" y1="264" x2="380" y2="280" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,284 375,276 385,276" style="fill:var(--muted)"/>
+    <rect x="265" y="284" width="230" height="28" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="303" text-anchor="middle" class="mono" style="font-size:12px">lm_head</text>
+    <line x1="380" y1="312" x2="380" y2="326" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,330 375,322 385,322" style="fill:var(--muted)"/>
+    <text x="430" y="334" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">→ logits</text>
+  </svg>
+  <div class="figcap"><b>图 26·1 · 解码器模型的层栈</b> — 一个 SGLang 模型就是把 <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span>（每层 = self_attn + MLP，配 RMSNorm 与残差）→ 末端 <span class="mono">norm</span> → <span class="mono">lm_head</span> 竖着叠起来。Llama-2-7B 就是 32 层、hidden 4096 的这样一摞。</div>
+</div>
+
 <h2>一层里发生了什么：跟着残差走一遍</h2>
 <p>值得强调的是，<strong>层的选择本身就编码了并行策略</strong>。当作者把 q/k/v 投影写成 <span class="mono">QKVParallelLinear</span>、把 o_proj 写成 <span class="mono">RowParallelLinear</span> 时，他没有写任何一行通信代码，却已经决定了：这层在张量并行下，权重按输出维切给各卡、各卡先各算一段、再在 o_proj 之后用一次 all-reduce 把结果拼齐（第 46 课）。换句话说，"选哪种并行层"就是在"选这层怎么跨卡分布"。同理，<span class="mono">VocabParallelEmbedding</span> 把词表维切开、<span class="mono">ParallelLMHead</span> 把输出投影切开。作者要操心的只是"维度对不对、切法配不配套"，真正的切片与集合通信全在层内部默默发生——这正是模型文件能保持简短的关键。</p>
 <p>把镜头推进到<strong>单独一层</strong>解码层，你能看清"组装"具体组装出了什么。数据带着上一层的残差进来，先做一次
@@ -419,6 +452,66 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
   <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down，提取非线性特征。</p></div></div>
   <div class="step"><div class="num">6</div><div class="sc"><h4>残差相加 → 下一层</h4><p>与 residual 相加，交出 <span class="mono">(hidden, residual)</span>。</p></div></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="LlamaAttention.forward 把注意力委托给 self.attn：hidden_states 经 qkv_proj、拆分 q/k/v、rotary_emb，进入高亮的 self.attn（RadixAttention，SGLang 缝合点），再经 o_proj 得到 output">
+    <text x="20" y="32" style="font-weight:700;fill:var(--muted);font-size:13px">LlamaAttention.forward(positions, hidden_states, forward_batch)</text>
+    <rect x="20" y="68" width="96" height="48" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="68" y="96" text-anchor="middle" class="mono" style="font-size:11px">hidden</text>
+    <line x1="116" y1="92" x2="128" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="132,92 124,87 124,97" style="fill:var(--muted)"/>
+    <rect x="130" y="68" width="96" height="48" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="178" y="96" text-anchor="middle" class="mono" style="font-size:11px">qkv_proj</text>
+    <line x1="226" y1="92" x2="238" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="242,92 234,87 234,97" style="fill:var(--muted)"/>
+    <rect x="240" y="68" width="96" height="48" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="288" y="90" text-anchor="middle" class="mono" style="font-size:11px">split</text>
+    <text x="288" y="106" text-anchor="middle" class="mono" style="font-size:11px">q,k,v</text>
+    <line x1="336" y1="92" x2="348" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="352,92 344,87 344,97" style="fill:var(--muted)"/>
+    <rect x="350" y="68" width="96" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="398" y="96" text-anchor="middle" class="mono" style="font-size:11px">rotary_emb</text>
+    <line x1="446" y1="92" x2="458" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="462,92 454,87 454,97" style="fill:var(--muted)"/>
+    <rect x="460" y="58" width="100" height="68" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="510" y="86" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink);font-size:12px">self.attn</text>
+    <text x="510" y="104" text-anchor="middle" class="mono" style="font-size:10px">RadixAttention</text>
+    <line x1="560" y1="92" x2="572" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="576,92 568,87 568,97" style="fill:var(--muted)"/>
+    <rect x="574" y="68" width="96" height="48" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="622" y="96" text-anchor="middle" class="mono" style="font-size:11px">o_proj</text>
+    <line x1="670" y1="92" x2="682" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="686,92 678,87 678,97" style="fill:var(--muted)"/>
+    <rect x="684" y="68" width="96" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="732" y="96" text-anchor="middle" class="mono" style="font-size:11px">output</text>
+    <line x1="510" y1="126" x2="510" y2="158" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <polygon points="510,162 505,154 515,154" style="fill:var(--accent)"/>
+    <rect x="360" y="162" width="300" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="510" y="186" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink);font-size:12px">SGLang 缝合点</text>
+    <text x="510" y="206" text-anchor="middle" style="fill:var(--ink);font-size:11px">KV 缓存 + 分页 + 注意力后端在此接入</text>
+    <text x="510" y="221" text-anchor="middle" style="fill:var(--muted);font-size:11px">由 forward_batch 驱动（第 33 课）</text>
+  </svg>
+  <div class="figcap"><b>图 26·2 · forward() 把注意力委托给 self.attn</b> — <span class="mono">LlamaAttention.forward</span> 自己只做投影、拆分、RoPE 这些"对齐张量"的活，真正的注意力计算交给高亮的 <span class="mono">self.attn</span>（<span class="mono">RadixAttention</span>）——这正是 KV 缓存与注意力后端插进来的<strong>缝</strong>，由 <span class="mono">forward_batch</span> 驱动。</div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/models/llama.py ::LlamaAttention</span><span class="ln">注意力层把算子委托给 self.attn（RadixAttention）</span></div>
+  <pre><span class="kw">class</span> <span class="st">LlamaAttention</span>(nn.Module):
+    <span class="kw">def</span> __init__(self, ...):
+        self.qkv_proj = QKVParallelLinear(...)   <span class="cm"># 融合的 q,k,v 投影</span>
+        self.o_proj   = RowParallelLinear(...)
+        self.rotary_emb = get_rope(...)
+        self.attn = RadixAttention(...)          <span class="cm"># &lt;- SGLang 的那道缝</span>
+    <span class="kw">def</span> forward(self, positions, hidden_states, forward_batch):
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([q_size, kv_size, kv_size], dim=-1)
+        q, k = self.rotary_emb(positions, q, k)
+        attn_output = self.attn(q, k, v, forward_batch)  <span class="cm"># KV 缓存 + 后端</span>
+        output, _ = self.o_proj(attn_output)
+        <span class="kw">return</span> output</pre>
+</div>
+
+<p>把这段代码和上图对起来看，你会发现整个 <span class="mono">LlamaAttention</span> 里<strong>没有一行注意力数学</strong>：它只负责投影、拆分、转 RoPE，然后把 q/k/v 原样递给 <span class="mono">self.attn</span>。最能说明问题的是这个具体例子——<strong>只要把 <span class="mono">self.attn = RadixAttention(...)</span> 这一行写进新模型</strong>，它就自动继承了前缀缓存（第 7 课）、分页 KV 与所有注意力后端（第 33 课），你不必碰任何一行缓存或内核代码。再配一组真实数字感受一下规模：<span class="mono">Llama-2-7B</span> 就是把上面这层注意力 + MLP 打包成 <strong>32 个</strong> <span class="mono">LlamaDecoderLayer</span>、hidden 维 <strong>4096</strong> 竖着叠起来——同一份 <span class="mono">LlamaAttention</span> 代码被实例化 32 次，每次只是 <span class="mono">layer_id</span> 与切片不同，算子始终是库里那一个。</p>
 
 <h2>谁写、谁给：一张分工表把成本说清</h2>
 <p>现在回到那个核心命题：为什么"加一个模型"在 SGLang 里这么便宜？看下面这张表——四（五）个类各自的职责，<strong>无一例外</strong>
@@ -591,6 +684,39 @@ forward_batch)</span> returning logits, and <span class="mono">load_weights</spa
   <div class="layer l-app"><div class="lh"><span class="badge">exit</span><span class="name">lm_head</span></div><div class="ld">Projects final hidden to vocab dim to get <strong>logits</strong> (weight may be shared with embed).</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="A decoder model's layer stack: embed_tokens through N LlamaDecoderLayers (each with self_attn and MLP, plus RMSNorm and residual), then a final norm, lm_head, and finally logits">
+    <rect x="255" y="20" width="250" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="380" y="40" text-anchor="middle" class="mono" style="font-size:12px">embed_tokens</text>
+    <line x1="380" y1="50" x2="380" y2="68" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,72 375,64 385,64" style="fill:var(--muted)"/>
+    <rect x="170" y="72" width="420" height="142" rx="8" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="186" y="92" style="font-weight:700;fill:var(--accent-ink);font-size:13px">N × LlamaDecoderLayer</text>
+    <rect x="520" y="78" width="60" height="22" rx="11" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="550" y="93" text-anchor="middle" class="mono" style="font-size:11px">× 32</text>
+    <rect x="190" y="104" width="180" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="280" y="124" text-anchor="middle" style="font-size:12px">RMSNorm + self_attn</text>
+    <text x="280" y="142" text-anchor="middle" style="fill:var(--muted);font-size:11px">attention sublayer</text>
+    <rect x="394" y="104" width="176" height="48" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="482" y="124" text-anchor="middle" style="font-size:12px">RMSNorm + MLP</text>
+    <text x="482" y="142" text-anchor="middle" style="fill:var(--muted);font-size:11px">feed-forward sublayer</text>
+    <text x="380" y="182" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">+ residual × 2, passed down layer by layer</text>
+    <text x="380" y="202" text-anchor="middle" style="fill:var(--faint);font-size:11px">Llama-2-7B: 32 layers · hidden 4096</text>
+    <line x1="380" y1="214" x2="380" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,236 375,228 385,228" style="fill:var(--muted)"/>
+    <rect x="265" y="236" width="230" height="28" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="380" y="255" text-anchor="middle" class="mono" style="font-size:12px">norm (RMSNorm)</text>
+    <line x1="380" y1="264" x2="380" y2="280" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,284 375,276 385,276" style="fill:var(--muted)"/>
+    <rect x="265" y="284" width="230" height="28" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="303" text-anchor="middle" class="mono" style="font-size:12px">lm_head</text>
+    <line x1="380" y1="312" x2="380" y2="326" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,330 375,322 385,322" style="fill:var(--muted)"/>
+    <text x="430" y="334" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">→ logits</text>
+  </svg>
+  <div class="figcap"><b>Fig 26·1 · A decoder model's layer stack</b> — a SGLang model just stacks <span class="mono">embed_tokens</span> → N×<span class="mono">LlamaDecoderLayer</span> (each = self_attn + MLP, with RMSNorm and residual) → final <span class="mono">norm</span> → <span class="mono">lm_head</span> vertically. Llama-2-7B is exactly such a stack of 32 layers with hidden 4096.</div>
+</div>
+
 <h2>What happens in one layer: follow the residual</h2>
 <p>Worth stressing: <strong>the choice of layer itself encodes the parallel strategy</strong>. When the author writes the q/k/v projection as <span class="mono">QKVParallelLinear</span> and o_proj as <span class="mono">RowParallelLinear</span>, they write no line of communication code, yet have already decided: under tensor parallelism this layer's weight is split on the output dim across cards, each card computes a slice, then one all-reduce after o_proj stitches results back (Lesson 46). In other words, "which parallel layer you pick" is "how this layer distributes across GPUs." Likewise <span class="mono">VocabParallelEmbedding</span> splits the vocab dim and <span class="mono">ParallelLMHead</span> splits the output projection. The author only worries about "are the dims right, do the slicing schemes match" — actual slicing and collective comms happen silently inside the layer, which is exactly why a model file stays short.</p>
 <p>Zoom into a <strong>single</strong> decoder layer and you see what "assembly" actually assembles. Data arrives carrying the previous layer's residual, first goes
@@ -614,6 +740,66 @@ the model only "computes tensors right," while "which KV-pool slots to read/writ
   <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down, extract nonlinear features.</p></div></div>
   <div class="step"><div class="num">6</div><div class="sc"><h4>Residual add → next layer</h4><p>Add to residual, hand off <span class="mono">(hidden, residual)</span>.</p></div></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="LlamaAttention.forward delegates attention to self.attn: hidden_states through qkv_proj, split q/k/v, rotary_emb, into the highlighted self.attn (RadixAttention, the SGLang seam), then o_proj to output">
+    <text x="20" y="32" style="font-weight:700;fill:var(--muted);font-size:13px">LlamaAttention.forward(positions, hidden_states, forward_batch)</text>
+    <rect x="20" y="68" width="96" height="48" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="68" y="96" text-anchor="middle" class="mono" style="font-size:11px">hidden</text>
+    <line x1="116" y1="92" x2="128" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="132,92 124,87 124,97" style="fill:var(--muted)"/>
+    <rect x="130" y="68" width="96" height="48" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="178" y="96" text-anchor="middle" class="mono" style="font-size:11px">qkv_proj</text>
+    <line x1="226" y1="92" x2="238" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="242,92 234,87 234,97" style="fill:var(--muted)"/>
+    <rect x="240" y="68" width="96" height="48" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="288" y="90" text-anchor="middle" class="mono" style="font-size:11px">split</text>
+    <text x="288" y="106" text-anchor="middle" class="mono" style="font-size:11px">q,k,v</text>
+    <line x1="336" y1="92" x2="348" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="352,92 344,87 344,97" style="fill:var(--muted)"/>
+    <rect x="350" y="68" width="96" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="398" y="96" text-anchor="middle" class="mono" style="font-size:11px">rotary_emb</text>
+    <line x1="446" y1="92" x2="458" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="462,92 454,87 454,97" style="fill:var(--muted)"/>
+    <rect x="460" y="58" width="100" height="68" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="510" y="86" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink);font-size:12px">self.attn</text>
+    <text x="510" y="104" text-anchor="middle" class="mono" style="font-size:10px">RadixAttention</text>
+    <line x1="560" y1="92" x2="572" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="576,92 568,87 568,97" style="fill:var(--muted)"/>
+    <rect x="574" y="68" width="96" height="48" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="622" y="96" text-anchor="middle" class="mono" style="font-size:11px">o_proj</text>
+    <line x1="670" y1="92" x2="682" y2="92" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="686,92 678,87 678,97" style="fill:var(--muted)"/>
+    <rect x="684" y="68" width="96" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="732" y="96" text-anchor="middle" class="mono" style="font-size:11px">output</text>
+    <line x1="510" y1="126" x2="510" y2="158" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <polygon points="510,162 505,154 515,154" style="fill:var(--accent)"/>
+    <rect x="360" y="162" width="300" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="510" y="186" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink);font-size:12px">the SGLang seam</text>
+    <text x="510" y="206" text-anchor="middle" style="fill:var(--ink);font-size:11px">KV cache + paging + attention backend plug in here</text>
+    <text x="510" y="221" text-anchor="middle" style="fill:var(--muted);font-size:11px">driven by forward_batch (Lesson 33)</text>
+  </svg>
+  <div class="figcap"><b>Fig 26·2 · forward() delegates attention to self.attn</b> — <span class="mono">LlamaAttention.forward</span> itself only does the "line up the tensors" work — projection, split, RoPE — and hands the real attention compute to the highlighted <span class="mono">self.attn</span> (<span class="mono">RadixAttention</span>). That is the <strong>seam</strong> where the KV cache and attention backend plug in, driven by <span class="mono">forward_batch</span>.</div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/models/llama.py ::LlamaAttention</span><span class="ln">the attention layer delegates the op to self.attn (RadixAttention)</span></div>
+  <pre><span class="kw">class</span> <span class="st">LlamaAttention</span>(nn.Module):
+    <span class="kw">def</span> __init__(self, ...):
+        self.qkv_proj = QKVParallelLinear(...)   <span class="cm"># fused q,k,v projection</span>
+        self.o_proj   = RowParallelLinear(...)
+        self.rotary_emb = get_rope(...)
+        self.attn = RadixAttention(...)          <span class="cm"># &lt;- the SGLang seam</span>
+    <span class="kw">def</span> forward(self, positions, hidden_states, forward_batch):
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([q_size, kv_size, kv_size], dim=-1)
+        q, k = self.rotary_emb(positions, q, k)
+        attn_output = self.attn(q, k, v, forward_batch)  <span class="cm"># KV cache + backend</span>
+        output, _ = self.o_proj(attn_output)
+        <span class="kw">return</span> output</pre>
+</div>
+
+<p>Line this code up with the figure above and you'll see that the whole <span class="mono">LlamaAttention</span> contains <strong>not one line of attention math</strong>: it only projects, splits, and spins RoPE, then hands q/k/v as-is to <span class="mono">self.attn</span>. The most telling concrete example: <strong>just writing the line <span class="mono">self.attn = RadixAttention(...)</span> into a new model</strong> is all it takes to inherit prefix caching (Lesson 7), paged KV, and every attention backend (Lesson 33) — you never touch a line of cache or kernel code. For a feel of the scale, some real numbers: <span class="mono">Llama-2-7B</span> is exactly this attention + MLP packed into <strong>32</strong> <span class="mono">LlamaDecoderLayer</span>s with hidden dim <strong>4096</strong>, stacked vertically — the same <span class="mono">LlamaAttention</span> code is instantiated 32 times, differing only by <span class="mono">layer_id</span> and slicing, while the op is always that one from the library.</p>
 
 <h2>Who writes, who provides: one table makes the cost clear</h2>
 <p>Back to the core claim: why is "adding a model" so cheap in SGLang? Read the table below — the responsibility of each of the four (five) classes is,

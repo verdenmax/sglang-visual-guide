@@ -376,6 +376,44 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   <div class="col"><h4>✅ 有图（replay）：一次提交</h4><p>启动时把整条前向<strong>录成一张图</strong>；运行时 CPU <strong>只提交一次</strong>，GPU 顺着图把几百个内核<strong>连续跑完</strong>，中间不再回头等 CPU。启动开销几乎<strong>归零</strong>，GPU 被<strong>喂满</strong>。</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="每步启动开销有图与无图对比：无图时每个解码步是 GPU 内核之间夹着许多 CPU 发起内核的小间隙，启动开销主导；有图时一次提交重放整条序列，间隙消失，GPU 背靠背连续跑">
+    <text x="16" y="32" style="font-weight:700;fill:var(--red)">无图（eager）：每步夹满 CPU 发起间隙</text>
+    <text x="16" y="64" style="fill:var(--muted);font-size:12px">GPU 时间线（一个解码步）</text>
+    <rect x="56" y="72" width="700" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="64" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="98" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="162" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="196" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="230" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="264" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="298" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="332" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="366" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="400" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="434" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="476" y="97" style="fill:var(--faint);font-size:12px">… 几百个内核 × 间隙，启动开销主导整步</text>
+    <rect x="64" y="124" width="14" height="14" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="86" y="135" style="fill:var(--blue);font-size:11px">内核（算）</text>
+    <rect x="180" y="124" width="14" height="14" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="202" y="135" style="fill:var(--amber);font-size:11px">等 CPU 发起（GPU 干等）</text>
+    <text x="16" y="190" style="font-weight:700;fill:var(--teal)">有图（replay）：一次提交，间隙消失</text>
+    <text x="16" y="222" style="fill:var(--muted);font-size:12px">GPU 时间线（一个解码步）</text>
+    <rect x="56" y="230" width="700" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="64" y="236" width="40" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="84" y="255" text-anchor="middle" class="mono" style="font-size:10px">提交</text>
+    <rect x="108" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="184" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="260" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="336" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="412" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="488" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="580" y="254" style="fill:var(--teal);font-size:12px">→ 内核背靠背连续跑，无间隙</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 每步启动开销：有图 vs 无图</b> — <strong>无图</strong>时每个解码步在 GPU 内核之间夹着许多“<strong>等 CPU 发起</strong>”的小间隙，小 batch 下启动开销主导整步；<strong>有图</strong>时只需<strong>一次提交</strong>就重放整条录好的序列，间隙消失、GPU 背靠背跑满。</div>
+</div>
+
 <h2>解法：录一次，重放整条前向</h2>
 <p>CUDA Graph 的核心动作只有两步：<strong>捕获（capture）</strong>与<strong>重放（replay）</strong>。捕获时，让模型<strong>空跑一遍</strong>前向，CUDA 在底层把这一遍<strong>所有内核的调用顺序和彼此依赖</strong>记成一张有向图，但<strong>并不真正执行计算</strong>；
 之后重放时，只需把这张图作为<strong>单个提交</strong>交给 GPU，硬件就按图把整串内核<strong>一次跑完</strong>，CPU 完全不必再逐个发起。一次提交替代几百次发起——这就是开销被抹平的地方。打个比方：捕获像是把一整套流水线动作<strong>录成一段视频</strong>，重放则是<strong>按下播放键</strong>，机器自己顺着录好的动作连贯做完，不必每一步都等人喊口令。</p>
@@ -389,6 +427,47 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   <div class="step"><div class="num">2</div><div class="sc"><h4>为一组尺寸各录一张</h4><p>遍历 batch 尺寸桶 1/2/4/8/…/max，每档录一张图，连同<strong>静态缓冲</strong>一起留着。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>运行时·padding</h4><p>真实 batch 向上取整到<strong>最近的已录桶</strong>（<span class="mono">_pad_to_bucket</span>），张量补到该尺寸。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>重放</h4><p><span class="mono">can_run_graph</span> 通过 → <strong>一次提交</strong>重放那张图（第 24 课），取出真实部分的 logits。</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 270" role="img" aria-label="捕获一次重放多次：左侧一次性捕获把固定 batch 形状的内核序列录成一张图对象，右侧在多个解码步里用新数据重放同一张录好的图">
+    <text x="16" y="34" style="font-weight:700;fill:var(--amber)">捕获 · 一次性</text>
+    <rect x="16" y="46" width="236" height="180" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="32" y="70" style="fill:var(--muted);font-size:12px">固定 batch 形状 · 空跑一遍前向</text>
+    <rect x="32" y="84" width="44" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="54" y="104" text-anchor="middle" class="mono" style="font-size:11px">k1</text>
+    <text x="82" y="104" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="92" y="84" width="44" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="114" y="104" text-anchor="middle" class="mono" style="font-size:11px">k2</text>
+    <text x="142" y="104" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="152" y="84" width="44" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="174" y="104" text-anchor="middle" class="mono" style="font-size:11px">k3</text>
+    <text x="202" y="104" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="212" y="84" width="28" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="226" y="104" text-anchor="middle" class="mono" style="font-size:11px">…</text>
+    <text x="32" y="144" style="font-size:12px">记录全部内核的调用顺序 + 依赖</text>
+    <rect x="32" y="156" width="204" height="54" rx="8" style="fill:var(--panel-2);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="134" y="180" text-anchor="middle" style="font-weight:700">几百个小内核 → 录成一张图</text>
+    <text x="134" y="198" text-anchor="middle" style="fill:var(--muted);font-size:11px">不真正计算，只记“剧本”</text>
+    <line x1="252" y1="130" x2="316" y2="130" style="stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="324,130 310,123 310,137" style="fill:var(--amber)"/>
+    <text x="284" y="120" text-anchor="middle" style="fill:var(--amber);font-size:12px">record</text>
+    <rect x="326" y="92" width="132" height="76" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="392" y="124" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">图对象</text>
+    <text x="392" y="146" text-anchor="middle" class="mono" style="font-size:11px">graph + 静态缓冲</text>
+    <line x1="458" y1="130" x2="522" y2="130" style="stroke:var(--accent);stroke-width:1.5"/>
+    <polygon points="530,130 516,123 516,137" style="fill:var(--accent)"/>
+    <text x="492" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">replay × 多次</text>
+    <text x="540" y="34" style="font-weight:700;fill:var(--teal)">重放 · 多次（每个解码步）</text>
+    <rect x="540" y="46" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="556" y="68" style="font-size:12px">解码步 1 · 一次提交重放（新数据 · 同形状）</text>
+    <rect x="540" y="88" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="556" y="110" style="font-size:12px">解码步 2 · 一次提交重放（新数据 · 同形状）</text>
+    <rect x="540" y="130" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="556" y="152" style="font-size:12px">解码步 3 · 一次提交重放（新数据 · 同形状）</text>
+    <text x="540" y="190" style="fill:var(--muted);font-size:12px">… 同一张图被重放成百上千次，几乎零启动开销</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 捕获一次 → 重放多次</b> — 左边<strong>只捕获一次</strong>：用固定 batch 形状空跑一遍前向，把几百个内核的调用顺序与依赖录成一张<strong>图对象</strong>（不真算）；右边在每个解码步都<strong>廉价地重放</strong>这张录好的图——形状不变、只换数据。</div>
 </div>
 
 <div class="codefile">
@@ -431,6 +510,20 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   <div class="cells"><span class="lab">已录桶</span><span class="cell">1</span><span class="sep">·</span><span class="cell">2</span><span class="sep">·</span><span class="cell">4</span><span class="sep">·</span><span class="cell hl">8</span><span class="sep">·</span><span class="cell">16</span><span class="sep">·</span><span class="cell">…</span><span class="sep">·</span><span class="cell">max</span></div>
   <div class="cells"><span class="lab">真实=5</span><span class="cell">5 行真实</span><span class="sep">+</span><span class="cell">3 行 padding</span><span class="sep">→</span><span class="cell hl">套桶 8 的图</span><span class="sep">→</span><span class="cell q">重放后只取前 5 行 logits</span></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner._pad_to_bucket</span><span class="ln">把真实 batch 大小向上取整到最近的已捕获分桶</span></div>
+  <pre><span class="kw">@staticmethod</span>
+<span class="kw">def</span> _pad_to_bucket(raw_size, buckets):
+    <span class="cm"># graphs are captured only for a FIXED set of batch sizes</span>
+    <span class="cm"># (buckets). Round a real size UP to the nearest bucket so a</span>
+    <span class="cm"># recorded graph can be replayed; can_run_graph must already</span>
+    <span class="cm"># have rejected raw_size &gt; max(buckets).</span>
+    index = bisect.bisect_left(buckets, raw_size)
+    <span class="kw">return</span> buckets[index]   <span class="cm"># smallest bucket &gt;= raw_size</span></pre>
+</div>
+
+<p><strong>具体例子：</strong>设已捕获的桶为 <span class="mono">[1, 2, 4, 8, 16, …]</span>。来一个真实 batch=5：<span class="mono">bisect_left</span> 落在 <strong>8</strong> 上，于是 <strong>padding 到桶 8</strong>——多塞 <strong>3 行空请求</strong>去重放桶 8 的那张图，跑完只取前 5 行的 logits。注意这套机制只对<strong>解码</strong>奏效：解码每步形状固定（每条请求只算 <strong>1 个新 token</strong>），能稳稳落进某个桶；而<strong>预填充</strong>长度千变万化、几乎每批形状都不同，所以多走即时、不走图。</p>
 
 <h2>回报：解码吞吐大涨，且与重叠调度天作之合</h2>
 <p>消灭了每步几百次内核启动，<strong>解码吞吐通常有可观增益</strong>——尤其在小模型、短内核、大并发的场景，启动开销占比最高，收益也最明显。更妙的是它和<strong>重叠调度器（第 21 课）</strong>是<strong>天作之合</strong>：
@@ -529,6 +622,44 @@ and now the fixed cost of "launching a kernel" becomes the dominant term. Worst 
   <div class="col"><h4>✅ Graph (replay): one submission</h4><p>At startup the whole forward is <strong>recorded into one graph</strong>; at run time the CPU <strong>submits just once</strong> and the GPU runs the hundreds of kernels <strong>back-to-back</strong> along the graph, never turning back to wait. Launch overhead is nearly <strong>zero</strong>, the GPU is <strong>saturated</strong>.</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Per-step launch overhead with vs without a graph: without a graph each decode step is many small CPU kernel-launch gaps between GPU kernels and launch overhead dominates; with a graph one submission replays the whole recorded sequence so gaps vanish and the GPU runs back-to-back">
+    <text x="16" y="32" style="font-weight:700;fill:var(--red)">No graph (eager): each step is full of CPU launch gaps</text>
+    <text x="16" y="64" style="fill:var(--muted);font-size:12px">GPU timeline (one decode step)</text>
+    <rect x="56" y="72" width="700" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="64" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="98" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="162" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="196" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="230" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="264" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="298" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="332" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="366" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="400" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="434" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="476" y="97" style="fill:var(--faint);font-size:12px">… hundreds of kernels × gaps, launch overhead dominates</text>
+    <rect x="64" y="124" width="14" height="14" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="86" y="135" style="fill:var(--blue);font-size:11px">kernel (compute)</text>
+    <rect x="200" y="124" width="14" height="14" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="222" y="135" style="fill:var(--amber);font-size:11px">wait for CPU launch (GPU idles)</text>
+    <text x="16" y="190" style="font-weight:700;fill:var(--teal)">With graph (replay): one submission, gaps gone</text>
+    <text x="16" y="222" style="fill:var(--muted);font-size:12px">GPU timeline (one decode step)</text>
+    <rect x="56" y="230" width="700" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="64" y="236" width="40" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="84" y="255" text-anchor="middle" class="mono" style="font-size:10px">submit</text>
+    <rect x="108" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="184" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="260" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="336" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="412" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="488" y="236" width="76" height="28" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="580" y="254" style="fill:var(--teal);font-size:12px">→ kernels run back-to-back, no gaps</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Per-step launch overhead: with vs without a graph</b> — <strong>without a graph</strong> every decode step sandwiches many small “<strong>wait for CPU launch</strong>” gaps between GPU kernels, and at small batch the launch overhead dominates the step; <strong>with a graph</strong> a single <strong>submission</strong> replays the whole recorded sequence, the gaps vanish and the GPU runs back-to-back.</div>
+</div>
+
 <h2>The fix: record once, replay the whole forward</h2>
 <p>A CUDA graph has just two moves: <strong>capture</strong> and <strong>replay</strong>. During capture, the model <strong>runs the forward once</strong> while CUDA records, underneath, <strong>the call order and dependencies of all kernels</strong> into a directed graph — <strong>without actually computing</strong>;
 then at replay, you hand that graph to the GPU as a <strong>single submission</strong> and the hardware runs the whole kernel string <strong>in one shot</strong>, with the CPU never launching anything one by one. One submission replaces hundreds of launches — that is where the overhead vanishes.</p>
@@ -540,6 +671,47 @@ at run time it takes the real batch, <strong>rounds it up to the nearest bucket<
   <div class="step"><div class="num">2</div><div class="sc"><h4>One graph per size</h4><p>Iterate batch buckets 1/2/4/8/…/max, record a graph for each, kept alongside its <strong>static buffers</strong>.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Run time · pad</h4><p>Round the real batch up to the <strong>nearest captured bucket</strong> (<span class="mono">_pad_to_bucket</span>); pad tensors to that size.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p><span class="mono">can_run_graph</span> passes → <strong>one submission</strong> replays that graph (Lesson 24); slice out the real rows' logits.</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 270" role="img" aria-label="Capture once, replay many: on the left a one-time capture records the kernel sequence for a fixed batch shape into a graph object; on the right many decode steps cheaply replay that recorded graph with new data and the same shape">
+    <text x="16" y="34" style="font-weight:700;fill:var(--amber)">Capture · once</text>
+    <rect x="16" y="46" width="236" height="180" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="32" y="70" style="fill:var(--muted);font-size:12px">fixed batch shape · run forward once</text>
+    <rect x="32" y="84" width="44" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="54" y="104" text-anchor="middle" class="mono" style="font-size:11px">k1</text>
+    <text x="82" y="104" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="92" y="84" width="44" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="114" y="104" text-anchor="middle" class="mono" style="font-size:11px">k2</text>
+    <text x="142" y="104" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="152" y="84" width="44" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="174" y="104" text-anchor="middle" class="mono" style="font-size:11px">k3</text>
+    <text x="202" y="104" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="212" y="84" width="28" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="226" y="104" text-anchor="middle" class="mono" style="font-size:11px">…</text>
+    <text x="32" y="144" style="font-size:12px">record every kernel's call order + deps</text>
+    <rect x="32" y="156" width="204" height="54" rx="8" style="fill:var(--panel-2);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="134" y="180" text-anchor="middle" style="font-weight:700">hundreds of kernels → one graph</text>
+    <text x="134" y="198" text-anchor="middle" style="fill:var(--muted);font-size:11px">no real compute, only the “script”</text>
+    <line x1="252" y1="130" x2="316" y2="130" style="stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="324,130 310,123 310,137" style="fill:var(--amber)"/>
+    <text x="284" y="120" text-anchor="middle" style="fill:var(--amber);font-size:12px">record</text>
+    <rect x="326" y="92" width="132" height="76" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="392" y="124" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">Graph object</text>
+    <text x="392" y="146" text-anchor="middle" class="mono" style="font-size:11px">graph + static buffers</text>
+    <line x1="458" y1="130" x2="522" y2="130" style="stroke:var(--accent);stroke-width:1.5"/>
+    <polygon points="530,130 516,123 516,137" style="fill:var(--accent)"/>
+    <text x="492" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">replay × many</text>
+    <text x="540" y="34" style="font-weight:700;fill:var(--teal)">Replay · many (every decode step)</text>
+    <rect x="540" y="46" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="556" y="68" style="font-size:12px">decode step 1 · one-submission replay (new data · same shape)</text>
+    <rect x="540" y="88" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="556" y="110" style="font-size:12px">decode step 2 · one-submission replay (new data · same shape)</text>
+    <rect x="540" y="130" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="556" y="152" style="font-size:12px">decode step 3 · one-submission replay (new data · same shape)</text>
+    <text x="540" y="190" style="fill:var(--muted);font-size:12px">… the same graph is replayed thousands of times, near-zero launch overhead</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Capture once → replay many</b> — on the left you <strong>capture only once</strong>: run one forward at a fixed batch shape to record hundreds of kernels' call order and deps into a <strong>graph object</strong> (no real compute); on the right every decode step <strong>cheaply replays</strong> that recorded graph — same shape, just new data.</div>
 </div>
 
 <div class="codefile">
@@ -580,6 +752,20 @@ Third, <strong>no data-dependent control flow inside the captured region</strong
   <div class="cells"><span class="lab">buckets</span><span class="cell">1</span><span class="sep">·</span><span class="cell">2</span><span class="sep">·</span><span class="cell">4</span><span class="sep">·</span><span class="cell hl">8</span><span class="sep">·</span><span class="cell">16</span><span class="sep">·</span><span class="cell">…</span><span class="sep">·</span><span class="cell">max</span></div>
   <div class="cells"><span class="lab">real=5</span><span class="cell">5 real rows</span><span class="sep">+</span><span class="cell">3 padding rows</span><span class="sep">→</span><span class="cell hl">use bucket-8 graph</span><span class="sep">→</span><span class="cell q">after replay keep first 5 rows' logits</span></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner._pad_to_bucket</span><span class="ln">round a real batch size up to the nearest captured bucket</span></div>
+  <pre><span class="kw">@staticmethod</span>
+<span class="kw">def</span> _pad_to_bucket(raw_size, buckets):
+    <span class="cm"># graphs are captured only for a FIXED set of batch sizes</span>
+    <span class="cm"># (buckets). Round a real size UP to the nearest bucket so a</span>
+    <span class="cm"># recorded graph can be replayed; can_run_graph must already</span>
+    <span class="cm"># have rejected raw_size &gt; max(buckets).</span>
+    index = bisect.bisect_left(buckets, raw_size)
+    <span class="kw">return</span> buckets[index]   <span class="cm"># smallest bucket &gt;= raw_size</span></pre>
+</div>
+
+<p><strong>Concrete example:</strong> say the captured buckets are <span class="mono">[1, 2, 4, 8, 16, …]</span>. A real batch of 5 arrives: <span class="mono">bisect_left</span> lands on <strong>8</strong>, so it <strong>pads up to bucket 8</strong> — adding <strong>3 empty rows</strong> to replay the bucket-8 graph, then keeps only the first 5 rows' logits. This only helps <strong>decode</strong>: each decode step has a fixed shape (every request computes just <strong>1 new token</strong>), so it drops cleanly into a bucket; <strong>prefill</strong> lengths vary wildly with a different shape almost every batch, so it runs eager rather than graphed.</p>
 
 <h2>The payoff: big decode throughput, and a perfect match with the overlap scheduler</h2>
 <p>Having killed the hundreds of launches per step, <strong>decode throughput usually gains a lot</strong> — most of all on small models, short kernels, large concurrency, where launch overhead is the highest share. Even better, it is a <strong>perfect match for the overlap scheduler (Lesson 21)</strong>:

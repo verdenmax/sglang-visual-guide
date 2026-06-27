@@ -401,6 +401,53 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <tr><td class="mono">out_cache_loc</td><td>新 token 的 K/V 写到池子哪里</td><td>KV 缓存池（第 30 课）</td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="一次前向：ModelRunner 拿到一个 ForwardBatch（input_ids、positions、seq_lens、out_cache_loc），从左到右跑过模型的层堆叠，产出下一个 token 的 logits">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">一次前向：输入 → 模型 → logits</text>
+    <rect x="24" y="58" width="210" height="150" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="129" y="84" text-anchor="middle" style="font-weight:700;fill:var(--blue)">ForwardBatch</text>
+    <rect x="40" y="98" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="113" class="mono" style="font-size:11px">input_ids</text>
+    <rect x="40" y="124" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="139" class="mono" style="font-size:11px">positions</text>
+    <rect x="40" y="150" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="165" class="mono" style="font-size:11px">seq_lens</text>
+    <rect x="40" y="176" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="191" class="mono" style="font-size:11px">out_cache_loc</text>
+    <line x1="234" y1="133" x2="300" y2="133" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="300,128 312,133 300,138" style="fill:var(--line)"/>
+    <rect x="312" y="58" width="230" height="150" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="427" y="84" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">model（层堆叠）</text>
+    <rect x="330" y="98" width="194" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="427" y="115" text-anchor="middle" style="font-size:12px">嵌入 embed</text>
+    <rect x="330" y="128" width="194" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="427" y="145" text-anchor="middle" style="font-size:12px">N 层解码层</text>
+    <rect x="330" y="158" width="194" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="427" y="175" text-anchor="middle" style="font-size:12px">norm + lm_head</text>
+    <line x1="552" y1="133" x2="612" y2="133" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="612,128 624,133 612,138" style="fill:var(--line)"/>
+    <rect x="632" y="92" width="144" height="82" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="704" y="128" text-anchor="middle" style="font-weight:700;fill:var(--teal)">logits</text>
+    <text x="704" y="150" text-anchor="middle" style="font-size:11px;fill:var(--muted)">下一个 token 的分布</text>
+  </svg>
+  <div class="figcap"><b>图 24·1 · 一次前向</b> — ModelRunner 拿到一个 ForwardBatch（input_ids / positions / seq_lens / out_cache_loc），从左到右跑过模型的层堆叠（嵌入 → N 层解码层 → norm + lm_head），最后产出下一个 token 的 logits。</div>
+</div>
+
+<p>这套字段并不是凭空设计的，它直接对应源码里 <span class="mono">ForwardBatch</span> 这个数据类——一次前向所需的全部输入，被打包进同一个结构体里：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/forward_batch_info.py ::ForwardBatch</span><span class="ln">一次前向所需的全部输入打成一个结构体</span></div>
+  <pre><span class="kw">class</span> ForwardBatch:
+    <span class="cm"># 一次前向的全部输入，打包在一起。</span>
+    forward_mode: ForwardMode      <span class="cm"># EXTEND（预填充）或 DECODE（解码）</span>
+    batch_size: int
+    input_ids: torch.Tensor        <span class="cm"># 这一步要跑的 token</span>
+    req_pool_indices: torch.Tensor <span class="cm"># 哪些请求（req_to_token 里的行）</span>
+    seq_lens: torch.Tensor         <span class="cm"># 每条请求的上下文长度</span>
+    out_cache_loc: torch.Tensor    <span class="cm"># 新 KV 写到哪里</span>
+    ...</pre>
+</div>
+
 <p>把这张表再往下读一层会更有味道。<strong>positions</strong> 绝不是摆设：它直接喂进 RoPE，决定每个 token 的旋转相位，所以预填充和解码一旦把绝对位置算错，注意力就会"看错"远近关系，输出立刻乱套——这也是分块预填充（第 22 课）必须小心维护 positions 连续性的原因。<strong>forward_mode</strong> 像一个总闸，它一拨下去就决定了后面整条路径：走变长的预填充内核还是规整的解码内核、能不能套 CUDA 图、注意力后端该用哪种 mask。<strong>注意力元数据</strong>则负责把"逻辑上的第 k 个 token"翻译成"物理上 KV 池里的哪一页、哪一个槽位"，它和 <span class="mono">out_cache_loc</span> 配合，明确告诉内核：新算出来的 K/V 写到哪、历史 K/V 又从哪读。可以说，ForwardBatch 这几个字段合起来就是一张"<strong>GPU 寻址表</strong>"，前向里的每一次读写都照着它走；它们组织得好不好，直接决定下游注意力内核（第 33 课）和 CUDA 图（第 27 课）能不能既快又稳。</p>
 
 <h2>ModelRunner.forward：一次前向怎么走</h2>
@@ -452,6 +499,38 @@ ModelRunner 再调 <span class="mono">sample()</span> 把 logits 交给采样器
   <div class="col"><h4>DECODE / 解码前向</h4><p>每条请求<strong>只算 1 个新 token</strong>，形状规整、batch 固定，正好适合
   <strong>CUDA Graph 重放</strong>（第 27 课）——把上百个小内核的启动开销一次性抹掉。它给缓存<strong>追加一行</strong>。</p></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="ForwardBatch 把若干预填充与解码请求并进一个批：一条 200 token 的预填充加上三条各 1 token 的解码，拼成长度 203 的 input_ids，由一次前向消费">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">ForwardBatch：prefill 与 decode 并进一个批</text>
+    <rect x="24" y="52" width="220" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="34" y="70" style="font-size:12px;fill:var(--amber);font-weight:700">req1 · EXTEND / 预填充</text>
+    <text x="34" y="86" class="mono" style="font-size:11px;fill:var(--amber)">200 tokens</text>
+    <rect x="24" y="100" width="220" height="32" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="34" y="120" style="font-size:12px;fill:var(--purple)">req2 · DECODE · 1 token</text>
+    <rect x="24" y="140" width="220" height="32" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="34" y="160" style="font-size:12px;fill:var(--purple)">req3 · DECODE · 1 token</text>
+    <rect x="24" y="180" width="220" height="32" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="34" y="200" style="font-size:12px;fill:var(--purple)">req4 · DECODE · 1 token</text>
+    <line x1="254" y1="132" x2="326" y2="132" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="326,127 338,132 326,137" style="fill:var(--line)"/>
+    <rect x="346" y="70" width="300" height="120" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="496" y="96" text-anchor="middle" style="font-weight:700;fill:var(--blue)">一个 ForwardBatch · input_ids</text>
+    <rect x="360" y="118" width="170" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1"/>
+    <text x="445" y="138" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--amber)">200（req1 预填充）</text>
+    <rect x="540" y="118" width="28" height="30" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
+    <rect x="572" y="118" width="28" height="30" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
+    <rect x="604" y="118" width="28" height="30" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
+    <text x="496" y="174" text-anchor="middle" class="mono" style="font-size:11px">长度 = 200 + 1 + 1 + 1 = 203</text>
+    <line x1="496" y1="190" x2="496" y2="222" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="491,222 496,234 501,222" style="fill:var(--line)"/>
+    <rect x="396" y="236" width="200" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="496" y="266" text-anchor="middle" style="font-weight:700;fill:var(--teal)">一次 forward 吃下整批</text>
+  </svg>
+  <div class="figcap"><b>图 24·2 · 一个批装下两种请求</b> — 一条 EXTEND/预填充（200 token）和三条 DECODE/解码（各 1 token）被打进同一个 ForwardBatch，<span class="mono">input_ids</span> 长度 = 200+1+1+1 = 203，由一次前向一口气算完。</div>
+</div>
+
+<p>举个具体例子：把 <strong>3 条解码请求</strong>（每条只算 1 个新 token）和 <strong>1 条 200 token 的预填充</strong>请求拼进<strong>同一个 ForwardBatch</strong>，<span class="mono">input_ids</span> 的长度就是 <span class="mono">200 + 1 + 1 + 1 = 203</span>。预填充那段的 <span class="mono">forward_mode</span> 是 <span class="mono">EXTEND</span>（一次喂进 200 个 token），三条解码则是 <span class="mono">DECODE</span>（每条只追加 1 个 token）；它们共用同一次前向、同一份注意力元数据，由 GPU 一口气算完，这正是连续批处理（第 21 课）把预填充和解码混批跑的样子。</p>
 
 <p>为什么偏偏是<strong>解码</strong>适合 CUDA 图、而预填充不适合？关键在"形状是否稳定"。CUDA 图录制的是一串固定的内核调用和固定的显存地址，录好之后重放时只能套用<strong>同样的张量形状、同样的指针</strong>。解码每步每条请求恰好只产出 1 个新 token，batch 大小在一段时间内不变、序列每步只长 1，形状高度规整，于是可以把不同的实际长度<strong>padding 到几档固定的桶</strong>，每档录一张图反复重放——而解码恰恰是启动开销占比最高的阶段（每步算得少、内核调得多），抹平这部分开销收益最大。预填充则正相反：提示长度千变万化、一次要算几百上千个 token，形状几乎每批都不同，硬要为每种形状录图既不划算也录不过来，所以它更愿意走即时（eager）路径，或采用分块/分片的折中（第 22、27 课）。一句话：<strong>解码是"小而规整、重复千万次"，正好踩在图重放的甜点区</strong>；预填充是"大而多变、各算各的"，让灵活的即时路径来扛更合适。</p>
 
@@ -599,6 +678,53 @@ ForwardBatch records "<strong>how the GPU computes this step</strong>".</p>
   <tr><td class="mono">out_cache_loc</td><td>where new K/V are written</td><td>KV cache pool (L30)</td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="one forward: ModelRunner takes a ForwardBatch (input_ids, positions, seq_lens, out_cache_loc), runs left-to-right through the model's layer stack, and produces next-token logits">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">one forward: inputs → model → logits</text>
+    <rect x="24" y="58" width="210" height="150" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="129" y="84" text-anchor="middle" style="font-weight:700;fill:var(--blue)">ForwardBatch</text>
+    <rect x="40" y="98" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="113" class="mono" style="font-size:11px">input_ids</text>
+    <rect x="40" y="124" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="139" class="mono" style="font-size:11px">positions</text>
+    <rect x="40" y="150" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="165" class="mono" style="font-size:11px">seq_lens</text>
+    <rect x="40" y="176" width="178" height="22" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="48" y="191" class="mono" style="font-size:11px">out_cache_loc</text>
+    <line x1="234" y1="133" x2="300" y2="133" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="300,128 312,133 300,138" style="fill:var(--line)"/>
+    <rect x="312" y="58" width="230" height="150" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="427" y="84" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">model (layer stack)</text>
+    <rect x="330" y="98" width="194" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="427" y="115" text-anchor="middle" style="font-size:12px">embed</text>
+    <rect x="330" y="128" width="194" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="427" y="145" text-anchor="middle" style="font-size:12px">N decoder layers</text>
+    <rect x="330" y="158" width="194" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1"/>
+    <text x="427" y="175" text-anchor="middle" style="font-size:12px">norm + lm_head</text>
+    <line x1="552" y1="133" x2="612" y2="133" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="612,128 624,133 612,138" style="fill:var(--line)"/>
+    <rect x="632" y="92" width="144" height="82" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="704" y="128" text-anchor="middle" style="font-weight:700;fill:var(--teal)">logits</text>
+    <text x="704" y="150" text-anchor="middle" style="font-size:11px;fill:var(--muted)">next-token dist</text>
+  </svg>
+  <div class="figcap"><b>Fig 24·1 · one forward</b> — ModelRunner takes a ForwardBatch (input_ids / positions / seq_lens / out_cache_loc), runs left-to-right through the model's layer stack (embed → N decoder layers → norm + lm_head), and finally produces next-token logits.</div>
+</div>
+
+<p>These fields aren't invented out of thin air; they map directly onto the <span class="mono">ForwardBatch</span> dataclass in the source — every input of a single forward pass, packed into one struct:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/forward_batch_info.py ::ForwardBatch</span><span class="ln">one struct holding every input of a single forward pass</span></div>
+  <pre><span class="kw">class</span> ForwardBatch:
+    <span class="cm"># every input of ONE forward pass, packed together.</span>
+    forward_mode: ForwardMode      <span class="cm"># EXTEND (prefill) or DECODE</span>
+    batch_size: int
+    input_ids: torch.Tensor        <span class="cm"># tokens to run this step</span>
+    req_pool_indices: torch.Tensor <span class="cm"># which requests (rows in req_to_token)</span>
+    seq_lens: torch.Tensor         <span class="cm"># per-request context length</span>
+    out_cache_loc: torch.Tensor    <span class="cm"># where to write the new KV</span>
+    ...</pre>
+</div>
+
 <p>Read that table one level deeper and it gets tastier. <strong>positions</strong> is no decoration: it feeds straight into
 RoPE and sets each token's rotation phase, so the moment prefill or decode gets an absolute position wrong, attention
 "misjudges" near-vs-far relationships and the output goes haywire — that's exactly why chunked prefill (Lesson 22) must
@@ -685,6 +811,38 @@ whole pipeline happens right here</strong>.</p>
   fixed batch — perfect for <strong>CUDA graph replay</strong> (Lesson 27), erasing the launch overhead of hundreds of tiny
   kernels. It <strong>appends one row</strong> to the cache.</p></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="ForwardBatch unifies several prefill and decode requests into one batch: one 200-token prefill plus three 1-token decodes are packed into a length-203 input_ids consumed by a single forward">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">ForwardBatch: prefill + decode in one batch</text>
+    <rect x="24" y="52" width="220" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="34" y="70" style="font-size:12px;fill:var(--amber);font-weight:700">req1 · EXTEND / prefill</text>
+    <text x="34" y="86" class="mono" style="font-size:11px;fill:var(--amber)">200 tokens</text>
+    <rect x="24" y="100" width="220" height="32" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="34" y="120" style="font-size:12px;fill:var(--purple)">req2 · DECODE · 1 token</text>
+    <rect x="24" y="140" width="220" height="32" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="34" y="160" style="font-size:12px;fill:var(--purple)">req3 · DECODE · 1 token</text>
+    <rect x="24" y="180" width="220" height="32" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="34" y="200" style="font-size:12px;fill:var(--purple)">req4 · DECODE · 1 token</text>
+    <line x1="254" y1="132" x2="326" y2="132" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="326,127 338,132 326,137" style="fill:var(--line)"/>
+    <rect x="346" y="70" width="300" height="120" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="496" y="96" text-anchor="middle" style="font-weight:700;fill:var(--blue)">one ForwardBatch · input_ids</text>
+    <rect x="360" y="118" width="170" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1"/>
+    <text x="445" y="138" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--amber)">200 (req1 prefill)</text>
+    <rect x="540" y="118" width="28" height="30" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
+    <rect x="572" y="118" width="28" height="30" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
+    <rect x="604" y="118" width="28" height="30" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1"/>
+    <text x="496" y="174" text-anchor="middle" class="mono" style="font-size:11px">length = 200 + 1 + 1 + 1 = 203</text>
+    <line x1="496" y1="190" x2="496" y2="222" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="491,222 496,234 501,222" style="fill:var(--line)"/>
+    <rect x="396" y="236" width="200" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="496" y="266" text-anchor="middle" style="font-weight:700;fill:var(--teal)">one forward consumes it all</text>
+  </svg>
+  <div class="figcap"><b>Fig 24·2 · one batch holds both kinds</b> — one EXTEND/prefill (200 tokens) and three DECODE/decode (1 token each) are packed into a single ForwardBatch; <span class="mono">input_ids</span> length = 200+1+1+1 = 203, consumed by one forward pass.</div>
+</div>
+
+<p>A concrete example: pack <strong>3 decode requests</strong> (each computing just 1 new token) and <strong>1 prefill of 200 tokens</strong> into <strong>one ForwardBatch</strong>, and <span class="mono">input_ids</span> has length <span class="mono">200 + 1 + 1 + 1 = 203</span>. The prefill segment's <span class="mono">forward_mode</span> is <span class="mono">EXTEND</span> (200 tokens fed at once), while the three decodes are <span class="mono">DECODE</span> (one appended token each); they share a single forward pass and one set of attention metadata, computed by the GPU in one shot — exactly how continuous batching (Lesson 21) runs prefill and decode mixed together.</p>
 
 <p>Why is it <strong>decode</strong> that suits CUDA graphs while prefill doesn't? It comes down to "is the shape stable".
 A CUDA graph records a fixed sequence of kernel calls at fixed memory addresses; once recorded, replay can only apply the
