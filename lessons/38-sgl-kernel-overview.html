@@ -402,6 +402,66 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>这段代码是整个 sgl-kernel 调用模式的<strong>缩影</strong>。它只做三件事:第一,把状态张量 <span class="mono">s_a</span>、<span class="mono">s_b</span> 统一转成 <span class="mono">float32</span>(dtype 校验/规整);第二,如果调用方没传 <span class="mono">v_merged</span>、<span class="mono">s_merged</span>,就用 <span class="mono">torch.empty_like</span> 分配输出张量,否则复用已有缓冲、避免重复分配;第三,把所有张量交给 <span class="mono">torch.ops.sgl_kernel.merge_state_v2.default</span>,跳进编译好的 C++/CUDA kernel 真正算。包装薄如纸,算法在 kernel 里。它的语义是:把两段<strong>部分注意力状态</strong>(value 张量 v 和对应的 softmax 归一化标量 s)合并成一段,常用于把 split-KV(把一长串 KV 切成几段分别算)的部分结果重新拼回完整注意力输出。<strong>薄 Python 包装 → torch.ops.sgl_kernel.&lt;name&gt; → csrc 编译 kernel</strong>,这条线你会在 sgl-kernel 里看到无数遍。</p>
 <p>再多看一眼这段代码的两个小细节,它们体现了 kernel 包装的工程考量。一是<strong>把 <span class="mono">s</span> 统一转成 <span class="mono">float32</span></strong>:部分注意力状态里的归一化标量对数值精度敏感,先升到 fp32 能避免合并时累积误差,这类"为正确性做的 dtype 规整"正适合放在 Python 薄包装里、而不是塞进每个 kernel。二是<strong>输出张量可由调用方传入</strong>:当上层已经准备好缓冲区时,包装就不再 <span class="mono">empty_like</span> 新分配,直接复用——在解码这种每步都要反复调用的热路径上,省下的每一次显存分配都是实打实的开销节约。把这两点放在一起看,你会更体会到"薄包装负责正确性与资源、kernel 负责极致计算"这条分工的精妙。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 230" role="img" aria-label="一次 kernel 调用穿过三层：Python 薄包装校验形状并分配输出，转交 torch.ops.sgl_kernel 分发，落到 csrc 里编译好的 CUDA 核做真正的 GPU 计算，再把输出张量返回">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">一次调用 · 穿过三层</text>
+    <rect x="24" y="52" width="212" height="84" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="130" y="84" text-anchor="middle" style="font-weight:700;fill:var(--blue)">Python 薄包装</text>
+    <text x="130" y="106" text-anchor="middle" style="font-size:12px">校验形状</text>
+    <text x="130" y="124" text-anchor="middle" style="font-size:12px">分配输出</text>
+    <text x="248" y="100" text-anchor="middle" style="fill:var(--muted);font-size:20px">→</text>
+    <rect x="272" y="52" width="232" height="84" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="388" y="84" text-anchor="middle" style="font-weight:700;fill:var(--amber)">torch.ops 分发</text>
+    <text x="388" y="110" text-anchor="middle" class="mono" style="font-size:11px">sgl_kernel.*</text>
+    <text x="516" y="100" text-anchor="middle" style="fill:var(--muted);font-size:20px">→</text>
+    <rect x="540" y="52" width="236" height="84" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="658" y="84" text-anchor="middle" style="font-weight:700;fill:var(--teal)">csrc CUDA 核</text>
+    <text x="658" y="106" text-anchor="middle" style="font-size:12px">真正的</text>
+    <text x="658" y="124" text-anchor="middle" style="font-size:12px">GPU 计算</text>
+    <line x1="658" y1="178" x2="146" y2="178" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="138,178 150,172 150,184" style="fill:var(--teal)"/>
+    <text x="402" y="170" text-anchor="middle" style="fill:var(--teal);font-size:12px">返回输出张量</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 一次调用穿过三层</b> — Python 薄包装校验形状、分配输出，转交 <span class="mono">torch.ops.sgl_kernel.*</span> 分发，落到 csrc 里编译好的 CUDA 核做真正的 GPU 计算，再把输出张量返回。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="AOT 与 JIT 两条到达 kernel 的路径：AOT 在 wheel 构建时提前编译、把 .so 打进 wheel、装好即用，成本在安装时；JIT 在首次调用时编译、缓存产物、之后复用，成本在首次调用">
+    <line x1="400" y1="24" x2="400" y2="266" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="60" y="40" style="font-weight:700;fill:var(--blue)">AOT · 预编进 wheel</text>
+    <rect x="60" y="56" width="280" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="84" text-anchor="middle" style="font-size:13px">wheel 构建时提前编译</text>
+    <text x="200" y="118" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="60" y="128" width="280" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="156" text-anchor="middle" class="mono" style="font-size:12px">.so 打进 wheel</text>
+    <text x="200" y="190" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="60" y="200" width="280" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="200" y="228" text-anchor="middle" style="font-weight:700;fill:var(--teal)">安装即用 · 零延迟</text>
+    <text x="200" y="262" text-anchor="middle" style="fill:var(--faint);font-size:12px">成本在安装时</text>
+    <text x="460" y="40" style="font-weight:700;fill:var(--amber)">JIT · 运行时编译</text>
+    <rect x="460" y="56" width="280" height="46" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="600" y="84" text-anchor="middle" style="font-size:13px">首次调用时编译</text>
+    <text x="600" y="118" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="460" y="128" width="280" height="46" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="600" y="156" text-anchor="middle" style="font-size:13px">缓存编译产物</text>
+    <text x="600" y="190" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="460" y="200" width="280" height="46" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="600" y="228" text-anchor="middle" style="font-weight:700;fill:var(--purple)">之后缓存复用</text>
+    <text x="600" y="262" text-anchor="middle" style="fill:var(--faint);font-size:12px">成本在首次调用</text>
+  </svg>
+  <div class="figcap"><b>图 2 · AOT vs JIT</b> — AOT 把重核函数在 wheel 构建时提前编好、以 <span class="mono">.so</span> 随包发布，装好即用；JIT 让较轻的核函数在首次调用时现编、缓存后复用。成本一个落在安装时，一个落在首次调用。</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/elementwise.py ::silu_and_mul</span><span class="ln">薄 Python 包装：分配输出 → 调 torch.ops 的 CUDA 核</span></div><pre>def silu_and_mul(input, out=None):
+    # thin Python wrapper around the compiled CUDA kernel.
+    if out is None:
+        # SwiGLU: input is [..., 2h], output is [..., h]
+        out = torch.empty(input.shape[:-1] + (input.shape[-1] // 2,),
+                          device=input.device, dtype=input.dtype)
+    torch.ops.sgl_kernel.silu_and_mul.default(out, input)  # -&gt; csrc CUDA
+    return out</pre></div>
+<p>举个具体例子:SwiGLU 前馈网络里,门控分支与数值分支被拼在同一个张量的最后一维。设输入是 <span class="mono">[tokens, 2h]</span>,<span class="mono">silu_and_mul</span> 在<strong>一个融合 kernel</strong> 里完成"前一半过 SiLU、再与后一半逐元素相乘",直接吐出 <span class="mono">[tokens, h]</span>——全程不落任何中间临时张量,省下一次显存往返。这正是上面那段薄包装的活法:Python 层只按 <span class="mono">input.shape[-1] // 2</span> 把输出张量分配好,真正的逐元素计算全压进 csrc 里那个 CUDA 核。末尾的 <span class="mono">.default</span> 不是随手写的后缀,而是注册在 <span class="mono">torch.ops.sgl_kernel</span> 命名空间下、那个真正用 C++ 实现的算子<strong>默认重载</strong>入口——和第一段 merge_state 里看到的 <span class="mono">.default</span> 是同一套机制。</p>
+
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>独立工程</strong>:<span class="mono">sgl-kernel/</span> 有自己的 CMake,与 <span class="mono">python/sglang/</span> 平级,核心是 <span class="mono">csrc/</span> 里的 C++/CUDA 源码。</li>
 <li><strong>AOT 编译</strong>:热路径 kernel 提前编进一个 <span class="mono">.so</span>,随 wheel 发布,启动零编译开销;对照 JIT(第39课)运行时现编。</li>
@@ -514,6 +574,66 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     return v_merged, s_merged</pre></div>
 <p>This snippet is a <strong>microcosm</strong> of the whole sgl-kernel calling pattern. It does just three things: first, cast the state tensors <span class="mono">s_a</span> and <span class="mono">s_b</span> to <span class="mono">float32</span> (dtype validation/normalization); second, if the caller did not pass <span class="mono">v_merged</span> and <span class="mono">s_merged</span>, allocate the outputs with <span class="mono">torch.empty_like</span>, otherwise reuse the provided buffers to avoid re-allocation; third, hand all tensors to <span class="mono">torch.ops.sgl_kernel.merge_state_v2.default</span>, jumping into the compiled C++/CUDA kernel that does the real work. The wrapper is paper-thin; the algorithm is in the kernel. Its semantics: merge two <strong>partial attention states</strong> (a value tensor v and its corresponding softmax-normalization scalar s) into one, commonly used to stitch split-KV partial results (a long KV run cut into segments computed separately) back into a complete attention output. <strong>Thin Python wrapper → torch.ops.sgl_kernel.&lt;name&gt; → compiled csrc kernel</strong> — a wire you will see countless times across sgl-kernel.</p>
 <p>Two small details in this code reflect the engineering thinking of a kernel wrapper. One is <strong>casting <span class="mono">s</span> to <span class="mono">float32</span></strong>: the normalization scalar in a partial attention state is sensitive to numeric precision, and promoting to fp32 first avoids accumulated error during the merge — this kind of "dtype normalization for correctness" belongs in the thin Python wrapper, not stuffed into every kernel. The other is that <strong>output tensors can be passed in by the caller</strong>: when the upper layer already has buffers ready, the wrapper skips a fresh <span class="mono">empty_like</span> allocation and reuses them — on the decode hot path that calls this repeatedly every step, every saved allocation is a real cost reduction. Seen together, they sharpen the elegant division of labor: the thin wrapper owns correctness and resources, the kernel owns the all-out computation.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 230" role="img" aria-label="One kernel call crosses three layers: a thin Python wrapper validates shapes and allocates the output, hands off to the torch.ops.sgl_kernel dispatcher, which lands on the compiled CUDA kernel in csrc that does the real GPU work, then returns the output tensor">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">one call · three layers</text>
+    <rect x="24" y="52" width="212" height="84" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="130" y="84" text-anchor="middle" style="font-weight:700;fill:var(--blue)">Python wrapper</text>
+    <text x="130" y="106" text-anchor="middle" style="font-size:12px">check shapes</text>
+    <text x="130" y="124" text-anchor="middle" style="font-size:12px">alloc output</text>
+    <text x="248" y="100" text-anchor="middle" style="fill:var(--muted);font-size:20px">→</text>
+    <rect x="272" y="52" width="232" height="84" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="388" y="84" text-anchor="middle" style="font-weight:700;fill:var(--amber)">torch.ops dispatch</text>
+    <text x="388" y="110" text-anchor="middle" class="mono" style="font-size:11px">sgl_kernel.*</text>
+    <text x="516" y="100" text-anchor="middle" style="fill:var(--muted);font-size:20px">→</text>
+    <rect x="540" y="52" width="236" height="84" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="658" y="84" text-anchor="middle" style="font-weight:700;fill:var(--teal)">csrc CUDA kernel</text>
+    <text x="658" y="106" text-anchor="middle" style="font-size:12px">real</text>
+    <text x="658" y="124" text-anchor="middle" style="font-size:12px">GPU work</text>
+    <line x1="658" y1="178" x2="146" y2="178" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="138,178 150,172 150,184" style="fill:var(--teal)"/>
+    <text x="402" y="170" text-anchor="middle" style="fill:var(--teal);font-size:12px">returns output tensor</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · One call crosses three layers</b> — the thin Python wrapper checks shapes and allocates the output, hands off to the <span class="mono">torch.ops.sgl_kernel.*</span> dispatcher, lands on the compiled CUDA kernel in csrc that does the real GPU work, then returns the output tensor.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="Two paths to reach a kernel: AOT compiles ahead at wheel-build time, packs the .so into the wheel, and is ready instantly, with cost paid at install time; JIT compiles on first call, caches the module, and reuses it after, with cost paid at first call">
+    <line x1="400" y1="24" x2="400" y2="266" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="60" y="40" style="font-weight:700;fill:var(--blue)">AOT · .so in the wheel</text>
+    <rect x="60" y="56" width="280" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="84" text-anchor="middle" style="font-size:13px">compile ahead at build</text>
+    <text x="200" y="118" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="60" y="128" width="280" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="156" text-anchor="middle" class="mono" style="font-size:12px">.so packed in wheel</text>
+    <text x="200" y="190" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="60" y="200" width="280" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="200" y="228" text-anchor="middle" style="font-weight:700;fill:var(--teal)">ready instantly</text>
+    <text x="200" y="262" text-anchor="middle" style="fill:var(--faint);font-size:12px">cost paid at install</text>
+    <text x="460" y="40" style="font-weight:700;fill:var(--amber)">JIT · compiled at runtime</text>
+    <rect x="460" y="56" width="280" height="46" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="600" y="84" text-anchor="middle" style="font-size:13px">compile on first call</text>
+    <text x="600" y="118" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="460" y="128" width="280" height="46" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="600" y="156" text-anchor="middle" style="font-size:13px">cache the module</text>
+    <text x="600" y="190" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="460" y="200" width="280" height="46" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="600" y="228" text-anchor="middle" style="font-weight:700;fill:var(--purple)">reuse after</text>
+    <text x="600" y="262" text-anchor="middle" style="fill:var(--faint);font-size:12px">cost paid at first call</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · AOT vs JIT</b> — AOT compiles the heavy kernels ahead at wheel-build time and ships them as a <span class="mono">.so</span> in the wheel, ready instantly; JIT compiles the lighter kernels on first use and caches them for reuse. The cost lands at install time versus at first call.</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/elementwise.py ::silu_and_mul</span><span class="ln">thin Python wrapper: alloc output → call the torch.ops CUDA kernel</span></div><pre>def silu_and_mul(input, out=None):
+    # thin Python wrapper around the compiled CUDA kernel.
+    if out is None:
+        # SwiGLU: input is [..., 2h], output is [..., h]
+        out = torch.empty(input.shape[:-1] + (input.shape[-1] // 2,),
+                          device=input.device, dtype=input.dtype)
+    torch.ops.sgl_kernel.silu_and_mul.default(out, input)  # -&gt; csrc CUDA
+    return out</pre></div>
+<p>A concrete example: in a SwiGLU feed-forward network the gate branch and value branch are concatenated along the last dimension of a single tensor. Given an input of <span class="mono">[tokens, 2h]</span>, <span class="mono">silu_and_mul</span> does "run SiLU on the first half, then multiply elementwise by the second half" inside <strong>one fused kernel</strong> and emits <span class="mono">[tokens, h]</span> directly — no intermediate temp tensor anywhere, saving a round trip to device memory. That is exactly how the thin wrapper above lives: the Python layer only allocates the output by <span class="mono">input.shape[-1] // 2</span>, while the real elementwise compute is pushed entirely into that CUDA kernel in csrc. The trailing <span class="mono">.default</span> is not a casual suffix but the <strong>default overload</strong> entry of the registered C++ op under the <span class="mono">torch.ops.sgl_kernel</span> namespace — the same mechanism as the <span class="mono">.default</span> you saw in the merge_state snippet above.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Standalone project</strong>: <span class="mono">sgl-kernel/</span> has its own CMake, sits as a sibling of <span class="mono">python/sglang/</span>, and is centered on the C++/CUDA source in <span class="mono">csrc/</span>.</li>

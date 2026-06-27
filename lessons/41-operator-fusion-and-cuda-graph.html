@@ -359,6 +359,39 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="flow"><div class="node">读 gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">写临时张量 (HBM)</div><div class="arrow">→</div><div class="node">读临时 + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">写输出 (HBM)</div></div>
 <div class="flow"><div class="node">读 x (HBM)</div><div class="arrow">→</div><div class="node">融合 kernel：silu 与 mul 同在寄存器</div><div class="arrow">→</div><div class="node">写输出 (HBM)</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="未融合需多次 HBM 往返，融合在单个 kernel 内于寄存器完成">
+    <text x="40" y="34" style="font-weight:700;fill:var(--red)">未融合：op → HBM → op → HBM</text>
+    <rect x="40" y="52" width="110" height="46" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="95" y="80" text-anchor="middle">相加</text>
+    <text x="161" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="172" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="227" y="80" text-anchor="middle" class="mono" style="font-size:12px">写 HBM</text>
+    <text x="293" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="304" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="359" y="80" text-anchor="middle" class="mono" style="font-size:12px">读 HBM</text>
+    <text x="425" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="436" y="52" width="110" height="46" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="491" y="80" text-anchor="middle">RMSNorm</text>
+    <text x="557" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="568" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="623" y="80" text-anchor="middle" class="mono" style="font-size:12px">写 HBM</text>
+    <text x="40" y="128" style="fill:var(--red);font-size:12px">中间张量反复进出显存，访存往返主导耗时</text>
+    <text x="40" y="176" style="font-weight:700;fill:var(--teal)">融合：单个 kernel（读一次 · 写一次）</text>
+    <rect x="40" y="194" width="150" height="56" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="115" y="227" text-anchor="middle">读一次</text>
+    <text x="202" y="227" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="215" y="194" width="290" height="56" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="360" y="220" text-anchor="middle">单 kernel：相加 + RMSNorm</text>
+    <text x="360" y="240" text-anchor="middle" style="fill:var(--muted);font-size:12px">全程留在寄存器</text>
+    <text x="517" y="227" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="530" y="194" width="150" height="56" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="605" y="227" text-anchor="middle">写一次</text>
+    <text x="40" y="282" style="fill:var(--teal);font-size:12px">省去中间 2 次写 + 1 次读 HBM</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 未融合 vs 融合</b> — 未融合每个算子都把中间张量写回再读出 HBM，访存往返主导耗时；融合在单个 kernel 内于寄存器完成相加与 RMSNorm，只读一次、写一次。</div>
+</div>
+
 <h2>二、CUDA Graph：捕获一次，反复重放</h2>
 <p>回顾<span class="mono">第27课</span>：CUDA Graph 把一串<strong>固定的内核启动序列</strong>记录下来（capture），之后每一步解码只要<strong>重放（replay）</strong>这张图即可，几乎没有 CPU 端的提交开销。这对解码极其关键，因为解码每步真正算的东西很少，CPU 逐个提交内核的开销会被放大成主要瓶颈。可以这样打个比方：没有图的时候，CPU 像一个必须亲口逐道下令的指挥，每道命令都要先在脑子里整理、再开口传达；有了图，整套命令被提前写成一张乐谱，演奏时只要照谱直奏，指挥几乎不必再开口。解码动辄要重复成千上万步，省下的这点"开口"成本累加起来非常可观，对最终的吞吐曲线影响相当明显，这也是工程上必须把这条路径打磨到位的原因。</p>
 <p>但 CUDA Graph 有两条硬约束：<strong>形状必须静态</strong>、<strong>不能有依赖数据的控制流</strong>。捕获时记录的是一组具体的指针与启动参数；如果下一次张量形状变了，或者程序要"看了数据才决定走哪条分支"，录下来的图就不再适用。因此：<strong>形状固定、行为确定的融合内核天然是"图友好（graph-friendly）"的</strong>；而那些<strong>形状会变、或在主机端有分支</strong>的算子，必须留在捕获区<strong>之外</strong>。</p>
@@ -371,6 +404,29 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <tr><td><span class="mono">fused_add_rmsnorm</span>（残差相加 + RMSNorm，第36课）</td><td>相加结果留在寄存器直接归一化，省一次往返与一次启动</td></tr>
 <tr><td>fused qk-norm + RoPE</td><td>归一化与旋转位置编码同内核完成，减少访存与提交</td></tr>
 <tr><td>融合后形状固定的内核</td><td>静态形状 → 图友好 → 可被 CUDA Graph 捕获重放</td></tr></table>
+
+<div class="fig">
+  <svg viewBox="0 0 800 240" role="img" aria-label="融合到固定形状到捕获到重放的流水线">
+    <text x="34" y="36" style="font-weight:700;fill:var(--muted)">融合 → 固定形状 → 捕获 → 重放</text>
+    <rect x="34" y="60" width="160" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="114" y="88" text-anchor="middle" style="font-weight:700">融合算子</text>
+    <text x="114" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">减少 kernel 数</text>
+    <text x="205" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="216" y="60" width="160" height="64" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="296" y="88" text-anchor="middle" style="font-weight:700">固定形状</text>
+    <text x="296" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">按 batch 分桶</text>
+    <text x="387" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="398" y="60" width="160" height="64" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="478" y="88" text-anchor="middle" style="font-weight:700">捕获</text>
+    <text x="478" y="108" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">CUDA Graph 录一次</text>
+    <text x="569" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="580" y="60" width="160" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="660" y="88" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">重放</text>
+    <text x="660" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">每步解码廉价</text>
+    <text x="34" y="170" style="fill:var(--accent-ink);font-size:12px">kernel 更少 → 捕获更易 → CPU 提交开销 ≈ 0</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 融合喂给 CUDA Graph</b> — 先融合压低 kernel 数，再在固定/分桶形状上整步捕获成一张图，之后每个解码步只需廉价重放，把 CPU 启动开销几乎归零。</div>
+</div>
 
 <h2>三、二者如何配合：少 + 融 + 静态 → 捕获 → 重放</h2>
 <p>把两件事串起来看，逻辑非常顺：先用<strong>融合</strong>把内核数量压下来、把中间访存消灭掉，让前向里大部分内核既<strong>少</strong>又<strong>形状固定</strong>；这样的内核序列恰好满足 CUDA Graph 的静态前提，于是可以<strong>捕获一次</strong>，之后每步解码<strong>反复重放</strong>，把"CPU 逐个提交内核"的开销几乎归零。对于带宽受限、启动开销敏感的解码阶段（<span class="mono">第4课</span>），这正是吞吐能上去的关键一环。</p>
@@ -403,6 +459,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
         silu_and_mul(x, out)            # -&gt; fused JIT silu+mul kernel (jit_kernel.activation)
         return out</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/elementwise.py ::fused_add_rmsnorm</span><span class="ln">一个 kernel 同时做 残差相加 + RMSNorm（省 HBM 往返）</span></div><pre>def fused_add_rmsnorm(input, residual, weight, eps=1e-6):
+    # ONE kernel does residual-add + RMSNorm in place — no temp tensor,
+    # no extra HBM round-trip:
+    #   Step 1:  residual += input
+    #   Step 2:  input = (residual / RMS(residual)) * weight
+    ...   # dispatches to the fused FlashInfer/CUDA kernel</pre></div>
+
+<p>具体到一个 Transformer block：每层有<strong>两处 add+norm 接缝</strong>（注意力前、MLP 前）。把每处的“残差相加 + RMSNorm”融成一个 <span class="mono">fused_add_rmsnorm</span> 内核，就能各省去一次对隐藏状态的完整读 + 写；内核更少也意味着要捕获进 CUDA Graph 的启动更少——融合与图的收益在这里叠加。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>融合</strong>把多个小算子合成一个内核，消除中间临时张量的 <span class="mono">HBM</span> 往返，并把多次<strong>启动开销</strong>压成一次。</li>
@@ -476,6 +541,39 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="flow"><div class="node">read gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">write temp (HBM)</div><div class="arrow">→</div><div class="node">read temp + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
 <div class="flow"><div class="node">read x (HBM)</div><div class="arrow">→</div><div class="node">fused kernel: silu &amp; mul in registers</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="unfused needs many HBM round-trips; fused does it in one kernel in registers">
+    <text x="40" y="34" style="font-weight:700;fill:var(--red)">unfused: op → HBM → op → HBM</text>
+    <rect x="40" y="52" width="110" height="46" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="95" y="80" text-anchor="middle">add</text>
+    <text x="161" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="172" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="227" y="80" text-anchor="middle" class="mono" style="font-size:12px">write HBM</text>
+    <text x="293" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="304" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="359" y="80" text-anchor="middle" class="mono" style="font-size:12px">read HBM</text>
+    <text x="425" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="436" y="52" width="110" height="46" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="491" y="80" text-anchor="middle">rmsnorm</text>
+    <text x="557" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="568" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="623" y="80" text-anchor="middle" class="mono" style="font-size:12px">write HBM</text>
+    <text x="40" y="128" style="fill:var(--red);font-size:12px">intermediates shuttle in/out of HBM — memory trips dominate</text>
+    <text x="40" y="176" style="font-weight:700;fill:var(--teal)">fused: single kernel (read once · write once)</text>
+    <rect x="40" y="194" width="150" height="56" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="115" y="227" text-anchor="middle">read once</text>
+    <text x="202" y="227" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="215" y="194" width="290" height="56" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="360" y="220" text-anchor="middle">one kernel: add + RMSNorm</text>
+    <text x="360" y="240" text-anchor="middle" style="fill:var(--muted);font-size:12px">kept in registers</text>
+    <text x="517" y="227" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="530" y="194" width="150" height="56" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="605" y="227" text-anchor="middle">write once</text>
+    <text x="40" y="282" style="fill:var(--teal);font-size:12px">saves 2 writes + 1 read of HBM</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · unfused vs fused</b> — unfused writes each intermediate back and reads it from HBM, so memory round-trips dominate; fused does add and RMSNorm in registers inside one kernel, reading once and writing once.</div>
+</div>
+
 <h2>2. CUDA graphs: capture once, replay many times</h2>
 <p>Recall <span class="mono">Lesson 27</span>: a CUDA graph records a <strong>fixed sequence of kernel launches</strong> (capture), and then each decode step just <strong>replays</strong> that graph with almost no CPU-side submission overhead. This matters enormously for decode, because each step computes so little that per-kernel CPU submission balloons into the dominant cost.</p>
 <p>But CUDA graphs impose two hard constraints: <strong>shapes must be static</strong> and <strong>no data-dependent control branching</strong>. Capture records concrete pointers and launch parameters; if next time a tensor's shape changes, or the program "looks at data to decide which branch to take," the recorded graph no longer applies. Hence: <strong>fixed-shape, deterministic fused kernels are inherently graph-friendly</strong>; ops whose <strong>shapes vary, or that branch on the host side</strong>, must stay <strong>outside</strong> the captured region.</p>
@@ -486,6 +584,29 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <tr><td><span class="mono">fused_add_rmsnorm</span> (residual-add + RMSNorm, Lesson 36)</td><td>Sum stays in registers and is normalized in place; saves a round-trip and a launch</td></tr>
 <tr><td>fused qk-norm + RoPE</td><td>Normalization and rotary embedding in one kernel; less traffic, fewer submissions</td></tr>
 <tr><td>Fixed-shape kernels after fusion</td><td>Static shape → graph-friendly → capturable/replayable by a CUDA graph</td></tr></table>
+
+<div class="fig">
+  <svg viewBox="0 0 800 240" role="img" aria-label="pipeline: fuse to static shape to capture to replay">
+    <text x="34" y="36" style="font-weight:700;fill:var(--muted)">fuse → static shape → capture → replay</text>
+    <rect x="34" y="60" width="160" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="114" y="88" text-anchor="middle" style="font-weight:700">fuse ops</text>
+    <text x="114" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">cut kernel count</text>
+    <text x="205" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="216" y="60" width="160" height="64" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="296" y="88" text-anchor="middle" style="font-weight:700">static shape</text>
+    <text x="296" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">bucket by batch</text>
+    <text x="387" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="398" y="60" width="160" height="64" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="478" y="88" text-anchor="middle" style="font-weight:700">capture</text>
+    <text x="478" y="108" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">CUDA Graph once</text>
+    <text x="569" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="580" y="60" width="160" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="660" y="88" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">replay</text>
+    <text x="660" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">cheap each step</text>
+    <text x="34" y="170" style="fill:var(--accent-ink);font-size:12px">fewer kernels → easier capture → CPU submit cost ≈ 0</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · fusion feeds the CUDA graph</b> — fuse first to cut kernel count, capture the whole step once at fixed/bucketed shapes, then replay cheaply on every decode step, driving CPU launch overhead to nearly zero.</div>
+</div>
 
 <h2>3. How they cooperate: fewer + fused + static → capture → replay</h2>
 <p>Chaining the two ideas, the logic is clean: first use <strong>fusion</strong> to shrink the kernel count and erase intermediate traffic, so most kernels in the forward are both <strong>few</strong> and <strong>fixed-shape</strong>; such a kernel sequence exactly satisfies the CUDA graph's static premise, so you can <strong>capture once</strong> and then <strong>replay</strong> it every decode step, driving the "CPU submits each kernel" cost to nearly zero. For the bandwidth-bound, launch-sensitive decode stage (<span class="mono">Lesson 4</span>), this is a key reason throughput can climb.</p>
@@ -515,6 +636,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
         silu_and_mul(x, out)            # -&gt; fused JIT silu+mul kernel (jit_kernel.activation)
         return out</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/elementwise.py ::fused_add_rmsnorm</span><span class="ln">one kernel does residual-add + RMSNorm (saves HBM round-trips)</span></div><pre>def fused_add_rmsnorm(input, residual, weight, eps=1e-6):
+    # ONE kernel does residual-add + RMSNorm in place — no temp tensor,
+    # no extra HBM round-trip:
+    #   Step 1:  residual += input
+    #   Step 2:  input = (residual / RMS(residual)) * weight
+    ...   # dispatches to the fused FlashInfer/CUDA kernel</pre></div>
+
+<p>Concretely, every Transformer block has <strong>two add+norm seams</strong> (pre-attention and pre-MLP). Fusing each “residual-add + RMSNorm” into one <span class="mono">fused_add_rmsnorm</span> kernel saves a full read + write of the hidden state per seam; fewer kernels also means fewer launches to capture in the CUDA graph — the wins of fusion and graphs compound here.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Fusion</strong> merges several small ops into one kernel, eliminating intermediate temporaries' <span class="mono">HBM</span> round-trips and collapsing many <strong>launches</strong> into one.</li>

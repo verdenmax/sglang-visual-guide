@@ -9779,7 +9779,7 @@ That means the only way to make this FFN more "knowledgeable" is to <strong>wide
 <p>An MoE layer swaps the structure. It splits that big FFN into <strong>N experts</strong> (each a <strong>smaller FFN</strong> — say 64 or 256 of them) and adds a <strong>router / gate</strong> —
 a tiny linear layer. For each incoming token, the router first <strong>scores every expert</strong>, then <strong>keeps only the top-k</strong> highest (e.g. 2 of 64).
 <strong>Only those k experts actually compute</strong>; the other dozens <strong>do nothing for this token</strong>. That is <strong>sparse activation</strong>: a layer holds enormous parameters, but each token lights up only a small handful.</p>
-<p>Do the arithmetic: with 64 experts and 2 per token, this layer's <strong>parameters</strong> are roughly 32x a dense version (huge knowledge capacity), yet each token's <strong>compute</strong> is just "pass through 2 small FFNs" —
+<p>Do the arithmetic: with 64 experts and 2 per token, this layer's <strong>parameters</strong> are roughly 64x a single FFN (huge knowledge capacity), yet each token's <strong>compute</strong> is just "pass through 2 small FFNs" —
 about a medium dense FFN, and <strong>nearly independent of the total expert count</strong>. So you can scale a model to tens or hundreds of billions of parameters while per-token inference FLOPs stay firmly pinned by <span class="mono">top-k</span>.
 That is why people say MoE "<strong>scales parameters, not per-token compute</strong>." Of course, "more parameters" means <strong>memory must hold every expert</strong>, even those idle for a given token — a cost we settle in the trade-offs at the end.</p>
 
@@ -9918,7 +9918,7 @@ SGLang's <span class="mono">FusedMoE</span> exists precisely for this: it <stron
     ...</pre>
 </div>
 
-<p>Two concrete examples to pin the numbers. <strong>Mixtral</strong>: each token picks 2 of 8 experts (<span class="mono">top_k=2, N=8</span>) — roughly 8x the parameters, but each token pays only "<strong>2 experts'</strong>" compute. <strong>DeepSeek-V3</strong>: with hundreds of experts it first splits them into <strong>groups</strong> and uses <strong>grouped top-k</strong> (<span class="mono">use_grouped_topk=True</span>, with <span class="mono">num_expert_group / topk_group</span>) — prune most groups at the group level, then pick experts within the chosen groups, saving routing cost and easing all-to-all communication under expert parallelism. Both are just different field values in <span class="mono">TopKConfig</span>.</p>
+<p>Two concrete examples to pin the numbers. <strong>Mixtral</strong>: each token picks 2 of 8 experts (<span class="mono">top_k=2, N=8</span>) — roughly 8x a single FFN's parameters, but each token pays only "<strong>2 experts'</strong>" compute. <strong>DeepSeek-V3</strong>: with hundreds of experts it first splits them into <strong>groups</strong> and uses <strong>grouped top-k</strong> (<span class="mono">use_grouped_topk=True</span>, with <span class="mono">num_expert_group / topk_group</span>) — prune most groups at the group level, then pick experts within the chosen groups, saving routing cost and easing all-to-all communication under expert parallelism. Both are just different field values in <span class="mono">TopKConfig</span>.</p>
 
 <h2>A few unavoidable terms</h2>
 <p>MoE docs lean on a small set of terms. Pin their meanings now and the DeepSeek-V3 / Mixtral code won't trip you up later. They are just the key roles in the four-step flow above — match each to its slot.</p>
@@ -10768,6 +10768,66 @@ and the real engineering complexity is tucked inside them.</p>
 <p>This snippet is a <strong>microcosm</strong> of the whole sgl-kernel calling pattern. It does just three things: first, cast the state tensors <span class="mono">s_a</span> and <span class="mono">s_b</span> to <span class="mono">float32</span> (dtype validation/normalization); second, if the caller did not pass <span class="mono">v_merged</span> and <span class="mono">s_merged</span>, allocate the outputs with <span class="mono">torch.empty_like</span>, otherwise reuse the provided buffers to avoid re-allocation; third, hand all tensors to <span class="mono">torch.ops.sgl_kernel.merge_state_v2.default</span>, jumping into the compiled C++/CUDA kernel that does the real work. The wrapper is paper-thin; the algorithm is in the kernel. Its semantics: merge two <strong>partial attention states</strong> (a value tensor v and its corresponding softmax-normalization scalar s) into one, commonly used to stitch split-KV partial results (a long KV run cut into segments computed separately) back into a complete attention output. <strong>Thin Python wrapper → torch.ops.sgl_kernel.&lt;name&gt; → compiled csrc kernel</strong> — a wire you will see countless times across sgl-kernel.</p>
 <p>Two small details in this code reflect the engineering thinking of a kernel wrapper. One is <strong>casting <span class="mono">s</span> to <span class="mono">float32</span></strong>: the normalization scalar in a partial attention state is sensitive to numeric precision, and promoting to fp32 first avoids accumulated error during the merge — this kind of "dtype normalization for correctness" belongs in the thin Python wrapper, not stuffed into every kernel. The other is that <strong>output tensors can be passed in by the caller</strong>: when the upper layer already has buffers ready, the wrapper skips a fresh <span class="mono">empty_like</span> allocation and reuses them — on the decode hot path that calls this repeatedly every step, every saved allocation is a real cost reduction. Seen together, they sharpen the elegant division of labor: the thin wrapper owns correctness and resources, the kernel owns the all-out computation.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 230" role="img" aria-label="One kernel call crosses three layers: a thin Python wrapper validates shapes and allocates the output, hands off to the torch.ops.sgl_kernel dispatcher, which lands on the compiled CUDA kernel in csrc that does the real GPU work, then returns the output tensor">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">one call · three layers</text>
+    <rect x="24" y="52" width="212" height="84" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="130" y="84" text-anchor="middle" style="font-weight:700;fill:var(--blue)">Python wrapper</text>
+    <text x="130" y="106" text-anchor="middle" style="font-size:12px">check shapes</text>
+    <text x="130" y="124" text-anchor="middle" style="font-size:12px">alloc output</text>
+    <text x="248" y="100" text-anchor="middle" style="fill:var(--muted);font-size:20px">→</text>
+    <rect x="272" y="52" width="232" height="84" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="388" y="84" text-anchor="middle" style="font-weight:700;fill:var(--amber)">torch.ops dispatch</text>
+    <text x="388" y="110" text-anchor="middle" class="mono" style="font-size:11px">sgl_kernel.*</text>
+    <text x="516" y="100" text-anchor="middle" style="fill:var(--muted);font-size:20px">→</text>
+    <rect x="540" y="52" width="236" height="84" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="658" y="84" text-anchor="middle" style="font-weight:700;fill:var(--teal)">csrc CUDA kernel</text>
+    <text x="658" y="106" text-anchor="middle" style="font-size:12px">real</text>
+    <text x="658" y="124" text-anchor="middle" style="font-size:12px">GPU work</text>
+    <line x1="658" y1="178" x2="146" y2="178" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="138,178 150,172 150,184" style="fill:var(--teal)"/>
+    <text x="402" y="170" text-anchor="middle" style="fill:var(--teal);font-size:12px">returns output tensor</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · One call crosses three layers</b> — the thin Python wrapper checks shapes and allocates the output, hands off to the <span class="mono">torch.ops.sgl_kernel.*</span> dispatcher, lands on the compiled CUDA kernel in csrc that does the real GPU work, then returns the output tensor.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="Two paths to reach a kernel: AOT compiles ahead at wheel-build time, packs the .so into the wheel, and is ready instantly, with cost paid at install time; JIT compiles on first call, caches the module, and reuses it after, with cost paid at first call">
+    <line x1="400" y1="24" x2="400" y2="266" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="60" y="40" style="font-weight:700;fill:var(--blue)">AOT · .so in the wheel</text>
+    <rect x="60" y="56" width="280" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="84" text-anchor="middle" style="font-size:13px">compile ahead at build</text>
+    <text x="200" y="118" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="60" y="128" width="280" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="156" text-anchor="middle" class="mono" style="font-size:12px">.so packed in wheel</text>
+    <text x="200" y="190" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="60" y="200" width="280" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="200" y="228" text-anchor="middle" style="font-weight:700;fill:var(--teal)">ready instantly</text>
+    <text x="200" y="262" text-anchor="middle" style="fill:var(--faint);font-size:12px">cost paid at install</text>
+    <text x="460" y="40" style="font-weight:700;fill:var(--amber)">JIT · compiled at runtime</text>
+    <rect x="460" y="56" width="280" height="46" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="600" y="84" text-anchor="middle" style="font-size:13px">compile on first call</text>
+    <text x="600" y="118" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="460" y="128" width="280" height="46" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="600" y="156" text-anchor="middle" style="font-size:13px">cache the module</text>
+    <text x="600" y="190" text-anchor="middle" style="fill:var(--muted);font-size:18px">↓</text>
+    <rect x="460" y="200" width="280" height="46" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="600" y="228" text-anchor="middle" style="font-weight:700;fill:var(--purple)">reuse after</text>
+    <text x="600" y="262" text-anchor="middle" style="fill:var(--faint);font-size:12px">cost paid at first call</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · AOT vs JIT</b> — AOT compiles the heavy kernels ahead at wheel-build time and ships them as a <span class="mono">.so</span> in the wheel, ready instantly; JIT compiles the lighter kernels on first use and caches them for reuse. The cost lands at install time versus at first call.</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/elementwise.py ::silu_and_mul</span><span class="ln">thin Python wrapper: alloc output → call the torch.ops CUDA kernel</span></div><pre>def silu_and_mul(input, out=None):
+    # thin Python wrapper around the compiled CUDA kernel.
+    if out is None:
+        # SwiGLU: input is [..., 2h], output is [..., h]
+        out = torch.empty(input.shape[:-1] + (input.shape[-1] // 2,),
+                          device=input.device, dtype=input.dtype)
+    torch.ops.sgl_kernel.silu_and_mul.default(out, input)  # -&gt; csrc CUDA
+    return out</pre></div>
+<p>A concrete example: in a SwiGLU feed-forward network the gate branch and value branch are concatenated along the last dimension of a single tensor. Given an input of <span class="mono">[tokens, 2h]</span>, <span class="mono">silu_and_mul</span> does "run SiLU on the first half, then multiply elementwise by the second half" inside <strong>one fused kernel</strong> and emits <span class="mono">[tokens, h]</span> directly — no intermediate temp tensor anywhere, saving a round trip to device memory. That is exactly how the thin wrapper above lives: the Python layer only allocates the output by <span class="mono">input.shape[-1] // 2</span>, while the real elementwise compute is pushed entirely into that CUDA kernel in csrc. The trailing <span class="mono">.default</span> is not a casual suffix but the <strong>default overload</strong> entry of the registered C++ op under the <span class="mono">torch.ops.sgl_kernel</span> namespace — the same mechanism as the <span class="mono">.default</span> you saw in the merge_state snippet above.</p>
+
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Standalone project</strong>: <span class="mono">sgl-kernel/</span> has its own CMake, sits as a sibling of <span class="mono">python/sglang/</span>, and is centered on the C++/CUDA source in <span class="mono">csrc/</span>.</li>
 <li><strong>AOT compilation</strong>: hot-path kernels are compiled ahead into one <span class="mono">.so</span> shipped with the wheel, zero compile overhead at startup; contrast with JIT (Lesson 39) compiled at runtime.</li>
@@ -10849,6 +10909,43 @@ and the real engineering complexity is tucked inside them.</p>
 <p>From the caller's viewpoint this is almost transparent: you just call the Python name exported by a wrapper, the first call "stalls" briefly (because it's compiling), and afterwards it's so smooth you don't feel JIT is there at all. What <span class="mono">load_jit</span> ultimately returns is the loaded extension Module, carrying the callable kernels exposed under their <span class="mono">export_name</span>; upper-layer code takes it and uses it just like any ordinary compiled op.</p>
 <p>There is also an easily-overlooked detail: the cache usually lives in a build directory on disk, so the "compile once, reuse later" benefit is not limited to a single process—it carries across processes and even across multiple restarts. As long as the source, architecture, and key compile options are unchanged (i.e. the unique marker is unchanged), the first time a new process uses the kernel it simply finds a ready-made <span class="mono">.so</span> already on disk and loads it, skipping compilation. This means that when you restart the service repeatedly on the same machine, the actual <span class="mono">nvcc</span> compile cost is usually paid only the very first time; no matter how many times you restart afterwards, it's a sub-second load. Once you understand this, you see why JIT is not so "scary" in production—the first-call latency is one-time, while the cache is persistent.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 270" role="img" aria-label="JIT call timeline: the first call pays a one-time compile cost and writes the .so into the cache, every later call hits the cache and just runs">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">Compile + cache .so on first call, reuse afterwards</text>
+    <rect x="470" y="17" width="12" height="12" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="488" y="27" style="fill:var(--muted);font-size:12px">compile</text>
+    <rect x="556" y="17" width="12" height="12" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="574" y="27" style="fill:var(--muted);font-size:12px">run</text>
+    <rect x="300" y="44" width="150" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="375" y="62" text-anchor="middle" style="font-size:12px;font-weight:700">cache dir</text>
+    <text x="375" y="78" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:11px">.so</text>
+    <line x1="40" y1="210" x2="770" y2="210" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M770 210 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="700" y="232" style="fill:var(--faint);font-size:11px">time →</text>
+    <rect x="70" y="92" width="90" height="78" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="70" y="170" width="90" height="40" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="115" y="136" text-anchor="middle" style="font-size:12px;font-weight:700">compile nvcc</text>
+    <text x="115" y="194" text-anchor="middle" style="font-size:11px">run</text>
+    <text x="115" y="230" text-anchor="middle" style="fill:var(--faint);font-size:11px">1st call</text>
+    <path d="M160 116 L300 64" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:4 3;fill:none"/>
+    <text x="232" y="98" text-anchor="middle" style="fill:var(--muted);font-size:11px">write</text>
+    <rect x="300" y="170" width="90" height="40" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="345" y="194" text-anchor="middle" style="font-size:11px">run</text>
+    <text x="345" y="230" text-anchor="middle" style="fill:var(--faint);font-size:11px">2nd call</text>
+    <rect x="460" y="170" width="90" height="40" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="505" y="194" text-anchor="middle" style="font-size:11px">run</text>
+    <text x="505" y="230" text-anchor="middle" style="fill:var(--faint);font-size:11px">3rd call</text>
+    <rect x="620" y="170" width="90" height="40" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="194" text-anchor="middle" style="font-size:11px">run</text>
+    <text x="665" y="230" text-anchor="middle" style="fill:var(--faint);font-size:11px">4th call</text>
+    <path d="M345 84 L345 170" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3;fill:none"/>
+    <path d="M420 84 L505 170" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3;fill:none"/>
+    <path d="M440 84 L665 170" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3;fill:none"/>
+    <text x="560" y="120" text-anchor="middle" style="fill:var(--muted);font-size:11px">cache hit · reuse .so</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Compile first, reuse later</b> — the first call to a JIT op pays a one-time <span class="mono">nvcc</span> compile cost and writes the <span class="mono">.so</span> into the cache dir; every later call hits the cache and runs only, as fast as AOT.</div>
+</div>
+
 <h2>3. Why JIT: flexibility and its cost</h2>
 <p>JIT's core selling point is flexibility. First, experimental ops can be changed and used freely without re-releasing a wheel each time. Second, it enables architecture-specific code generation: after querying the concrete GPU architecture, it decides which templates and compile flags to use, squeezing more performance out of each card. Third, kernels can be parameterized by runtime shapes or flags, adapting to ever-changing inputs. Fourth, the wheel stays slim—source is tiny, the compiled artifact is generated on demand and cached locally, keeping the release lean.</p>
 <p>Of these four, "architecture-specific code generation" especially shows JIT's value. The optimal implementation of the same algorithm often differs across GPU generations: a new architecture may offer new tensor-core instructions, larger shared memory, or a different memory hierarchy, and only by hand-writing or generating code specialized for them can you fully exploit the hardware. For AOT to cover these differences, it must compile a separate build per architecture and pack them all into the wheel; JIT only needs to query "which architecture am I running on now" at runtime and compile a best-fitting kernel for it. For an inference engine that must keep pace with cutting-edge hardware, this "adapt to the hardware" ability is invaluable—it means when a new card hits the market, you can run on it and gradually tune without waiting for the next release cycle.</p>
@@ -10859,6 +10956,34 @@ and the real engineering complexity is tucked inside them.</p>
 <p>Putting Lesson 38 and this lesson side by side makes it clearer: AOT (<span class="mono">sgl-kernel</span>) and JIT (<span class="mono">jit_kernel</span>) both end up "calling a compiled GPU kernel from Python." Their destination is the same; they only differ on the way there—AOT compiles kernels at wheel-build time and ships them with the binary, ready on install; JIT ships the source and compiles plus caches on the local machine at first call. Once you grasp this, you can make the right call when designing new ops: hand stable, hot, zero-dependency kernels to AOT; hand experimental, architecture-specific, or wheel-slimming kernels to JIT. Having both is precisely the engineering wisdom that lets SGLang's kernel system balance performance and flexibility.</p>
 <p>Going further, the two paths are not isolated. A kernel often is born as JIT first: it iterates quickly inside <span class="mono">jit_kernel</span>, is tried per architecture, and once correctness and performance are proven—if it stabilizes and is heavily reused—it can "graduate" to <span class="mono">sgl-kernel</span> on the AOT path, baked into the wheel to enjoy zero first-call latency. Conversely, when new hardware just launches and new instructions are still being polished, JIT lets SGLang run on it immediately without waiting for the next release. Precisely because the destination is unified (both are <span class="mono">torch.ops</span>-style callables into compiled kernels), upper-layer code barely needs to care whether an op comes from AOT or JIT—this abstraction, which encapsulates the complexity of "when to compile and how to ship," is the key to an engine that is both fast and flexible.</p>
 <p>In one sentence: JIT is not a replacement for AOT but its complement. Lesson 38's <span class="mono">sgl-kernel</span> bakes the most stable, hottest kernels into the binary in exchange for being ready out of the box with zero first-call latency; this lesson's <span class="mono">jit_kernel</span> compiles the experimental, architecture-specific, or shape-varying kernels on demand at runtime in exchange for flexibility and slimness. Both paths ultimately converge into the same <span class="mono">torch.ops</span>-style calls, together holding up SGLang's kernel performance foundation, and together embodying the engineering wisdom of balancing performance and flexibility in a large inference system.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="AOT vs JIT strategies: AOT prebuilds kernels into the wheel, zero first-call cost but big size; JIT compiles on first use and caches, slim install and easy to add a kernel">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">AOT shipped vs JIT compiled on demand</text>
+    <rect x="40" y="50" width="340" height="216" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="60" y="80" style="font-size:13px;font-weight:700;fill:var(--blue)">AOT · sgl-kernel</text>
+    <text x="60" y="100" style="fill:var(--muted);font-size:11px">prebuilt into the wheel</text>
+    <line x1="56" y1="112" x2="364" y2="112" style="stroke:var(--line);stroke-width:1"/>
+    <text x="60" y="142" style="fill:var(--muted);font-size:12px">first call</text>
+    <text x="364" y="142" text-anchor="end" style="font-size:12px;font-weight:700">zero cost</text>
+    <text x="60" y="182" style="fill:var(--muted);font-size:12px">install / wheel</text>
+    <text x="364" y="182" text-anchor="end" style="font-size:12px;font-weight:700">larger</text>
+    <text x="60" y="222" style="fill:var(--muted);font-size:12px">add a kernel</text>
+    <text x="364" y="222" text-anchor="end" style="font-size:12px;font-weight:700">re-release</text>
+    <rect x="420" y="50" width="340" height="216" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="440" y="80" style="font-size:13px;font-weight:700;fill:var(--teal)">JIT · jit_kernel</text>
+    <text x="440" y="100" style="fill:var(--muted);font-size:11px">compiled on first use</text>
+    <line x1="436" y1="112" x2="744" y2="112" style="stroke:var(--line);stroke-width:1"/>
+    <text x="440" y="142" style="fill:var(--muted);font-size:12px">first call</text>
+    <text x="744" y="142" text-anchor="end" style="font-size:12px;font-weight:700">one-time small</text>
+    <text x="440" y="182" style="fill:var(--muted);font-size:12px">install / wheel</text>
+    <text x="744" y="182" text-anchor="end" style="font-size:12px;font-weight:700">slim</text>
+    <text x="440" y="222" style="fill:var(--muted);font-size:12px">add a kernel</text>
+    <text x="744" y="222" text-anchor="end" style="font-size:12px;font-weight:700">edit &amp; run</text>
+    <text x="400" y="286" text-anchor="middle" style="fill:var(--faint);font-size:11px">one op can live on both paths — same destination</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · AOT shipped vs JIT compiled on demand</b> — AOT (<span class="mono">sgl-kernel</span>) prebuilds heavy kernels into the wheel: zero first-call cost, but slow build and a big wheel; JIT (<span class="mono">jit_kernel</span>) compiles on first use and caches: slim install, a tiny one-time cost, and easy to add a kernel.</div>
+</div>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>First call to <span class="mono">load_jit</span></h4><p>The target <span class="mono">.so</span> does not exist yet; the marker is not found in the cache.</p></div></div>
@@ -10906,6 +11031,14 @@ and the real engineering complexity is tucked inside them.</p>
     # the C++/CUDA kernel class. Returns the loaded extension Module.
     ...
 </pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/jit_kernel/activation.py ::silu_and_mul</span><span class="ln">JIT activation entry: forwards to a runtime-compiled, cached kernel</span></div><pre>def silu_and_mul(input, out=None, expert_ids=None, expert_step=1):
+    # JIT activation op: run_activation triggers a compile-on-first-use
+    # (then cached .so) and dispatches to that kernel.
+    return run_activation("silu", input, out, expert_ids, expert_step)
+</pre></div>
+
+<p>A concrete example: the same <span class="mono">silu_and_mul</span> exists on both paths—in Lesson 38's <span class="mono">sgl-kernel</span> it is the AOT version, shipped ready with the wheel; here in <span class="mono">jit_kernel/activation.py</span> it is the JIT version, compiled on the spot on the first call and cache-hit thereafter. Its sibling ops <span class="mono">gelu_and_mul</span> and <span class="mono">gelu_tanh_and_mul</span> go through the same <span class="mono">run_activation</span> entry too, only swapping the activation name from <span class="mono">"silu"</span> to <span class="mono">"gelu"</span> / <span class="mono">"gelu_tanh"</span>—so "one entry, compile on demand, reused across ops" is exactly the JIT path's uniform pattern.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><span class="mono">jit_kernel/</span> compiles small C++/CUDA kernels on demand at runtime, instead of shipping them ahead of time in the wheel like Lesson 38's <span class="mono">sgl-kernel</span>.</li>
@@ -10994,6 +11127,54 @@ and the real engineering complexity is tucked inside them.</p>
 
 <div class="cellgroup"><div class="cell">page #7</div><div class="cell">page #3</div><div class="cell">page #19</div><div class="cell">page #5</div><div class="cell">page #12</div><div class="cell">page #0</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="Paged-KV gather: a contiguous logical sequence maps through the page_table kv_indices to physically scattered pages in the KV pool, and the kernel gathers the right pages before attending">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">logical contiguous → kv_indices → physically scattered</text>
+    <text x="24" y="56" style="fill:var(--muted);font-size:11px">logical sequence (contiguous)</text>
+    <rect x="24" y="64" width="72" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="60" y="86" text-anchor="middle" class="mono" style="font-size:11px">L0</text>
+    <rect x="110" y="64" width="72" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="146" y="86" text-anchor="middle" class="mono" style="font-size:11px">L1</text>
+    <rect x="196" y="64" width="72" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="232" y="86" text-anchor="middle" class="mono" style="font-size:11px">L2</text>
+    <rect x="282" y="64" width="72" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="318" y="86" text-anchor="middle" class="mono" style="font-size:11px">L3</text>
+    <line x1="60" y1="98" x2="60" y2="146" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="146" y1="98" x2="146" y2="146" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="232" y1="98" x2="232" y2="146" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="318" y1="98" x2="318" y2="146" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="138" style="fill:var(--muted);font-size:11px">page_table (kv_indices)</text>
+    <rect x="24" y="148" width="72" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="60" y="170" text-anchor="middle" class="mono" style="font-size:11px">7</text>
+    <rect x="110" y="148" width="72" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="146" y="170" text-anchor="middle" class="mono" style="font-size:11px">3</text>
+    <rect x="196" y="148" width="72" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="232" y="170" text-anchor="middle" class="mono" style="font-size:11px">19</text>
+    <rect x="282" y="148" width="72" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="318" y="170" text-anchor="middle" class="mono" style="font-size:11px">5</text>
+    <rect x="424" y="44" width="356" height="242" rx="12" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="440" y="64" style="fill:var(--faint);font-size:11px">KV pool (scattered pages)</text>
+    <rect x="446" y="80" width="84" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="488" y="103" text-anchor="middle" class="mono" style="font-size:11px">page #3</text>
+    <rect x="600" y="74" width="84" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="642" y="97" text-anchor="middle" class="mono" style="font-size:11px">page #19</text>
+    <rect x="470" y="152" width="84" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="512" y="175" text-anchor="middle" class="mono" style="font-size:11px">page #7</text>
+    <rect x="636" y="150" width="84" height="38" rx="6" style="fill:var(--panel);stroke:var(--line);stroke-width:1.5"/>
+    <text x="678" y="173" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">page #0</text>
+    <rect x="540" y="224" width="84" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="582" y="247" text-anchor="middle" class="mono" style="font-size:11px">page #5</text>
+    <rect x="690" y="224" width="84" height="38" rx="6" style="fill:var(--panel);stroke:var(--line);stroke-width:1.5"/>
+    <text x="732" y="247" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">page #12</text>
+    <line x1="60" y1="182" x2="512" y2="171" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="146" y1="182" x2="488" y2="99" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="232" y1="182" x2="642" y2="93" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="318" y1="182" x2="582" y2="243" style="stroke:var(--teal);stroke-width:1.5"/>
+    <text x="24" y="306" style="fill:var(--faint);font-size:11px">kernel gathers these pages by kv_indices → attends as one sequence</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Paged-KV gather</b> — a logically contiguous sequence (<span class="mono">L0…L3</span>) is translated through the <span class="mono">page_table</span> (the <span class="mono">kv_indices</span>) into physically scattered KV pages (#7, #3, #19, #5); the kernel first gathers those scattered pages by <span class="mono">kv_indices</span> before it can attend to them as one sequence.</div>
+</div>
+
 <p>This "jump-around" access is the biggest engineering challenge of a decode kernel. Done crudely, page jumps make access scattered and bandwidth poor; done well, the kernel lets one thread block own one sequence, or coalesces several page reads into aligned, contiguous memory transactions, using every memory read fully. That is why the very same attention math runs at wildly different speeds across backends (Lesson 33) — almost all the difference is KV access efficiency.</p>
 
 <h2>3. Tiling and online softmax: done in one streaming pass</h2>
@@ -11004,6 +11185,64 @@ and the real engineering complexity is tucked inside them.</p>
 <div class="cols"><div class="col"><strong>prefill kernel</strong><br>Processes all prompt tokens, with many query positions — a wide, thick, GEMM-like dense computation. Compute-heavy, it can keep tensor cores fed; the bottleneck leans toward arithmetic.</div><div class="col"><strong>decode kernel</strong><br>One query position per step, a skinny and long shape, dominated by gathering over the KV cache via page_table. Tiny compute, large access; the bottleneck is memory bandwidth (Lesson 4).</div></div>
 
 <p>Because their shapes and bottlenecks differ entirely, SGLang takes different kernel paths for them: prefill like one big GEMM, decode like a large sparse pick. Forcing both into one implementation usually leaves both running slowly.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Tiled attention inner loop: one Q tile streams over the KV tiles, each tile computes S equals Q times K transpose, online softmax updates the running max and sum, then times V is accumulated into the accumulator; the full score matrix never hits HBM">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">one Q tile → stream over KV tiles</text>
+    <rect x="24" y="86" width="92" height="120" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="70" y="140" text-anchor="middle" class="mono" style="font-size:12px">Q tile</text>
+    <text x="70" y="160" text-anchor="middle" style="fill:var(--muted);font-size:11px">one query row</text>
+    <line x1="116" y1="146" x2="148" y2="146" style="stroke:var(--line);stroke-width:2"/>
+    <rect x="150" y="52" width="486" height="208" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5;stroke-dasharray:6 5"/>
+    <text x="166" y="74" style="fill:var(--accent-ink);font-weight:700;font-size:12px">loop: over KV tiles</text>
+    <rect x="166" y="90" width="86" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="209" y="111" text-anchor="middle" class="mono" style="font-size:11px">KV tile</text>
+    <text x="209" y="127" text-anchor="middle" style="fill:var(--muted);font-size:10px">K, V block</text>
+    <line x1="252" y1="113" x2="276" y2="113" style="stroke:var(--line);stroke-width:2"/>
+    <rect x="278" y="90" width="92" height="46" rx="6" style="fill:var(--panel);stroke:var(--line);stroke-width:1.5"/>
+    <text x="324" y="111" text-anchor="middle" class="mono" style="font-size:11px">S=Q·Kᵀ</text>
+    <text x="324" y="127" text-anchor="middle" style="fill:var(--muted);font-size:10px">tile scores</text>
+    <line x1="370" y1="113" x2="394" y2="113" style="stroke:var(--line);stroke-width:2"/>
+    <rect x="396" y="90" width="104" height="46" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="448" y="111" text-anchor="middle" style="font-size:11px">online softmax</text>
+    <text x="448" y="127" text-anchor="middle" style="fill:var(--muted);font-size:10px">update m, ℓ</text>
+    <line x1="500" y1="113" x2="524" y2="113" style="stroke:var(--line);stroke-width:2"/>
+    <rect x="526" y="90" width="92" height="46" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="572" y="111" text-anchor="middle" class="mono" style="font-size:11px">·V accum</text>
+    <text x="572" y="127" text-anchor="middle" style="fill:var(--muted);font-size:10px">rescale O</text>
+    <rect x="166" y="172" width="452" height="66" rx="8" style="fill:var(--panel);stroke:var(--line);stroke-width:1.5"/>
+    <text x="182" y="192" style="fill:var(--muted);font-size:11px">running state (kept in registers)</text>
+    <rect x="182" y="202" width="120" height="26" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="242" y="219" text-anchor="middle" class="mono" style="font-size:11px">m running max</text>
+    <rect x="312" y="202" width="118" height="26" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="371" y="219" text-anchor="middle" class="mono" style="font-size:11px">ℓ running sum</text>
+    <rect x="440" y="202" width="160" height="26" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="520" y="219" text-anchor="middle" class="mono" style="font-size:11px">O accumulator</text>
+    <line x1="636" y1="146" x2="668" y2="146" style="stroke:var(--line);stroke-width:2"/>
+    <rect x="670" y="120" width="110" height="52" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="725" y="142" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">output O</text>
+    <text x="725" y="160" text-anchor="middle" style="fill:var(--muted);font-size:10px">this tile</text>
+    <text x="24" y="288" style="fill:var(--faint);font-size:11px">full score matrix never hits HBM — read, compute, drop each tile</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Tiled attention inner loop</b> — one Q tile streams over the KV tiles: each tile computes <span class="mono">S=Q·Kᵀ</span>, online softmax updates the running max <span class="mono">m</span> and sum <span class="mono">ℓ</span> (rescaling the accumulator), then <span class="mono">·V</span> is accumulated into <span class="mono">O</span>; the full score matrix never hits HBM.</div>
+</div>
+
+<p>This trio — tiling, online softmax, paged gather — is not unique to decode. The prefill/extend phase runs the same tiled flash-attention, just with more query positions and a wider shape. The <span class="mono">extend_attention_fwd</span> below is SGLang's Triton kernel entry for the extend phase: it gathers the already-cached paged K/V via <span class="mono">kv_indptr</span>/<span class="mono">kv_indices</span>, then does tiled Q·Kᵀ → online softmax → ·V per tile, writing the result into <span class="mono">o_extend</span>:</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/triton_ops/extend_attention.py ::extend_attention_fwd</span><span class="ln">Triton tiled flash-attention (extend/prefill phase)</span></div><pre>def extend_attention_fwd(q_extend, k_extend, v_extend, o_extend,
+                         k_buffer, v_buffer,
+                         qo_indptr, kv_indptr, kv_indices, ...):
+    # Triton flash-attention for the EXTEND (prefill) phase.
+    # gather cached K/V by kv_indices (paged), then per Q tile:
+    #   tiled Q·Kᵀ -&gt; online softmax (running max/sum) -&gt; ·V,
+    # streaming over KV tiles so full scores never hit HBM.
+    # writes the attention output into o_extend.
+    ...
+</pre></div>
+
+<p>Concrete numbers show why tiling matters: for a 4000-token sequence, materialising the full score matrix is 4000×4000 ≈ 16M scores; tiling only ever holds one tile, say 128×128 ≈ 16K — memory drops from <span class="mono">O(seq²)</span> to <span class="mono">O(tile)</span>, three orders of magnitude smaller, which is exactly why one streaming pass fits in SRAM.</p>
+
+<p>And the power of <span class="mono">kv_indices</span>: that same 4000-token context, cut into 16-token pages, is 250 pages scattered across the KV pool; the kernel reads those 250 page ids from <span class="mono">kv_indices</span> and attends to them as one contiguous sequence — no need to reserve 4000 tokens of contiguous memory, and not a single history token is missed.</p>
 
 <h2>4. A real wrinkle: MLA's compressed latent layout</h2>
 <p>To ground all of this in real code, look at the DeepSeek-style <strong>MLA</strong> (multi-head latent attention) decode kernel. MLA has a real-world wrinkle: its KV is not stored plainly as "one K, one V per head," but as a <strong>compressed latent</strong> (<span class="mono">D_latent=512</span>) plus a small <strong>rope part</strong> (<span class="mono">D_rope=64</span>), 576 dims per position together. The kernel reads this compressed KV from <span class="mono">kv_c_and_k_pe_cache</span> via the page_table, <strong>pads</strong> the head count up to the kernel's tile width <span class="mono">MAX_HEADS=128</span>, then dispatches to the compiled CUDA kernel. The Python below is that "prepare data + dispatch" wrapper; the real multiply-accumulate happens inside the compiled kernel behind <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span>:</p>
@@ -11118,6 +11357,39 @@ and the real engineering complexity is tucked inside them.</p>
 <div class="flow"><div class="node">read gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">write temp (HBM)</div><div class="arrow">→</div><div class="node">read temp + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
 <div class="flow"><div class="node">read x (HBM)</div><div class="arrow">→</div><div class="node">fused kernel: silu &amp; mul in registers</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="unfused needs many HBM round-trips; fused does it in one kernel in registers">
+    <text x="40" y="34" style="font-weight:700;fill:var(--red)">unfused: op → HBM → op → HBM</text>
+    <rect x="40" y="52" width="110" height="46" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="95" y="80" text-anchor="middle">add</text>
+    <text x="161" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="172" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="227" y="80" text-anchor="middle" class="mono" style="font-size:12px">write HBM</text>
+    <text x="293" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="304" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="359" y="80" text-anchor="middle" class="mono" style="font-size:12px">read HBM</text>
+    <text x="425" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="436" y="52" width="110" height="46" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="491" y="80" text-anchor="middle">rmsnorm</text>
+    <text x="557" y="80" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="568" y="52" width="110" height="46" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="623" y="80" text-anchor="middle" class="mono" style="font-size:12px">write HBM</text>
+    <text x="40" y="128" style="fill:var(--red);font-size:12px">intermediates shuttle in/out of HBM — memory trips dominate</text>
+    <text x="40" y="176" style="font-weight:700;fill:var(--teal)">fused: single kernel (read once · write once)</text>
+    <rect x="40" y="194" width="150" height="56" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="115" y="227" text-anchor="middle">read once</text>
+    <text x="202" y="227" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="215" y="194" width="290" height="56" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="360" y="220" text-anchor="middle">one kernel: add + RMSNorm</text>
+    <text x="360" y="240" text-anchor="middle" style="fill:var(--muted);font-size:12px">kept in registers</text>
+    <text x="517" y="227" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="530" y="194" width="150" height="56" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="605" y="227" text-anchor="middle">write once</text>
+    <text x="40" y="282" style="fill:var(--teal);font-size:12px">saves 2 writes + 1 read of HBM</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · unfused vs fused</b> — unfused writes each intermediate back and reads it from HBM, so memory round-trips dominate; fused does add and RMSNorm in registers inside one kernel, reading once and writing once.</div>
+</div>
+
 <h2>2. CUDA graphs: capture once, replay many times</h2>
 <p>Recall <span class="mono">Lesson 27</span>: a CUDA graph records a <strong>fixed sequence of kernel launches</strong> (capture), and then each decode step just <strong>replays</strong> that graph with almost no CPU-side submission overhead. This matters enormously for decode, because each step computes so little that per-kernel CPU submission balloons into the dominant cost.</p>
 <p>But CUDA graphs impose two hard constraints: <strong>shapes must be static</strong> and <strong>no data-dependent control branching</strong>. Capture records concrete pointers and launch parameters; if next time a tensor's shape changes, or the program "looks at data to decide which branch to take," the recorded graph no longer applies. Hence: <strong>fixed-shape, deterministic fused kernels are inherently graph-friendly</strong>; ops whose <strong>shapes vary, or that branch on the host side</strong>, must stay <strong>outside</strong> the captured region.</p>
@@ -11128,6 +11400,29 @@ and the real engineering complexity is tucked inside them.</p>
 <tr><td><span class="mono">fused_add_rmsnorm</span> (residual-add + RMSNorm, Lesson 36)</td><td>Sum stays in registers and is normalized in place; saves a round-trip and a launch</td></tr>
 <tr><td>fused qk-norm + RoPE</td><td>Normalization and rotary embedding in one kernel; less traffic, fewer submissions</td></tr>
 <tr><td>Fixed-shape kernels after fusion</td><td>Static shape → graph-friendly → capturable/replayable by a CUDA graph</td></tr></table>
+
+<div class="fig">
+  <svg viewBox="0 0 800 240" role="img" aria-label="pipeline: fuse to static shape to capture to replay">
+    <text x="34" y="36" style="font-weight:700;fill:var(--muted)">fuse → static shape → capture → replay</text>
+    <rect x="34" y="60" width="160" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="114" y="88" text-anchor="middle" style="font-weight:700">fuse ops</text>
+    <text x="114" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">cut kernel count</text>
+    <text x="205" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="216" y="60" width="160" height="64" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="296" y="88" text-anchor="middle" style="font-weight:700">static shape</text>
+    <text x="296" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">bucket by batch</text>
+    <text x="387" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="398" y="60" width="160" height="64" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="478" y="88" text-anchor="middle" style="font-weight:700">capture</text>
+    <text x="478" y="108" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">CUDA Graph once</text>
+    <text x="569" y="96" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="580" y="60" width="160" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="660" y="88" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">replay</text>
+    <text x="660" y="108" text-anchor="middle" style="fill:var(--muted);font-size:12px">cheap each step</text>
+    <text x="34" y="170" style="fill:var(--accent-ink);font-size:12px">fewer kernels → easier capture → CPU submit cost ≈ 0</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · fusion feeds the CUDA graph</b> — fuse first to cut kernel count, capture the whole step once at fixed/bucketed shapes, then replay cheaply on every decode step, driving CPU launch overhead to nearly zero.</div>
+</div>
 
 <h2>3. How they cooperate: fewer + fused + static → capture → replay</h2>
 <p>Chaining the two ideas, the logic is clean: first use <strong>fusion</strong> to shrink the kernel count and erase intermediate traffic, so most kernels in the forward are both <strong>few</strong> and <strong>fixed-shape</strong>; such a kernel sequence exactly satisfies the CUDA graph's static premise, so you can <strong>capture once</strong> and then <strong>replay</strong> it every decode step, driving the "CPU submits each kernel" cost to nearly zero. For the bandwidth-bound, launch-sensitive decode stage (<span class="mono">Lesson 4</span>), this is a key reason throughput can climb.</p>
@@ -11157,6 +11452,15 @@ and the real engineering complexity is tucked inside them.</p>
         out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
         silu_and_mul(x, out)            # -&gt; fused JIT silu+mul kernel (jit_kernel.activation)
         return out</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">sgl-kernel/python/sgl_kernel/elementwise.py ::fused_add_rmsnorm</span><span class="ln">one kernel does residual-add + RMSNorm (saves HBM round-trips)</span></div><pre>def fused_add_rmsnorm(input, residual, weight, eps=1e-6):
+    # ONE kernel does residual-add + RMSNorm in place — no temp tensor,
+    # no extra HBM round-trip:
+    #   Step 1:  residual += input
+    #   Step 2:  input = (residual / RMS(residual)) * weight
+    ...   # dispatches to the fused FlashInfer/CUDA kernel</pre></div>
+
+<p>Concretely, every Transformer block has <strong>two add+norm seams</strong> (pre-attention and pre-MLP). Fusing each “residual-add + RMSNorm” into one <span class="mono">fused_add_rmsnorm</span> kernel saves a full read + write of the hidden state per seam; fewer kernels also means fewer launches to capture in the CUDA graph — the wins of fusion and graphs compound here.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Fusion</strong> merges several small ops into one kernel, eliminating intermediate temporaries' <span class="mono">HBM</span> round-trips and collapsing many <strong>launches</strong> into one.</li>
@@ -11249,6 +11553,34 @@ and the real engineering complexity is tucked inside them.</p>
 <div class="layer">⚙️ Per-chip kernels: attention backend (Lesson 33) · AOT kernels (Lesson 38) · JIT kernels (Lesson 39) — swapped per chip</div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Three horizontal bands: hardware-agnostic upper tiers, the SRTPlatform seam, per-chip kernels">
+    <text x="24" y="28" style="font-weight:700;fill:var(--blue)">Upper · hardware-agnostic</text>
+    <rect x="20" y="36" width="760" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="40" y="50" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="153" y="73" text-anchor="middle" style="font-size:13px">Scheduler</text>
+    <rect x="287" y="50" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="400" y="73" text-anchor="middle" style="font-size:13px">Model</text>
+    <rect x="534" y="50" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="647" y="73" text-anchor="middle" style="font-size:13px">Attention abstraction</text>
+    <text x="24" y="120" style="font-weight:700;fill:var(--amber)">Seam · SRTPlatform</text>
+    <rect x="20" y="128" width="760" height="64" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5;stroke-dasharray:6 4"/>
+    <rect x="40" y="142" width="350" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="215" y="165" text-anchor="middle" class="mono" style="font-size:12px">capability flags supports_fp8…</text>
+    <rect x="410" y="142" width="330" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="575" y="165" text-anchor="middle" class="mono" style="font-size:12px">device ops</text>
+    <text x="24" y="212" style="font-weight:700;fill:var(--purple)">Lower · per-chip kernels</text>
+    <rect x="20" y="220" width="760" height="64" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <rect x="40" y="234" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="153" y="257" text-anchor="middle" class="mono" style="font-size:13px">CUDA</text>
+    <rect x="287" y="234" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="400" y="257" text-anchor="middle" class="mono" style="font-size:13px">HIP</text>
+    <rect x="534" y="234" width="226" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="647" y="257" text-anchor="middle" class="mono" style="font-size:13px">CANN</text>
+  </svg>
+  <div class="figcap"><b>Fig A · Three bands</b> — the upper tiers are hardware-agnostic (scheduler / model / attention abstraction); the middle is the SRTPlatform seam (capability flags + device ops), where hardware specifics live; the bottom is per-chip kernels (CUDA / HIP / CANN…).</div>
+</div>
+
 <table class="t">
 <tr><th>Hardware</th><th>Its backend / kernels</th></tr>
 <tr><td>NVIDIA GPU</td><td>CudaSRTPlatform · hardware_backend/gpu · CUDA attention kernels</td></tr>
@@ -11259,6 +11591,46 @@ and the real engineering complexity is tucked inside them.</p>
 <tr><td>Apple MLX</td><td>hardware_backend/mlx · MLX kernels</td></tr>
 <tr><td>Plain CPU</td><td>CPU platform · hardware_backend/cpu · CPU kernels</td></tr>
 </table>
+
+<div class="fig">
+  <svg viewBox="0 0 800 330" role="img" aria-label="One SGLang engine fans out to many chips, each an SRTPlatform subclass answering capability flags">
+    <rect x="300" y="20" width="200" height="48" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="400" y="49" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">SGLang engine</text>
+    <line x1="400" y1="68" x2="400" y2="98" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="150" y1="98" x2="670" y2="98" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="150" y1="98" x2="150" y2="118" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="410" y1="98" x2="410" y2="118" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="670" y1="98" x2="670" y2="118" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="150" y1="196" x2="150" y2="232" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="410" y1="196" x2="410" y2="232" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="670" y1="196" x2="670" y2="232" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="40" y="118" width="220" height="78" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="150" y="144" text-anchor="middle" style="font-weight:700">NVIDIA · CUDA</text>
+    <text x="150" y="164" text-anchor="middle" style="font-size:11px;fill:var(--muted)">SRTPlatform subclass</text>
+    <text x="150" y="184" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✓ · graph ✓</text>
+    <rect x="300" y="118" width="220" height="78" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="410" y="144" text-anchor="middle" style="font-weight:700">AMD · ROCm</text>
+    <text x="410" y="164" text-anchor="middle" style="font-size:11px;fill:var(--muted)">SRTPlatform subclass</text>
+    <text x="410" y="184" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✓ · graph ✓</text>
+    <rect x="560" y="118" width="220" height="78" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="670" y="144" text-anchor="middle" style="font-weight:700">Ascend · NPU</text>
+    <text x="670" y="164" text-anchor="middle" style="font-size:11px;fill:var(--muted)">SRTPlatform subclass</text>
+    <text x="670" y="184" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✓ · graph ✗</text>
+    <rect x="40" y="232" width="220" height="78" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="150" y="258" text-anchor="middle" style="font-weight:700">Intel · XPU</text>
+    <text x="150" y="278" text-anchor="middle" style="font-size:11px;fill:var(--muted)">SRTPlatform subclass</text>
+    <text x="150" y="298" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✗ · graph ✗</text>
+    <rect x="300" y="232" width="220" height="78" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="410" y="258" text-anchor="middle" style="font-weight:700">Moore · MUSA</text>
+    <text x="410" y="278" text-anchor="middle" style="font-size:11px;fill:var(--muted)">SRTPlatform subclass</text>
+    <text x="410" y="298" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✗ · graph ✓</text>
+    <rect x="560" y="232" width="220" height="78" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="670" y="258" text-anchor="middle" style="font-weight:700">Apple · MLX</text>
+    <text x="670" y="278" text-anchor="middle" style="font-size:11px;fill:var(--muted)">SRTPlatform subclass</text>
+    <text x="670" y="298" text-anchor="middle" class="mono" style="font-size:11px">fp8 ✗ · graph ✗</text>
+  </svg>
+  <div class="figcap"><b>Fig B · One engine → many chips</b> — the same SGLang engine fans out to NVIDIA (CUDA), AMD (ROCm), Ascend NPU, Intel XPU, MUSA, MLX; each is an SRTPlatform subclass answering flags like supports_fp8 / support_cuda_graph (some yes, some no).</div>
+</div>
 
 <div class="cols">
 <div class="col"><strong>✅ Portable (one codebase runs everywhere)</strong><br/>The scheduler (Lesson 18), the model (Lesson 26), most modules, and the input/output (IO) pipeline. They are hardware-agnostic and reused as-is when chips change.</div>
@@ -11291,6 +11663,22 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
     def supports_fp8(self): return True
     def support_cuda_graph(self): return True
     def support_piecewise_cuda_graph(self): return True</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/platforms/cuda.py ::CudaSRTPlatform</span><span class="ln">concrete platform: NVIDIA/CUDA answers the capability flags</span></div><pre>class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):
+    # the concrete NVIDIA/CUDA platform. Upper layers ask capability
+    # questions; this subclass answers them, so engine code stays
+    # hardware-agnostic.
+    def supports_fp8(self) -&gt; bool:
+        return True
+    def support_cuda_graph(self) -&gt; bool:
+        return True
+    def support_piecewise_cuda_graph(self) -&gt; bool:
+        return True</pre></div>
+
+<div class="card"><div class="tag">🧩 Concrete examples</div><ul>
+<li><strong>Porting to a new accelerator</strong>: just add one <span class="mono">SRTPlatform</span> subclass plus its kernels — <strong>without touching</strong> the scheduler (Lesson 18) or the model (Lesson 26).</li>
+<li><strong>A chip without CUDA-graph support</strong>: its <span class="mono">support_cuda_graph()</span> simply returns <span class="mono">False</span>, so the engine skips graph capture and falls back to per-operator execution, still running fine.</li>
+</ul></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>The <strong>platform abstraction</strong> lets one engine run on many chips: the base class <span class="mono">SRTPlatform</span> (in <span class="mono">srt/platforms/interface.py</span>) declares per-chip factory methods, capability flags, and lifecycle hooks.</li>
