@@ -384,6 +384,37 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   此外还有 abort（中止）、flush_cache（清缓存）、health（健康检查）等独立的<strong>控制消息</strong>。
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="进程间的消息类型：TokenizerManager、Scheduler、DetokenizerManager 三个进程之间流动的 dataclass 消息，每条箭头标注它承载的 struct">
+    <text x="20" y="32" style="font-weight:700;fill:var(--muted)">三进程 · 各自独立内存 · 只靠投递 dataclass 协作</text>
+    <text x="95" y="70" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">GenerateReqInput</text>
+    <text x="95" y="86" text-anchor="middle" style="font-size:10px;fill:var(--muted)">客户端 → 前门（不跨进程）</text>
+    <line x1="95" y1="92" x2="95" y2="116" style="stroke:var(--blue);stroke-width:1.5"/>
+    <polygon points="95,122 90,112 100,112" style="fill:var(--blue)"/>
+    <rect x="20" y="122" width="150" height="62" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="150" text-anchor="middle" style="font-weight:700;font-size:13px">TokenizerManager</text>
+    <text x="95" y="170" text-anchor="middle" style="fill:var(--muted);font-size:11px">前门 · 分词</text>
+    <rect x="325" y="122" width="150" height="62" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="400" y="150" text-anchor="middle" style="font-weight:700;font-size:13px;fill:var(--accent-ink)">Scheduler</text>
+    <text x="400" y="170" text-anchor="middle" style="fill:var(--muted);font-size:11px">调度 · 前向</text>
+    <rect x="630" y="122" width="150" height="62" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="705" y="150" text-anchor="middle" style="font-weight:700;font-size:12.5px">DetokenizerManager</text>
+    <text x="705" y="170" text-anchor="middle" style="fill:var(--muted);font-size:11px">反分词</text>
+    <text x="247" y="118" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--ink)">TokenizedGenerateReqInput</text>
+    <line x1="170" y1="140" x2="319" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="325,140 315,135 315,145" style="fill:var(--line)"/>
+    <text x="552" y="118" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--ink)">BatchTokenIDOutput</text>
+    <line x1="475" y1="140" x2="624" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="630,140 620,135 620,145" style="fill:var(--line)"/>
+    <line x1="705" y1="184" x2="705" y2="236" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="705" y1="236" x2="95" y2="236" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="95" y1="236" x2="95" y2="190" style="stroke:var(--teal);stroke-width:1.5"/>
+    <polygon points="95,184 90,194 100,194" style="fill:var(--teal)"/>
+    <text x="400" y="228" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--teal)">BatchStrOutput → 经前门投回客户端</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 进程间的消息类型</b> — 三个进程不共享内存，只靠投递 dataclass 协作：<span class="mono">GenerateReqInput</span> 进前门后变成 <span class="mono">TokenizedGenerateReqInput</span> 送往调度器，调度器产出 <span class="mono">BatchTokenIDOutput</span> 交反分词器，最后 <span class="mono">BatchStrOutput</span> 经前门投回客户端。</div>
+</div>
+
 <h2>为什么是“传消息”而不是“共享内存”</h2>
 <p>回忆第 2 课的<strong>三进程模型</strong>：主进程（TokenizerManager）、调度器子进程、反分词器子进程。它们是<strong>三个独立的操作系统进程</strong>，
 各有各的内存空间——主进程里的一个 Python 对象，调度器进程<strong>看不见、也碰不到</strong>。这不是缺陷，而是刻意为之：拆进程能绕开
@@ -419,6 +450,40 @@ dataclass 让每条消息的字段一目了然、可读可打印；ZMQ 提供轻
   <div class="node"><div class="nt">按 rid 投回客户端</div><div class="nd">交还正在 await 的那条请求</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="一次往返：请求经 ZMQ socket 在三进程间右行，响应再原路返回，构成一个回路；强调这些是纯 Python dataclass 经 IPC 序列化，而非进程间 HTTP">
+    <text x="20" y="32" style="font-weight:700;fill:var(--muted)">一次往返 · 经 ZMQ IPC socket 收发</text>
+    <text x="380" y="74" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">请求 → pickle 序列化 → ZMQ 送往下一进程</text>
+    <line x1="109" y1="116" x2="109" y2="86" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="109" y1="86" x2="651" y2="86" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="651" y1="86" x2="651" y2="116" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="651,122 646,112 656,112" style="fill:var(--blue)"/>
+    <rect x="24" y="120" width="170" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="109" y="148" text-anchor="middle" style="font-weight:700;font-size:13px">TokenizerManager</text>
+    <text x="109" y="168" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--muted)">主进程</text>
+    <rect x="295" y="120" width="170" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="148" text-anchor="middle" style="font-weight:700;font-size:13px">Scheduler</text>
+    <text x="380" y="168" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--muted)">子进程</text>
+    <rect x="566" y="120" width="170" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="651" y="148" text-anchor="middle" style="font-weight:700;font-size:12.5px">DetokenizerManager</text>
+    <text x="651" y="168" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--muted)">子进程</text>
+    <circle cx="244" cy="152" r="11" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="244" y="156" text-anchor="middle" class="mono" style="font-size:9px;fill:var(--amber)">zmq</text>
+    <circle cx="515" cy="152" r="11" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="515" y="156" text-anchor="middle" class="mono" style="font-size:9px;fill:var(--amber)">zmq</text>
+    <line x1="651" y1="188" x2="651" y2="246" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="651" y1="246" x2="109" y2="246" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="109" y1="246" x2="109" y2="190" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="109,184 104,194 114,194" style="fill:var(--teal)"/>
+    <text x="380" y="238" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">响应 ← ZMQ 收到 → unpickle 还原 ← BatchStrOutput</text>
+    <rect x="190" y="276" width="380" height="32" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="297" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">纯 Python dataclass · 经 IPC 序列化 · 不是进程间 HTTP</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 一次往返</b> — 请求被 pickle 序列化、经 <span class="mono">zmq</span> socket 右行穿过三进程，响应再原路返回，构成一个回路。注意：进程间穿梭的是<strong>纯 Python dataclass</strong>（经 IPC 序列化），<strong>不是</strong>进程间的 HTTP——HTTP 只在最外层面向客户端。</div>
+</div>
+
+<p>一个具体的画面：主进程把 <span class="mono">TokenizedGenerateReqInput</span> 对象交给 ZMQ，ZMQ 用 <span class="mono">pickle</span>（部分通道用 <span class="mono">msgpack</span>）把它拍成字节流，经 IPC socket 送到调度器子进程，再在那头反序列化还原成同形状的对象——<strong>两端拿到的是同一个 dataclass，而不是一段 HTTP body</strong>。</p>
+
 <p>把这条链路逐棒说清楚。<strong>第一棒</strong>，TokenizerManager（第 14 课）收到 <span class="mono">GenerateReqInput</span>——这是<strong>用户视角</strong>的请求：
 里面是<strong>原始文本</strong>、采样参数、是否流式（<span class="mono">stream</span>），还可能带图片/音频。注意：<strong>这个对象不跨进程</strong>，它只活在主进程里。
 <strong>第二棒</strong>，分词把文本变成 token id，打包成 <span class="mono">TokenizedGenerateReqInput</span>——<strong>这个</strong>才是真正被 ZMQ 序列化、
@@ -441,6 +506,21 @@ dataclass 让每条消息的字段一目了然、可读可打印；ZMQ 提供轻
   <tr><td class="mono">BatchTokenIDOutput</td><td>rids、decode_ids/output_ids、finished_reasons</td><td>Scheduler/worker →（ZMQ）→ Detokenizer</td></tr>
   <tr><td class="mono">BatchStrOutput</td><td>rids、output_strs、output_ids、finish 信息</td><td>Detokenizer →（ZMQ）→ TokenizerManager → 客户端</td></tr>
 </table>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/io_struct.py ::BatchTokenIDOutput</span><span class="ln">Scheduler → Detokenizer：一步的原始 token 输出</span></div>
+  <pre><span class="kw">@dataclasses.dataclass</span>
+<span class="kw">class</span> BatchTokenIDOutput(BaseBatchReq):
+    <span class="cm"># Scheduler -&gt; Detokenizer: one step's raw token outputs to be turned into text</span>
+    finished_reasons: list      <span class="cm"># None / stop / length, per request</span>
+    decoded_texts: list         <span class="cm"># text decoded so far (for incremental decode)</span>
+    decode_ids: list            <span class="cm"># the token ids to detokenize</span>
+    read_offsets: list          <span class="cm"># where to resume detokenizing each request</span>
+    output_ids: list            <span class="cm"># the newly produced token ids</span>
+    skip_special_tokens: list</pre>
+</div>
+
+<p>具体感受一下这条边的“批量”性质：某一步里调度器同时跑了 <span class="mono">rid=7</span>、<span class="mono">rid=3</span>、<span class="mono">rid=9</span> 三条请求，它就把这三条的新 token id 一起塞进<strong>同一个</strong> <span class="mono">BatchTokenIDOutput</span>，靠 <span class="mono">BaseBatchReq</span> 里的 <span class="mono">rids</span> 列表标明每段归谁；这条消息再经 ZMQ（<span class="mono">pickle</span>/<span class="mono">msgpack</span> 序列化）送到反分词器。</p>
 
 <p>把这张表竖着读，你会发现一个优雅的规律：<strong>上一行的“消费者”往往就是下一行的“生产者”</strong>，四个 struct 首尾相接，
 正好拼成请求从“人类文本”到“token”再回到“人类文本”的<strong>完整闭环</strong>。还要留意<strong>单数与复数</strong>的切换：进的方向是<strong>单条</strong>
@@ -583,6 +663,37 @@ evolvability</strong> — a lesson distributed systems keep re-teaching.</p>
   <strong>control messages</strong>: abort, flush_cache, health.
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="The IPC message types: dataclass messages flowing between the three processes TokenizerManager, Scheduler and DetokenizerManager, each arrow labeled with the struct it carries">
+    <text x="20" y="32" style="font-weight:700;fill:var(--muted)">Three processes · separate memory · cooperate only by passing dataclasses</text>
+    <text x="95" y="70" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">GenerateReqInput</text>
+    <text x="95" y="86" text-anchor="middle" style="font-size:10px;fill:var(--muted)">client → front door (no IPC)</text>
+    <line x1="95" y1="92" x2="95" y2="116" style="stroke:var(--blue);stroke-width:1.5"/>
+    <polygon points="95,122 90,112 100,112" style="fill:var(--blue)"/>
+    <rect x="20" y="122" width="150" height="62" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="150" text-anchor="middle" style="font-weight:700;font-size:13px">TokenizerManager</text>
+    <text x="95" y="170" text-anchor="middle" style="fill:var(--muted);font-size:11px">front door · tokenize</text>
+    <rect x="325" y="122" width="150" height="62" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="400" y="150" text-anchor="middle" style="font-weight:700;font-size:13px;fill:var(--accent-ink)">Scheduler</text>
+    <text x="400" y="170" text-anchor="middle" style="fill:var(--muted);font-size:11px">schedule · forward</text>
+    <rect x="630" y="122" width="150" height="62" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="705" y="150" text-anchor="middle" style="font-weight:700;font-size:12.5px">DetokenizerManager</text>
+    <text x="705" y="170" text-anchor="middle" style="fill:var(--muted);font-size:11px">detokenize</text>
+    <text x="247" y="118" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--ink)">TokenizedGenerateReqInput</text>
+    <line x1="170" y1="140" x2="319" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="325,140 315,135 315,145" style="fill:var(--line)"/>
+    <text x="552" y="118" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--ink)">BatchTokenIDOutput</text>
+    <line x1="475" y1="140" x2="624" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="630,140 620,135 620,145" style="fill:var(--line)"/>
+    <line x1="705" y1="184" x2="705" y2="236" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="705" y1="236" x2="95" y2="236" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="95" y1="236" x2="95" y2="190" style="stroke:var(--teal);stroke-width:1.5"/>
+    <polygon points="95,184 90,194 100,194" style="fill:var(--teal)"/>
+    <text x="400" y="228" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--teal)">BatchStrOutput → routed back to client via front door</text>
+  </svg>
+  <div class="figcap"><b>Figure 1 · The IPC message types</b> — the three processes share no memory and cooperate only by passing dataclasses: a <span class="mono">GenerateReqInput</span> becomes a <span class="mono">TokenizedGenerateReqInput</span> sent to the scheduler, which emits a <span class="mono">BatchTokenIDOutput</span> to the detokenizer, whose <span class="mono">BatchStrOutput</span> is routed back to the client via the front door.</div>
+</div>
+
 <h2>Why message passing, not shared memory</h2>
 <p>Recall the <strong>three-process model</strong> (Lesson 2): the main process (TokenizerManager), the scheduler subprocess, the detokenizer subprocess. They are
 <strong>three separate OS processes</strong>, each with its own memory — an object in the main process is <strong>invisible and untouchable</strong> to the scheduler. This is
@@ -615,6 +726,40 @@ leg's "output message" is exactly the next leg's "input message," and the baton 
   <div class="node"><div class="nt">route by rid to client</div><div class="nd">hand back to the awaiting request</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="One round-trip: the request travels right through the three processes over ZMQ sockets and the response returns the same way, forming a loop; these are plain Python dataclasses serialized over IPC, not HTTP between processes">
+    <text x="20" y="32" style="font-weight:700;fill:var(--muted)">One round-trip · sent and received over ZMQ IPC sockets</text>
+    <text x="380" y="74" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">request → pickle-serialize → ZMQ to next process</text>
+    <line x1="109" y1="116" x2="109" y2="86" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="109" y1="86" x2="651" y2="86" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="651" y1="86" x2="651" y2="116" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="651,122 646,112 656,112" style="fill:var(--blue)"/>
+    <rect x="24" y="120" width="170" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="109" y="148" text-anchor="middle" style="font-weight:700;font-size:13px">TokenizerManager</text>
+    <text x="109" y="168" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--muted)">main process</text>
+    <rect x="295" y="120" width="170" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="148" text-anchor="middle" style="font-weight:700;font-size:13px">Scheduler</text>
+    <text x="380" y="168" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--muted)">subprocess</text>
+    <rect x="566" y="120" width="170" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="651" y="148" text-anchor="middle" style="font-weight:700;font-size:12.5px">DetokenizerManager</text>
+    <text x="651" y="168" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--muted)">subprocess</text>
+    <circle cx="244" cy="152" r="11" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="244" y="156" text-anchor="middle" class="mono" style="font-size:9px;fill:var(--amber)">zmq</text>
+    <circle cx="515" cy="152" r="11" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="515" y="156" text-anchor="middle" class="mono" style="font-size:9px;fill:var(--amber)">zmq</text>
+    <line x1="651" y1="188" x2="651" y2="246" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="651" y1="246" x2="109" y2="246" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <line x1="109" y1="246" x2="109" y2="190" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <polygon points="109,184 104,194 114,194" style="fill:var(--teal)"/>
+    <text x="380" y="238" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">response ← ZMQ receives → unpickle ← BatchStrOutput</text>
+    <rect x="190" y="276" width="380" height="32" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="297" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">plain Python dataclasses · serialized over IPC · not HTTP</text>
+  </svg>
+  <div class="figcap"><b>Figure 2 · One round-trip</b> — the request is pickle-serialized and travels right through the three processes over <span class="mono">zmq</span> sockets, then the response returns the same way, forming a loop. Note: what crosses between processes are <strong>plain Python dataclasses</strong> (serialized over IPC), <strong>not</strong> HTTP between processes — HTTP exists only at the outermost edge facing the client.</div>
+</div>
+
+<p>A concrete picture: the main process hands the <span class="mono">TokenizedGenerateReqInput</span> object to ZMQ, which uses <span class="mono">pickle</span> (and <span class="mono">msgpack</span> on some channels) to flatten it into bytes, sends it over an IPC socket to the scheduler subprocess, and rebuilds the same-shaped object on the other side — <strong>both ends hold the same dataclass, not an HTTP body</strong>.</p>
+
 <p>Leg by leg. <strong>Leg one</strong>: the TokenizerManager (Lesson 14) receives a <span class="mono">GenerateReqInput</span> — the <strong>user-facing</strong> request:
 <strong>raw text</strong>, sampling params, a <span class="mono">stream</span> flag, maybe images/audio. Note: <strong>this object does not cross processes</strong>; it lives only in the main
 process. <strong>Leg two</strong>: tokenization turns text into token ids and packs a <span class="mono">TokenizedGenerateReqInput</span> — <strong>this</strong> is the message actually
@@ -634,6 +779,21 @@ That is the one line to memorize this lesson.</p>
   <tr><td class="mono">BatchTokenIDOutput</td><td>rids, decode_ids/output_ids, finished_reasons</td><td>Scheduler/worker →(ZMQ)→ Detokenizer</td></tr>
   <tr><td class="mono">BatchStrOutput</td><td>rids, output_strs, output_ids, finish info</td><td>Detokenizer →(ZMQ)→ TokenizerManager → client</td></tr>
 </table>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/io_struct.py ::BatchTokenIDOutput</span><span class="ln">Scheduler -&gt; Detokenizer: a step's raw token outputs</span></div>
+  <pre><span class="kw">@dataclasses.dataclass</span>
+<span class="kw">class</span> BatchTokenIDOutput(BaseBatchReq):
+    <span class="cm"># Scheduler -&gt; Detokenizer: one step's raw token outputs to be turned into text</span>
+    finished_reasons: list      <span class="cm"># None / stop / length, per request</span>
+    decoded_texts: list         <span class="cm"># text decoded so far (for incremental decode)</span>
+    decode_ids: list            <span class="cm"># the token ids to detokenize</span>
+    read_offsets: list          <span class="cm"># where to resume detokenizing each request</span>
+    output_ids: list            <span class="cm"># the newly produced token ids</span>
+    skip_special_tokens: list</pre>
+</div>
+
+<p>Feel the "batched" nature of this edge concretely: in one step the scheduler runs <span class="mono">rid=7</span>, <span class="mono">rid=3</span>, and <span class="mono">rid=9</span> together, so it packs all three requests' new token ids into a <strong>single</strong> <span class="mono">BatchTokenIDOutput</span>, with the <span class="mono">rids</span> list from <span class="mono">BaseBatchReq</span> marking which segment is whose; that one message is then sent over ZMQ (serialized with <span class="mono">pickle</span>/<span class="mono">msgpack</span>) to the detokenizer.</p>
 
 <p>Read the table top-to-bottom and a neat pattern appears: <strong>each row's consumer is the next row's producer</strong>; the four structs link end-to-end into the
 <strong>full loop</strong> from "human text" to "tokens" and back to "human text." Note the switch from <strong>singular to plural</strong>: inbound is <strong>single</strong>

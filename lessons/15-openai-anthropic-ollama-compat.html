@@ -410,6 +410,34 @@ SGLang 在背后偷偷调用了 openai.com——<strong>恰恰相反</strong>。
   <div class="layer l-core"><div class="lh"><span class="badge">前门</span><span class="name">TokenizerManager（第 14 课）</span></div><div class="ld">接过原生请求，分词、贴 rid、经 ZMQ 送往调度器。<strong>共享的快路径</strong>从这里开始，对所有协议一视同仁。</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 770 270" role="img" aria-label="三种协议各走自己的适配器，做完 schema 翻译与聊天模板后收敛成同一个 GenerateReqInput，引擎内核只看到统一形态">
+    <text x="24" y="24" style="font-weight:700;fill:var(--muted)">三种协议入口</text>
+    <rect x="24" y="36" width="196" height="48" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="122" y="58" text-anchor="middle" style="font-weight:700;fill:var(--blue)">OpenAI</text>
+    <text x="122" y="75" text-anchor="middle" class="mono" style="font-size:11px">/v1/chat/completions</text>
+    <rect x="24" y="98" width="196" height="48" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="122" y="120" text-anchor="middle" style="font-weight:700;fill:var(--teal)">Anthropic</text>
+    <text x="122" y="137" text-anchor="middle" class="mono" style="font-size:11px">/v1/messages</text>
+    <rect x="24" y="160" width="196" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="122" y="182" text-anchor="middle" style="font-weight:700;fill:var(--amber)">Ollama</text>
+    <text x="122" y="199" text-anchor="middle" class="mono" style="font-size:11px">/api/generate</text>
+    <rect x="288" y="60" width="150" height="124" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="363" y="106" text-anchor="middle" style="font-weight:700;fill:var(--muted)">适配器层</text>
+    <text x="363" y="128" text-anchor="middle" style="fill:var(--faint);font-size:12px">schema 翻译</text>
+    <text x="363" y="146" text-anchor="middle" style="fill:var(--faint);font-size:12px">+ 聊天模板</text>
+    <line x1="220" y1="60" x2="288" y2="100" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="122" x2="288" y2="122" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="184" x2="288" y2="144" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="506" y="84" width="208" height="76" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="610" y="114" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">一个内部请求</text>
+    <text x="610" y="134" text-anchor="middle" class="mono" style="font-size:12px">GenerateReqInput</text>
+    <line x1="438" y1="122" x2="506" y2="122" style="stroke:var(--accent);stroke-width:1.5"/>
+    <text x="610" y="186" text-anchor="middle" style="fill:var(--muted);font-size:12px">引擎内核只看到这份统一形态</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 三种协议 → 一个内部请求</b> — OpenAI、Anthropic、Ollama 三种入口各走自己的适配器，做完 <span class="mono">schema</span> 翻译与聊天模板后，统统收敛成同一个 <span class="mono">GenerateReqInput</span>；引擎内核只看到这份统一形态，再也分不清请求原本说的是哪种方言。</div>
+</div>
+
 <h2>路由 → serving 类 → 原生映射</h2>
 <p>具体到代码，每条 HTTP 路由都绑着一个负责翻译的 serving 类。下面这张表把“外界看到的路由”和“内部接手的类”对齐，
 你能一眼看出兼容层的<strong>分工地图</strong>：不同方言走不同适配器，但箭头最终都指向同一个 <span class="mono">GenerateReqInput</span>。</p>
@@ -442,6 +470,48 @@ Ollama 的 <span class="mono">/api/generate</span> 又是另一套，但<strong>
   响应也是 SGLang 原生 JSON。<strong>不套聊天模板</strong>、字段最贴近内核，是第 13 课讲的原生 HTTP 入口，适合自定义客户端与前端 RuntimeEndpoint。</p></div>
   <div class="col"><h4><span class="mono">/v1/chat/completions</span></h4><p>OpenAI 形状：body 是 <span class="mono">messages</span> 角色列表，由 <span class="mono">OpenAIServingChat</span> <strong>套用聊天模板</strong>后翻成
   <span class="mono">GenerateReqInput</span>；响应被映射成 <span class="mono">chat.completion</span> 对象或 <span class="mono">chat.completion.chunk</span> SSE 流（第 17 课）。任何 OpenAI 客户端开箱即用。</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 770 250" role="img" aria-label="OpenAI 的 messages 角色列表先经聊天模板拼成单段 prompt 字符串，再被分词成 token">
+    <text x="24" y="24" style="font-weight:700;fill:var(--muted)">之前 · messages 列表</text>
+    <rect x="24" y="36" width="190" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="34" y="56" class="mono" style="font-size:11px">{role: system, ...}</text>
+    <rect x="24" y="74" width="190" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="34" y="94" class="mono" style="font-size:11px">{role: user, ...}</text>
+    <rect x="24" y="112" width="190" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="34" y="132" class="mono" style="font-size:11px">{role: assistant, ...}</text>
+    <line x1="214" y1="89" x2="272" y2="89" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="272" y="52" width="206" height="74" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="375" y="80" text-anchor="middle" style="font-weight:700;fill:var(--amber)">聊天模板</text>
+    <text x="375" y="102" text-anchor="middle" class="mono" style="font-size:10px">&lt;|im_start|&gt;role…&lt;|im_end|&gt;</text>
+    <line x1="478" y1="89" x2="536" y2="89" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="536" y="52" width="210" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="641" y="71" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">单段 prompt 字符串</text>
+    <text x="641" y="88" text-anchor="middle" class="mono" style="font-size:10px">"&lt;|im_start|&gt;system…"</text>
+    <line x1="641" y1="96" x2="641" y2="134" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="536" y="134" width="210" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="641" y="159" text-anchor="middle" class="mono" style="fill:var(--teal);font-size:12px">tokens [12, 8801, …]</text>
+    <text x="375" y="200" text-anchor="middle" style="fill:var(--faint);font-size:12px">之后：单段字符串 → 分词成 token 交给运行时</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 套用 chat 模板</b> — OpenAI 给的是一串 <span class="mono">{role, content}</span> 消息（system / user / assistant）；适配器按模型的聊天模板（如 <span class="mono">&lt;|im_start|&gt;role…&lt;|im_end|&gt;</span>）把它们拼成<strong>单段 prompt 字符串</strong>，再分词成 token——这正是 chat 接口比原生 <span class="mono">/generate</span> 多出来的那一步。</div>
+</div>
+
+<p>举个具体例子。OpenAI 的 <span class="mono">messages</span> 就是一串带角色的对象，例如
+<span class="mono">[{"role":"system","content":"你是助手"}, {"role":"user","content":"你好"}]</span>；
+套用聊天模板后，会被拼成一段带特殊标记的纯文本，例如
+<span class="mono">&lt;|im_start|&gt;system 你是助手&lt;|im_end|&gt;&lt;|im_start|&gt;user 你好&lt;|im_end|&gt;&lt;|im_start|&gt;assistant</span>，
+最后这段字符串再被<strong>分词成 token</strong> 交给运行时。原生 <span class="mono">/generate</span> 直接收 prompt 文本，省掉的正是这一步。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/openai/serving_chat.py ::OpenAIServingChat</span><span class="ln">把 OpenAI 聊天请求适配成 SGLang 内部请求</span></div>
+  <pre><span class="kw">class</span> OpenAIServingChat(OpenAIServingBase):
+    <span class="cm"># adapts OpenAI /v1/chat/completions to SGLang's internal request</span>
+    <span class="kw">def</span> _convert_to_internal_request(self, request):
+        <span class="cm"># 1) apply the chat template to `messages` -&gt; one prompt string</span>
+        <span class="cm"># 2) map OpenAI params (temperature, max_tokens, ...) -&gt; sampling_params</span>
+        <span class="cm"># 3) return a GenerateReqInput the engine understands</span>
+        ...</pre>
 </div>
 
 <p>把这层对照想透，你就会明白一个工程上的取舍：原生接口<strong>更贴近内核、开销更小、字段最灵活</strong>，但只有了解 SGLang 的人会用；
@@ -616,6 +686,34 @@ compat layer sidesteps it elegantly with "thin adapters + shared core."</p>
   <div class="layer l-core"><div class="lh"><span class="badge">Front door</span><span class="name">TokenizerManager (Lesson 14)</span></div><div class="ld">Takes the native request, tokenizes, stamps a rid, ships it to the scheduler via ZMQ. The <strong>shared fast path</strong> starts here, identical for all protocols.</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 770 270" role="img" aria-label="three protocols each take their own adapter; after schema translation and chat templating they converge into one GenerateReqInput that the engine core sees as a single unified form">
+    <text x="24" y="24" style="font-weight:700;fill:var(--muted)">Three protocol entries</text>
+    <rect x="24" y="36" width="196" height="48" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="122" y="58" text-anchor="middle" style="font-weight:700;fill:var(--blue)">OpenAI</text>
+    <text x="122" y="75" text-anchor="middle" class="mono" style="font-size:11px">/v1/chat/completions</text>
+    <rect x="24" y="98" width="196" height="48" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="122" y="120" text-anchor="middle" style="font-weight:700;fill:var(--teal)">Anthropic</text>
+    <text x="122" y="137" text-anchor="middle" class="mono" style="font-size:11px">/v1/messages</text>
+    <rect x="24" y="160" width="196" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="122" y="182" text-anchor="middle" style="font-weight:700;fill:var(--amber)">Ollama</text>
+    <text x="122" y="199" text-anchor="middle" class="mono" style="font-size:11px">/api/generate</text>
+    <rect x="288" y="60" width="150" height="124" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="363" y="106" text-anchor="middle" style="font-weight:700;fill:var(--muted)">Adapter layer</text>
+    <text x="363" y="128" text-anchor="middle" style="fill:var(--faint);font-size:12px">schema translation</text>
+    <text x="363" y="146" text-anchor="middle" style="fill:var(--faint);font-size:12px">+ chat template</text>
+    <line x1="220" y1="60" x2="288" y2="100" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="122" x2="288" y2="122" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="184" x2="288" y2="144" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="506" y="84" width="208" height="76" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="610" y="114" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">One internal request</text>
+    <text x="610" y="134" text-anchor="middle" class="mono" style="font-size:12px">GenerateReqInput</text>
+    <line x1="438" y1="122" x2="506" y2="122" style="stroke:var(--accent);stroke-width:1.5"/>
+    <text x="610" y="186" text-anchor="middle" style="fill:var(--muted);font-size:12px">the engine core sees only this unified form</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Three protocols → one internal request</b> — OpenAI, Anthropic and Ollama each take their own adapter; after <span class="mono">schema</span> translation and chat templating they all converge into one <span class="mono">GenerateReqInput</span>. The engine core sees only this unified form and can no longer tell which dialect the request originally spoke.</div>
+</div>
+
 <h2>Route → serving class → native mapping</h2>
 <p>In code, each HTTP route is bound to a serving class that does the translating. The table below aligns "the route the world sees"
 with "the class that takes it inside" — at a glance you see the compat layer's <strong>division-of-labor map</strong>: different dialects
@@ -646,6 +744,48 @@ looks like</strong> — native is SGLang's own shape, OpenAI is a shape mimicked
   and the response is native SGLang JSON. <strong>No chat template</strong>, fields closest to the core — the native HTTP entry from Lesson 13, ideal for custom clients and the front-end RuntimeEndpoint.</p></div>
   <div class="col"><h4><span class="mono">/v1/chat/completions</span></h4><p>OpenAI shape: the body is a <span class="mono">messages</span> role list that <span class="mono">OpenAIServingChat</span> <strong>runs through the chat template</strong> and translates into
   <span class="mono">GenerateReqInput</span>; the response is mapped to a <span class="mono">chat.completion</span> object or a <span class="mono">chat.completion.chunk</span> SSE stream (Lesson 17). Any OpenAI client works out of the box.</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 770 250" role="img" aria-label="OpenAI's messages role list is first assembled by the chat template into a single prompt string, then tokenized into tokens">
+    <text x="24" y="24" style="font-weight:700;fill:var(--muted)">Before · messages list</text>
+    <rect x="24" y="36" width="190" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="34" y="56" class="mono" style="font-size:11px">{role: system, ...}</text>
+    <rect x="24" y="74" width="190" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="34" y="94" class="mono" style="font-size:11px">{role: user, ...}</text>
+    <rect x="24" y="112" width="190" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="34" y="132" class="mono" style="font-size:11px">{role: assistant, ...}</text>
+    <line x1="214" y1="89" x2="272" y2="89" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="272" y="52" width="206" height="74" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="375" y="80" text-anchor="middle" style="font-weight:700;fill:var(--amber)">chat template</text>
+    <text x="375" y="102" text-anchor="middle" class="mono" style="font-size:10px">&lt;|im_start|&gt;role…&lt;|im_end|&gt;</text>
+    <line x1="478" y1="89" x2="536" y2="89" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="536" y="52" width="210" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="641" y="71" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">single prompt string</text>
+    <text x="641" y="88" text-anchor="middle" class="mono" style="font-size:10px">"&lt;|im_start|&gt;system…"</text>
+    <line x1="641" y1="96" x2="641" y2="134" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="536" y="134" width="210" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="641" y="159" text-anchor="middle" class="mono" style="fill:var(--teal);font-size:12px">tokens [12, 8801, …]</text>
+    <text x="375" y="200" text-anchor="middle" style="fill:var(--faint);font-size:12px">After: one string → tokenized and handed to the runtime</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Applying the chat template</b> — OpenAI gives a list of <span class="mono">{role, content}</span> messages (system / user / assistant); the adapter assembles them per the model's chat template (e.g. <span class="mono">&lt;|im_start|&gt;role…&lt;|im_end|&gt;</span>) into a <strong>single prompt string</strong>, then tokenizes it — exactly the extra step the chat endpoint has over native <span class="mono">/generate</span>.</div>
+</div>
+
+<p>A concrete example. OpenAI's <span class="mono">messages</span> is just a list of role-tagged objects, e.g.
+<span class="mono">[{"role":"system","content":"You are helpful"}, {"role":"user","content":"hi"}]</span>;
+after applying the chat template it becomes one marked-up plain-text string, e.g.
+<span class="mono">&lt;|im_start|&gt;system You are helpful&lt;|im_end|&gt;&lt;|im_start|&gt;user hi&lt;|im_end|&gt;&lt;|im_start|&gt;assistant</span>,
+and that string is finally <strong>tokenized into tokens</strong> for the runtime. Native <span class="mono">/generate</span> takes prompt text directly, skipping exactly this step.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/openai/serving_chat.py ::OpenAIServingChat</span><span class="ln">adapts an OpenAI chat request into SGLang's internal request</span></div>
+  <pre><span class="kw">class</span> OpenAIServingChat(OpenAIServingBase):
+    <span class="cm"># adapts OpenAI /v1/chat/completions to SGLang's internal request</span>
+    <span class="kw">def</span> _convert_to_internal_request(self, request):
+        <span class="cm"># 1) apply the chat template to `messages` -&gt; one prompt string</span>
+        <span class="cm"># 2) map OpenAI params (temperature, max_tokens, ...) -&gt; sampling_params</span>
+        <span class="cm"># 3) return a GenerateReqInput the engine understands</span>
+        ...</pre>
 </div>
 
 <h2>Two "OpenAI directions": don't conflate A and B</h2>
