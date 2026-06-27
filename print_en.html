@@ -14161,7 +14161,7 @@ class ServerArgs:
     <text x="34" y="120" style="font-size:12px;fill:var(--muted)">requests →</text>
     <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
     <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">outcome, not why</text>
-    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
     <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler: see the process</text>
     <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
     <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
@@ -14319,11 +14319,11 @@ class BenchmarkMetrics:
 
 <p>Two concrete examples: a unit test for a sampling helper just <span class="mono">import</span>s it, feeds a set of logits, and asserts the chosen token is right—all in milliseconds, never touching a GPU; an e2e accuracy test instead calls <span class="mono">popen_launch_server</span> to bring up a server, runs the <span class="mono">GSM8K</span> dataset through it, and passes only if the score is above a threshold (say 0.8). The helper below is exactly that "launch a server" entry point for e2e tests:</p>
 
-<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">spawn a real server subprocess, poll /health until ready</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">spawn a real server subprocess, poll /health_generate until ready</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
                         other_args=None, ...):
     # spawn a REAL server subprocess:
-    #   python -m sglang.launch_server --model-path model ...other_args
-    # then poll /health until ready (or raise on `timeout`). e2e tests
+    #   sglang serve --model-path model ...other_args
+    # then poll /health_generate until ready (or raise on `timeout`). e2e tests
     # hit this server over HTTP, then tear it down.
     ...
     return process</pre></div>
@@ -14911,6 +14911,31 @@ repos:
 <p>Six faces, one soul. They mesh so tightly precisely because they all assume the same shared-prefix worldview. Study any single lesson and it looks like a local trick; stack Lessons 7, 11, 20, 29, 30, and 31 together and you finally see the spine running through them all.</p>
 <p>It helps to walk one concrete chain end to end. In a multi-turn chat app, the developer uses <span class="mono">fork</span> in the DSL (Lesson 11) to split the same history into three candidate replies; conceptually (Lesson 7) the three share one opening, so the engine should compute it once. In implementation (Lesson 29), that history becomes one <span class="mono">TreeNode</span> in <span class="mono">RadixCache</span> shared by three requests, whose <span class="mono">value</span> points at several physical pages (Lesson 30, on Lesson 6). The scheduler (Lesson 20), seeing the three requests' prefixes overlap heavily, places them together and runs them almost simultaneously, keeping that shared KV "hot" in memory for repeated hits. As the conversation grows and memory tightens, HiCache (Lesson 31) tiers that now-cooler history down to CPU or even disk, recalling it as a whole segment when needed. From the moment the developer types <span class="mono">fork</span> to the migration of that KV across three storage tiers, it is <strong>the same node on the same tree</strong> being tended by different layers in different ways. That is the most concrete picture of "one idea running through the full stack."</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="Radial web: the central RadixAttention prefix sharing radiates to the DSL fork, the KV cache radix tree, the scheduler's cache-aware LPM ordering, and HiCache memory tiers">
+    <line x1="390" y1="160" x2="270" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="270" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <ellipse cx="390" cy="160" rx="118" ry="42" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="390" y="153" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">RadixAttention</text>
+    <text x="390" y="175" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">prefix sharing · one idea</text>
+    <rect x="30" y="40" width="240" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="44" y="64" style="fill:var(--blue);font-weight:700">DSL (L11)</text>
+    <text x="44" y="84" style="font-size:12px">fork shares a prefix</text>
+    <rect x="510" y="40" width="240" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="524" y="64" style="fill:var(--teal);font-weight:700">KV cache (L29)</text>
+    <text x="524" y="84" style="font-size:12px">radix tree of prefixes</text>
+    <rect x="30" y="224" width="240" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="44" y="248" style="fill:var(--amber);font-weight:700">Scheduler (L20)</text>
+    <text x="44" y="268" style="font-size:12px">cache-aware LPM order</text>
+    <rect x="510" y="224" width="240" height="56" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="524" y="248" style="fill:var(--purple);font-weight:700">Memory tiers (L31)</text>
+    <text x="524" y="268" style="font-size:12px">HiCache keeps hot ones</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · The radial web: one idea recurring everywhere</b> — the central <span class="mono">RadixAttention</span> (prefix sharing) radiates outward: the DSL's <span class="mono">fork</span> manufactures shared prefixes, the KV cache stores them as a radix tree, the scheduler orders by cache-aware LPM so hits run first, and HiCache keeps hot prefixes in memory. One idea, reused everywhere.</div>
+</div>
+
 <h2>3. From "an optimization glued on" to "a structure grown into the skeleton"</h2>
 <p>The difference is not merely aesthetic. Treating prefix sharing as a bolt-on means the cache and the engine are two separate logics: the cache knows nothing about scheduling, scheduling never yields for the cache, and hits are pure luck. Treating it as first-class means the scheduler knows the tree's shape, can estimate hits, and can actively cluster similar requests; it means the memory manager knows how many requests share which pages and must not reclaim them carelessly; it means tiered storage can move whole segments along tree boundaries instead of scattered copies. Only after an idea is promoted to a structure can the whole system coordinate around it.</p>
 <p>This also explains why the name <span class="mono">RadixAttention</span> holds both "Radix (radix tree)" and "Attention": attention consumes KV, and KV is organized as a radix tree. The operator and the data structure here are <strong>two sides of one coin</strong>, not a before-and-after.</p>
@@ -14919,6 +14944,45 @@ repos:
 <h2>4. How a single request lives out its life on this tree</h2>
 <p>Zoom back to one request: it arrives with a token sequence, first runs <span class="mono">match_prefix</span>, walks down the tree, and finds the <strong>longest prefix</strong> overlapping with the stock; that prefix's KV is <strong>reused</strong> as-is (and <span class="mono">inc_lock_ref</span> pins it so it won't be evicted mid-flight); the engine truly forward-computes only the <strong>newly-appeared suffix</strong>; afterward <span class="mono">insert</span> hangs that new suffix back onto the tree, splitting a node at the divergence so future requests can share it too. This lifecycle—"match the longest prefix → reuse KV → compute only the new suffix → write back to the tree"—is the entire essence of <span class="mono">RadixAttention</span>, and the four diagrams below pull it apart from different angles.</p>
 <p>Two details deserve a pause. First, the "pinning" of <span class="mono">inc_lock_ref</span> is necessary because reuse and reclamation coexist on the same tree: while request A is computing down some shared prefix, the reclamation logic (<span class="mono">evict</span>) must never snatch that prefix's pages away, or A would "step into the void" mid-computation. Reference counting makes "who is using it" visible, so eviction only dares touch leaves no one references. Second, the "node splitting" of <span class="mono">insert</span> is the key to the tree continually growing shared structure: when a new suffix shares only the first half of an existing node, the system splits the old node in two at the divergence—the common upper half stays shared by both, the differing lower halves become two children. This "split on demand" keeps the radix tree in a compact "share what can be shared, fork exactly where it must" shape, rather than degenerating into a heap of unrelated full strings. Understand pinning and splitting and you understand <strong>why this tree is both safe and efficient</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Match reuse compute-only-suffix: a request's tokens split into shared prefix and new suffix; match_prefix reuses the prefix KV for zero compute and the model forwards only the new suffix">
+    <text x="40" y="36" style="font-weight:700;fill:var(--muted)">request tokens = [ shared prefix | new suffix ]</text>
+    <rect x="40" y="62" width="420" height="48" rx="8" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="250" y="84" text-anchor="middle" style="fill:var(--muted);font-weight:700">shared prefix</text>
+    <text x="250" y="102" text-anchor="middle" style="fill:var(--faint);font-size:12px">cached KV · greyed</text>
+    <rect x="468" y="62" width="272" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="604" y="84" text-anchor="middle" style="fill:var(--amber);font-weight:700">new suffix</text>
+    <text x="604" y="102" text-anchor="middle" style="fill:var(--amber);font-size:12px">the only computed part</text>
+    <line x1="40" y1="124" x2="460" y2="124" style="stroke:var(--teal);stroke-width:1.5"/>
+    <text x="40" y="152" style="fill:var(--teal);font-weight:700">match_prefix hits</text>
+    <text x="40" y="172" style="font-size:12px">reuse its KV · 0 compute</text>
+    <line x1="468" y1="124" x2="740" y2="124" style="stroke:var(--amber);stroke-width:1.5"/>
+    <text x="468" y="152" style="fill:var(--amber);font-weight:700">forward only the suffix</text>
+    <text x="468" y="172" style="font-size:12px">cost = suffix length</text>
+    <rect x="40" y="208" width="360" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="56" y="232" style="fill:var(--teal);font-weight:700">radix tree: prefix resident</text>
+    <text x="56" y="252" style="font-size:12px">walk to the deepest known node, reuse</text>
+    <rect x="468" y="208" width="272" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="484" y="232" style="fill:var(--accent-ink);font-weight:700">saved = the prefix span</text>
+    <text x="484" y="252" style="font-size:12px">not the whole sequence</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Match → reuse → compute only the new suffix</b> — a request's tokens split into "shared prefix (greyed, cached) | new suffix (highlighted)"; <span class="mono">match_prefix</span> finds the prefix in the tree and reuses its KV as-is (0 compute), so the model forwards only the <strong>new suffix</strong>. Cost equals the suffix length, not the whole sequence.</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.insert</span><span class="ln">insert a span of tokens+KV so later requests share this prefix</span></div><pre>def insert(self, params: InsertParams) -&gt; InsertResult:
+    # add a sequence's tokens + KV into the radix tree so later
+    # requests can SHARE this prefix. The key is page-aligned first.
+    key = params.key.page_aligned(self.page_size)
+    value = params.value[:len(key)]
+    prefix_len, last_node = self._insert_helper(
+        self.root_node, key, value, ...)   # split nodes at divergence
+    return InsertResult(prefix_len=prefix_len)   # how much already existed</pre></div>
+
+<div class="card detail"><div class="tag">🧪 Concrete example</div>
+<p>Picture a <strong>1000-token system prompt</strong> shared by every request. The first request <span class="mono">insert</span>s it into the tree once, and its KV lands on a handful of pages. The next request arrives with the same opening, and <span class="mono">match_prefix</span> hits all 1000 tokens at once—<strong>0 recompute</strong>—so the engine forwards only its own question. The third and fourth do the same: the more that shared prefix is reused, the more compute is saved.</p>
+<p>And this <strong>same radix idea</strong> powers four places at once: the DSL's <span class="mono">fork</span> makes branches share an opening, the cache stores prefixes as a tree, cache-aware LPM scheduling clusters high-hit requests, and HiCache tiers that tree across GPU/CPU/disk by temperature. One <span class="mono">insert</span> feeds the whole stack.</p>
+</div>
 
 <table class="t">
 <tr><th>Where shared prefixes appear</th><th>The role it plays there</th></tr>
@@ -15053,6 +15117,86 @@ class RadixCache(BasePrefixCache):
 <p>The <strong>overlap scheduler (L21)</strong> turns that serial loop into a <strong>pipeline</strong>: while the GPU runs <span class="mono">forward(batch N)</span>, the CPU <strong>is not idle</strong>—it is already <strong>assembling batch N+1</strong> (pick requests, allocate pages, move tensors) and <strong>processing batch N-1's results in parallel</strong> (sample, append token, check stop). Note a subtle but important point: the CPU processes the results of the <strong>previous</strong> step, not the one just launched—because that forward hasn't finished yet. It is precisely this <strong>off-by-one-beat</strong> arrangement that keeps the CPU always busy and the GPU never waiting.</p>
 <p>All of this is controlled by the <span class="mono">enable_overlap</span> switch (the opposite of <span class="mono">--disable-overlap-schedule</span>). Once enabled, the CPU's scheduling and result handling are "tucked into" the shadow of the GPU forward, becoming nearly <strong>invisible</strong> in wall-clock time. The cost is that the engine must hold <strong>several steps' intermediate state</strong> at once (N-1, N, N+1), raising implementation complexity and making debugging harder—but this is where the words "zero-overhead" actually land, and it is worth it. Turn overlap off and the engine falls back to that naive serial loop: correctness unchanged, but GPU utilization and throughput drop noticeably. This also explains why it is on by default: for the vast majority of production loads, trading a little extra memory for nearly double the effective compute is as good a bargain as it gets.</p>
 
+<p><strong>A concrete sense of scale</strong>: when the batch is small (say only a few decode requests), one GPU forward may take just 2~3 ms, while the CPU's pick/allocate/sample work for this beat can approach 2 ms—run serially, that 2 ms nearly <strong>doubles</strong> the per-step time. Turn overlap on and that CPU work is tucked entirely into the GPU forward's shadow, so wall-clock time is set almost solely by the GPU and throughput returns to the ideal "<strong>GPU-bound only</strong>" value—exactly what makes "zero-overhead" scheduling live up to its name. The larger the batch, the longer the GPU forward and the more easily that CPU cost is fully absorbed, but small-batch is precisely where overlap pays off most.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="serial timeline the GPU idles during CPU schedule and processing, overlap timeline the CPU runs concurrently with the GPU forward and the bubbles vanish">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">Serial: GPU has bubbles</text>
+    <text x="20" y="60" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="119" y="61" text-anchor="middle" style="font-size:12px">forward N</text>
+    <rect x="174" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="220" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">idle</text>
+    <rect x="266" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="321" y="61" text-anchor="middle" style="font-size:12px">forward N+1</text>
+    <rect x="376" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="422" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">idle</text>
+    <rect x="468" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="523" y="61" text-anchor="middle" style="font-size:12px">forward N+2</text>
+    <text x="20" y="104" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="174" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="220" y="105" text-anchor="middle" class="mono" style="font-size:11px">sched+proc</text>
+    <rect x="376" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="422" y="105" text-anchor="middle" class="mono" style="font-size:11px">sched+proc</text>
+    <line x1="20" y1="150" x2="780" y2="150" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="20" y="184" style="font-weight:700;fill:var(--accent-ink)">Overlap: bubbles gone</text>
+    <text x="20" y="216" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="217" text-anchor="middle" style="font-size:12px">forward N</text>
+    <rect x="184" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="244" y="217" text-anchor="middle" style="font-size:12px">forward N+1</text>
+    <rect x="304" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="364" y="217" text-anchor="middle" style="font-size:12px">forward N+2</text>
+    <rect x="424" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="484" y="217" text-anchor="middle" style="font-size:12px">forward N+3</text>
+    <text x="20" y="260" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="64" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="124" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <rect x="184" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <rect x="304" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="364" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <rect x="424" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="484" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <text x="560" y="231" style="fill:var(--teal);font-weight:700;font-size:13px">CPU ‖ GPU busy</text>
+  </svg>
+  <div class="figcap"><b>Fig 59-1 · CPU bubbles hidden behind the forward</b> — serial: the GPU idles during CPU schedule and processing (the bubble); overlap: the CPU runs concurrently with the GPU forward, the GPU runs back-to-back, the bubbles vanish.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="a three-stage pipeline build forward process with three lanes staggered one step apart, in steady state one beat runs all three stages in parallel">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">Overlap pipeline: 3 stages, 1 step apart</text>
+    <rect x="498" y="64" width="134" height="158" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="115" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t1</text>
+    <text x="265" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t2</text>
+    <text x="415" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t3</text>
+    <text x="565" y="52" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">t4</text>
+    <text x="20" y="92" style="fill:var(--muted);font-size:12px">build</text>
+    <text x="20" y="152" style="fill:var(--muted);font-size:12px">forward</text>
+    <text x="20" y="212" style="fill:var(--muted);font-size:12px">process</text>
+    <rect x="55" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="115" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B1</text>
+    <rect x="205" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="265" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B2</text>
+    <rect x="355" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="415" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B3</text>
+    <rect x="505" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="565" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B4</text>
+    <rect x="205" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="265" y="153" text-anchor="middle" class="mono" style="font-size:11px">fwd B1</text>
+    <rect x="355" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="415" y="153" text-anchor="middle" class="mono" style="font-size:11px">fwd B2</text>
+    <rect x="505" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="565" y="153" text-anchor="middle" class="mono" style="font-size:11px">fwd B3</text>
+    <rect x="355" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="415" y="213" text-anchor="middle" class="mono" style="font-size:11px">proc B1</text>
+    <rect x="505" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="213" text-anchor="middle" class="mono" style="font-size:11px">proc B2</text>
+    <text x="20" y="258" style="fill:var(--accent-ink);font-weight:700;font-size:13px">one beat: build N+1 ‖ forward N ‖ process N-1</text>
+  </svg>
+  <div class="figcap"><b>Fig 59-2 · the overlap pipeline</b> — build, forward, and process lanes are each staggered one step apart; once in steady state (t4), a single beat has the CPU build batch N+1, the GPU run forward N, and the CPU process batch N-1—all three always in parallel.</div>
+</div>
+
 <h2>3. The other beads: chunked prefill, CUDA graphs, process split</h2>
 <p>The same thread strings three more beads. <strong>Chunked prefill (L22)</strong> tackles a different bubble: if a very long prompt's prefill runs all at once, it fills the entire forward and every request currently decoding gets <strong>stalled</strong> waiting for it, causing a latency spike. SGLang <strong>slices</strong> the long prefill into chunks and <strong>interleaves</strong> them with decode—each step packs in a little new-prompt prefill while still serving the old generating requests—so a single big job can't clog the whole pipeline. Still the same idea: "don't let one segment break the GPU's rhythm," thinning a long-bubble-causing big task into many small ones that disturb no one.</p>
 <p><strong>CUDA graphs (L27)</strong> fight the <strong>kernel-launch overhead</strong> bubble: every CUDA kernel launch costs the CPU a fixed amount, a decode step launches dozens to hundreds of kernels, which adds up to real CPU time, and during it the GPU often waits for the next kernel to be submitted. CUDA graphs <strong>record the whole chain of kernels into one graph</strong> and later <strong>replay</strong> it to run the entire sequence on the GPU, so the CPU barely participates in launching one by one—another form of "don't let the CPU bottleneck the GPU," aimed squarely at decode, the <strong>many-small-kernel</strong> scenario most easily dragged down by launch overhead.</p>
@@ -15092,6 +15236,19 @@ class RadixCache(BasePrefixCache):
             result = self.run_batch(batch)          # launch GPU forward (async)
             self.process_batch_result(prev_result)  # overlap: handle the prior step
             prev_result = result</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">overlap loop: process the previous batch while the GPU runs the current one</span></div><pre>def event_loop_overlap(self):
+    # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
+    # results while the current batch is still running on the GPU.
+    self.result_queue = deque()
+    while True:
+        recv = self.request_receiver.recv_requests()
+        self.process_input_requests(recv)
+        batch = self.get_next_batch_to_run()        # build batch N (CPU)
+        result = self.run_batch(batch)              # launch forward N (GPU)
+        self.result_queue.append((batch, result))
+        # one step out of phase: process batch N-1 now
+        self.process_batch_result(*self.result_queue.popleft())</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>
@@ -15183,6 +15340,34 @@ class RadixCache(BasePrefixCache):
 <p>Put the two side by side and you reach a counterintuitive conclusion: <strong>the same GPU is nearly wrung dry during prefill, yet mostly idle during decode.</strong> The GPU isn't slacking—decode is a workload that inherently can't keep it fed; the bottleneck is the data path from memory to the compute units, not the compute itself. Grasp this and you understand the starting point of every scheduling trick that follows: either find a way for decode to piggyback on prefill's compute, or separate the two workloads entirely so each saturates its own bottleneck.</p>
 <p>Further, this contrast explains "why LLM inference feels so different from training." Training is almost entirely compute-bound big matmuls, where adding compute pays off immediately; in online serving, the decode phase that actually shapes the user experience is bandwidth-bound, and a stronger compute card alone may not make tokens come out faster. The reason SGLang invests so much in scheduling, batching, and KV management all traces back to this prefill-vs-decode axis.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Arithmetic-intensity roofline: decode at low intensity sits on the bandwidth-bound ramp, prefill at high intensity sits on the compute-bound plateau">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Arithmetic intensity: roofline</text>
+    <line x1="70" y1="58" x2="70" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="70" y1="240" x2="745" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M745 240 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="408" y="270" text-anchor="middle" style="fill:var(--faint);font-size:12px">arithmetic intensity FLOPs/byte →</text>
+    <text x="78" y="52" style="fill:var(--faint);font-size:11px">achieved FLOP/s ↑</text>
+    <line x1="70" y1="240" x2="380" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <line x1="380" y1="90" x2="730" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <text x="196" y="148" transform="rotate(-26 196 148)" style="fill:var(--purple);font-size:11px">bw roof</text>
+    <text x="556" y="82" text-anchor="middle" style="fill:var(--purple);font-size:11px">compute roof · peak</text>
+    <line x1="380" y1="90" x2="380" y2="240" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:4 4"/>
+    <text x="380" y="256" text-anchor="middle" style="fill:var(--faint);font-size:10px">ridge</text>
+    <text x="208" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">bandwidth-bound</text>
+    <text x="558" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">compute-bound</text>
+    <circle cx="170" cy="192" r="7" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:2"/>
+    <text x="186" y="186" style="fill:var(--blue);font-size:12px;font-weight:700">decode</text>
+    <text x="186" y="202" style="fill:var(--blue);font-size:11px">low AI · bw-bound</text>
+    <circle cx="556" cy="90" r="7" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="556" y="118" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <text x="556" y="134" text-anchor="middle" style="fill:var(--amber);font-size:11px">high AI · compute-bound</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Arithmetic-intensity roofline</b> — the x-axis is arithmetic intensity (multiply-adds per byte read). <span class="mono">decode</span> is low and sits on the left <strong>bandwidth ramp</strong>, most of its compute idle; <span class="mono">prefill</span> is high and sits on the right <strong>compute plateau</strong>, tensor cores kept full. Left of the ridge is bandwidth-bound, right of it compute-bound.</div>
+</div>
+
+<p>Concretely: in one big prefill GEMM, every byte of weights read is amortized over <strong>thousands</strong> of multiply-adds (compute-bound); in decode, each generated token does only a <strong>handful</strong> of multiply-adds per byte read (bandwidth-bound). On the same card the two workloads' arithmetic intensities differ by orders of magnitude—which is exactly why they land at opposite ends of the roofline.</p>
+
 <h2>2. How this contrast creates the throughput-vs-latency pull</h2>
 <p><strong>Lesson 8</strong>'s <strong>throughput vs latency</strong> fight is rooted right here. Two key metrics: <span class="mono">TTFT</span> (time to first token, driven mainly by prefill) and <span class="mono">ITL</span> (inter-token latency, driven by decode).</p>
 <p>What happens if you stuff both workloads into one serial queue? A very long prompt's prefill is a big compute-heavy chunk; once it hits the GPU it <strong>blocks every request that's currently decoding</strong>—everyone's ITL spikes and output stutters. Conversely, if you always favor smooth decode, new requests' prefill never gets scheduled and TTFT climbs.</p>
@@ -15200,6 +15385,40 @@ class RadixCache(BasePrefixCache):
 <p>The upside is that <strong>each pool saturates its own bottleneck without interference</strong>: the prefill pool can wring out compute, the decode pool can focus on growing the batch and using bandwidth fully, and each can scale and tune independently. The cost is an extra <strong>KV transfer</strong>—which is exactly the seam the code below guards.</p>
 <p>Why is this "seemingly more troublesome" approach worth it? Because in the co-located approach the two workloads forever contend for the same GPU; however clever the scheduler, there's always some squeeze between prefill chunks and decode. Once separated, the prefill pool is all uniform big parallel passes and can use the batching strategy best suited to compute-bound work, while the decode pool is all uniform token-by-token generation and can pile the batch up to the bandwidth limit—<strong>each pool is no longer dragged down by the other workload</strong>. In very large-scale online serving with strict SLAs on both TTFT and ITL, this physical isolation is often more reliable and less fiddly than penny-pinching on one card.</p>
 <p>Of course, separation is no free lunch. The KV cache can be hundreds of MB per sequence, and after the prefill pool computes it, it must be moved across the network to the decode pool, so that transfer link's bandwidth and latency become a new critical path—move it slowly and the decode side just waits. So PD disaggregation swaps an "in-GPU scheduling problem" for a "cross-machine data-movement problem", and the interface for that movement is exactly what <span class="mono">BaseKVManager</span> defines.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="Co-located time-share vs disaggregated pools: on the left one GPU pool time-shares prefill and decode that contend, on the right a prefill pool and decode pool are separate and each saturates, joined by a KV transfer">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Co-located vs disaggregated</text>
+    <rect x="24" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="210" y="84" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">co-located · contend</text>
+    <rect x="60" y="104" width="300" height="118" rx="10" style="fill:var(--faint);stroke:var(--line)" fill-opacity="0.06"/>
+    <text x="210" y="126" text-anchor="middle" style="fill:var(--muted);font-size:11px">one GPU pool</text>
+    <rect x="80" y="142" width="92" height="58" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="126" y="176" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <rect x="196" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="220" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="244" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="268" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="292" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="316" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="210" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">two workloads contend</text>
+    <rect x="424" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="610" y="84" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">disaggregated · isolated</text>
+    <rect x="448" y="120" width="124" height="96" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="510" y="158" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill pool</text>
+    <text x="510" y="178" text-anchor="middle" style="fill:var(--amber);font-size:11px">compute-max</text>
+    <rect x="648" y="120" width="124" height="96" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="710" y="158" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">decode pool</text>
+    <text x="710" y="178" text-anchor="middle" style="fill:var(--blue);font-size:11px">bw-full</text>
+    <line x1="572" y1="168" x2="640" y2="168" style="stroke:var(--teal);stroke-width:2"/>
+    <path d="M648 168 l-9 -4 v8 z" style="fill:var(--teal)"/>
+    <text x="610" y="150" text-anchor="middle" style="fill:var(--teal);font-size:11px">KV transfer</text>
+    <text x="610" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">each saturates · isolated</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Co-located vs disaggregated</b> — on the left one GPU pool <strong>time-shares</strong> prefill and decode, so the two workloads contend and interrupt each other; on the right the <span class="mono">prefill pool</span> and <span class="mono">decode pool</span> are <strong>separate</strong>, each sized and batched for its own bottleneck and joined by a single <strong>KV transfer</strong>, so neither disturbs the other.</div>
+</div>
+
+<p>Because they're separated, you can <strong>scale each to real traffic</strong>: add prefill GPUs when prompts are long and prefill is the squeeze; add decode GPUs when outputs are long and decode is the squeeze—neither side constrains the other. That independent scaling is something the co-located approach simply can't give you.</p>
 
 <div class="cols"><div class="col">
 <p><strong>Prefill: one big parallel pass (compute-bound)</strong></p>
@@ -15238,6 +15457,17 @@ class RadixCache(BasePrefixCache):
 
 <p>Look at the code: <span class="mono">BaseKVManager</span> is the "seam" of the PD-disaggregation path. The <span class="mono">disaggregation_mode</span> passed at construction decides whether this process is the prefill side or the decode side—one interface, two roles. <span class="mono">register_to_bootstrap()</span> lets a prefill worker get <strong>paired</strong> with a decode worker; once paired, the KV cache is transferred from the prefill side to the decode side. The whole complexity of the disaggregated architecture is wrapped up behind this abstraction.</p>
 <p>Notice the design philosophy here: it's an <span class="mono">ABC</span> (abstract base class) with every method marked <span class="mono">@abstractmethod</span>. That means SGLang isn't bound to one concrete transport implementation—the backend can be RDMA, NVLink, or something else, as long as it implements this interface. <strong>The abstraction "prefill and decode live in separate pools" is cleanly decoupled from the implementation "which pipe actually moves the KV".</strong> This echoes another through-line of the whole book: layer the "what" apart from the "how", so the upper scheduling decisions need not care about the lower hardware details.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::KVPoll</span><span class="ln">the KV-transfer state machine: poll until Success</span></div><pre>class KVPoll:
+    # the state of a prefill -&gt; decode KV transfer; poll() returns one
+    # of these until the transfer is done (or failed).
+    Failed = 0
+    Bootstrapping = 1
+    WaitingForInput = 2
+    Transferring = 3
+    Success = 4</pre></div>
+
+<p>This <span class="mono">KVPoll</span> is the "dashboard" of that KV-transfer seam: every cross-pool KV move walks through these five integer states—from <span class="mono">Bootstrapping</span> (connect and pair) through <span class="mono">WaitingForInput</span> and <span class="mono">Transferring</span> (in flight), polled until <span class="mono">Success</span>, dropping to <span class="mono">Failed</span> if anything breaks. The decode side keeps calling <span class="mono">poll()</span> on this state to tell whether the KV computed by prefill has arrived and token-by-token generation can begin. A plain little state machine that wraps the messy business of "moving data across machines" into one observable, retryable loop.</p>
 
 <h2>5. One axis explains many decisions</h2>
 <p>Now pull the camera all the way back. Lesson 4's compute-bound vs bandwidth-bound, Lesson 8's throughput vs latency, Lesson 22's chunked prefill, Lesson 45's PD disaggregation—these four lessons look like four separate topics, but they are four points on the same axis. The <strong>root tension</strong> (prefill and decode are opposite in nature) produces a <strong>pull</strong> (they contend for the same GPU), and the pull forces <strong>two reconciliations</strong> (co-located time-sharing, or separated machines).</p>
@@ -15317,6 +15547,73 @@ class RadixCache(BasePrefixCache):
 <p>Two often-confused notions are worth separating here: <strong>latency</strong> is "how long one thing takes end to end," while <strong>throughput</strong> is "how many things finish per unit time." Serial steps hurt because they're stuck on latency — each waits on the previous, time strung together one slot at a time. Reshaping them into parallel steps essentially moves work that was "billed by latency" onto a track "billed by throughput": the GPU is built to do a big batch at once, so the same total work gets flattened into a single parallel operation. Speculative decoding, CUDA Graph, and the overlap scheduler all do this same thing — they just act on three different serial links: "generating tokens," "launching kernels," and "CPU-GPU cooperation."</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="serial decode needs k target forwards, while drafting k tokens needs only one parallel verify">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">Serial decode: k target forwards (slow)</text>
+    <rect x="20" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="66" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="66" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok1</text>
+    <text x="126" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="140" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="186" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="186" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok2</text>
+    <text x="246" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="260" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="306" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok3</text>
+    <text x="366" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="380" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="426" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok4</text>
+    <text x="488" y="58" style="fill:var(--muted);font-size:12px">… k serial forwards</text>
+    <text x="488" y="78" style="fill:var(--amber);font-size:12px;font-weight:700">each waits on last</text>
+    <line x1="20" y1="108" x2="760" y2="108" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="138" style="font-weight:700;fill:var(--accent-ink)">Draft → ONE parallel verify (fast)</text>
+    <rect x="20" y="154" width="112" height="46" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="76" y="174" text-anchor="middle" style="font-size:12px">Draft model</text>
+    <text x="76" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">cheap</text>
+    <text x="146" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="160" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="175" y="180" text-anchor="middle" class="mono" style="font-size:11px">t1</text>
+    <rect x="194" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="209" y="180" text-anchor="middle" class="mono" style="font-size:11px">t2</text>
+    <rect x="228" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="243" y="180" text-anchor="middle" class="mono" style="font-size:11px">t3</text>
+    <rect x="262" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="277" y="180" text-anchor="middle" class="mono" style="font-size:11px">t4</text>
+    <text x="226" y="214" text-anchor="middle" style="fill:var(--muted);font-size:11px">k candidate tokens</text>
+    <text x="306" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="320" y="154" width="244" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="174" text-anchor="middle" style="font-weight:700;fill:var(--teal)">Target: verify all k at once</text>
+    <text x="442" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">one forward, compute idle anyway</text>
+    <text x="576" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="590" y="154" width="170" height="46" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">ONE forward</text>
+    <text x="675" y="190" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">accept ≤ k tokens</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · k serial forwards vs ONE parallel verify</b> — top: baseline token-by-token decode, k tokens = k serial target forwards, each waiting on the last. bottom: a cheap draft proposes k candidates, the target does <strong>one</strong> parallel forward verifying all k → up to k tokens from a single expensive forward. Contrast k forwards vs 1.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="the trade: spend a little cheap parallel draft compute to save expensive serial target steps">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">The trade: cheap parallel draft compute ↔ saved serial steps</text>
+    <line x1="140" y1="96" x2="640" y2="96" style="stroke:var(--line);stroke-width:3"/>
+    <line x1="390" y1="96" x2="390" y2="150" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="390,150 370,192 410,192" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <line x1="235" y1="96" x2="235" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="545" y1="96" x2="545" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="106" width="230" height="62" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="235" y="132" text-anchor="middle" style="font-weight:700;fill:var(--amber)">Spend: cheap draft compute</text>
+    <text x="235" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">draft + verify a batch at once</text>
+    <rect x="430" y="106" width="230" height="62" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="545" y="132" text-anchor="middle" style="font-weight:700;fill:var(--teal)">Save: serial target steps</text>
+    <text x="545" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">was k forwards</text>
+    <text x="390" y="228" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">High acceptance → net win; low → near break-even</text>
+    <text x="390" y="250" text-anchor="middle" style="fill:var(--muted);font-size:12px">spend spare compute, buy saved serial latency</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · the balance of this trade</b> — you <strong>spend</strong> a little extra compute (the draft model + verifying a few candidate tokens in parallel — cheap because it's one batched forward) to <strong>save</strong> expensive serial target steps. Net win when acceptance is high, near break-even when it's low — it's trading spare compute for saved serial latency.</div>
+</div>
+
 <h2>The serial wall: why decode is slow</h2>
 <p>In training, all tokens of a sentence go into the GPU at once and compute in parallel — the GPU's favorite, <strong>compute-bound</strong> kind of work. Decode can't do that: you can't even speak of token N+1 before token N exists, because the latter is the former's input. So generating k tokens means k forwards, advancing one slot at a time. As Lesson 4 showed, in such a single-step forward the GPU's FLOPs sit mostly idle; the real bottleneck is moving huge weights and the KV cache from memory into the compute units — <strong>bandwidth</strong>. In other words, decode forces a machine built for "big parallel batches" into "compute a tiny bit, then wait on memory." This <strong>serial wall</strong> is exactly what every later trick tries to climb.</p>
 <p>Why does this happen? It comes down to <strong>arithmetic intensity</strong> — how many multiply-adds you get per byte of weights read from memory. Prefill processes hundreds or thousands of tokens at once, reusing the same weights over and over: high intensity, math units saturated. Decode computes one token per step yet still re-reads the entire weight set and full KV cache, so intensity is pitifully low and the math units idle most of the time, just waiting for data to stream in from memory. That's why piling more compute onto decode barely helps — the bottleneck isn't compute at all, it's bandwidth and the "each step waits on the last" serial nature. Grasp this and you see the cure: either pack more tokens into the same step (bigger batch, amortizing that weight read) or find a way to <strong>advance multiple tokens at once</strong>, compressing the serial step count itself. Speculative decoding takes the latter road.</p>
@@ -15357,6 +15654,21 @@ class RadixCache(BasePrefixCache):
         ...
     # net: many tokens per target forward when the draft is good — sequential
     # decode steps become one parallel verify
+</pre></div>
+
+<p>Feel the scale concretely: verifying 64 candidate tokens in <strong>one</strong> target forward costs about the same as a single normal decode step (the weights and KV must be hauled from memory either way), yet can accept several tokens at once. The <span class="mono">custom_mask</span> (tree attention mask) makes each branch of the tree attend only along <strong>its own path</strong>, never bleeding across branches — so in that one forward, many candidate paths are verified at the same time without interfering. This is "draft for parallel verify" in EAGLE's tree form: a whole draft tree squeezed into a single forward.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_info.py ::EagleVerifyInput</span><span class="ln">everything needed to verify the whole draft tree in one forward</span></div><pre>class EagleVerifyInput(SpecInput):
+    # everything the target needs to verify a whole draft TREE in ONE
+    # forward: the candidate tokens + a tree attention mask + the
+    # retrieve indices that map tree nodes back to accepted paths.
+    draft_token: torch.Tensor       # the proposed tree of tokens
+    custom_mask: torch.Tensor       # tree attention mask
+    positions: torch.Tensor
+    retrieve_index: torch.Tensor    # tree -&gt; sequence bookkeeping
+    spec_steps: int
+    topk: int
+    draft_token_num: int            # nodes verified this forward
 </pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div>
@@ -15482,6 +15794,80 @@ class RadixCache(BasePrefixCache):
     # FlashInfer / Triton / FA each implement these; chosen at deploy time,
     # the model code never changes</pre></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 340" role="img" aria-label="A stable core radiating 8 pluggable seams: the core stays fixed, the edges swap">
+    <line x1="400" y1="172" x2="124" y2="37" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="400" y2="37" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="676" y2="37" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="80" y2="172" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="720" y2="172" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="124" y2="307" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="400" y2="307" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="676" y2="307" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <rect x="58" y="16" width="132" height="42" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="42" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">Attention</text>
+    <rect x="334" y="16" width="132" height="42" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="400" y="42" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">Quant</text>
+    <rect x="610" y="16" width="132" height="42" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="676" y="42" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">MoE</text>
+    <rect x="14" y="151" width="132" height="42" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="80" y="177" text-anchor="middle" style="fill:var(--purple);font-size:12px;font-weight:700">Model</text>
+    <rect x="654" y="151" width="132" height="42" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="720" y="177" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">Sampler</text>
+    <rect x="58" y="286" width="132" height="42" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="124" y="312" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">KV cache</text>
+    <rect x="334" y="286" width="132" height="42" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="400" y="312" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">Platform</text>
+    <rect x="610" y="286" width="132" height="42" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="676" y="312" text-anchor="middle" style="fill:var(--purple);font-size:12px;font-weight:700">Grammar</text>
+    <rect x="300" y="140" width="200" height="64" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="400" y="166" text-anchor="middle" style="fill:var(--accent-ink);font-size:14px;font-weight:700">Stable core</text>
+    <text x="400" y="187" text-anchor="middle" style="fill:var(--muted);font-size:11px">scheduler · memory · loop</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Stable core + pluggable edges</b> — the central engine core (scheduler · memory · model loop) stays fixed and radiates 8 seams; each is an interface with swappable implementations. The core stays put; the edges swap at deploy time.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Program to the interface: upper code depends on an abstract interface at compile time, a concrete impl is picked by hardware and injected at deploy time">
+    <rect x="210" y="16" width="360" height="48" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="390" y="36" text-anchor="middle" style="fill:var(--ink);font-size:13px;font-weight:700">Upper code</text>
+    <text x="390" y="54" text-anchor="middle" style="fill:var(--muted);font-size:11px">calls the interface, never the impl</text>
+    <line x1="390" y1="64" x2="390" y2="94" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="390,100 383,86 397,86" style="fill:var(--muted)"/>
+    <text x="404" y="84" style="fill:var(--blue);font-size:11px">compile-time · to interface</text>
+    <rect x="210" y="100" width="360" height="54" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="390" y="122" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:13px;font-weight:700">interface SRTPlatform (ABC)</text>
+    <text x="390" y="142" text-anchor="middle" style="fill:var(--muted);font-size:11px">stable method signatures</text>
+    <line x1="390" y1="154" x2="390" y2="184" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="390,190 383,176 397,176" style="fill:var(--muted)"/>
+    <text x="404" y="174" style="fill:var(--purple);font-size:11px">deploy-time · pick &amp; inject</text>
+    <line x1="390" y1="190" x2="125" y2="198" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="390" y1="190" x2="655" y2="198" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <rect x="20" y="198" width="210" height="54" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="125" y="220" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">NVIDIA</text>
+    <text x="125" y="239" text-anchor="middle" class="mono" style="fill:var(--teal);font-size:11px">→ FlashInfer</text>
+    <rect x="285" y="198" width="210" height="54" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="220" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">AMD</text>
+    <text x="390" y="239" text-anchor="middle" class="mono" style="fill:var(--blue);font-size:11px">→ Triton</text>
+    <rect x="550" y="198" width="210" height="54" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="655" y="220" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">new chip</text>
+    <text x="655" y="239" text-anchor="middle" style="fill:var(--amber);font-size:11px">= one new subclass</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Program to the interface → pick the impl at deploy</b> — upper code depends only on the abstract interface <span class="mono">SRTPlatform</span> at compile time; at startup a concrete impl is chosen by a flag or detected hardware and injected: FlashInfer on NVIDIA, Triton on AMD, with the upper code unchanged.</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/platforms/interface.py ::SRTPlatform</span><span class="ln">one stable seam per hardware: base defines the interface, subclasses override</span></div><pre>class SRTPlatform(DeviceMixin):
+    # one stable seam per hardware platform. Upper layers program to
+    # THIS interface; each chip subclasses and overrides the methods.
+    supported_quantization: list[str] = []
+    def apply_server_args_defaults(self, server_args): ...
+    def get_default_attention_backend(self) -&gt; str:
+        raise NotImplementedError      # each platform answers
+    def get_graph_runner_cls(self) -&gt; type:
+        raise NotImplementedError</pre></div>
+
+<p>A concrete picture: the same engine has <span class="mono">get_default_attention_backend()</span> return FlashInfer on <strong>NVIDIA</strong> and Triton on <strong>AMD</strong>—the upper scheduler and model loop <strong>never change</strong>, because they only call the <span class="mono">SRTPlatform</span> interface; which chip or kernel sits behind it is transparent to them. To add a new accelerator you do not sprinkle <span class="mono">if</span> branches through the scheduler; you <strong>add one SRTPlatform subclass</strong>, override these few methods, and select it at deploy time: the change is contained in a single file and not a line of core code moves.</p>
+
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One pattern, everywhere</strong>: program to an interface (an ABC); the concrete implementation is selected <span class="mono">at deploy time</span>—the same skeleton runs through the whole book.</li>
 <li><strong>Stable core</strong>: the Scheduler, the model-execution loop, and the memory pools stay fixed—the precondition for everything else being swappable; the steadier the core, the freer the edge.</li>
@@ -15579,7 +15965,80 @@ class RadixCache(BasePrefixCache):
 <tr><td>Quantization and parallelism</td><td>fit bigger models onto the hardware, freeing room for the batch</td><td>Lessons 35, 46</td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="The throughput-lever map: each design buys throughput — continuous batching keeps the GPU full, prefix cache skips recompute, chunked prefill doesn't stall decode, CUDA graph and fusion kill launch overhead, overlap scheduler hides CPU, speculative decode emits more tokens per forward, quantization fits more and runs faster">
+    <text x="20" y="30" style="font-weight:700;fill:var(--accent-ink)">Throughput-lever map: each design → the throughput it buys</text>
+    <rect x="20" y="48" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="68" text-anchor="middle" style="fill:var(--ink);font-weight:600">Continuous batching</text>
+    <text x="260" y="68" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="68" style="fill:var(--muted)">keep GPU full</text>
+    <rect x="20" y="86" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="106" text-anchor="middle" style="fill:var(--ink);font-weight:600">Prefix cache</text>
+    <text x="260" y="106" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="106" style="fill:var(--muted)">skip recompute</text>
+    <rect x="20" y="124" width="230" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="135" y="144" text-anchor="middle" style="fill:var(--ink);font-weight:600">Chunked prefill</text>
+    <text x="260" y="144" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="144" style="fill:var(--muted)">don't stall decode</text>
+    <rect x="20" y="162" width="230" height="30" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="135" y="182" text-anchor="middle" style="fill:var(--ink);font-weight:600">CUDA graph + fusion</text>
+    <text x="260" y="182" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="182" style="fill:var(--muted)">kill launch overhead</text>
+    <rect x="20" y="200" width="230" height="30" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="135" y="220" text-anchor="middle" style="fill:var(--ink);font-weight:600">Overlap scheduler</text>
+    <text x="260" y="220" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="220" style="fill:var(--muted)">hide CPU</text>
+    <rect x="20" y="238" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="258" text-anchor="middle" style="fill:var(--ink);font-weight:600">Speculative decode</text>
+    <text x="260" y="258" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="258" style="fill:var(--muted)">more tokens/forward</text>
+    <rect x="20" y="276" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="296" text-anchor="middle" style="fill:var(--ink);font-weight:600">Quantization</text>
+    <text x="260" y="296" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="296" style="fill:var(--muted)">fit more / faster</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · The throughput-lever map</b> — the guide's big levers in one table: each row is "lever → the throughput it buys." Continuous batching keeps the GPU full, prefix cache skips recompute, chunked prefill doesn't stall decode, CUDA graph and fusion kill launch overhead, overlap scheduler hides the CPU, speculative decode emits more tokens per forward, and quantization fits more while running faster.</div>
+</div>
+
 <div class="flow"><div class="node">Request arrives<br><span class="mono">form batch</span></div><div class="arrow">→</div><div class="node">Schedule queue<br><span class="mono">big batch+prefix-hit</span></div><div class="arrow">→</div><div class="node">Prefix cache<br><span class="mono">skip repeats</span></div><div class="arrow">→</div><div class="node">Prefill<br><span class="mono">chunked, no hog</span></div><div class="arrow">→</div><div class="node">Decode loop<br><span class="mono">overlap+graph</span></div><div class="arrow">→</div><div class="node">Kernel exec<br><span class="mono">ride bandwidth</span></div><div class="arrow">→</div><div class="node">Return token<br><span class="mono">oven never idle</span></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="The full request path annotated with the lever at each stage: tokenize, schedule (continuous batching), prefix (radix cache), forward (CUDA graph and fusion), sample, detokenize, stream (overlap)">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">The full request path: the lever at each stage</text>
+    <rect x="12" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="61" y="97" text-anchor="middle" style="fill:var(--ink)">tokenize</text>
+    <text x="61" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">text→ids</text>
+    <text x="116" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="124" y="70" width="98" height="44" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="173" y="97" text-anchor="middle" style="fill:var(--ink)">schedule</text>
+    <text x="173" y="135" text-anchor="middle" style="fill:var(--blue);font-size:11px">continuous</text>
+    <text x="173" y="149" text-anchor="middle" style="fill:var(--blue);font-size:11px">batching</text>
+    <text x="228" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="236" y="70" width="98" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="285" y="97" text-anchor="middle" style="fill:var(--ink)">prefix</text>
+    <text x="285" y="135" text-anchor="middle" style="fill:var(--teal);font-size:11px">radix</text>
+    <text x="285" y="149" text-anchor="middle" style="fill:var(--teal);font-size:11px">cache</text>
+    <text x="340" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="348" y="70" width="98" height="44" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="397" y="97" text-anchor="middle" style="fill:var(--ink)">forward</text>
+    <text x="397" y="135" text-anchor="middle" style="fill:var(--purple);font-size:11px">CUDA graph</text>
+    <text x="397" y="149" text-anchor="middle" style="fill:var(--purple);font-size:11px">+ fusion</text>
+    <text x="452" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="460" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="509" y="97" text-anchor="middle" style="fill:var(--ink)">sample</text>
+    <text x="509" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">pick next token</text>
+    <text x="564" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="572" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="621" y="97" text-anchor="middle" style="fill:var(--ink)">detokenize</text>
+    <text x="621" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">ids→text</text>
+    <text x="676" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="684" y="70" width="98" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="733" y="97" text-anchor="middle" style="fill:var(--ink)">stream</text>
+    <text x="733" y="142" text-anchor="middle" style="fill:var(--amber);font-size:11px">overlap</text>
+    <text x="20" y="220" style="fill:var(--muted);font-size:12px">"The life of a request" — retold here as a throughput story: each stage carries the lever that applies to it.</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · The throughput lever at each stage</b> — the "life of a request" retold as a throughput story: along the end-to-end path (tokenize → schedule → prefix → forward → sample → detokenize → stream), each stage carries a small tag naming the lever that applies there — continuous batching at schedule, radix cache at prefix, CUDA graph and fusion at forward, overlap scheduling at stream.</div>
+</div>
 
 <div class="cols"><div class="col"><strong>Throughput levers (push the system to its max)</strong><ul><li>Batching: amortize the weight read</li><li>Paging: fit more requests</li><li>Prefix caching: skip redundant compute</li><li>Overlap scheduling: eliminate idling</li><li>CUDA Graphs: cut launch overhead</li><li>Kernels and fusion: drain the bandwidth</li></ul></div><div class="col"><strong>Latency safeguards (don't sacrifice the person)</strong><ul><li>Chunked prefill (Lesson 22): slice long prompts, interleave, never hog a whole step</li><li>Speculative decoding (Lesson 43): emit several tokens per step without extra weight reads</li><li>Essence: maximize the system while protecting the individual user's experience</li></ul></div></div>
 
@@ -15596,6 +16055,21 @@ class SchedulePolicy:
     def calc_priority(self, waiting_queue):
         ...
 </pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">the continuous-batching lever: each step pick which batch to run</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
+    # the continuous-batching lever, run EVERY step: merge any finished
+    # prefill into the running batch, then decide what to run next —
+    # admit a new prefill batch (more work) or keep decoding.
+    merge_finished_prefill_into(self.running_batch)
+    new_batch = self.get_new_batch_prefill()    # admit within token budget
+    if new_batch is not None:
+        return new_batch                         # run prefill this step
+    return self.running_batch                    # else keep decoding
+</pre></div>
+
+<div class="card"><div class="tag">🔎 A concrete example</div>
+<p>Because <span class="mono">get_next_batch_to_run</span> runs once <strong>every step</strong>, the instant a request in the batch finishes, the slot it frees is <strong>immediately</strong> refilled by a waiting request (that is continuous batching) — there's no need to drain the whole batch first and only then start a new one. This <strong>single lever</strong> is why the expensive oven (the GPU) stays saturated: every step it makes the most profitable choice among "merge finished prefill → admit a new prefill if it fits → otherwise keep decoding."</p>
+</div>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>

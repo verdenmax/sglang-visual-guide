@@ -372,6 +372,34 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>把这两条放在一起看，你会得到一个很反直觉的结论：<strong>同一块 GPU，跑 prefill 时几乎被榨干，跑 decode 时却大半空转。</strong>不是 GPU 偷懒，而是 decode 这种负载天生喂不饱它——瓶颈在显存到计算单元之间那条数据通道，不在算力本身。理解了这一点，你才能明白后面所有调度技巧的出发点：它们要么想办法让 decode 蹭上 prefill 的算力，要么干脆把两种负载彻底隔开，各自喂饱各自的瓶颈。</p>
 <p>更进一步，这条对立还解释了"为什么 LLM 推理跟训练手感如此不同"。训练几乎全是 compute-bound 的大矩阵乘，堆算力立竿见影；而在线推理里，真正决定用户体验的 decode 阶段是 bandwidth-bound 的，单纯换更强算力的卡未必能让吐字更快。SGLang 之所以在调度、批处理、KV 管理上下这么多功夫，根子都在这条 prefill-vs-decode 的轴上。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="算术强度屋顶线：decode 低强度落在带宽受限的斜坡上，prefill 高强度落在算力受限的平台上">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">算术强度：屋顶线</text>
+    <line x1="70" y1="58" x2="70" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="70" y1="240" x2="745" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M745 240 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="408" y="270" text-anchor="middle" style="fill:var(--faint);font-size:12px">算术强度 FLOPs/byte →</text>
+    <text x="78" y="52" style="fill:var(--faint);font-size:11px">达到算力 ↑</text>
+    <line x1="70" y1="240" x2="380" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <line x1="380" y1="90" x2="730" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <text x="196" y="148" transform="rotate(-26 196 148)" style="fill:var(--purple);font-size:11px">带宽屋顶</text>
+    <text x="556" y="82" text-anchor="middle" style="fill:var(--purple);font-size:11px">算力屋顶 · 峰值</text>
+    <line x1="380" y1="90" x2="380" y2="240" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:4 4"/>
+    <text x="380" y="256" text-anchor="middle" style="fill:var(--faint);font-size:10px">脊点</text>
+    <text x="208" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">带宽受限区</text>
+    <text x="558" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">算力受限区</text>
+    <circle cx="170" cy="192" r="7" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:2"/>
+    <text x="186" y="186" style="fill:var(--blue);font-size:12px;font-weight:700">decode</text>
+    <text x="186" y="202" style="fill:var(--blue);font-size:11px">低强度 · 带宽受限</text>
+    <circle cx="556" cy="90" r="7" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="556" y="118" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <text x="556" y="134" text-anchor="middle" style="fill:var(--amber);font-size:11px">高强度 · 算力受限</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 算术强度屋顶线</b> — 横轴是算术强度（每读一字节做多少乘加）。<span class="mono">decode</span> 强度低，落在左边的<strong>带宽斜坡</strong>上，算力大半空着；<span class="mono">prefill</span> 强度高，落在右边的<strong>算力平台</strong>上，张量核心被喂满。脊点左边带宽受限、右边算力受限。</div>
+</div>
+
+<p>举个具体数字：prefill 一次大矩阵乘里，权重每读一字节能摊上<strong>成千上万次</strong>乘加（compute-bound）；而 decode 每生成一个 token，每读一字节往往只做<strong>个位数</strong>次乘加（bandwidth-bound）。同一块卡，两种负载的算术强度能差出几个数量级——这正是它们落在屋顶线两端的原因。</p>
+
 <h2>二、这个对立如何制造吞吐与延迟的拉扯</h2>
 <p><strong>第8课</strong>讲的<strong>吞吐 vs 延迟</strong>之争，根子就在这里。两个关键指标：<span class="mono">TTFT</span>（首字延迟，主要由 prefill 决定）和 <span class="mono">ITL</span>（字间延迟，由 decode 决定）。</p>
 <p>把两种负载塞进一个串行队列会发生什么？一个超长 prompt 的 prefill 是一大块算力密集的活，它一旦上 GPU，就会把<strong>所有正在解码的请求全部堵住</strong>——大家的 ITL 瞬间飙高，输出卡顿。反过来，若一味优先 decode 的流畅，新请求的 prefill 又迟迟排不上，TTFT 变长。</p>
@@ -389,6 +417,40 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>好处是<strong>各自饱和各自的瓶颈、互不打扰</strong>：prefill 池可以把算力榨干，decode 池可以专心把 batch 做大、把带宽用足，两边能独立扩缩容、独立调优。代价是多了一道<strong>KV 传输</strong>——这正是下面那段代码所守护的接缝。</p>
 <p>为什么这种"看起来更费事"的方案反而值得？因为共置方案里两种负载永远在抢同一块 GPU，调度器再聪明，prefill 切片和 decode 之间总有一点互相挤压；而分离之后，prefill 池里全是清一色的大并行、可以用最适合 compute-bound 的批策略，decode 池里全是清一色的逐字生成、可以把 batch 堆到带宽极限——<strong>每一池都不再被另一种负载拖累</strong>。在超大规模、对 TTFT 和 ITL 都有严格 SLA 的线上服务里，这种物理隔离往往比"在一块卡上精打细算"更省心、也更稳。</p>
 <p>当然，分离不是免费的午餐。KV 缓存可能高达每条序列几百 MB，要在 prefill 池算完后跨网络搬到 decode 池，这条传输链路的带宽与延迟就成了新的关键路径——搬得慢，decode 侧就得干等。所以 PD 分离把一个"GPU 内部的调度问题"换成了一个"跨机的数据搬运问题"，而这个搬运问题的接口，正由 <span class="mono">BaseKVManager</span> 来定义。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="同机时分对比分离独立池：左边一块 GPU 池时分 prefill 与 decode 互相争抢，右边 prefill 池与 decode 池分开、各自饱和，中间靠 KV 传输相连">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">同机时分 vs 分离独立池</text>
+    <rect x="24" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="210" y="84" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">同机时分 · 争抢</text>
+    <rect x="60" y="104" width="300" height="118" rx="10" style="fill:var(--faint);stroke:var(--line)" fill-opacity="0.06"/>
+    <text x="210" y="126" text-anchor="middle" style="fill:var(--muted);font-size:11px">一块 GPU 池</text>
+    <rect x="80" y="142" width="92" height="58" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="126" y="176" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <rect x="196" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="220" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="244" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="268" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="292" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="316" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="210" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">两种负载互相争抢</text>
+    <rect x="424" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="610" y="84" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">分离独立池 · 隔离</text>
+    <rect x="448" y="120" width="124" height="96" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="510" y="158" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill 池</text>
+    <text x="510" y="178" text-anchor="middle" style="fill:var(--amber);font-size:11px">算力拉满</text>
+    <rect x="648" y="120" width="124" height="96" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="710" y="158" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">decode 池</text>
+    <text x="710" y="178" text-anchor="middle" style="fill:var(--blue);font-size:11px">带宽用足</text>
+    <line x1="572" y1="168" x2="640" y2="168" style="stroke:var(--teal);stroke-width:2"/>
+    <path d="M648 168 l-9 -4 v8 z" style="fill:var(--teal)"/>
+    <text x="610" y="150" text-anchor="middle" style="fill:var(--teal);font-size:11px">KV 传输</text>
+    <text x="610" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">各自饱和 · 互不打扰</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 同机时分 vs 分离独立池</b> — 左边一块 GPU 池<strong>时分</strong>跑 prefill 与 decode，两种负载互相争抢、彼此打断；右边把 <span class="mono">prefill 池</span>与 <span class="mono">decode 池</span><strong>分开</strong>，各自按自己的瓶颈定容量、组批，中间靠一次 <strong>KV 传输</strong>相连，互不打扰。</div>
+</div>
+
+<p>正因为分离，你可以按真实流量<strong>各自扩缩容</strong>：prompt 很长、prefill 吃紧就多加 prefill 卡；输出很长、decode 吃紧就多加 decode 卡，两边互不牵制。这种独立伸缩，是共置方案给不了的。</p>
 
 <div class="cols"><div class="col">
 <p><strong>Prefill：一次大并行（算力受限）</strong></p>
@@ -427,6 +489,17 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>看这段代码：<span class="mono">BaseKVManager</span> 就是 PD 分离那条路的"接缝"。构造时传入的 <span class="mono">disaggregation_mode</span> 决定了当前进程是 prefill 侧还是 decode 侧——同一套接口，两种角色。<span class="mono">register_to_bootstrap()</span> 让一个 prefill worker 能和一个 decode worker <strong>配对</strong>，配对成功后，KV 缓存就从 prefill 侧传到 decode 侧。整个分离式架构的复杂度，都被这层抽象包住了。</p>
 <p>留意这里的设计哲学：它是一个 <span class="mono">ABC</span>（抽象基类），所有方法都标了 <span class="mono">@abstractmethod</span>。这意味着 SGLang 并不绑定某一种具体的传输实现——底层可以是 RDMA、可以是 NVLink、也可以是别的后端，只要它实现了这套接口。<strong>"prefill 和 decode 分居两池"这个抽象，和"具体用什么管子搬 KV"这个实现，被干净地解耦开了。</strong>这也呼应了全书反复出现的另一条主线：把"是什么"和"怎么做"分层，让上层的调度决策不必关心下层的硬件细节。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::KVPoll</span><span class="ln">KV 传输的状态机：轮询直到 Success</span></div><pre>class KVPoll:
+    # the state of a prefill -&gt; decode KV transfer; poll() returns one
+    # of these until the transfer is done (or failed).
+    Failed = 0
+    Bootstrapping = 1
+    WaitingForInput = 2
+    Transferring = 3
+    Success = 4</pre></div>
+
+<p>这段 <span class="mono">KVPoll</span> 就是上面那道 KV 传输接缝的"仪表盘"：每一条跨池搬运的 KV，都在这五个整数状态里走——从 <span class="mono">Bootstrapping</span>（建连配对）到 <span class="mono">WaitingForInput</span>、<span class="mono">Transferring</span>（搬运中），一路轮询直到 <span class="mono">Success</span>，中途出错则落到 <span class="mono">Failed</span>。decode 侧正是靠不停 <span class="mono">poll()</span> 这个状态，判断 prefill 算好的 KV 到没到、能不能开始逐字生成。一个朴素的状态机，把"跨机搬数据"这件麻烦事收拢成了一个可观测、可重试的循环。</p>
 
 <h2>五、一个轴，看懂许多决定</h2>
 <p>现在把镜头拉到最远。第4课的 compute-bound vs bandwidth-bound、第8课的吞吐 vs 延迟、第22课的 chunked prefill、第45课的 PD 分离——这四课乍看分属四个话题，其实是同一根轴上的四个点。<strong>根本对立</strong>（prefill 与 decode 性质相反）产生<strong>张力</strong>（它们抢同一块 GPU），张力逼出<strong>两种调解</strong>（共置分时、或分机分离）。</p>
@@ -519,6 +592,34 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Put the two side by side and you reach a counterintuitive conclusion: <strong>the same GPU is nearly wrung dry during prefill, yet mostly idle during decode.</strong> The GPU isn't slacking—decode is a workload that inherently can't keep it fed; the bottleneck is the data path from memory to the compute units, not the compute itself. Grasp this and you understand the starting point of every scheduling trick that follows: either find a way for decode to piggyback on prefill's compute, or separate the two workloads entirely so each saturates its own bottleneck.</p>
 <p>Further, this contrast explains "why LLM inference feels so different from training." Training is almost entirely compute-bound big matmuls, where adding compute pays off immediately; in online serving, the decode phase that actually shapes the user experience is bandwidth-bound, and a stronger compute card alone may not make tokens come out faster. The reason SGLang invests so much in scheduling, batching, and KV management all traces back to this prefill-vs-decode axis.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Arithmetic-intensity roofline: decode at low intensity sits on the bandwidth-bound ramp, prefill at high intensity sits on the compute-bound plateau">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Arithmetic intensity: roofline</text>
+    <line x1="70" y1="58" x2="70" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="70" y1="240" x2="745" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M745 240 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="408" y="270" text-anchor="middle" style="fill:var(--faint);font-size:12px">arithmetic intensity FLOPs/byte →</text>
+    <text x="78" y="52" style="fill:var(--faint);font-size:11px">achieved FLOP/s ↑</text>
+    <line x1="70" y1="240" x2="380" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <line x1="380" y1="90" x2="730" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <text x="196" y="148" transform="rotate(-26 196 148)" style="fill:var(--purple);font-size:11px">bw roof</text>
+    <text x="556" y="82" text-anchor="middle" style="fill:var(--purple);font-size:11px">compute roof · peak</text>
+    <line x1="380" y1="90" x2="380" y2="240" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:4 4"/>
+    <text x="380" y="256" text-anchor="middle" style="fill:var(--faint);font-size:10px">ridge</text>
+    <text x="208" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">bandwidth-bound</text>
+    <text x="558" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">compute-bound</text>
+    <circle cx="170" cy="192" r="7" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:2"/>
+    <text x="186" y="186" style="fill:var(--blue);font-size:12px;font-weight:700">decode</text>
+    <text x="186" y="202" style="fill:var(--blue);font-size:11px">low AI · bw-bound</text>
+    <circle cx="556" cy="90" r="7" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="556" y="118" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <text x="556" y="134" text-anchor="middle" style="fill:var(--amber);font-size:11px">high AI · compute-bound</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Arithmetic-intensity roofline</b> — the x-axis is arithmetic intensity (multiply-adds per byte read). <span class="mono">decode</span> is low and sits on the left <strong>bandwidth ramp</strong>, most of its compute idle; <span class="mono">prefill</span> is high and sits on the right <strong>compute plateau</strong>, tensor cores kept full. Left of the ridge is bandwidth-bound, right of it compute-bound.</div>
+</div>
+
+<p>Concretely: in one big prefill GEMM, every byte of weights read is amortized over <strong>thousands</strong> of multiply-adds (compute-bound); in decode, each generated token does only a <strong>handful</strong> of multiply-adds per byte read (bandwidth-bound). On the same card the two workloads' arithmetic intensities differ by orders of magnitude—which is exactly why they land at opposite ends of the roofline.</p>
+
 <h2>2. How this contrast creates the throughput-vs-latency pull</h2>
 <p><strong>Lesson 8</strong>'s <strong>throughput vs latency</strong> fight is rooted right here. Two key metrics: <span class="mono">TTFT</span> (time to first token, driven mainly by prefill) and <span class="mono">ITL</span> (inter-token latency, driven by decode).</p>
 <p>What happens if you stuff both workloads into one serial queue? A very long prompt's prefill is a big compute-heavy chunk; once it hits the GPU it <strong>blocks every request that's currently decoding</strong>—everyone's ITL spikes and output stutters. Conversely, if you always favor smooth decode, new requests' prefill never gets scheduled and TTFT climbs.</p>
@@ -536,6 +637,40 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>The upside is that <strong>each pool saturates its own bottleneck without interference</strong>: the prefill pool can wring out compute, the decode pool can focus on growing the batch and using bandwidth fully, and each can scale and tune independently. The cost is an extra <strong>KV transfer</strong>—which is exactly the seam the code below guards.</p>
 <p>Why is this "seemingly more troublesome" approach worth it? Because in the co-located approach the two workloads forever contend for the same GPU; however clever the scheduler, there's always some squeeze between prefill chunks and decode. Once separated, the prefill pool is all uniform big parallel passes and can use the batching strategy best suited to compute-bound work, while the decode pool is all uniform token-by-token generation and can pile the batch up to the bandwidth limit—<strong>each pool is no longer dragged down by the other workload</strong>. In very large-scale online serving with strict SLAs on both TTFT and ITL, this physical isolation is often more reliable and less fiddly than penny-pinching on one card.</p>
 <p>Of course, separation is no free lunch. The KV cache can be hundreds of MB per sequence, and after the prefill pool computes it, it must be moved across the network to the decode pool, so that transfer link's bandwidth and latency become a new critical path—move it slowly and the decode side just waits. So PD disaggregation swaps an "in-GPU scheduling problem" for a "cross-machine data-movement problem", and the interface for that movement is exactly what <span class="mono">BaseKVManager</span> defines.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="Co-located time-share vs disaggregated pools: on the left one GPU pool time-shares prefill and decode that contend, on the right a prefill pool and decode pool are separate and each saturates, joined by a KV transfer">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Co-located vs disaggregated</text>
+    <rect x="24" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="210" y="84" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">co-located · contend</text>
+    <rect x="60" y="104" width="300" height="118" rx="10" style="fill:var(--faint);stroke:var(--line)" fill-opacity="0.06"/>
+    <text x="210" y="126" text-anchor="middle" style="fill:var(--muted);font-size:11px">one GPU pool</text>
+    <rect x="80" y="142" width="92" height="58" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="126" y="176" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <rect x="196" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="220" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="244" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="268" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="292" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="316" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="210" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">two workloads contend</text>
+    <rect x="424" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="610" y="84" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">disaggregated · isolated</text>
+    <rect x="448" y="120" width="124" height="96" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="510" y="158" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill pool</text>
+    <text x="510" y="178" text-anchor="middle" style="fill:var(--amber);font-size:11px">compute-max</text>
+    <rect x="648" y="120" width="124" height="96" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="710" y="158" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">decode pool</text>
+    <text x="710" y="178" text-anchor="middle" style="fill:var(--blue);font-size:11px">bw-full</text>
+    <line x1="572" y1="168" x2="640" y2="168" style="stroke:var(--teal);stroke-width:2"/>
+    <path d="M648 168 l-9 -4 v8 z" style="fill:var(--teal)"/>
+    <text x="610" y="150" text-anchor="middle" style="fill:var(--teal);font-size:11px">KV transfer</text>
+    <text x="610" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">each saturates · isolated</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Co-located vs disaggregated</b> — on the left one GPU pool <strong>time-shares</strong> prefill and decode, so the two workloads contend and interrupt each other; on the right the <span class="mono">prefill pool</span> and <span class="mono">decode pool</span> are <strong>separate</strong>, each sized and batched for its own bottleneck and joined by a single <strong>KV transfer</strong>, so neither disturbs the other.</div>
+</div>
+
+<p>Because they're separated, you can <strong>scale each to real traffic</strong>: add prefill GPUs when prompts are long and prefill is the squeeze; add decode GPUs when outputs are long and decode is the squeeze—neither side constrains the other. That independent scaling is something the co-located approach simply can't give you.</p>
 
 <div class="cols"><div class="col">
 <p><strong>Prefill: one big parallel pass (compute-bound)</strong></p>
@@ -574,6 +709,17 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>Look at the code: <span class="mono">BaseKVManager</span> is the "seam" of the PD-disaggregation path. The <span class="mono">disaggregation_mode</span> passed at construction decides whether this process is the prefill side or the decode side—one interface, two roles. <span class="mono">register_to_bootstrap()</span> lets a prefill worker get <strong>paired</strong> with a decode worker; once paired, the KV cache is transferred from the prefill side to the decode side. The whole complexity of the disaggregated architecture is wrapped up behind this abstraction.</p>
 <p>Notice the design philosophy here: it's an <span class="mono">ABC</span> (abstract base class) with every method marked <span class="mono">@abstractmethod</span>. That means SGLang isn't bound to one concrete transport implementation—the backend can be RDMA, NVLink, or something else, as long as it implements this interface. <strong>The abstraction "prefill and decode live in separate pools" is cleanly decoupled from the implementation "which pipe actually moves the KV".</strong> This echoes another through-line of the whole book: layer the "what" apart from the "how", so the upper scheduling decisions need not care about the lower hardware details.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::KVPoll</span><span class="ln">the KV-transfer state machine: poll until Success</span></div><pre>class KVPoll:
+    # the state of a prefill -&gt; decode KV transfer; poll() returns one
+    # of these until the transfer is done (or failed).
+    Failed = 0
+    Bootstrapping = 1
+    WaitingForInput = 2
+    Transferring = 3
+    Success = 4</pre></div>
+
+<p>This <span class="mono">KVPoll</span> is the "dashboard" of that KV-transfer seam: every cross-pool KV move walks through these five integer states—from <span class="mono">Bootstrapping</span> (connect and pair) through <span class="mono">WaitingForInput</span> and <span class="mono">Transferring</span> (in flight), polled until <span class="mono">Success</span>, dropping to <span class="mono">Failed</span> if anything breaks. The decode side keeps calling <span class="mono">poll()</span> on this state to tell whether the KV computed by prefill has arrived and token-by-token generation can begin. A plain little state machine that wraps the messy business of "moving data across machines" into one observable, retryable loop.</p>
 
 <h2>5. One axis explains many decisions</h2>
 <p>Now pull the camera all the way back. Lesson 4's compute-bound vs bandwidth-bound, Lesson 8's throughput vs latency, Lesson 22's chunked prefill, Lesson 45's PD disaggregation—these four lessons look like four separate topics, but they are four points on the same axis. The <strong>root tension</strong> (prefill and decode are opposite in nature) produces a <strong>pull</strong> (they contend for the same GPU), and the pull forces <strong>two reconciliations</strong> (co-located time-sharing, or separated machines).</p>

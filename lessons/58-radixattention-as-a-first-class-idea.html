@@ -366,6 +366,31 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>六张面孔，一个灵魂。它们之所以能严丝合缝地咬合，正是因为大家都默认了同一个共享前缀的世界观。你若只学某一课，会觉得它是个局部技巧；你若把第7、11、20、29、30、31课叠在一起看，才会看见那条贯穿始终的主轴。</p>
 <p>不妨顺着一条具体的链路把它走一遍。一个多轮对话应用，开发者在 DSL 里用 <span class="mono">fork</span>（第11课）把同一段历史分裂成三条候选回复；这三条在概念上（第7课）共享同一个开头，所以引擎只应算一次。落到实现（第29课），这段历史变成 <span class="mono">RadixCache</span> 里一个被三条请求共享的 <span class="mono">TreeNode</span>，它的 <span class="mono">value</span> 指向若干物理页（第30课，承第6课）。调度器（第20课）看到这三条请求前缀高度重合，便把它们排在一起、几乎同时跑，让那段共享 KV 在显存里「热」着被反复命中。等对话变长、显存吃紧，HiCache（第31课）再把这段已经不那么热的历史整段下放到 CPU 甚至磁盘，需要时再整段调回。你看，从开发者敲下 <span class="mono">fork</span> 的那一刻，到这段 KV 在三级存储间迁徙，<strong>自始至终是同一棵树上的同一个节点</strong>在被不同层次以不同方式照料。这就是「一个念头贯穿全栈」最具体的样子。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="放射网：中心的 RadixAttention 前缀共享，向外连到 DSL 的 fork、KV 缓存的基数树、调度器的 LPM 缓存感知排序、HiCache 的内存分层">
+    <line x1="390" y1="160" x2="270" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="270" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <ellipse cx="390" cy="160" rx="118" ry="42" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="390" y="153" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">RadixAttention</text>
+    <text x="390" y="175" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">前缀共享 · 一个念头</text>
+    <rect x="30" y="40" width="240" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="44" y="64" style="fill:var(--blue);font-weight:700">DSL（第11课）</text>
+    <text x="44" y="84" style="font-size:12px">fork 共用提示前缀</text>
+    <rect x="510" y="40" width="240" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="524" y="64" style="fill:var(--teal);font-weight:700">KV 缓存（第29课）</text>
+    <text x="524" y="84" style="font-size:12px">基数树存前缀</text>
+    <rect x="30" y="224" width="240" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="44" y="248" style="fill:var(--amber);font-weight:700">调度器（第20课）</text>
+    <text x="44" y="268" style="font-size:12px">LPM 缓存感知排序</text>
+    <rect x="510" y="224" width="240" height="56" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="524" y="248" style="fill:var(--purple);font-weight:700">内存分层（第31课）</text>
+    <text x="524" y="268" style="font-size:12px">HiCache 留驻热前缀</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 放射网：同一个念头反复出现</b> — 中心的 <span class="mono">RadixAttention</span>（前缀共享）向四方辐射：DSL 的 <span class="mono">fork</span> 制造共享前缀、KV 缓存把它存成基数树、调度器用 LPM 缓存感知排序优先放行命中、HiCache 把热前缀留驻内存。一个念头，处处复用。</div>
+</div>
+
 <h2>三、从「贴上去的优化」到「长在骨架里的结构」</h2>
 <p>差别不只是审美。把前缀共享当外挂，意味着缓存和引擎是两套各自为政的逻辑，缓存对调度一无所知，调度也不会为缓存让路，命中纯靠运气。把它当一等公民，意味着调度器知道树的形状、能预估命中、能主动把相似请求排在一起；意味着显存管理器知道哪些页被多少请求共享、不能随便回收；意味着分层存储能沿着树的边界整段搬运而不是零散拷贝。一个念头被升格为结构后，全系统才能围绕它协同。</p>
 <p>这也解释了为什么 <span class="mono">RadixAttention</span> 这个名字里同时含着「Radix（基数树）」和「Attention（注意力）」：注意力计算消费 KV，而 KV 被组织成一棵基数树。算子和数据结构在这里是<strong>同一枚硬币的两面</strong>，不是先后关系。</p>
@@ -374,6 +399,45 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>四、一次请求，是怎么在这棵树上走完一生的</h2>
 <p>把视角拉回单个请求：它带着一串 token 进来，先做 <span class="mono">match_prefix</span>，沿树往下走，找到与库存重合的<strong>最长前缀</strong>；这段前缀的 KV 被原样<strong>复用</strong>（并 <span class="mono">inc_lock_ref</span> 钉住，防止半路被回收）；引擎只对<strong>新出现的后缀</strong>真正做前向计算；算完后通过 <span class="mono">insert</span> 把这段新后缀挂回树上，在分叉处把节点劈开，让未来的请求又能共享到它。这条「匹配最长前缀 → 复用 KV → 只算新后缀 → 写回树」的生命周期，就是 <span class="mono">RadixAttention</span> 的全部精髓，下面四张图把它从不同侧面拆开看。</p>
 <p>这里有两个细节值得停下来体会。其一，<span class="mono">inc_lock_ref</span> 的「钉住」之所以必要，是因为复用和回收在同一棵树上并存：当请求 A 正靠着某段共享前缀往下算时，回收逻辑（<span class="mono">evict</span>）绝不能把这段前缀的页抢走，否则 A 算到一半就「踩空」了。引用计数让「谁在用」变得可见，回收只敢从无人引用的叶子下手。其二，<span class="mono">insert</span> 的「劈开节点」是树能持续长出共享的关键：当新后缀与某个已有节点只共享前半段时，系统会在分叉处把老节点一分为二——公共的上半段继续被双方共享，各自不同的下半段成为两个孩子。正是这个「按需劈开」的动作，让基数树始终保持「能共享的尽量共享、该分叉的精确分叉」的紧凑形态，而不会退化成一堆互不相干的整串。理解了钉住与劈开，你就理解了这棵树<strong>为什么既安全又高效</strong>。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="匹配复用只算新后缀：请求 tokens 分成共享前缀与新后缀，match_prefix 命中前缀复用其 KV 零计算，模型只前向新后缀">
+    <text x="40" y="36" style="font-weight:700;fill:var(--muted)">请求 tokens ＝ [ 共享前缀 ｜ 新后缀 ]</text>
+    <rect x="40" y="62" width="420" height="48" rx="8" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="250" y="84" text-anchor="middle" style="fill:var(--muted);font-weight:700">共享前缀</text>
+    <text x="250" y="102" text-anchor="middle" style="fill:var(--faint);font-size:12px">已缓存 KV · 灰</text>
+    <rect x="468" y="62" width="272" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="604" y="84" text-anchor="middle" style="fill:var(--amber);font-weight:700">新后缀</text>
+    <text x="604" y="102" text-anchor="middle" style="fill:var(--amber);font-size:12px">唯一要算的部分</text>
+    <line x1="40" y1="124" x2="460" y2="124" style="stroke:var(--teal);stroke-width:1.5"/>
+    <text x="40" y="152" style="fill:var(--teal);font-weight:700">match_prefix 命中</text>
+    <text x="40" y="172" style="font-size:12px">复用其 KV · 0 计算</text>
+    <line x1="468" y1="124" x2="740" y2="124" style="stroke:var(--amber);stroke-width:1.5"/>
+    <text x="468" y="152" style="fill:var(--amber);font-weight:700">只对新后缀前向计算</text>
+    <text x="468" y="172" style="font-size:12px">算量 ＝ 后缀长度</text>
+    <rect x="40" y="208" width="360" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="56" y="232" style="fill:var(--teal);font-weight:700">基数树：此前缀已驻留</text>
+    <text x="56" y="252" style="font-size:12px">沿树走到最深已知节点，直接复用</text>
+    <rect x="468" y="208" width="272" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="484" y="232" style="fill:var(--accent-ink);font-weight:700">省下的就是前缀那段</text>
+    <text x="484" y="252" style="font-size:12px">而非整条序列重算</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 匹配 → 复用 → 只算新后缀</b> — 请求的 token 切成「共享前缀（灰、已缓存）｜新后缀（高亮）」；<span class="mono">match_prefix</span> 在树里找到前缀、原样复用它的 KV（0 计算），模型只对<strong>新后缀</strong>做前向。算量等于后缀长度，而不是整条序列。</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.insert</span><span class="ln">把一段 token+KV 插入树，让后续请求共享该前缀</span></div><pre>def insert(self, params: InsertParams) -&gt; InsertResult:
+    # 把一条序列的 token + KV 写进基数树，让后续请求能共享这段前缀；
+    # key 先做分页对齐（page_size 的整数倍）。
+    key = params.key.page_aligned(self.page_size)
+    value = params.value[:len(key)]
+    prefix_len, last_node = self._insert_helper(
+        self.root_node, key, value, ...)   # 在分叉处劈开节点
+    return InsertResult(prefix_len=prefix_len)   # 有多少前缀本就存在</pre></div>
+
+<div class="card detail"><div class="tag">🧪 具体例子</div>
+<p>设想一段被所有请求共用的 <strong>1000 token 系统提示词</strong>。第一条请求来时，它被 <span class="mono">insert</span> 进树一次，对应的 KV 落在若干分页上。第二条请求带着同样的开头进来，<span class="mono">match_prefix</span> 一口气命中全部 1000 个 token——<strong>0 次重算</strong>——引擎只对它自己那句问题做前向。第三、第四条也照此办理：那段共享前缀越被复用，省下的算力越多。</p>
+<p>而这<strong>同一个基数树念头</strong>同时撑起了四处：DSL 的 <span class="mono">fork</span> 让分支共享开头、缓存把前缀存成树、LPM 缓存感知调度把命中高的请求排在一起、HiCache 再按冷热把这棵树分层铺到 GPU/CPU/磁盘。一个 <span class="mono">insert</span>，喂养了全栈。</p>
+</div>
 
 <table class="t">
 <tr><th>共享前缀出现的地方</th><th>它在这里扮演的角色</th></tr>
@@ -507,6 +571,31 @@ class RadixCache(BasePrefixCache):
 <p>Six faces, one soul. They mesh so tightly precisely because they all assume the same shared-prefix worldview. Study any single lesson and it looks like a local trick; stack Lessons 7, 11, 20, 29, 30, and 31 together and you finally see the spine running through them all.</p>
 <p>It helps to walk one concrete chain end to end. In a multi-turn chat app, the developer uses <span class="mono">fork</span> in the DSL (Lesson 11) to split the same history into three candidate replies; conceptually (Lesson 7) the three share one opening, so the engine should compute it once. In implementation (Lesson 29), that history becomes one <span class="mono">TreeNode</span> in <span class="mono">RadixCache</span> shared by three requests, whose <span class="mono">value</span> points at several physical pages (Lesson 30, on Lesson 6). The scheduler (Lesson 20), seeing the three requests' prefixes overlap heavily, places them together and runs them almost simultaneously, keeping that shared KV "hot" in memory for repeated hits. As the conversation grows and memory tightens, HiCache (Lesson 31) tiers that now-cooler history down to CPU or even disk, recalling it as a whole segment when needed. From the moment the developer types <span class="mono">fork</span> to the migration of that KV across three storage tiers, it is <strong>the same node on the same tree</strong> being tended by different layers in different ways. That is the most concrete picture of "one idea running through the full stack."</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="Radial web: the central RadixAttention prefix sharing radiates to the DSL fork, the KV cache radix tree, the scheduler's cache-aware LPM ordering, and HiCache memory tiers">
+    <line x1="390" y1="160" x2="270" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="270" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <ellipse cx="390" cy="160" rx="118" ry="42" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="390" y="153" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">RadixAttention</text>
+    <text x="390" y="175" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">prefix sharing · one idea</text>
+    <rect x="30" y="40" width="240" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="44" y="64" style="fill:var(--blue);font-weight:700">DSL (L11)</text>
+    <text x="44" y="84" style="font-size:12px">fork shares a prefix</text>
+    <rect x="510" y="40" width="240" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="524" y="64" style="fill:var(--teal);font-weight:700">KV cache (L29)</text>
+    <text x="524" y="84" style="font-size:12px">radix tree of prefixes</text>
+    <rect x="30" y="224" width="240" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="44" y="248" style="fill:var(--amber);font-weight:700">Scheduler (L20)</text>
+    <text x="44" y="268" style="font-size:12px">cache-aware LPM order</text>
+    <rect x="510" y="224" width="240" height="56" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="524" y="248" style="fill:var(--purple);font-weight:700">Memory tiers (L31)</text>
+    <text x="524" y="268" style="font-size:12px">HiCache keeps hot ones</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · The radial web: one idea recurring everywhere</b> — the central <span class="mono">RadixAttention</span> (prefix sharing) radiates outward: the DSL's <span class="mono">fork</span> manufactures shared prefixes, the KV cache stores them as a radix tree, the scheduler orders by cache-aware LPM so hits run first, and HiCache keeps hot prefixes in memory. One idea, reused everywhere.</div>
+</div>
+
 <h2>3. From "an optimization glued on" to "a structure grown into the skeleton"</h2>
 <p>The difference is not merely aesthetic. Treating prefix sharing as a bolt-on means the cache and the engine are two separate logics: the cache knows nothing about scheduling, scheduling never yields for the cache, and hits are pure luck. Treating it as first-class means the scheduler knows the tree's shape, can estimate hits, and can actively cluster similar requests; it means the memory manager knows how many requests share which pages and must not reclaim them carelessly; it means tiered storage can move whole segments along tree boundaries instead of scattered copies. Only after an idea is promoted to a structure can the whole system coordinate around it.</p>
 <p>This also explains why the name <span class="mono">RadixAttention</span> holds both "Radix (radix tree)" and "Attention": attention consumes KV, and KV is organized as a radix tree. The operator and the data structure here are <strong>two sides of one coin</strong>, not a before-and-after.</p>
@@ -515,6 +604,45 @@ class RadixCache(BasePrefixCache):
 <h2>4. How a single request lives out its life on this tree</h2>
 <p>Zoom back to one request: it arrives with a token sequence, first runs <span class="mono">match_prefix</span>, walks down the tree, and finds the <strong>longest prefix</strong> overlapping with the stock; that prefix's KV is <strong>reused</strong> as-is (and <span class="mono">inc_lock_ref</span> pins it so it won't be evicted mid-flight); the engine truly forward-computes only the <strong>newly-appeared suffix</strong>; afterward <span class="mono">insert</span> hangs that new suffix back onto the tree, splitting a node at the divergence so future requests can share it too. This lifecycle—"match the longest prefix → reuse KV → compute only the new suffix → write back to the tree"—is the entire essence of <span class="mono">RadixAttention</span>, and the four diagrams below pull it apart from different angles.</p>
 <p>Two details deserve a pause. First, the "pinning" of <span class="mono">inc_lock_ref</span> is necessary because reuse and reclamation coexist on the same tree: while request A is computing down some shared prefix, the reclamation logic (<span class="mono">evict</span>) must never snatch that prefix's pages away, or A would "step into the void" mid-computation. Reference counting makes "who is using it" visible, so eviction only dares touch leaves no one references. Second, the "node splitting" of <span class="mono">insert</span> is the key to the tree continually growing shared structure: when a new suffix shares only the first half of an existing node, the system splits the old node in two at the divergence—the common upper half stays shared by both, the differing lower halves become two children. This "split on demand" keeps the radix tree in a compact "share what can be shared, fork exactly where it must" shape, rather than degenerating into a heap of unrelated full strings. Understand pinning and splitting and you understand <strong>why this tree is both safe and efficient</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Match reuse compute-only-suffix: a request's tokens split into shared prefix and new suffix; match_prefix reuses the prefix KV for zero compute and the model forwards only the new suffix">
+    <text x="40" y="36" style="font-weight:700;fill:var(--muted)">request tokens = [ shared prefix | new suffix ]</text>
+    <rect x="40" y="62" width="420" height="48" rx="8" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="250" y="84" text-anchor="middle" style="fill:var(--muted);font-weight:700">shared prefix</text>
+    <text x="250" y="102" text-anchor="middle" style="fill:var(--faint);font-size:12px">cached KV · greyed</text>
+    <rect x="468" y="62" width="272" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="604" y="84" text-anchor="middle" style="fill:var(--amber);font-weight:700">new suffix</text>
+    <text x="604" y="102" text-anchor="middle" style="fill:var(--amber);font-size:12px">the only computed part</text>
+    <line x1="40" y1="124" x2="460" y2="124" style="stroke:var(--teal);stroke-width:1.5"/>
+    <text x="40" y="152" style="fill:var(--teal);font-weight:700">match_prefix hits</text>
+    <text x="40" y="172" style="font-size:12px">reuse its KV · 0 compute</text>
+    <line x1="468" y1="124" x2="740" y2="124" style="stroke:var(--amber);stroke-width:1.5"/>
+    <text x="468" y="152" style="fill:var(--amber);font-weight:700">forward only the suffix</text>
+    <text x="468" y="172" style="font-size:12px">cost = suffix length</text>
+    <rect x="40" y="208" width="360" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="56" y="232" style="fill:var(--teal);font-weight:700">radix tree: prefix resident</text>
+    <text x="56" y="252" style="font-size:12px">walk to the deepest known node, reuse</text>
+    <rect x="468" y="208" width="272" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="484" y="232" style="fill:var(--accent-ink);font-weight:700">saved = the prefix span</text>
+    <text x="484" y="252" style="font-size:12px">not the whole sequence</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Match → reuse → compute only the new suffix</b> — a request's tokens split into "shared prefix (greyed, cached) | new suffix (highlighted)"; <span class="mono">match_prefix</span> finds the prefix in the tree and reuses its KV as-is (0 compute), so the model forwards only the <strong>new suffix</strong>. Cost equals the suffix length, not the whole sequence.</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.insert</span><span class="ln">insert a span of tokens+KV so later requests share this prefix</span></div><pre>def insert(self, params: InsertParams) -&gt; InsertResult:
+    # add a sequence's tokens + KV into the radix tree so later
+    # requests can SHARE this prefix. The key is page-aligned first.
+    key = params.key.page_aligned(self.page_size)
+    value = params.value[:len(key)]
+    prefix_len, last_node = self._insert_helper(
+        self.root_node, key, value, ...)   # split nodes at divergence
+    return InsertResult(prefix_len=prefix_len)   # how much already existed</pre></div>
+
+<div class="card detail"><div class="tag">🧪 Concrete example</div>
+<p>Picture a <strong>1000-token system prompt</strong> shared by every request. The first request <span class="mono">insert</span>s it into the tree once, and its KV lands on a handful of pages. The next request arrives with the same opening, and <span class="mono">match_prefix</span> hits all 1000 tokens at once—<strong>0 recompute</strong>—so the engine forwards only its own question. The third and fourth do the same: the more that shared prefix is reused, the more compute is saved.</p>
+<p>And this <strong>same radix idea</strong> powers four places at once: the DSL's <span class="mono">fork</span> makes branches share an opening, the cache stores prefixes as a tree, cache-aware LPM scheduling clusters high-hit requests, and HiCache tiers that tree across GPU/CPU/disk by temperature. One <span class="mono">insert</span> feeds the whole stack.</p>
+</div>
 
 <table class="t">
 <tr><th>Where shared prefixes appear</th><th>The role it plays there</th></tr>

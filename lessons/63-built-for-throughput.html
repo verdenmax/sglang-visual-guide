@@ -378,7 +378,80 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <tr><td>量化与并行</td><td>把更大的模型塞进硬件，给批次腾空间</td><td>第35、46课</td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="吞吐杠杆地图：每个设计带来的吞吐——连续批处理让 GPU 不空转、前缀缓存跳过重算、分块预填充不卡解码、CUDA 图与融合杀启动开销、重叠调度隐藏 CPU、投机解码每次前向多吐、量化装更多更快">
+    <text x="20" y="30" style="font-weight:700;fill:var(--accent-ink)">吞吐杠杆地图：每个设计 → 它买来的吞吐</text>
+    <rect x="20" y="48" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="68" text-anchor="middle" style="fill:var(--ink);font-weight:600">连续批处理</text>
+    <text x="260" y="68" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="68" style="fill:var(--muted)">GPU 不空转</text>
+    <rect x="20" y="86" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="106" text-anchor="middle" style="fill:var(--ink);font-weight:600">前缀缓存</text>
+    <text x="260" y="106" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="106" style="fill:var(--muted)">跳过重算</text>
+    <rect x="20" y="124" width="230" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="135" y="144" text-anchor="middle" style="fill:var(--ink);font-weight:600">分块预填充</text>
+    <text x="260" y="144" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="144" style="fill:var(--muted)">不卡解码</text>
+    <rect x="20" y="162" width="230" height="30" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="135" y="182" text-anchor="middle" style="fill:var(--ink);font-weight:600">CUDA 图 + 融合</text>
+    <text x="260" y="182" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="182" style="fill:var(--muted)">杀启动开销</text>
+    <rect x="20" y="200" width="230" height="30" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="135" y="220" text-anchor="middle" style="fill:var(--ink);font-weight:600">重叠调度</text>
+    <text x="260" y="220" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="220" style="fill:var(--muted)">隐藏 CPU</text>
+    <rect x="20" y="238" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="258" text-anchor="middle" style="fill:var(--ink);font-weight:600">投机解码</text>
+    <text x="260" y="258" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="258" style="fill:var(--muted)">每次前向多吐</text>
+    <rect x="20" y="276" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="296" text-anchor="middle" style="fill:var(--ink);font-weight:600">量化</text>
+    <text x="260" y="296" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="296" style="fill:var(--muted)">装更多 / 更快</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 吞吐杠杆地图</b> — 把全书的大杠杆排成一张表：每一行是"杠杆 → 它买来的吞吐"。连续批处理填满 GPU、前缀缓存跳过重算、分块预填充不卡解码、CUDA 图与融合杀掉启动开销、重叠调度隐藏 CPU、投机解码每次前向多吐 token、量化装得更多也更快。</div>
+</div>
+
 <div class="flow"><div class="node">请求到达<br><span class="mono">攒批</span></div><div class="arrow">→</div><div class="node">调度排队<br><span class="mono">大批+前缀命中</span></div><div class="arrow">→</div><div class="node">前缀缓存<br><span class="mono">跳过重复</span></div><div class="arrow">→</div><div class="node">预填充<br><span class="mono">分块不霸占</span></div><div class="arrow">→</div><div class="node">解码循环<br><span class="mono">重叠+Graph</span></div><div class="arrow">→</div><div class="node">内核执行<br><span class="mono">贴带宽极限</span></div><div class="arrow">→</div><div class="node">返回 token<br><span class="mono">炉子不空</span></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="完整请求路径，每段标注它的吞吐杠杆：分词、调度（连续批处理）、前缀（基数缓存）、前向（CUDA 图与融合）、采样、反分词、流式（重叠）">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">完整请求路径：每段标注它的吞吐杠杆</text>
+    <rect x="12" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="61" y="97" text-anchor="middle" style="fill:var(--ink)">分词</text>
+    <text x="61" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">文本→id</text>
+    <text x="116" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="124" y="70" width="98" height="44" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="173" y="97" text-anchor="middle" style="fill:var(--ink)">调度</text>
+    <text x="173" y="135" text-anchor="middle" style="fill:var(--blue);font-size:11px">连续</text>
+    <text x="173" y="149" text-anchor="middle" style="fill:var(--blue);font-size:11px">批处理</text>
+    <text x="228" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="236" y="70" width="98" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="285" y="97" text-anchor="middle" style="fill:var(--ink)">前缀</text>
+    <text x="285" y="135" text-anchor="middle" style="fill:var(--teal);font-size:11px">基数</text>
+    <text x="285" y="149" text-anchor="middle" style="fill:var(--teal);font-size:11px">缓存</text>
+    <text x="340" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="348" y="70" width="98" height="44" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="397" y="97" text-anchor="middle" style="fill:var(--ink)">前向</text>
+    <text x="397" y="135" text-anchor="middle" style="fill:var(--purple);font-size:11px">CUDA 图</text>
+    <text x="397" y="149" text-anchor="middle" style="fill:var(--purple);font-size:11px">+ 融合</text>
+    <text x="452" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="460" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="509" y="97" text-anchor="middle" style="fill:var(--ink)">采样</text>
+    <text x="509" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">选下一 token</text>
+    <text x="564" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="572" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="621" y="97" text-anchor="middle" style="fill:var(--ink)">反分词</text>
+    <text x="621" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">id→文本</text>
+    <text x="676" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="684" y="70" width="98" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="733" y="97" text-anchor="middle" style="fill:var(--ink)">流式</text>
+    <text x="733" y="142" text-anchor="middle" style="fill:var(--amber);font-size:11px">重叠</text>
+    <text x="20" y="220" style="fill:var(--muted);font-size:12px">「一次请求的一生」——这次重讲成一个吞吐故事：每一段都挂着它对应的那颗杠杆。</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 请求路径上的吞吐杠杆</b> — 把"一次请求的一生"重讲成吞吐故事：端到端路径（分词 → 调度 → 前缀 → 前向 → 采样 → 反分词 → 流式）上，给每一段挂一个小标签，标出该处生效的吞吐杠杆——调度处是连续批处理、前缀处是基数缓存、前向处是 CUDA 图与融合、流式处是重叠调度。</div>
+</div>
 
 <div class="cols"><div class="col"><strong>吞吐杠杆（把系统推到最大）</strong><ul><li>批处理：摊薄权重读取</li><li>分页：装下更多请求</li><li>前缀缓存：跳过重复计算</li><li>重叠调度：消灭空转</li><li>CUDA Graph：砍启动开销</li><li>内核与融合：榨干带宽</li></ul></div><div class="col"><strong>延迟护栏（不牺牲那个人）</strong><ul><li>分块预填充（第22课）：长 prompt 切块交错，不霸占整步</li><li>投机解码（第43课）：一步多吐 token，不增加权重读取</li><li>本质：在最大化系统的同时守住单用户体验</li></ul></div></div>
 
@@ -395,6 +468,21 @@ class SchedulePolicy:
     def calc_priority(self, waiting_queue):
         ...
 </pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">连续批处理的核心杠杆：每步决定跑哪个批</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
+    # the continuous-batching lever, run EVERY step: merge any finished
+    # prefill into the running batch, then decide what to run next —
+    # admit a new prefill batch (more work) or keep decoding.
+    merge_finished_prefill_into(self.running_batch)
+    new_batch = self.get_new_batch_prefill()    # admit within token budget
+    if new_batch is not None:
+        return new_batch                         # run prefill this step
+    return self.running_batch                    # else keep decoding
+</pre></div>
+
+<div class="card"><div class="tag">🔎 具体例子</div>
+<p>因为 <span class="mono">get_next_batch_to_run</span> 每一步都会跑一次，所以当批次里某个请求一完成、它腾出的槽位会<strong>立刻</strong>被一个等待中的请求填上（这就是连续批处理）——根本不用先把整批排空、再开新批。正是这<strong>同一颗杠杆</strong>，让那台贵烤炉（GPU）始终满载：每一步都在"合并已完成的预填充 → 尽量塞进新预填充 → 否则继续解码"之间做出最划算的决定。</p>
+</div>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
 <ul>
@@ -497,7 +585,80 @@ class SchedulePolicy:
 <tr><td>Quantization and parallelism</td><td>fit bigger models onto the hardware, freeing room for the batch</td><td>Lessons 35, 46</td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="The throughput-lever map: each design buys throughput — continuous batching keeps the GPU full, prefix cache skips recompute, chunked prefill doesn't stall decode, CUDA graph and fusion kill launch overhead, overlap scheduler hides CPU, speculative decode emits more tokens per forward, quantization fits more and runs faster">
+    <text x="20" y="30" style="font-weight:700;fill:var(--accent-ink)">Throughput-lever map: each design → the throughput it buys</text>
+    <rect x="20" y="48" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="68" text-anchor="middle" style="fill:var(--ink);font-weight:600">Continuous batching</text>
+    <text x="260" y="68" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="68" style="fill:var(--muted)">keep GPU full</text>
+    <rect x="20" y="86" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="106" text-anchor="middle" style="fill:var(--ink);font-weight:600">Prefix cache</text>
+    <text x="260" y="106" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="106" style="fill:var(--muted)">skip recompute</text>
+    <rect x="20" y="124" width="230" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="135" y="144" text-anchor="middle" style="fill:var(--ink);font-weight:600">Chunked prefill</text>
+    <text x="260" y="144" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="144" style="fill:var(--muted)">don't stall decode</text>
+    <rect x="20" y="162" width="230" height="30" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="135" y="182" text-anchor="middle" style="fill:var(--ink);font-weight:600">CUDA graph + fusion</text>
+    <text x="260" y="182" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="182" style="fill:var(--muted)">kill launch overhead</text>
+    <rect x="20" y="200" width="230" height="30" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="135" y="220" text-anchor="middle" style="fill:var(--ink);font-weight:600">Overlap scheduler</text>
+    <text x="260" y="220" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="220" style="fill:var(--muted)">hide CPU</text>
+    <rect x="20" y="238" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="258" text-anchor="middle" style="fill:var(--ink);font-weight:600">Speculative decode</text>
+    <text x="260" y="258" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="258" style="fill:var(--muted)">more tokens/forward</text>
+    <rect x="20" y="276" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="296" text-anchor="middle" style="fill:var(--ink);font-weight:600">Quantization</text>
+    <text x="260" y="296" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="296" style="fill:var(--muted)">fit more / faster</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · The throughput-lever map</b> — the guide's big levers in one table: each row is "lever → the throughput it buys." Continuous batching keeps the GPU full, prefix cache skips recompute, chunked prefill doesn't stall decode, CUDA graph and fusion kill launch overhead, overlap scheduler hides the CPU, speculative decode emits more tokens per forward, and quantization fits more while running faster.</div>
+</div>
+
 <div class="flow"><div class="node">Request arrives<br><span class="mono">form batch</span></div><div class="arrow">→</div><div class="node">Schedule queue<br><span class="mono">big batch+prefix-hit</span></div><div class="arrow">→</div><div class="node">Prefix cache<br><span class="mono">skip repeats</span></div><div class="arrow">→</div><div class="node">Prefill<br><span class="mono">chunked, no hog</span></div><div class="arrow">→</div><div class="node">Decode loop<br><span class="mono">overlap+graph</span></div><div class="arrow">→</div><div class="node">Kernel exec<br><span class="mono">ride bandwidth</span></div><div class="arrow">→</div><div class="node">Return token<br><span class="mono">oven never idle</span></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="The full request path annotated with the lever at each stage: tokenize, schedule (continuous batching), prefix (radix cache), forward (CUDA graph and fusion), sample, detokenize, stream (overlap)">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">The full request path: the lever at each stage</text>
+    <rect x="12" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="61" y="97" text-anchor="middle" style="fill:var(--ink)">tokenize</text>
+    <text x="61" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">text→ids</text>
+    <text x="116" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="124" y="70" width="98" height="44" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="173" y="97" text-anchor="middle" style="fill:var(--ink)">schedule</text>
+    <text x="173" y="135" text-anchor="middle" style="fill:var(--blue);font-size:11px">continuous</text>
+    <text x="173" y="149" text-anchor="middle" style="fill:var(--blue);font-size:11px">batching</text>
+    <text x="228" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="236" y="70" width="98" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="285" y="97" text-anchor="middle" style="fill:var(--ink)">prefix</text>
+    <text x="285" y="135" text-anchor="middle" style="fill:var(--teal);font-size:11px">radix</text>
+    <text x="285" y="149" text-anchor="middle" style="fill:var(--teal);font-size:11px">cache</text>
+    <text x="340" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="348" y="70" width="98" height="44" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="397" y="97" text-anchor="middle" style="fill:var(--ink)">forward</text>
+    <text x="397" y="135" text-anchor="middle" style="fill:var(--purple);font-size:11px">CUDA graph</text>
+    <text x="397" y="149" text-anchor="middle" style="fill:var(--purple);font-size:11px">+ fusion</text>
+    <text x="452" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="460" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="509" y="97" text-anchor="middle" style="fill:var(--ink)">sample</text>
+    <text x="509" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">pick next token</text>
+    <text x="564" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="572" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="621" y="97" text-anchor="middle" style="fill:var(--ink)">detokenize</text>
+    <text x="621" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">ids→text</text>
+    <text x="676" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="684" y="70" width="98" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="733" y="97" text-anchor="middle" style="fill:var(--ink)">stream</text>
+    <text x="733" y="142" text-anchor="middle" style="fill:var(--amber);font-size:11px">overlap</text>
+    <text x="20" y="220" style="fill:var(--muted);font-size:12px">"The life of a request" — retold here as a throughput story: each stage carries the lever that applies to it.</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · The throughput lever at each stage</b> — the "life of a request" retold as a throughput story: along the end-to-end path (tokenize → schedule → prefix → forward → sample → detokenize → stream), each stage carries a small tag naming the lever that applies there — continuous batching at schedule, radix cache at prefix, CUDA graph and fusion at forward, overlap scheduling at stream.</div>
+</div>
 
 <div class="cols"><div class="col"><strong>Throughput levers (push the system to its max)</strong><ul><li>Batching: amortize the weight read</li><li>Paging: fit more requests</li><li>Prefix caching: skip redundant compute</li><li>Overlap scheduling: eliminate idling</li><li>CUDA Graphs: cut launch overhead</li><li>Kernels and fusion: drain the bandwidth</li></ul></div><div class="col"><strong>Latency safeguards (don't sacrifice the person)</strong><ul><li>Chunked prefill (Lesson 22): slice long prompts, interleave, never hog a whole step</li><li>Speculative decoding (Lesson 43): emit several tokens per step without extra weight reads</li><li>Essence: maximize the system while protecting the individual user's experience</li></ul></div></div>
 
@@ -514,6 +675,21 @@ class SchedulePolicy:
     def calc_priority(self, waiting_queue):
         ...
 </pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">the continuous-batching lever: each step pick which batch to run</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
+    # the continuous-batching lever, run EVERY step: merge any finished
+    # prefill into the running batch, then decide what to run next —
+    # admit a new prefill batch (more work) or keep decoding.
+    merge_finished_prefill_into(self.running_batch)
+    new_batch = self.get_new_batch_prefill()    # admit within token budget
+    if new_batch is not None:
+        return new_batch                         # run prefill this step
+    return self.running_batch                    # else keep decoding
+</pre></div>
+
+<div class="card"><div class="tag">🔎 A concrete example</div>
+<p>Because <span class="mono">get_next_batch_to_run</span> runs once <strong>every step</strong>, the instant a request in the batch finishes, the slot it frees is <strong>immediately</strong> refilled by a waiting request (that is continuous batching) — there's no need to drain the whole batch first and only then start a new one. This <strong>single lever</strong> is why the expensive oven (the GPU) stays saturated: every step it makes the most profitable choice among "merge finished prefill → admit a new prefill if it fits → otherwise keep decoding."</p>
+</div>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>

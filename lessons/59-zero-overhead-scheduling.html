@@ -363,6 +363,86 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p><strong>重叠调度（第21课）</strong>把这个串行循环改造成<strong>流水线</strong>：当 GPU 正在跑 <span class="mono">forward(批 N)</span> 时，CPU<strong>不闲着</strong>——它已经在<strong>组装批 N+1</strong>（挑请求、分配页、搬张量），并且<strong>并行处理批 N-1 的结果</strong>（采样、拼 token、检测停止）。注意这里有一个微妙但重要的点：CPU 处理的是<strong>上一步</strong>的结果，而不是刚发出去那一步的——因为刚发出的前向还没算完。正是这种"<strong>错一拍</strong>"的安排，让 CPU 永远有活干、GPU 永远不用等。</p>
 <p>这一切由 <span class="mono">enable_overlap</span> 开关控制（即 <span class="mono">--disable-overlap-schedule</span> 的反面）。一旦打开，CPU 的调度与结果处理就被"塞进"了 GPU 前向的影子里，墙钟时间上几乎<strong>不可见</strong>。代价是引擎要同时持有<strong>多步的中间状态</strong>（N-1、N、N+1），实现复杂度更高，也更难调试——但这正是"零开销"四个字真正落地、值得付出的地方。如果你把 overlap 关掉，引擎会退回到那个朴素串行循环，正确性不变，但 GPU 利用率和吞吐都会明显下滑。这也解释了为什么默认就是打开的：对绝大多数线上负载来说，多花一点内存换回近乎翻倍的有效算力，是再划算不过的交易。</p>
 
+<p><strong>一个具体的数字感</strong>：当批很小（比如只有几条 decode 请求）时，GPU 的一次前向可能只要 2~3 毫秒，而 CPU 这一拍要做的挑批、分配、采样加起来也可能逼近 2 毫秒——串行执行时这 2 毫秒几乎让每步耗时<strong>翻倍</strong>。打开重叠后，这段 CPU 工作被整体藏进 GPU 前向的影子里，墙钟时间几乎只由 GPU 决定，吞吐因此回到"<strong>只受 GPU 限制</strong>"的理想值——这正是"零开销"调度名副其实之处。批越大，GPU 前向越长，CPU 那点开销就越容易被完全吃掉，但小批场景恰恰是重叠收益最明显的地方。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="串行时间线 GPU 在 CPU 调度与处理期间出现气泡，重叠时间线 CPU 与 GPU 前向并行运行气泡消失">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">串行：GPU 有气泡</text>
+    <text x="20" y="60" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="119" y="61" text-anchor="middle" style="font-size:12px">前向 N</text>
+    <rect x="174" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="220" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">空等</text>
+    <rect x="266" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="321" y="61" text-anchor="middle" style="font-size:12px">前向 N+1</text>
+    <rect x="376" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="422" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">空等</text>
+    <rect x="468" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="523" y="61" text-anchor="middle" style="font-size:12px">前向 N+2</text>
+    <text x="20" y="104" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="174" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="220" y="105" text-anchor="middle" class="mono" style="font-size:11px">调度+处理</text>
+    <rect x="376" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="422" y="105" text-anchor="middle" class="mono" style="font-size:11px">调度+处理</text>
+    <line x1="20" y1="150" x2="780" y2="150" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="20" y="184" style="font-weight:700;fill:var(--accent-ink)">重叠：气泡消失</text>
+    <text x="20" y="216" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="217" text-anchor="middle" style="font-size:12px">前向 N</text>
+    <rect x="184" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="244" y="217" text-anchor="middle" style="font-size:12px">前向 N+1</text>
+    <rect x="304" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="364" y="217" text-anchor="middle" style="font-size:12px">前向 N+2</text>
+    <rect x="424" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="484" y="217" text-anchor="middle" style="font-size:12px">前向 N+3</text>
+    <text x="20" y="260" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="64" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="124" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <rect x="184" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <rect x="304" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="364" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <rect x="424" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="484" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <text x="560" y="231" style="fill:var(--teal);font-weight:700;font-size:13px">CPU‖GPU 并行</text>
+  </svg>
+  <div class="figcap"><b>图 59-1 · CPU 气泡藏到前向之后</b> — 串行时 GPU 在 CPU 调度与处理期间空等（气泡）；重叠时 CPU 与 GPU 前向并行，GPU 背靠背连跑，气泡消失。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="三级流水线 构建 前向 处理 三条泳道沿时间步错开一拍 稳定态同一拍三段并行">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">重叠流水：三段错一拍</text>
+    <rect x="498" y="64" width="134" height="158" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="115" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t1</text>
+    <text x="265" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t2</text>
+    <text x="415" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t3</text>
+    <text x="565" y="52" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">t4</text>
+    <text x="20" y="92" style="fill:var(--muted);font-size:12px">构建</text>
+    <text x="20" y="152" style="fill:var(--muted);font-size:12px">前向</text>
+    <text x="20" y="212" style="fill:var(--muted);font-size:12px">处理</text>
+    <rect x="55" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="115" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B1</text>
+    <rect x="205" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="265" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B2</text>
+    <rect x="355" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="415" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B3</text>
+    <rect x="505" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="565" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B4</text>
+    <rect x="205" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="265" y="153" text-anchor="middle" class="mono" style="font-size:11px">前向 B1</text>
+    <rect x="355" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="415" y="153" text-anchor="middle" class="mono" style="font-size:11px">前向 B2</text>
+    <rect x="505" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="565" y="153" text-anchor="middle" class="mono" style="font-size:11px">前向 B3</text>
+    <rect x="355" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="415" y="213" text-anchor="middle" class="mono" style="font-size:11px">处理 B1</text>
+    <rect x="505" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="213" text-anchor="middle" class="mono" style="font-size:11px">处理 B2</text>
+    <text x="20" y="258" style="fill:var(--accent-ink);font-weight:700;font-size:13px">同一拍：构建 N+1 ‖ 前向 N ‖ 处理 N-1</text>
+  </svg>
+  <div class="figcap"><b>图 59-2 · 重叠流水线</b> — 构建、前向、处理三条泳道各错开一拍；进入稳定态后（t4），同一拍里 CPU 构建批 N+1、GPU 跑前向 N、CPU 处理批 N-1，三段始终并行。</div>
+</div>
+
 <h2>三、其他珠子：分块预填充、CUDA 图、进程拆分</h2>
 <p>同一条主线还串着另外三颗珠子。<strong>分块预填充（第22课）</strong>解决的是另一种气泡：一个超长 prompt 的 prefill 如果一口气跑完，会占满整个前向，让所有正在 decode 的请求<strong>全体卡住</strong>等它，造成延迟尖刺。SGLang 把长 prefill <strong>切成小块</strong>，与 decode <strong>交替</strong>进行——每一步既塞进一点新 prompt 的 prefill，又照顾正在生成的老请求，避免单个大活堵死整条流水线。本质还是那句话："别让某一段把 GPU 的节奏打乱"，把一个会引发长气泡的大任务摊薄成许多不打扰别人的小任务。</p>
 <p><strong>CUDA 图（第27课）</strong>对付的是<strong>内核启动开销</strong>这种气泡：每发射一个 CUDA kernel，CPU 都要付出固定的启动成本，decode 一步要发几十上百个 kernel，加起来就是可观的 CPU 时间，而且这段时间 GPU 往往在等下一个 kernel 被提交。CUDA 图把整串 kernel<strong>录制成一张图</strong>，之后一次<strong>重放</strong>就能在 GPU 上跑完整条序列，CPU 几乎不再逐个参与发射——这是"别让 CPU 成为 GPU 瓶颈"的又一种形态，专门针对 decode 这种<strong>kernel 多、单个小</strong>、最容易被启动开销拖累的场景。</p>
@@ -402,6 +482,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
             result = self.run_batch(batch)          # launch GPU forward (async)
             self.process_batch_result(prev_result)  # overlap: handle the prior step
             prev_result = result</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">重叠循环：处理上一批结果的同时，GPU 跑当前批</span></div><pre>def event_loop_overlap(self):
+    # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
+    # results while the current batch is still running on the GPU.
+    self.result_queue = deque()
+    while True:
+        recv = self.request_receiver.recv_requests()
+        self.process_input_requests(recv)
+        batch = self.get_next_batch_to_run()        # build batch N (CPU)
+        result = self.run_batch(batch)              # launch forward N (GPU)
+        self.result_queue.append((batch, result))
+        # one step out of phase: process batch N-1 now
+        self.process_batch_result(*self.result_queue.popleft())</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一条主线</strong>：CPU 绝不能让 GPU 等。任何前向<strong>前后</strong>的 CPU 工作都是潜在气泡。</li>
@@ -480,6 +573,86 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>The <strong>overlap scheduler (L21)</strong> turns that serial loop into a <strong>pipeline</strong>: while the GPU runs <span class="mono">forward(batch N)</span>, the CPU <strong>is not idle</strong>—it is already <strong>assembling batch N+1</strong> (pick requests, allocate pages, move tensors) and <strong>processing batch N-1's results in parallel</strong> (sample, append token, check stop). Note a subtle but important point: the CPU processes the results of the <strong>previous</strong> step, not the one just launched—because that forward hasn't finished yet. It is precisely this <strong>off-by-one-beat</strong> arrangement that keeps the CPU always busy and the GPU never waiting.</p>
 <p>All of this is controlled by the <span class="mono">enable_overlap</span> switch (the opposite of <span class="mono">--disable-overlap-schedule</span>). Once enabled, the CPU's scheduling and result handling are "tucked into" the shadow of the GPU forward, becoming nearly <strong>invisible</strong> in wall-clock time. The cost is that the engine must hold <strong>several steps' intermediate state</strong> at once (N-1, N, N+1), raising implementation complexity and making debugging harder—but this is where the words "zero-overhead" actually land, and it is worth it. Turn overlap off and the engine falls back to that naive serial loop: correctness unchanged, but GPU utilization and throughput drop noticeably. This also explains why it is on by default: for the vast majority of production loads, trading a little extra memory for nearly double the effective compute is as good a bargain as it gets.</p>
 
+<p><strong>A concrete sense of scale</strong>: when the batch is small (say only a few decode requests), one GPU forward may take just 2~3 ms, while the CPU's pick/allocate/sample work for this beat can approach 2 ms—run serially, that 2 ms nearly <strong>doubles</strong> the per-step time. Turn overlap on and that CPU work is tucked entirely into the GPU forward's shadow, so wall-clock time is set almost solely by the GPU and throughput returns to the ideal "<strong>GPU-bound only</strong>" value—exactly what makes "zero-overhead" scheduling live up to its name. The larger the batch, the longer the GPU forward and the more easily that CPU cost is fully absorbed, but small-batch is precisely where overlap pays off most.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="serial timeline the GPU idles during CPU schedule and processing, overlap timeline the CPU runs concurrently with the GPU forward and the bubbles vanish">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">Serial: GPU has bubbles</text>
+    <text x="20" y="60" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="119" y="61" text-anchor="middle" style="font-size:12px">forward N</text>
+    <rect x="174" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="220" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">idle</text>
+    <rect x="266" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="321" y="61" text-anchor="middle" style="font-size:12px">forward N+1</text>
+    <rect x="376" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="422" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">idle</text>
+    <rect x="468" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="523" y="61" text-anchor="middle" style="font-size:12px">forward N+2</text>
+    <text x="20" y="104" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="174" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="220" y="105" text-anchor="middle" class="mono" style="font-size:11px">sched+proc</text>
+    <rect x="376" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="422" y="105" text-anchor="middle" class="mono" style="font-size:11px">sched+proc</text>
+    <line x1="20" y1="150" x2="780" y2="150" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="20" y="184" style="font-weight:700;fill:var(--accent-ink)">Overlap: bubbles gone</text>
+    <text x="20" y="216" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="217" text-anchor="middle" style="font-size:12px">forward N</text>
+    <rect x="184" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="244" y="217" text-anchor="middle" style="font-size:12px">forward N+1</text>
+    <rect x="304" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="364" y="217" text-anchor="middle" style="font-size:12px">forward N+2</text>
+    <rect x="424" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="484" y="217" text-anchor="middle" style="font-size:12px">forward N+3</text>
+    <text x="20" y="260" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="64" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="124" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <rect x="184" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <rect x="304" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="364" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <rect x="424" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="484" y="261" text-anchor="middle" class="mono" style="font-size:11px">sched/proc</text>
+    <text x="560" y="231" style="fill:var(--teal);font-weight:700;font-size:13px">CPU ‖ GPU busy</text>
+  </svg>
+  <div class="figcap"><b>Fig 59-1 · CPU bubbles hidden behind the forward</b> — serial: the GPU idles during CPU schedule and processing (the bubble); overlap: the CPU runs concurrently with the GPU forward, the GPU runs back-to-back, the bubbles vanish.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="a three-stage pipeline build forward process with three lanes staggered one step apart, in steady state one beat runs all three stages in parallel">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">Overlap pipeline: 3 stages, 1 step apart</text>
+    <rect x="498" y="64" width="134" height="158" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="115" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t1</text>
+    <text x="265" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t2</text>
+    <text x="415" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t3</text>
+    <text x="565" y="52" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">t4</text>
+    <text x="20" y="92" style="fill:var(--muted);font-size:12px">build</text>
+    <text x="20" y="152" style="fill:var(--muted);font-size:12px">forward</text>
+    <text x="20" y="212" style="fill:var(--muted);font-size:12px">process</text>
+    <rect x="55" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="115" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B1</text>
+    <rect x="205" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="265" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B2</text>
+    <rect x="355" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="415" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B3</text>
+    <rect x="505" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="565" y="93" text-anchor="middle" class="mono" style="font-size:11px">build B4</text>
+    <rect x="205" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="265" y="153" text-anchor="middle" class="mono" style="font-size:11px">fwd B1</text>
+    <rect x="355" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="415" y="153" text-anchor="middle" class="mono" style="font-size:11px">fwd B2</text>
+    <rect x="505" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="565" y="153" text-anchor="middle" class="mono" style="font-size:11px">fwd B3</text>
+    <rect x="355" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="415" y="213" text-anchor="middle" class="mono" style="font-size:11px">proc B1</text>
+    <rect x="505" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="213" text-anchor="middle" class="mono" style="font-size:11px">proc B2</text>
+    <text x="20" y="258" style="fill:var(--accent-ink);font-weight:700;font-size:13px">one beat: build N+1 ‖ forward N ‖ process N-1</text>
+  </svg>
+  <div class="figcap"><b>Fig 59-2 · the overlap pipeline</b> — build, forward, and process lanes are each staggered one step apart; once in steady state (t4), a single beat has the CPU build batch N+1, the GPU run forward N, and the CPU process batch N-1—all three always in parallel.</div>
+</div>
+
 <h2>3. The other beads: chunked prefill, CUDA graphs, process split</h2>
 <p>The same thread strings three more beads. <strong>Chunked prefill (L22)</strong> tackles a different bubble: if a very long prompt's prefill runs all at once, it fills the entire forward and every request currently decoding gets <strong>stalled</strong> waiting for it, causing a latency spike. SGLang <strong>slices</strong> the long prefill into chunks and <strong>interleaves</strong> them with decode—each step packs in a little new-prompt prefill while still serving the old generating requests—so a single big job can't clog the whole pipeline. Still the same idea: "don't let one segment break the GPU's rhythm," thinning a long-bubble-causing big task into many small ones that disturb no one.</p>
 <p><strong>CUDA graphs (L27)</strong> fight the <strong>kernel-launch overhead</strong> bubble: every CUDA kernel launch costs the CPU a fixed amount, a decode step launches dozens to hundreds of kernels, which adds up to real CPU time, and during it the GPU often waits for the next kernel to be submitted. CUDA graphs <strong>record the whole chain of kernels into one graph</strong> and later <strong>replay</strong> it to run the entire sequence on the GPU, so the CPU barely participates in launching one by one—another form of "don't let the CPU bottleneck the GPU," aimed squarely at decode, the <strong>many-small-kernel</strong> scenario most easily dragged down by launch overhead.</p>
@@ -519,6 +692,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
             result = self.run_batch(batch)          # launch GPU forward (async)
             self.process_batch_result(prev_result)  # overlap: handle the prior step
             prev_result = result</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">overlap loop: process the previous batch while the GPU runs the current one</span></div><pre>def event_loop_overlap(self):
+    # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
+    # results while the current batch is still running on the GPU.
+    self.result_queue = deque()
+    while True:
+        recv = self.request_receiver.recv_requests()
+        self.process_input_requests(recv)
+        batch = self.get_next_batch_to_run()        # build batch N (CPU)
+        result = self.run_batch(batch)              # launch forward N (GPU)
+        self.result_queue.append((batch, result))
+        # one step out of phase: process batch N-1 now
+        self.process_batch_result(*self.result_queue.popleft())</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>

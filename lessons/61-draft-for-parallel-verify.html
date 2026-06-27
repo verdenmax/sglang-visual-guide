@@ -355,6 +355,73 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>这里要分清两个常被混淆的概念：<strong>延迟（latency）</strong>是"一件事从头到尾要等多久"，<strong>吞吐（throughput）</strong>是"单位时间能完成多少件事"。串行步骤之所以痛，是因为它们卡在延迟上——每一步都要等上一步，时间被一格一格地串起来。把它们改造成并行步骤，本质上是把"按延迟收费"的活，搬到"按吞吐收费"的赛道上：GPU 本来就擅长一次做一大批，于是同样的总工作量，被摊平到一次并行操作里完成。投机解码、CUDA Graph、重叠调度，全都在做这件同样的事——只是分别作用在"生成 token""发射内核""CPU 与 GPU 协作"这三个不同的串行环节上。</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="串行 decode 需要 k 次目标前向，而草稿提议 k 个 token 后只需一次并行验证">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">串行 decode：k 次目标前向（慢）</text>
+    <rect x="20" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="66" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="66" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok1</text>
+    <text x="126" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="140" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="186" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="186" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok2</text>
+    <text x="246" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="260" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="306" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok3</text>
+    <text x="366" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="380" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="426" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok4</text>
+    <text x="488" y="58" style="fill:var(--muted);font-size:12px">… 共 k 次串行</text>
+    <text x="488" y="78" style="fill:var(--amber);font-size:12px;font-weight:700">每步都等上一步</text>
+    <line x1="20" y1="108" x2="760" y2="108" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="138" style="font-weight:700;fill:var(--accent-ink)">草稿 → 一次并行验证（快）</text>
+    <rect x="20" y="154" width="112" height="46" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="76" y="174" text-anchor="middle" style="font-size:12px">草稿模型</text>
+    <text x="76" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">便宜</text>
+    <text x="146" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="160" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="175" y="180" text-anchor="middle" class="mono" style="font-size:11px">t1</text>
+    <rect x="194" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="209" y="180" text-anchor="middle" class="mono" style="font-size:11px">t2</text>
+    <rect x="228" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="243" y="180" text-anchor="middle" class="mono" style="font-size:11px">t3</text>
+    <rect x="262" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="277" y="180" text-anchor="middle" class="mono" style="font-size:11px">t4</text>
+    <text x="226" y="214" text-anchor="middle" style="fill:var(--muted);font-size:11px">k 个候选 token</text>
+    <text x="306" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="320" y="154" width="244" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="174" text-anchor="middle" style="font-weight:700;fill:var(--teal)">目标：一次并行验证 k 个</text>
+    <text x="442" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">一次 forward，算力本就闲着</text>
+    <text x="576" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="590" y="154" width="170" height="46" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">一次前向</text>
+    <text x="675" y="190" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">接受 ≤ k 个 token</text>
+  </svg>
+  <div class="figcap"><b>图 1 · k 次串行 vs 一次并行验证</b> — 上：基线逐 token decode，k 个 token = k 次串行目标前向，每步都得等上一步。下：便宜草稿先提议 k 个候选，目标只做<strong>一次</strong>并行 forward 同时验证全部 k 个 → 一次昂贵前向最多吐出 k 个 token。对比 k 次前向 vs 1 次。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="权衡：花一点便宜的并行草稿算力，去换省下的昂贵串行目标步">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">权衡：便宜的并行草稿算力 ↔ 省下的串行步数</text>
+    <line x1="140" y1="96" x2="640" y2="96" style="stroke:var(--line);stroke-width:3"/>
+    <line x1="390" y1="96" x2="390" y2="150" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="390,150 370,192 410,192" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <line x1="235" y1="96" x2="235" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="545" y1="96" x2="545" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="106" width="230" height="62" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="235" y="132" text-anchor="middle" style="font-weight:700;fill:var(--amber)">花：便宜的并行草稿算力</text>
+    <text x="235" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">草稿 + 一次验证一批候选</text>
+    <rect x="430" y="106" width="230" height="62" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="545" y="132" text-anchor="middle" style="font-weight:700;fill:var(--teal)">省：昂贵的串行目标步</text>
+    <text x="545" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">原本 k 次 forward</text>
+    <text x="390" y="228" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">命中率高 → 净赚；命中率低 → 接近打平</text>
+    <text x="390" y="250" text-anchor="middle" style="fill:var(--muted);font-size:12px">用一点闲置算力，换被省下的串行延迟</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 这笔交易的天平</b> — 你<strong>花</strong>掉一点额外算力（草稿模型 + 并行验证几个候选 token，便宜在它只是一次批量 forward），去<strong>省</strong>掉昂贵的串行目标步。命中率高时净赚，命中率低时接近打平（break-even）——本质是拿闲置算力换串行延迟。</div>
+</div>
+
 <h2>串行的墙：decode 为什么慢</h2>
 <p>训练时，一整句话的所有 token 可以一次性喂进 GPU，并行算完——这是 GPU 最擅长的、<strong>compute-bound</strong> 的活。但 decode 不行：你还没生成第 N 个 token，就无从谈起第 N+1 个，因为后者要把前者当输入。于是生成 k 个 token 就是 k 次 forward，一次只前进一格。第4课讲过，这样的单步 forward 里，GPU 的浮点算力大量闲置，真正的瓶颈是把庞大的权重和 KV 缓存从显存搬进计算单元的<strong>带宽</strong>。换句话说，decode 把一台擅长"大批量并行计算"的机器，逼成了"一次只算一点点、还在等内存"的状态。这堵<strong>串行的墙</strong>，就是后面所有技巧想翻越的对象。</p>
 <p>为什么会这样？关键在<strong>算术强度</strong>——也就是每从显存读一个字节的权重，能摊到多少次乘加运算。prefill 一次处理成百上千个 token，同一份权重被反复复用，算术强度高，算力被吃满；decode 每步只算一个 token，却同样要把整套权重、整份 KV 缓存重新读一遍，算术强度低到可怜，乘加单元大半时间在空转、只是干等数据从显存流过来。于是单纯往 decode 上堆更多算力几乎没用——瓶颈根本不在算力，而在带宽和"必须一步等一步"的串行性。理解了这一点，你就明白：要让 decode 变快，要么把更多 token 塞进同一步（增大 batch、复用那次权重搬运），要么想办法<strong>一次推进多个 token</strong>，把串行步数本身压下去。投机解码走的正是后一条路。</p>
@@ -395,6 +462,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         ...
     # net: many tokens per target forward when the draft is good — sequential
     # decode steps become one parallel verify
+</pre></div>
+
+<p>具体感受一下规模：在<strong>一次</strong>目标 forward 里验证 64 个候选 token，开销和一次普通 decode 步几乎一样（权重、KV 反正都要从显存搬一遍），却可能一口气接受好几个 token。而 <span class="mono">custom_mask</span>（树注意力掩码）保证树上每个分支只沿着<strong>自己那条路径</strong>做注意力、互不串味——于是同一次 forward 里，许多条候选路径被同时、却互不干扰地验证。这正是"草稿换并行验证"在 EAGLE 树形态下的落地：把一棵草稿树压进一次前向。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_info.py ::EagleVerifyInput</span><span class="ln">一次并行验证整棵草稿树所需的全部输入</span></div><pre>class EagleVerifyInput(SpecInput):
+    # everything the target needs to verify a whole draft TREE in ONE
+    # forward: the candidate tokens + a tree attention mask + the
+    # retrieve indices that map tree nodes back to accepted paths.
+    draft_token: torch.Tensor       # the proposed tree of tokens
+    custom_mask: torch.Tensor       # tree attention mask
+    positions: torch.Tensor
+    retrieve_index: torch.Tensor    # tree -&gt; sequence bookkeeping
+    spec_steps: int
+    topk: int
+    draft_token_num: int            # nodes verified this forward
 </pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
@@ -469,6 +551,73 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Two often-confused notions are worth separating here: <strong>latency</strong> is "how long one thing takes end to end," while <strong>throughput</strong> is "how many things finish per unit time." Serial steps hurt because they're stuck on latency — each waits on the previous, time strung together one slot at a time. Reshaping them into parallel steps essentially moves work that was "billed by latency" onto a track "billed by throughput": the GPU is built to do a big batch at once, so the same total work gets flattened into a single parallel operation. Speculative decoding, CUDA Graph, and the overlap scheduler all do this same thing — they just act on three different serial links: "generating tokens," "launching kernels," and "CPU-GPU cooperation."</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="serial decode needs k target forwards, while drafting k tokens needs only one parallel verify">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">Serial decode: k target forwards (slow)</text>
+    <rect x="20" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="66" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="66" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok1</text>
+    <text x="126" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="140" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="186" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="186" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok2</text>
+    <text x="246" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="260" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="306" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok3</text>
+    <text x="366" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="380" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="60" text-anchor="middle" style="font-size:12px">Target fwd</text>
+    <text x="426" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok4</text>
+    <text x="488" y="58" style="fill:var(--muted);font-size:12px">… k serial forwards</text>
+    <text x="488" y="78" style="fill:var(--amber);font-size:12px;font-weight:700">each waits on last</text>
+    <line x1="20" y1="108" x2="760" y2="108" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="138" style="font-weight:700;fill:var(--accent-ink)">Draft → ONE parallel verify (fast)</text>
+    <rect x="20" y="154" width="112" height="46" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="76" y="174" text-anchor="middle" style="font-size:12px">Draft model</text>
+    <text x="76" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">cheap</text>
+    <text x="146" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="160" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="175" y="180" text-anchor="middle" class="mono" style="font-size:11px">t1</text>
+    <rect x="194" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="209" y="180" text-anchor="middle" class="mono" style="font-size:11px">t2</text>
+    <rect x="228" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="243" y="180" text-anchor="middle" class="mono" style="font-size:11px">t3</text>
+    <rect x="262" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="277" y="180" text-anchor="middle" class="mono" style="font-size:11px">t4</text>
+    <text x="226" y="214" text-anchor="middle" style="fill:var(--muted);font-size:11px">k candidate tokens</text>
+    <text x="306" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="320" y="154" width="244" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="174" text-anchor="middle" style="font-weight:700;fill:var(--teal)">Target: verify all k at once</text>
+    <text x="442" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">one forward, compute idle anyway</text>
+    <text x="576" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="590" y="154" width="170" height="46" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">ONE forward</text>
+    <text x="675" y="190" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">accept ≤ k tokens</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · k serial forwards vs ONE parallel verify</b> — top: baseline token-by-token decode, k tokens = k serial target forwards, each waiting on the last. bottom: a cheap draft proposes k candidates, the target does <strong>one</strong> parallel forward verifying all k → up to k tokens from a single expensive forward. Contrast k forwards vs 1.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="the trade: spend a little cheap parallel draft compute to save expensive serial target steps">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">The trade: cheap parallel draft compute ↔ saved serial steps</text>
+    <line x1="140" y1="96" x2="640" y2="96" style="stroke:var(--line);stroke-width:3"/>
+    <line x1="390" y1="96" x2="390" y2="150" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="390,150 370,192 410,192" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <line x1="235" y1="96" x2="235" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="545" y1="96" x2="545" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="106" width="230" height="62" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="235" y="132" text-anchor="middle" style="font-weight:700;fill:var(--amber)">Spend: cheap draft compute</text>
+    <text x="235" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">draft + verify a batch at once</text>
+    <rect x="430" y="106" width="230" height="62" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="545" y="132" text-anchor="middle" style="font-weight:700;fill:var(--teal)">Save: serial target steps</text>
+    <text x="545" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">was k forwards</text>
+    <text x="390" y="228" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">High acceptance → net win; low → near break-even</text>
+    <text x="390" y="250" text-anchor="middle" style="fill:var(--muted);font-size:12px">spend spare compute, buy saved serial latency</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · the balance of this trade</b> — you <strong>spend</strong> a little extra compute (the draft model + verifying a few candidate tokens in parallel — cheap because it's one batched forward) to <strong>save</strong> expensive serial target steps. Net win when acceptance is high, near break-even when it's low — it's trading spare compute for saved serial latency.</div>
+</div>
+
 <h2>The serial wall: why decode is slow</h2>
 <p>In training, all tokens of a sentence go into the GPU at once and compute in parallel — the GPU's favorite, <strong>compute-bound</strong> kind of work. Decode can't do that: you can't even speak of token N+1 before token N exists, because the latter is the former's input. So generating k tokens means k forwards, advancing one slot at a time. As Lesson 4 showed, in such a single-step forward the GPU's FLOPs sit mostly idle; the real bottleneck is moving huge weights and the KV cache from memory into the compute units — <strong>bandwidth</strong>. In other words, decode forces a machine built for "big parallel batches" into "compute a tiny bit, then wait on memory." This <strong>serial wall</strong> is exactly what every later trick tries to climb.</p>
 <p>Why does this happen? It comes down to <strong>arithmetic intensity</strong> — how many multiply-adds you get per byte of weights read from memory. Prefill processes hundreds or thousands of tokens at once, reusing the same weights over and over: high intensity, math units saturated. Decode computes one token per step yet still re-reads the entire weight set and full KV cache, so intensity is pitifully low and the math units idle most of the time, just waiting for data to stream in from memory. That's why piling more compute onto decode barely helps — the bottleneck isn't compute at all, it's bandwidth and the "each step waits on the last" serial nature. Grasp this and you see the cure: either pack more tokens into the same step (bigger batch, amortizing that weight read) or find a way to <strong>advance multiple tokens at once</strong>, compressing the serial step count itself. Speculative decoding takes the latter road.</p>
@@ -509,6 +658,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         ...
     # net: many tokens per target forward when the draft is good — sequential
     # decode steps become one parallel verify
+</pre></div>
+
+<p>Feel the scale concretely: verifying 64 candidate tokens in <strong>one</strong> target forward costs about the same as a single normal decode step (the weights and KV must be hauled from memory either way), yet can accept several tokens at once. The <span class="mono">custom_mask</span> (tree attention mask) makes each branch of the tree attend only along <strong>its own path</strong>, never bleeding across branches — so in that one forward, many candidate paths are verified at the same time without interfering. This is "draft for parallel verify" in EAGLE's tree form: a whole draft tree squeezed into a single forward.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_info.py ::EagleVerifyInput</span><span class="ln">everything needed to verify the whole draft tree in one forward</span></div><pre>class EagleVerifyInput(SpecInput):
+    # everything the target needs to verify a whole draft TREE in ONE
+    # forward: the candidate tokens + a tree attention mask + the
+    # retrieve indices that map tree nodes back to accepted paths.
+    draft_token: torch.Tensor       # the proposed tree of tokens
+    custom_mask: torch.Tensor       # tree attention mask
+    positions: torch.Tensor
+    retrieve_index: torch.Tensor    # tree -&gt; sequence bookkeeping
+    spec_steps: int
+    topk: int
+    draft_token_num: int            # nodes verified this forward
 </pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div>

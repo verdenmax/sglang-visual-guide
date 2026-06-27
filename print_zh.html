@@ -14434,7 +14434,7 @@ class ServerArgs:
     <text x="34" y="120" style="font-size:12px;fill:var(--muted)">请求流 →</text>
     <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
     <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">知结果，不知原因</text>
-    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
     <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler：看见过程</text>
     <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
     <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
@@ -14593,11 +14593,11 @@ class BenchmarkMetrics:
 
 <p>举两个具体例子：一个采样辅助函数的单元测试只需 <span class="mono">import</span> 它、喂一组 logits、断言挑出的 token 对不对，整个过程在毫秒级完成、完全不碰 GPU；而一个端到端准确率测试会先用 <span class="mono">popen_launch_server</span> 拉起服务器，再在 <span class="mono">GSM8K</span> 数据集上跑一遍，断言得分高于某个阈值（比如 0.8）才算通过。下面这个辅助函数就是端到端测试的「起服务器」入口：</p>
 
-<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">起一个真实服务器子进程，轮询 /health 直到就绪</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">起一个真实服务器子进程，轮询 /health_generate 直到就绪</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
                         other_args=None, ...):
     # spawn a REAL server subprocess:
-    #   python -m sglang.launch_server --model-path model ...other_args
-    # then poll /health until ready (or raise on `timeout`). e2e tests
+    #   sglang serve --model-path model ...other_args
+    # then poll /health_generate until ready (or raise on `timeout`). e2e tests
     # hit this server over HTTP, then tear it down.
     ...
     return process</pre></div>
@@ -15189,6 +15189,31 @@ repos:
 <p>六张面孔，一个灵魂。它们之所以能严丝合缝地咬合，正是因为大家都默认了同一个共享前缀的世界观。你若只学某一课，会觉得它是个局部技巧；你若把第7、11、20、29、30、31课叠在一起看，才会看见那条贯穿始终的主轴。</p>
 <p>不妨顺着一条具体的链路把它走一遍。一个多轮对话应用，开发者在 DSL 里用 <span class="mono">fork</span>（第11课）把同一段历史分裂成三条候选回复；这三条在概念上（第7课）共享同一个开头，所以引擎只应算一次。落到实现（第29课），这段历史变成 <span class="mono">RadixCache</span> 里一个被三条请求共享的 <span class="mono">TreeNode</span>，它的 <span class="mono">value</span> 指向若干物理页（第30课，承第6课）。调度器（第20课）看到这三条请求前缀高度重合，便把它们排在一起、几乎同时跑，让那段共享 KV 在显存里「热」着被反复命中。等对话变长、显存吃紧，HiCache（第31课）再把这段已经不那么热的历史整段下放到 CPU 甚至磁盘，需要时再整段调回。你看，从开发者敲下 <span class="mono">fork</span> 的那一刻，到这段 KV 在三级存储间迁徙，<strong>自始至终是同一棵树上的同一个节点</strong>在被不同层次以不同方式照料。这就是「一个念头贯穿全栈」最具体的样子。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="放射网：中心的 RadixAttention 前缀共享，向外连到 DSL 的 fork、KV 缓存的基数树、调度器的 LPM 缓存感知排序、HiCache 的内存分层">
+    <line x1="390" y1="160" x2="270" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="270" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="390" y1="160" x2="510" y2="224" style="stroke:var(--line);stroke-width:1.5"/>
+    <ellipse cx="390" cy="160" rx="118" ry="42" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="390" y="153" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">RadixAttention</text>
+    <text x="390" y="175" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">前缀共享 · 一个念头</text>
+    <rect x="30" y="40" width="240" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="44" y="64" style="fill:var(--blue);font-weight:700">DSL（第11课）</text>
+    <text x="44" y="84" style="font-size:12px">fork 共用提示前缀</text>
+    <rect x="510" y="40" width="240" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="524" y="64" style="fill:var(--teal);font-weight:700">KV 缓存（第29课）</text>
+    <text x="524" y="84" style="font-size:12px">基数树存前缀</text>
+    <rect x="30" y="224" width="240" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="44" y="248" style="fill:var(--amber);font-weight:700">调度器（第20课）</text>
+    <text x="44" y="268" style="font-size:12px">LPM 缓存感知排序</text>
+    <rect x="510" y="224" width="240" height="56" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="524" y="248" style="fill:var(--purple);font-weight:700">内存分层（第31课）</text>
+    <text x="524" y="268" style="font-size:12px">HiCache 留驻热前缀</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 放射网：同一个念头反复出现</b> — 中心的 <span class="mono">RadixAttention</span>（前缀共享）向四方辐射：DSL 的 <span class="mono">fork</span> 制造共享前缀、KV 缓存把它存成基数树、调度器用 LPM 缓存感知排序优先放行命中、HiCache 把热前缀留驻内存。一个念头，处处复用。</div>
+</div>
+
 <h2>三、从「贴上去的优化」到「长在骨架里的结构」</h2>
 <p>差别不只是审美。把前缀共享当外挂，意味着缓存和引擎是两套各自为政的逻辑，缓存对调度一无所知，调度也不会为缓存让路，命中纯靠运气。把它当一等公民，意味着调度器知道树的形状、能预估命中、能主动把相似请求排在一起；意味着显存管理器知道哪些页被多少请求共享、不能随便回收；意味着分层存储能沿着树的边界整段搬运而不是零散拷贝。一个念头被升格为结构后，全系统才能围绕它协同。</p>
 <p>这也解释了为什么 <span class="mono">RadixAttention</span> 这个名字里同时含着「Radix（基数树）」和「Attention（注意力）」：注意力计算消费 KV，而 KV 被组织成一棵基数树。算子和数据结构在这里是<strong>同一枚硬币的两面</strong>，不是先后关系。</p>
@@ -15197,6 +15222,45 @@ repos:
 <h2>四、一次请求，是怎么在这棵树上走完一生的</h2>
 <p>把视角拉回单个请求：它带着一串 token 进来，先做 <span class="mono">match_prefix</span>，沿树往下走，找到与库存重合的<strong>最长前缀</strong>；这段前缀的 KV 被原样<strong>复用</strong>（并 <span class="mono">inc_lock_ref</span> 钉住，防止半路被回收）；引擎只对<strong>新出现的后缀</strong>真正做前向计算；算完后通过 <span class="mono">insert</span> 把这段新后缀挂回树上，在分叉处把节点劈开，让未来的请求又能共享到它。这条「匹配最长前缀 → 复用 KV → 只算新后缀 → 写回树」的生命周期，就是 <span class="mono">RadixAttention</span> 的全部精髓，下面四张图把它从不同侧面拆开看。</p>
 <p>这里有两个细节值得停下来体会。其一，<span class="mono">inc_lock_ref</span> 的「钉住」之所以必要，是因为复用和回收在同一棵树上并存：当请求 A 正靠着某段共享前缀往下算时，回收逻辑（<span class="mono">evict</span>）绝不能把这段前缀的页抢走，否则 A 算到一半就「踩空」了。引用计数让「谁在用」变得可见，回收只敢从无人引用的叶子下手。其二，<span class="mono">insert</span> 的「劈开节点」是树能持续长出共享的关键：当新后缀与某个已有节点只共享前半段时，系统会在分叉处把老节点一分为二——公共的上半段继续被双方共享，各自不同的下半段成为两个孩子。正是这个「按需劈开」的动作，让基数树始终保持「能共享的尽量共享、该分叉的精确分叉」的紧凑形态，而不会退化成一堆互不相干的整串。理解了钉住与劈开，你就理解了这棵树<strong>为什么既安全又高效</strong>。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="匹配复用只算新后缀：请求 tokens 分成共享前缀与新后缀，match_prefix 命中前缀复用其 KV 零计算，模型只前向新后缀">
+    <text x="40" y="36" style="font-weight:700;fill:var(--muted)">请求 tokens ＝ [ 共享前缀 ｜ 新后缀 ]</text>
+    <rect x="40" y="62" width="420" height="48" rx="8" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="250" y="84" text-anchor="middle" style="fill:var(--muted);font-weight:700">共享前缀</text>
+    <text x="250" y="102" text-anchor="middle" style="fill:var(--faint);font-size:12px">已缓存 KV · 灰</text>
+    <rect x="468" y="62" width="272" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="604" y="84" text-anchor="middle" style="fill:var(--amber);font-weight:700">新后缀</text>
+    <text x="604" y="102" text-anchor="middle" style="fill:var(--amber);font-size:12px">唯一要算的部分</text>
+    <line x1="40" y1="124" x2="460" y2="124" style="stroke:var(--teal);stroke-width:1.5"/>
+    <text x="40" y="152" style="fill:var(--teal);font-weight:700">match_prefix 命中</text>
+    <text x="40" y="172" style="font-size:12px">复用其 KV · 0 计算</text>
+    <line x1="468" y1="124" x2="740" y2="124" style="stroke:var(--amber);stroke-width:1.5"/>
+    <text x="468" y="152" style="fill:var(--amber);font-weight:700">只对新后缀前向计算</text>
+    <text x="468" y="172" style="font-size:12px">算量 ＝ 后缀长度</text>
+    <rect x="40" y="208" width="360" height="56" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="56" y="232" style="fill:var(--teal);font-weight:700">基数树：此前缀已驻留</text>
+    <text x="56" y="252" style="font-size:12px">沿树走到最深已知节点，直接复用</text>
+    <rect x="468" y="208" width="272" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="484" y="232" style="fill:var(--accent-ink);font-weight:700">省下的就是前缀那段</text>
+    <text x="484" y="252" style="font-size:12px">而非整条序列重算</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 匹配 → 复用 → 只算新后缀</b> — 请求的 token 切成「共享前缀（灰、已缓存）｜新后缀（高亮）」；<span class="mono">match_prefix</span> 在树里找到前缀、原样复用它的 KV（0 计算），模型只对<strong>新后缀</strong>做前向。算量等于后缀长度，而不是整条序列。</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.insert</span><span class="ln">把一段 token+KV 插入树，让后续请求共享该前缀</span></div><pre>def insert(self, params: InsertParams) -&gt; InsertResult:
+    # 把一条序列的 token + KV 写进基数树，让后续请求能共享这段前缀；
+    # key 先做分页对齐（page_size 的整数倍）。
+    key = params.key.page_aligned(self.page_size)
+    value = params.value[:len(key)]
+    prefix_len, last_node = self._insert_helper(
+        self.root_node, key, value, ...)   # 在分叉处劈开节点
+    return InsertResult(prefix_len=prefix_len)   # 有多少前缀本就存在</pre></div>
+
+<div class="card detail"><div class="tag">🧪 具体例子</div>
+<p>设想一段被所有请求共用的 <strong>1000 token 系统提示词</strong>。第一条请求来时，它被 <span class="mono">insert</span> 进树一次，对应的 KV 落在若干分页上。第二条请求带着同样的开头进来，<span class="mono">match_prefix</span> 一口气命中全部 1000 个 token——<strong>0 次重算</strong>——引擎只对它自己那句问题做前向。第三、第四条也照此办理：那段共享前缀越被复用，省下的算力越多。</p>
+<p>而这<strong>同一个基数树念头</strong>同时撑起了四处：DSL 的 <span class="mono">fork</span> 让分支共享开头、缓存把前缀存成树、LPM 缓存感知调度把命中高的请求排在一起、HiCache 再按冷热把这棵树分层铺到 GPU/CPU/磁盘。一个 <span class="mono">insert</span>，喂养了全栈。</p>
+</div>
 
 <table class="t">
 <tr><th>共享前缀出现的地方</th><th>它在这里扮演的角色</th></tr>
@@ -15331,6 +15395,86 @@ class RadixCache(BasePrefixCache):
 <p><strong>重叠调度（第21课）</strong>把这个串行循环改造成<strong>流水线</strong>：当 GPU 正在跑 <span class="mono">forward(批 N)</span> 时，CPU<strong>不闲着</strong>——它已经在<strong>组装批 N+1</strong>（挑请求、分配页、搬张量），并且<strong>并行处理批 N-1 的结果</strong>（采样、拼 token、检测停止）。注意这里有一个微妙但重要的点：CPU 处理的是<strong>上一步</strong>的结果，而不是刚发出去那一步的——因为刚发出的前向还没算完。正是这种"<strong>错一拍</strong>"的安排，让 CPU 永远有活干、GPU 永远不用等。</p>
 <p>这一切由 <span class="mono">enable_overlap</span> 开关控制（即 <span class="mono">--disable-overlap-schedule</span> 的反面）。一旦打开，CPU 的调度与结果处理就被"塞进"了 GPU 前向的影子里，墙钟时间上几乎<strong>不可见</strong>。代价是引擎要同时持有<strong>多步的中间状态</strong>（N-1、N、N+1），实现复杂度更高，也更难调试——但这正是"零开销"四个字真正落地、值得付出的地方。如果你把 overlap 关掉，引擎会退回到那个朴素串行循环，正确性不变，但 GPU 利用率和吞吐都会明显下滑。这也解释了为什么默认就是打开的：对绝大多数线上负载来说，多花一点内存换回近乎翻倍的有效算力，是再划算不过的交易。</p>
 
+<p><strong>一个具体的数字感</strong>：当批很小（比如只有几条 decode 请求）时，GPU 的一次前向可能只要 2~3 毫秒，而 CPU 这一拍要做的挑批、分配、采样加起来也可能逼近 2 毫秒——串行执行时这 2 毫秒几乎让每步耗时<strong>翻倍</strong>。打开重叠后，这段 CPU 工作被整体藏进 GPU 前向的影子里，墙钟时间几乎只由 GPU 决定，吞吐因此回到"<strong>只受 GPU 限制</strong>"的理想值——这正是"零开销"调度名副其实之处。批越大，GPU 前向越长，CPU 那点开销就越容易被完全吃掉，但小批场景恰恰是重叠收益最明显的地方。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="串行时间线 GPU 在 CPU 调度与处理期间出现气泡，重叠时间线 CPU 与 GPU 前向并行运行气泡消失">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">串行：GPU 有气泡</text>
+    <text x="20" y="60" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="119" y="61" text-anchor="middle" style="font-size:12px">前向 N</text>
+    <rect x="174" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="220" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">空等</text>
+    <rect x="266" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="321" y="61" text-anchor="middle" style="font-size:12px">前向 N+1</text>
+    <rect x="376" y="40" width="92" height="32" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="422" y="61" text-anchor="middle" style="fill:var(--red);font-size:12px">空等</text>
+    <rect x="468" y="40" width="110" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="523" y="61" text-anchor="middle" style="font-size:12px">前向 N+2</text>
+    <text x="20" y="104" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="174" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="220" y="105" text-anchor="middle" class="mono" style="font-size:11px">调度+处理</text>
+    <rect x="376" y="86" width="92" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="422" y="105" text-anchor="middle" class="mono" style="font-size:11px">调度+处理</text>
+    <line x1="20" y1="150" x2="780" y2="150" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="20" y="184" style="font-weight:700;fill:var(--accent-ink)">重叠：气泡消失</text>
+    <text x="20" y="216" style="fill:var(--faint);font-size:12px">GPU</text>
+    <rect x="64" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="217" text-anchor="middle" style="font-size:12px">前向 N</text>
+    <rect x="184" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="244" y="217" text-anchor="middle" style="font-size:12px">前向 N+1</text>
+    <rect x="304" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="364" y="217" text-anchor="middle" style="font-size:12px">前向 N+2</text>
+    <rect x="424" y="196" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="484" y="217" text-anchor="middle" style="font-size:12px">前向 N+3</text>
+    <text x="20" y="260" style="fill:var(--faint);font-size:12px">CPU</text>
+    <rect x="64" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="124" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <rect x="184" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <rect x="304" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="364" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <rect x="424" y="242" width="120" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="484" y="261" text-anchor="middle" class="mono" style="font-size:11px">调度/处理</text>
+    <text x="560" y="231" style="fill:var(--teal);font-weight:700;font-size:13px">CPU‖GPU 并行</text>
+  </svg>
+  <div class="figcap"><b>图 59-1 · CPU 气泡藏到前向之后</b> — 串行时 GPU 在 CPU 调度与处理期间空等（气泡）；重叠时 CPU 与 GPU 前向并行，GPU 背靠背连跑，气泡消失。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="三级流水线 构建 前向 处理 三条泳道沿时间步错开一拍 稳定态同一拍三段并行">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">重叠流水：三段错一拍</text>
+    <rect x="498" y="64" width="134" height="158" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="115" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t1</text>
+    <text x="265" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t2</text>
+    <text x="415" y="52" text-anchor="middle" style="fill:var(--faint);font-size:12px">t3</text>
+    <text x="565" y="52" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">t4</text>
+    <text x="20" y="92" style="fill:var(--muted);font-size:12px">构建</text>
+    <text x="20" y="152" style="fill:var(--muted);font-size:12px">前向</text>
+    <text x="20" y="212" style="fill:var(--muted);font-size:12px">处理</text>
+    <rect x="55" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="115" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B1</text>
+    <rect x="205" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="265" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B2</text>
+    <rect x="355" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="415" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B3</text>
+    <rect x="505" y="72" width="120" height="32" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="565" y="93" text-anchor="middle" class="mono" style="font-size:11px">构建 B4</text>
+    <rect x="205" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="265" y="153" text-anchor="middle" class="mono" style="font-size:11px">前向 B1</text>
+    <rect x="355" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="415" y="153" text-anchor="middle" class="mono" style="font-size:11px">前向 B2</text>
+    <rect x="505" y="132" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="565" y="153" text-anchor="middle" class="mono" style="font-size:11px">前向 B3</text>
+    <rect x="355" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="415" y="213" text-anchor="middle" class="mono" style="font-size:11px">处理 B1</text>
+    <rect x="505" y="192" width="120" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="213" text-anchor="middle" class="mono" style="font-size:11px">处理 B2</text>
+    <text x="20" y="258" style="fill:var(--accent-ink);font-weight:700;font-size:13px">同一拍：构建 N+1 ‖ 前向 N ‖ 处理 N-1</text>
+  </svg>
+  <div class="figcap"><b>图 59-2 · 重叠流水线</b> — 构建、前向、处理三条泳道各错开一拍；进入稳定态后（t4），同一拍里 CPU 构建批 N+1、GPU 跑前向 N、CPU 处理批 N-1，三段始终并行。</div>
+</div>
+
 <h2>三、其他珠子：分块预填充、CUDA 图、进程拆分</h2>
 <p>同一条主线还串着另外三颗珠子。<strong>分块预填充（第22课）</strong>解决的是另一种气泡：一个超长 prompt 的 prefill 如果一口气跑完，会占满整个前向，让所有正在 decode 的请求<strong>全体卡住</strong>等它，造成延迟尖刺。SGLang 把长 prefill <strong>切成小块</strong>，与 decode <strong>交替</strong>进行——每一步既塞进一点新 prompt 的 prefill，又照顾正在生成的老请求，避免单个大活堵死整条流水线。本质还是那句话："别让某一段把 GPU 的节奏打乱"，把一个会引发长气泡的大任务摊薄成许多不打扰别人的小任务。</p>
 <p><strong>CUDA 图（第27课）</strong>对付的是<strong>内核启动开销</strong>这种气泡：每发射一个 CUDA kernel，CPU 都要付出固定的启动成本，decode 一步要发几十上百个 kernel，加起来就是可观的 CPU 时间，而且这段时间 GPU 往往在等下一个 kernel 被提交。CUDA 图把整串 kernel<strong>录制成一张图</strong>，之后一次<strong>重放</strong>就能在 GPU 上跑完整条序列，CPU 几乎不再逐个参与发射——这是"别让 CPU 成为 GPU 瓶颈"的又一种形态，专门针对 decode 这种<strong>kernel 多、单个小</strong>、最容易被启动开销拖累的场景。</p>
@@ -15370,6 +15514,19 @@ class RadixCache(BasePrefixCache):
             result = self.run_batch(batch)          # launch GPU forward (async)
             self.process_batch_result(prev_result)  # overlap: handle the prior step
             prev_result = result</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.event_loop_overlap</span><span class="ln">重叠循环：处理上一批结果的同时，GPU 跑当前批</span></div><pre>def event_loop_overlap(self):
+    # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
+    # results while the current batch is still running on the GPU.
+    self.result_queue = deque()
+    while True:
+        recv = self.request_receiver.recv_requests()
+        self.process_input_requests(recv)
+        batch = self.get_next_batch_to_run()        # build batch N (CPU)
+        result = self.run_batch(batch)              # launch forward N (GPU)
+        self.result_queue.append((batch, result))
+        # one step out of phase: process batch N-1 now
+        self.process_batch_result(*self.result_queue.popleft())</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一条主线</strong>：CPU 绝不能让 GPU 等。任何前向<strong>前后</strong>的 CPU 工作都是潜在气泡。</li>
@@ -15461,6 +15618,34 @@ class RadixCache(BasePrefixCache):
 <p>把这两条放在一起看，你会得到一个很反直觉的结论：<strong>同一块 GPU，跑 prefill 时几乎被榨干，跑 decode 时却大半空转。</strong>不是 GPU 偷懒，而是 decode 这种负载天生喂不饱它——瓶颈在显存到计算单元之间那条数据通道，不在算力本身。理解了这一点，你才能明白后面所有调度技巧的出发点：它们要么想办法让 decode 蹭上 prefill 的算力，要么干脆把两种负载彻底隔开，各自喂饱各自的瓶颈。</p>
 <p>更进一步，这条对立还解释了"为什么 LLM 推理跟训练手感如此不同"。训练几乎全是 compute-bound 的大矩阵乘，堆算力立竿见影；而在线推理里，真正决定用户体验的 decode 阶段是 bandwidth-bound 的，单纯换更强算力的卡未必能让吐字更快。SGLang 之所以在调度、批处理、KV 管理上下这么多功夫，根子都在这条 prefill-vs-decode 的轴上。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="算术强度屋顶线：decode 低强度落在带宽受限的斜坡上，prefill 高强度落在算力受限的平台上">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">算术强度：屋顶线</text>
+    <line x1="70" y1="58" x2="70" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="70" y1="240" x2="745" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M745 240 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="408" y="270" text-anchor="middle" style="fill:var(--faint);font-size:12px">算术强度 FLOPs/byte →</text>
+    <text x="78" y="52" style="fill:var(--faint);font-size:11px">达到算力 ↑</text>
+    <line x1="70" y1="240" x2="380" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <line x1="380" y1="90" x2="730" y2="90" style="stroke:var(--purple);stroke-width:2"/>
+    <text x="196" y="148" transform="rotate(-26 196 148)" style="fill:var(--purple);font-size:11px">带宽屋顶</text>
+    <text x="556" y="82" text-anchor="middle" style="fill:var(--purple);font-size:11px">算力屋顶 · 峰值</text>
+    <line x1="380" y1="90" x2="380" y2="240" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:4 4"/>
+    <text x="380" y="256" text-anchor="middle" style="fill:var(--faint);font-size:10px">脊点</text>
+    <text x="208" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">带宽受限区</text>
+    <text x="558" y="228" text-anchor="middle" style="fill:var(--muted);font-size:11px">算力受限区</text>
+    <circle cx="170" cy="192" r="7" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:2"/>
+    <text x="186" y="186" style="fill:var(--blue);font-size:12px;font-weight:700">decode</text>
+    <text x="186" y="202" style="fill:var(--blue);font-size:11px">低强度 · 带宽受限</text>
+    <circle cx="556" cy="90" r="7" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:2"/>
+    <text x="556" y="118" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <text x="556" y="134" text-anchor="middle" style="fill:var(--amber);font-size:11px">高强度 · 算力受限</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 算术强度屋顶线</b> — 横轴是算术强度（每读一字节做多少乘加）。<span class="mono">decode</span> 强度低，落在左边的<strong>带宽斜坡</strong>上，算力大半空着；<span class="mono">prefill</span> 强度高，落在右边的<strong>算力平台</strong>上，张量核心被喂满。脊点左边带宽受限、右边算力受限。</div>
+</div>
+
+<p>举个具体数字：prefill 一次大矩阵乘里，权重每读一字节能摊上<strong>成千上万次</strong>乘加（compute-bound）；而 decode 每生成一个 token，每读一字节往往只做<strong>个位数</strong>次乘加（bandwidth-bound）。同一块卡，两种负载的算术强度能差出几个数量级——这正是它们落在屋顶线两端的原因。</p>
+
 <h2>二、这个对立如何制造吞吐与延迟的拉扯</h2>
 <p><strong>第8课</strong>讲的<strong>吞吐 vs 延迟</strong>之争，根子就在这里。两个关键指标：<span class="mono">TTFT</span>（首字延迟，主要由 prefill 决定）和 <span class="mono">ITL</span>（字间延迟，由 decode 决定）。</p>
 <p>把两种负载塞进一个串行队列会发生什么？一个超长 prompt 的 prefill 是一大块算力密集的活，它一旦上 GPU，就会把<strong>所有正在解码的请求全部堵住</strong>——大家的 ITL 瞬间飙高，输出卡顿。反过来，若一味优先 decode 的流畅，新请求的 prefill 又迟迟排不上，TTFT 变长。</p>
@@ -15478,6 +15663,40 @@ class RadixCache(BasePrefixCache):
 <p>好处是<strong>各自饱和各自的瓶颈、互不打扰</strong>：prefill 池可以把算力榨干，decode 池可以专心把 batch 做大、把带宽用足，两边能独立扩缩容、独立调优。代价是多了一道<strong>KV 传输</strong>——这正是下面那段代码所守护的接缝。</p>
 <p>为什么这种"看起来更费事"的方案反而值得？因为共置方案里两种负载永远在抢同一块 GPU，调度器再聪明，prefill 切片和 decode 之间总有一点互相挤压；而分离之后，prefill 池里全是清一色的大并行、可以用最适合 compute-bound 的批策略，decode 池里全是清一色的逐字生成、可以把 batch 堆到带宽极限——<strong>每一池都不再被另一种负载拖累</strong>。在超大规模、对 TTFT 和 ITL 都有严格 SLA 的线上服务里，这种物理隔离往往比"在一块卡上精打细算"更省心、也更稳。</p>
 <p>当然，分离不是免费的午餐。KV 缓存可能高达每条序列几百 MB，要在 prefill 池算完后跨网络搬到 decode 池，这条传输链路的带宽与延迟就成了新的关键路径——搬得慢，decode 侧就得干等。所以 PD 分离把一个"GPU 内部的调度问题"换成了一个"跨机的数据搬运问题"，而这个搬运问题的接口，正由 <span class="mono">BaseKVManager</span> 来定义。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="同机时分对比分离独立池：左边一块 GPU 池时分 prefill 与 decode 互相争抢，右边 prefill 池与 decode 池分开、各自饱和，中间靠 KV 传输相连">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">同机时分 vs 分离独立池</text>
+    <rect x="24" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="210" y="84" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">同机时分 · 争抢</text>
+    <rect x="60" y="104" width="300" height="118" rx="10" style="fill:var(--faint);stroke:var(--line)" fill-opacity="0.06"/>
+    <text x="210" y="126" text-anchor="middle" style="fill:var(--muted);font-size:11px">一块 GPU 池</text>
+    <rect x="80" y="142" width="92" height="58" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="126" y="176" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill</text>
+    <rect x="196" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="220" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="244" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="268" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="292" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="316" y="142" width="16" height="58" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="210" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">两种负载互相争抢</text>
+    <rect x="424" y="56" width="372" height="236" rx="12" style="fill:var(--panel-2);stroke:var(--line)"/>
+    <text x="610" y="84" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">分离独立池 · 隔离</text>
+    <rect x="448" y="120" width="124" height="96" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="510" y="158" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill 池</text>
+    <text x="510" y="178" text-anchor="middle" style="fill:var(--amber);font-size:11px">算力拉满</text>
+    <rect x="648" y="120" width="124" height="96" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="710" y="158" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">decode 池</text>
+    <text x="710" y="178" text-anchor="middle" style="fill:var(--blue);font-size:11px">带宽用足</text>
+    <line x1="572" y1="168" x2="640" y2="168" style="stroke:var(--teal);stroke-width:2"/>
+    <path d="M648 168 l-9 -4 v8 z" style="fill:var(--teal)"/>
+    <text x="610" y="150" text-anchor="middle" style="fill:var(--teal);font-size:11px">KV 传输</text>
+    <text x="610" y="252" text-anchor="middle" style="fill:var(--muted);font-size:11px">各自饱和 · 互不打扰</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 同机时分 vs 分离独立池</b> — 左边一块 GPU 池<strong>时分</strong>跑 prefill 与 decode，两种负载互相争抢、彼此打断；右边把 <span class="mono">prefill 池</span>与 <span class="mono">decode 池</span><strong>分开</strong>，各自按自己的瓶颈定容量、组批，中间靠一次 <strong>KV 传输</strong>相连，互不打扰。</div>
+</div>
+
+<p>正因为分离，你可以按真实流量<strong>各自扩缩容</strong>：prompt 很长、prefill 吃紧就多加 prefill 卡；输出很长、decode 吃紧就多加 decode 卡，两边互不牵制。这种独立伸缩，是共置方案给不了的。</p>
 
 <div class="cols"><div class="col">
 <p><strong>Prefill：一次大并行（算力受限）</strong></p>
@@ -15516,6 +15735,17 @@ class RadixCache(BasePrefixCache):
 
 <p>看这段代码：<span class="mono">BaseKVManager</span> 就是 PD 分离那条路的"接缝"。构造时传入的 <span class="mono">disaggregation_mode</span> 决定了当前进程是 prefill 侧还是 decode 侧——同一套接口，两种角色。<span class="mono">register_to_bootstrap()</span> 让一个 prefill worker 能和一个 decode worker <strong>配对</strong>，配对成功后，KV 缓存就从 prefill 侧传到 decode 侧。整个分离式架构的复杂度，都被这层抽象包住了。</p>
 <p>留意这里的设计哲学：它是一个 <span class="mono">ABC</span>（抽象基类），所有方法都标了 <span class="mono">@abstractmethod</span>。这意味着 SGLang 并不绑定某一种具体的传输实现——底层可以是 RDMA、可以是 NVLink、也可以是别的后端，只要它实现了这套接口。<strong>"prefill 和 decode 分居两池"这个抽象，和"具体用什么管子搬 KV"这个实现，被干净地解耦开了。</strong>这也呼应了全书反复出现的另一条主线：把"是什么"和"怎么做"分层，让上层的调度决策不必关心下层的硬件细节。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::KVPoll</span><span class="ln">KV 传输的状态机：轮询直到 Success</span></div><pre>class KVPoll:
+    # the state of a prefill -&gt; decode KV transfer; poll() returns one
+    # of these until the transfer is done (or failed).
+    Failed = 0
+    Bootstrapping = 1
+    WaitingForInput = 2
+    Transferring = 3
+    Success = 4</pre></div>
+
+<p>这段 <span class="mono">KVPoll</span> 就是上面那道 KV 传输接缝的"仪表盘"：每一条跨池搬运的 KV，都在这五个整数状态里走——从 <span class="mono">Bootstrapping</span>（建连配对）到 <span class="mono">WaitingForInput</span>、<span class="mono">Transferring</span>（搬运中），一路轮询直到 <span class="mono">Success</span>，中途出错则落到 <span class="mono">Failed</span>。decode 侧正是靠不停 <span class="mono">poll()</span> 这个状态，判断 prefill 算好的 KV 到没到、能不能开始逐字生成。一个朴素的状态机，把"跨机搬数据"这件麻烦事收拢成了一个可观测、可重试的循环。</p>
 
 <h2>五、一个轴，看懂许多决定</h2>
 <p>现在把镜头拉到最远。第4课的 compute-bound vs bandwidth-bound、第8课的吞吐 vs 延迟、第22课的 chunked prefill、第45课的 PD 分离——这四课乍看分属四个话题，其实是同一根轴上的四个点。<strong>根本对立</strong>（prefill 与 decode 性质相反）产生<strong>张力</strong>（它们抢同一块 GPU），张力逼出<strong>两种调解</strong>（共置分时、或分机分离）。</p>
@@ -15595,6 +15825,73 @@ class RadixCache(BasePrefixCache):
 <p>这里要分清两个常被混淆的概念：<strong>延迟（latency）</strong>是"一件事从头到尾要等多久"，<strong>吞吐（throughput）</strong>是"单位时间能完成多少件事"。串行步骤之所以痛，是因为它们卡在延迟上——每一步都要等上一步，时间被一格一格地串起来。把它们改造成并行步骤，本质上是把"按延迟收费"的活，搬到"按吞吐收费"的赛道上：GPU 本来就擅长一次做一大批，于是同样的总工作量，被摊平到一次并行操作里完成。投机解码、CUDA Graph、重叠调度，全都在做这件同样的事——只是分别作用在"生成 token""发射内核""CPU 与 GPU 协作"这三个不同的串行环节上。</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="串行 decode 需要 k 次目标前向，而草稿提议 k 个 token 后只需一次并行验证">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">串行 decode：k 次目标前向（慢）</text>
+    <rect x="20" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="66" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="66" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok1</text>
+    <text x="126" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="140" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="186" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="186" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok2</text>
+    <text x="246" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="260" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="306" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok3</text>
+    <text x="366" y="67" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="380" y="42" width="92" height="40" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="60" text-anchor="middle" style="font-size:12px">目标前向</text>
+    <text x="426" y="76" text-anchor="middle" class="mono" style="font-size:11px">→ tok4</text>
+    <text x="488" y="58" style="fill:var(--muted);font-size:12px">… 共 k 次串行</text>
+    <text x="488" y="78" style="fill:var(--amber);font-size:12px;font-weight:700">每步都等上一步</text>
+    <line x1="20" y1="108" x2="760" y2="108" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="138" style="font-weight:700;fill:var(--accent-ink)">草稿 → 一次并行验证（快）</text>
+    <rect x="20" y="154" width="112" height="46" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="76" y="174" text-anchor="middle" style="font-size:12px">草稿模型</text>
+    <text x="76" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">便宜</text>
+    <text x="146" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="160" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="175" y="180" text-anchor="middle" class="mono" style="font-size:11px">t1</text>
+    <rect x="194" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="209" y="180" text-anchor="middle" class="mono" style="font-size:11px">t2</text>
+    <rect x="228" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="243" y="180" text-anchor="middle" class="mono" style="font-size:11px">t3</text>
+    <rect x="262" y="160" width="30" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="277" y="180" text-anchor="middle" class="mono" style="font-size:11px">t4</text>
+    <text x="226" y="214" text-anchor="middle" style="fill:var(--muted);font-size:11px">k 个候选 token</text>
+    <text x="306" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="320" y="154" width="244" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="174" text-anchor="middle" style="font-weight:700;fill:var(--teal)">目标：一次并行验证 k 个</text>
+    <text x="442" y="190" text-anchor="middle" style="fill:var(--muted);font-size:11px">一次 forward，算力本就闲着</text>
+    <text x="576" y="180" text-anchor="middle" style="fill:var(--faint)">→</text>
+    <rect x="590" y="154" width="170" height="46" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">一次前向</text>
+    <text x="675" y="190" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">接受 ≤ k 个 token</text>
+  </svg>
+  <div class="figcap"><b>图 1 · k 次串行 vs 一次并行验证</b> — 上：基线逐 token decode，k 个 token = k 次串行目标前向，每步都得等上一步。下：便宜草稿先提议 k 个候选，目标只做<strong>一次</strong>并行 forward 同时验证全部 k 个 → 一次昂贵前向最多吐出 k 个 token。对比 k 次前向 vs 1 次。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="权衡：花一点便宜的并行草稿算力，去换省下的昂贵串行目标步">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">权衡：便宜的并行草稿算力 ↔ 省下的串行步数</text>
+    <line x1="140" y1="96" x2="640" y2="96" style="stroke:var(--line);stroke-width:3"/>
+    <line x1="390" y1="96" x2="390" y2="150" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="390,150 370,192 410,192" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <line x1="235" y1="96" x2="235" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="545" y1="96" x2="545" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="106" width="230" height="62" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="235" y="132" text-anchor="middle" style="font-weight:700;fill:var(--amber)">花：便宜的并行草稿算力</text>
+    <text x="235" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">草稿 + 一次验证一批候选</text>
+    <rect x="430" y="106" width="230" height="62" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="545" y="132" text-anchor="middle" style="font-weight:700;fill:var(--teal)">省：昂贵的串行目标步</text>
+    <text x="545" y="152" text-anchor="middle" style="fill:var(--muted);font-size:11px">原本 k 次 forward</text>
+    <text x="390" y="228" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">命中率高 → 净赚；命中率低 → 接近打平</text>
+    <text x="390" y="250" text-anchor="middle" style="fill:var(--muted);font-size:12px">用一点闲置算力，换被省下的串行延迟</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 这笔交易的天平</b> — 你<strong>花</strong>掉一点额外算力（草稿模型 + 并行验证几个候选 token，便宜在它只是一次批量 forward），去<strong>省</strong>掉昂贵的串行目标步。命中率高时净赚，命中率低时接近打平（break-even）——本质是拿闲置算力换串行延迟。</div>
+</div>
+
 <h2>串行的墙：decode 为什么慢</h2>
 <p>训练时，一整句话的所有 token 可以一次性喂进 GPU，并行算完——这是 GPU 最擅长的、<strong>compute-bound</strong> 的活。但 decode 不行：你还没生成第 N 个 token，就无从谈起第 N+1 个，因为后者要把前者当输入。于是生成 k 个 token 就是 k 次 forward，一次只前进一格。第4课讲过，这样的单步 forward 里，GPU 的浮点算力大量闲置，真正的瓶颈是把庞大的权重和 KV 缓存从显存搬进计算单元的<strong>带宽</strong>。换句话说，decode 把一台擅长"大批量并行计算"的机器，逼成了"一次只算一点点、还在等内存"的状态。这堵<strong>串行的墙</strong>，就是后面所有技巧想翻越的对象。</p>
 <p>为什么会这样？关键在<strong>算术强度</strong>——也就是每从显存读一个字节的权重，能摊到多少次乘加运算。prefill 一次处理成百上千个 token，同一份权重被反复复用，算术强度高，算力被吃满；decode 每步只算一个 token，却同样要把整套权重、整份 KV 缓存重新读一遍，算术强度低到可怜，乘加单元大半时间在空转、只是干等数据从显存流过来。于是单纯往 decode 上堆更多算力几乎没用——瓶颈根本不在算力，而在带宽和"必须一步等一步"的串行性。理解了这一点，你就明白：要让 decode 变快，要么把更多 token 塞进同一步（增大 batch、复用那次权重搬运），要么想办法<strong>一次推进多个 token</strong>，把串行步数本身压下去。投机解码走的正是后一条路。</p>
@@ -15635,6 +15932,21 @@ class RadixCache(BasePrefixCache):
         ...
     # net: many tokens per target forward when the draft is good — sequential
     # decode steps become one parallel verify
+</pre></div>
+
+<p>具体感受一下规模：在<strong>一次</strong>目标 forward 里验证 64 个候选 token，开销和一次普通 decode 步几乎一样（权重、KV 反正都要从显存搬一遍），却可能一口气接受好几个 token。而 <span class="mono">custom_mask</span>（树注意力掩码）保证树上每个分支只沿着<strong>自己那条路径</strong>做注意力、互不串味——于是同一次 forward 里，许多条候选路径被同时、却互不干扰地验证。这正是"草稿换并行验证"在 EAGLE 树形态下的落地：把一棵草稿树压进一次前向。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_info.py ::EagleVerifyInput</span><span class="ln">一次并行验证整棵草稿树所需的全部输入</span></div><pre>class EagleVerifyInput(SpecInput):
+    # everything the target needs to verify a whole draft TREE in ONE
+    # forward: the candidate tokens + a tree attention mask + the
+    # retrieve indices that map tree nodes back to accepted paths.
+    draft_token: torch.Tensor       # the proposed tree of tokens
+    custom_mask: torch.Tensor       # tree attention mask
+    positions: torch.Tensor
+    retrieve_index: torch.Tensor    # tree -&gt; sequence bookkeeping
+    spec_steps: int
+    topk: int
+    draft_token_num: int            # nodes verified this forward
 </pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
@@ -15760,6 +16072,80 @@ class RadixCache(BasePrefixCache):
     # FlashInfer / Triton / FA each implement these; chosen at deploy time,
     # the model code never changes</pre></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 340" role="img" aria-label="稳定内核向外放射 8 条可插拔接缝：核心固定，边缘可换">
+    <line x1="400" y1="172" x2="124" y2="37" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="400" y2="37" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="676" y2="37" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="80" y2="172" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="720" y2="172" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="124" y2="307" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="400" y2="307" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="400" y1="172" x2="676" y2="307" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <rect x="58" y="16" width="132" height="42" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="42" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">注意力后端</text>
+    <rect x="334" y="16" width="132" height="42" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="400" y="42" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">量化</text>
+    <rect x="610" y="16" width="132" height="42" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="676" y="42" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">MoE</text>
+    <rect x="14" y="151" width="132" height="42" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="80" y="177" text-anchor="middle" style="fill:var(--purple);font-size:12px;font-weight:700">模型</text>
+    <rect x="654" y="151" width="132" height="42" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="720" y="177" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">采样器</text>
+    <rect x="58" y="286" width="132" height="42" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="124" y="312" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">KV 缓存</text>
+    <rect x="334" y="286" width="132" height="42" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="400" y="312" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">平台·硬件</text>
+    <rect x="610" y="286" width="132" height="42" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="676" y="312" text-anchor="middle" style="fill:var(--purple);font-size:12px;font-weight:700">语法后端</text>
+    <rect x="300" y="140" width="200" height="64" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="400" y="166" text-anchor="middle" style="fill:var(--accent-ink);font-size:14px;font-weight:700">稳定内核</text>
+    <text x="400" y="187" text-anchor="middle" style="fill:var(--muted);font-size:11px">调度器·内存·模型循环</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 稳定内核 + 可插拔边缘</b> — 中央引擎核心（调度器·内存·模型循环）固定不变，向外放射 8 条接缝，每条都是一个接口、各有可替换实现；核心不动，边缘随部署替换。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="面向接口编程：编译期上层代码依赖抽象接口，部署期再按硬件选一个具体实现注入">
+    <rect x="210" y="16" width="360" height="48" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="390" y="36" text-anchor="middle" style="fill:var(--ink);font-size:13px;font-weight:700">上层代码</text>
+    <text x="390" y="54" text-anchor="middle" style="fill:var(--muted);font-size:11px">只调用接口，从不认实现</text>
+    <line x1="390" y1="64" x2="390" y2="94" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="390,100 383,86 397,86" style="fill:var(--muted)"/>
+    <text x="404" y="84" style="fill:var(--blue);font-size:11px">编译期 · 面向接口</text>
+    <rect x="210" y="100" width="360" height="54" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="390" y="122" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:13px;font-weight:700">接口 SRTPlatform（抽象基类）</text>
+    <text x="390" y="142" text-anchor="middle" style="fill:var(--muted);font-size:11px">稳定的方法签名</text>
+    <line x1="390" y1="154" x2="390" y2="184" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="390,190 383,176 397,176" style="fill:var(--muted)"/>
+    <text x="404" y="174" style="fill:var(--purple);font-size:11px">部署期 · 选实现并注入</text>
+    <line x1="390" y1="190" x2="125" y2="198" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="390" y1="190" x2="655" y2="198" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <rect x="20" y="198" width="210" height="54" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="125" y="220" text-anchor="middle" style="fill:var(--teal);font-size:12px;font-weight:700">NVIDIA</text>
+    <text x="125" y="239" text-anchor="middle" class="mono" style="fill:var(--teal);font-size:11px">→ FlashInfer</text>
+    <rect x="285" y="198" width="210" height="54" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="220" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">AMD</text>
+    <text x="390" y="239" text-anchor="middle" class="mono" style="fill:var(--blue);font-size:11px">→ Triton</text>
+    <rect x="550" y="198" width="210" height="54" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="655" y="220" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">新芯片</text>
+    <text x="655" y="239" text-anchor="middle" style="fill:var(--amber);font-size:11px">= 新增一个子类</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 面向接口编程 → 部署时选实现</b> — 上层代码在编译期只依赖抽象接口 <span class="mono">SRTPlatform</span>；启动部署时再按开关或检测到的硬件选一个具体实现并注入：NVIDIA 选 FlashInfer、AMD 选 Triton，上层代码一行不改。</div>
+</div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/platforms/interface.py ::SRTPlatform</span><span class="ln">每种硬件一个稳定接缝：基类定接口，子类覆写</span></div><pre>class SRTPlatform(DeviceMixin):
+    # one stable seam per hardware platform. Upper layers program to
+    # THIS interface; each chip subclasses and overrides the methods.
+    supported_quantization: list[str] = []
+    def apply_server_args_defaults(self, server_args): ...
+    def get_default_attention_backend(self) -&gt; str:
+        raise NotImplementedError      # each platform answers
+    def get_graph_runner_cls(self) -&gt; type:
+        raise NotImplementedError</pre></div>
+
+<p>一个具体的画面：同一套引擎，在 <strong>NVIDIA</strong> 上 <span class="mono">get_default_attention_backend()</span> 返回 FlashInfer，在 <strong>AMD</strong> 上返回 Triton——上层调度与模型循环<strong>从不改动</strong>，因为它们只调用 <span class="mono">SRTPlatform</span> 这个接口，至于背后是哪块芯片、哪种内核，对它们透明。想新增一种加速器，做法不是在调度器里到处加 <span class="mono">if</span> 分支，而是<strong>新增一个 SRTPlatform 子类</strong>、覆写这几个方法，再在部署时选上它即可：改动被收在一个文件里，核心代码一行不动。</p>
+
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一个模式，处处复现</strong>：面向接口（抽象基类）编程，具体实现在<span class="mono">部署时</span>选定；这是贯穿全书的同一副骨架。</li>
 <li><strong>稳定核心</strong>：Scheduler、模型执行循环、内存池保持不变，是一切可替换的前提；核心越稳定，边缘就越自由。</li>
@@ -15857,7 +16243,80 @@ class RadixCache(BasePrefixCache):
 <tr><td>量化与并行</td><td>把更大的模型塞进硬件，给批次腾空间</td><td>第35、46课</td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="吞吐杠杆地图：每个设计带来的吞吐——连续批处理让 GPU 不空转、前缀缓存跳过重算、分块预填充不卡解码、CUDA 图与融合杀启动开销、重叠调度隐藏 CPU、投机解码每次前向多吐、量化装更多更快">
+    <text x="20" y="30" style="font-weight:700;fill:var(--accent-ink)">吞吐杠杆地图：每个设计 → 它买来的吞吐</text>
+    <rect x="20" y="48" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="68" text-anchor="middle" style="fill:var(--ink);font-weight:600">连续批处理</text>
+    <text x="260" y="68" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="68" style="fill:var(--muted)">GPU 不空转</text>
+    <rect x="20" y="86" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="106" text-anchor="middle" style="fill:var(--ink);font-weight:600">前缀缓存</text>
+    <text x="260" y="106" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="106" style="fill:var(--muted)">跳过重算</text>
+    <rect x="20" y="124" width="230" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="135" y="144" text-anchor="middle" style="fill:var(--ink);font-weight:600">分块预填充</text>
+    <text x="260" y="144" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="144" style="fill:var(--muted)">不卡解码</text>
+    <rect x="20" y="162" width="230" height="30" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="135" y="182" text-anchor="middle" style="fill:var(--ink);font-weight:600">CUDA 图 + 融合</text>
+    <text x="260" y="182" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="182" style="fill:var(--muted)">杀启动开销</text>
+    <rect x="20" y="200" width="230" height="30" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="135" y="220" text-anchor="middle" style="fill:var(--ink);font-weight:600">重叠调度</text>
+    <text x="260" y="220" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="220" style="fill:var(--muted)">隐藏 CPU</text>
+    <rect x="20" y="238" width="230" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="135" y="258" text-anchor="middle" style="fill:var(--ink);font-weight:600">投机解码</text>
+    <text x="260" y="258" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="258" style="fill:var(--muted)">每次前向多吐</text>
+    <rect x="20" y="276" width="230" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="135" y="296" text-anchor="middle" style="fill:var(--ink);font-weight:600">量化</text>
+    <text x="260" y="296" style="fill:var(--faint);font-weight:700">→</text>
+    <text x="288" y="296" style="fill:var(--muted)">装更多 / 更快</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 吞吐杠杆地图</b> — 把全书的大杠杆排成一张表：每一行是"杠杆 → 它买来的吞吐"。连续批处理填满 GPU、前缀缓存跳过重算、分块预填充不卡解码、CUDA 图与融合杀掉启动开销、重叠调度隐藏 CPU、投机解码每次前向多吐 token、量化装得更多也更快。</div>
+</div>
+
 <div class="flow"><div class="node">请求到达<br><span class="mono">攒批</span></div><div class="arrow">→</div><div class="node">调度排队<br><span class="mono">大批+前缀命中</span></div><div class="arrow">→</div><div class="node">前缀缓存<br><span class="mono">跳过重复</span></div><div class="arrow">→</div><div class="node">预填充<br><span class="mono">分块不霸占</span></div><div class="arrow">→</div><div class="node">解码循环<br><span class="mono">重叠+Graph</span></div><div class="arrow">→</div><div class="node">内核执行<br><span class="mono">贴带宽极限</span></div><div class="arrow">→</div><div class="node">返回 token<br><span class="mono">炉子不空</span></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="完整请求路径，每段标注它的吞吐杠杆：分词、调度（连续批处理）、前缀（基数缓存）、前向（CUDA 图与融合）、采样、反分词、流式（重叠）">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">完整请求路径：每段标注它的吞吐杠杆</text>
+    <rect x="12" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="61" y="97" text-anchor="middle" style="fill:var(--ink)">分词</text>
+    <text x="61" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">文本→id</text>
+    <text x="116" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="124" y="70" width="98" height="44" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="173" y="97" text-anchor="middle" style="fill:var(--ink)">调度</text>
+    <text x="173" y="135" text-anchor="middle" style="fill:var(--blue);font-size:11px">连续</text>
+    <text x="173" y="149" text-anchor="middle" style="fill:var(--blue);font-size:11px">批处理</text>
+    <text x="228" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="236" y="70" width="98" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="285" y="97" text-anchor="middle" style="fill:var(--ink)">前缀</text>
+    <text x="285" y="135" text-anchor="middle" style="fill:var(--teal);font-size:11px">基数</text>
+    <text x="285" y="149" text-anchor="middle" style="fill:var(--teal);font-size:11px">缓存</text>
+    <text x="340" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="348" y="70" width="98" height="44" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="397" y="97" text-anchor="middle" style="fill:var(--ink)">前向</text>
+    <text x="397" y="135" text-anchor="middle" style="fill:var(--purple);font-size:11px">CUDA 图</text>
+    <text x="397" y="149" text-anchor="middle" style="fill:var(--purple);font-size:11px">+ 融合</text>
+    <text x="452" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="460" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="509" y="97" text-anchor="middle" style="fill:var(--ink)">采样</text>
+    <text x="509" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">选下一 token</text>
+    <text x="564" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="572" y="70" width="98" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="621" y="97" text-anchor="middle" style="fill:var(--ink)">反分词</text>
+    <text x="621" y="138" text-anchor="middle" style="fill:var(--muted);font-size:11px">id→文本</text>
+    <text x="676" y="97" text-anchor="middle" style="fill:var(--faint);font-weight:700">→</text>
+    <rect x="684" y="70" width="98" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="733" y="97" text-anchor="middle" style="fill:var(--ink)">流式</text>
+    <text x="733" y="142" text-anchor="middle" style="fill:var(--amber);font-size:11px">重叠</text>
+    <text x="20" y="220" style="fill:var(--muted);font-size:12px">「一次请求的一生」——这次重讲成一个吞吐故事：每一段都挂着它对应的那颗杠杆。</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 请求路径上的吞吐杠杆</b> — 把"一次请求的一生"重讲成吞吐故事：端到端路径（分词 → 调度 → 前缀 → 前向 → 采样 → 反分词 → 流式）上，给每一段挂一个小标签，标出该处生效的吞吐杠杆——调度处是连续批处理、前缀处是基数缓存、前向处是 CUDA 图与融合、流式处是重叠调度。</div>
+</div>
 
 <div class="cols"><div class="col"><strong>吞吐杠杆（把系统推到最大）</strong><ul><li>批处理：摊薄权重读取</li><li>分页：装下更多请求</li><li>前缀缓存：跳过重复计算</li><li>重叠调度：消灭空转</li><li>CUDA Graph：砍启动开销</li><li>内核与融合：榨干带宽</li></ul></div><div class="col"><strong>延迟护栏（不牺牲那个人）</strong><ul><li>分块预填充（第22课）：长 prompt 切块交错，不霸占整步</li><li>投机解码（第43课）：一步多吐 token，不增加权重读取</li><li>本质：在最大化系统的同时守住单用户体验</li></ul></div></div>
 
@@ -15874,6 +16333,21 @@ class SchedulePolicy:
     def calc_priority(self, waiting_queue):
         ...
 </pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">连续批处理的核心杠杆：每步决定跑哪个批</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
+    # the continuous-batching lever, run EVERY step: merge any finished
+    # prefill into the running batch, then decide what to run next —
+    # admit a new prefill batch (more work) or keep decoding.
+    merge_finished_prefill_into(self.running_batch)
+    new_batch = self.get_new_batch_prefill()    # admit within token budget
+    if new_batch is not None:
+        return new_batch                         # run prefill this step
+    return self.running_batch                    # else keep decoding
+</pre></div>
+
+<div class="card"><div class="tag">🔎 具体例子</div>
+<p>因为 <span class="mono">get_next_batch_to_run</span> 每一步都会跑一次，所以当批次里某个请求一完成、它腾出的槽位会<strong>立刻</strong>被一个等待中的请求填上（这就是连续批处理）——根本不用先把整批排空、再开新批。正是这<strong>同一颗杠杆</strong>，让那台贵烤炉（GPU）始终满载：每一步都在"合并已完成的预填充 → 尽量塞进新预填充 → 否则继续解码"之间做出最划算的决定。</p>
+</div>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
 <ul>
