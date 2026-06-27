@@ -58,6 +58,36 @@ LESSON_33 = {"zh": r"""
   <div class="layer l-core"><div class="lh"><span class="badge">实现</span><span class="name">FlashInfer / Triton / FlashAttention 3 / AMD·NPU…</span></div><div class="ld">各自带着真正的 CUDA / Triton <strong>kernel</strong>。由 <span class="mono">--attention-backend</span> 或按硬件自动选定。</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="模型里的 RadixAttention 调用 AttentionBackend 抽象基类，其下扇出到 FlashInfer、Triton、FlashAttention 3、Torch 原生等多个具体后端">
+    <rect x="300" y="18" width="200" height="48" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="400" y="38" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">模型 · RadixAttention</text>
+    <text x="400" y="56" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:12px">self.attn(q,k,v,fb)</text>
+    <line x1="400" y1="66" x2="400" y2="98" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="400,104 393,92 407,92" style="fill:var(--line)"/>
+    <rect x="288" y="104" width="224" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:2"/>
+    <text x="400" y="125" text-anchor="middle" class="mono" style="font-weight:700">AttentionBackend</text>
+    <text x="400" y="144" text-anchor="middle" style="fill:var(--muted);font-size:12px">抽象基类（ABC）· 一份契约</text>
+    <line x1="400" y1="156" x2="104" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="400" y1="156" x2="298" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="400" y1="156" x2="492" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="400" y1="156" x2="686" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="14" y="216" width="180" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="104" y="242" text-anchor="middle" style="fill:var(--blue);font-weight:700">FlashInfer</text>
+    <text x="104" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">NVIDIA 默认</text>
+    <rect x="208" y="216" width="180" height="58" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="298" y="242" text-anchor="middle" style="fill:var(--teal);font-weight:700">Triton</text>
+    <text x="298" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">可移植兜底</text>
+    <rect x="402" y="216" width="180" height="58" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="492" y="242" text-anchor="middle" style="fill:var(--amber);font-weight:700">FlashAttn 3</text>
+    <text x="492" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">FA3 · 高性能</text>
+    <rect x="596" y="216" width="180" height="58" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="686" y="242" text-anchor="middle" style="fill:var(--purple);font-weight:700">Torch 原生</text>
+    <text x="686" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">纯 PyTorch</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 模型 → 抽象基类 → 具体后端</b> — 模型里的 <span class="mono">RadixAttention</span> 只调用 <span class="mono">AttentionBackend</span> 这一个抽象基类，其下扇出到多个具体实现（FlashInfer / Triton / FA3 / Torch 原生）；换哪个后端，模型一行都不用改。</div>
+</div>
+
 <h2>有哪些后端，它们各自强在哪</h2>
 <p>后端是一族而非一个。<strong>FlashInfer</strong> 是高性能 CUDA 实现，在很多 NVIDIA 显卡上是<strong>默认</strong>选择——它把分页 KV 布局、各种掩码、CUDA graph 集成都打磨得很深。
 <strong>Triton</strong> 后端用 Triton 语言写成，<strong>可移植性</strong>是它的卖点：在 FlashInfer 还没支持、或硬件/数据类型不匹配时，它是稳妥的<strong>兜底</strong>。
@@ -77,6 +107,31 @@ LESSON_33 = {"zh": r"""
   <tr><td class="mono">FlashAttention 3</td><td>又一族高性能 kernel</td><td>合适硬件上进一步压低延迟</td></tr>
   <tr><td class="mono">AMD / NPU…</td><td>硬件专属实现</td><td>非 NVIDIA 硬件（第 42 课）</td></tr>
 </table>
+
+<div class="fig">
+  <svg viewBox="0 0 800 280" role="img" aria-label="部署时按硬件与模型选后端：Hopper 加通用模型选 FlashInfer 或 FA3，AMD 或其他硬件选 Triton，兜底选 Torch 原生，由 --attention-backend 指定或自动">
+    <text x="24" y="30" style="fill:var(--muted);font-size:13px">部署时由 <tspan class="mono" style="fill:var(--ink)">--attention-backend</tspan> 选定（或按硬件自动）</text>
+    <rect x="24" y="54" width="250" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="149" y="86" text-anchor="middle" style="fill:var(--ink)">Hopper / 通用模型</text>
+    <rect x="24" y="128" width="250" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="149" y="160" text-anchor="middle" style="fill:var(--ink)">AMD / 其他硬件</text>
+    <rect x="24" y="202" width="250" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="149" y="234" text-anchor="middle" style="fill:var(--ink)">兜底（任意硬件）</text>
+    <line x1="274" y1="80" x2="500" y2="80" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="506,80 494,74 494,86" style="fill:var(--line)"/>
+    <line x1="274" y1="154" x2="500" y2="154" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="506,154 494,148 494,160" style="fill:var(--line)"/>
+    <line x1="274" y1="228" x2="500" y2="228" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="506,228 494,222 494,234" style="fill:var(--line)"/>
+    <rect x="506" y="54" width="270" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="641" y="86" text-anchor="middle" style="fill:var(--blue);font-weight:700">FlashInfer / FA3</text>
+    <rect x="506" y="128" width="270" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="641" y="160" text-anchor="middle" style="fill:var(--teal);font-weight:700">Triton</text>
+    <rect x="506" y="202" width="270" height="52" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="641" y="234" text-anchor="middle" style="fill:var(--purple);font-weight:700">Torch 原生</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 部署时按硬件/模型选后端</b> — 启动时用 <span class="mono">--attention-backend</span> 指定（或自动）：Hopper＋通用模型 → FlashInfer/FA3；AMD/其他 → Triton；兜底 → Torch 原生。换的是后端，模型代码一行不动。</div>
+</div>
 
 <h2>一次前向：先规划元数据，再分派 EXTEND / DECODE 两条路</h2>
 <p>后端每次前向具体做两件事。<strong>第一件是"规划元数据"（plan metadata）</strong>：在真正调 kernel 之前，后端要先算清楚这一批请求的<strong>读写地图</strong>——
@@ -151,6 +206,24 @@ SGLang 支持几十个模型（第 26 课），如果注意力 kernel 写死在�
         <span class="kw">raise</span> NotImplementedError()</pre>
 </div>
 
+<p>抽象基类只立下契约，真正干活的是<strong>具体后端</strong>。下面是 <span class="mono">FlashInferAttnBackend</span>——它<strong>继承</strong> <span class="mono">AttentionBackend</span>，把那三个方法<strong>填上 FlashInfer 的真实实现</strong>：<span class="mono">init_forward_metadata</span> 建好 FlashInfer 需要的 wrapper/索引，<span class="mono">forward_extend</span> 走 prefill，<span class="mono">forward_decode</span> 走解码。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/flashinfer_backend.py ::FlashInferAttnBackend</span><span class="ln">具体后端：用 FlashInfer 实现抽象基类的契约</span></div>
+  <pre><span class="kw">class</span> <span class="st">FlashInferAttnBackend</span>(AttentionBackend):
+    <span class="cm"># 面向 NVIDIA GPU 的具体后端，基于 FlashInfer</span>
+    <span class="cm"># 库（分页 KV + 快速 prefill/decode kernel）。</span>
+    <span class="kw">def</span> init_forward_metadata(self, forward_batch):
+        <span class="cm"># 构建 FlashInfer 每步所需的 wrapper / 索引。</span>
+        ...
+    <span class="kw">def</span> forward_extend(self, q, k, v, layer, forward_batch):
+        ...   <span class="cm"># prefill：对整段新 token 做注意力</span>
+    <span class="kw">def</span> forward_decode(self, q, k, v, layer, forward_batch):
+        ...   <span class="cm"># decode：1 个新 query token 对已缓存 K/V</span></pre>
+</div>
+
+<p>具体到命令行：<span class="mono">--attention-backend flashinfer</span> 就挑中了上面这个实现，换成 <span class="mono">--attention-backend triton</span> 或 <span class="mono">fa3</span> 则换上另一族 kernel——<strong>模型代码一个字都不用动</strong>。因为模型前向里永远只有那一句 <span class="mono">self.attn(...)</span>，被换掉的后端只是悄悄在它底下转动。</p>
+
 <div class="card key">
   <div class="tag">🔑 本课要点</div>
   <strong>① 模型里的注意力层（RadixAttention，第 29 课）不含 kernel</strong>——它持有形状参数，把真正的注意力数学<strong>委托</strong>给一个 <span class="mono">AttentionBackend</span>（ABC）。
@@ -200,6 +273,36 @@ blissfully unaware of who is spinning behind it — and it needn't know.</p>
   <div class="layer l-core"><div class="lh"><span class="badge">Impls</span><span class="name">FlashInfer / Triton / FlashAttention 3 / AMD·NPU…</span></div><div class="ld">each carries the real CUDA / Triton <strong>kernel</strong>. Chosen by <span class="mono">--attention-backend</span> or auto by hardware.</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="The model's RadixAttention calls the AttentionBackend abstract base class, which fans out to concrete backends: FlashInfer, Triton, FlashAttention 3, Torch-native">
+    <rect x="300" y="18" width="200" height="48" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="400" y="38" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">Model · RadixAttention</text>
+    <text x="400" y="56" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:12px">self.attn(q,k,v,fb)</text>
+    <line x1="400" y1="66" x2="400" y2="98" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="400,104 393,92 407,92" style="fill:var(--line)"/>
+    <rect x="288" y="104" width="224" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:2"/>
+    <text x="400" y="125" text-anchor="middle" class="mono" style="font-weight:700">AttentionBackend</text>
+    <text x="400" y="144" text-anchor="middle" style="fill:var(--muted);font-size:12px">abstract base class (ABC) · one contract</text>
+    <line x1="400" y1="156" x2="104" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="400" y1="156" x2="298" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="400" y1="156" x2="492" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="400" y1="156" x2="686" y2="214" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="14" y="216" width="180" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="104" y="242" text-anchor="middle" style="fill:var(--blue);font-weight:700">FlashInfer</text>
+    <text x="104" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">NVIDIA default</text>
+    <rect x="208" y="216" width="180" height="58" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="298" y="242" text-anchor="middle" style="fill:var(--teal);font-weight:700">Triton</text>
+    <text x="298" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">portable fallback</text>
+    <rect x="402" y="216" width="180" height="58" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="492" y="242" text-anchor="middle" style="fill:var(--amber);font-weight:700">FlashAttn 3</text>
+    <text x="492" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">FA3 · high-perf</text>
+    <rect x="596" y="216" width="180" height="58" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="686" y="242" text-anchor="middle" style="fill:var(--purple);font-weight:700">Torch-native</text>
+    <text x="686" y="261" text-anchor="middle" style="fill:var(--muted);font-size:11px">pure PyTorch</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Model → ABC → concrete backends</b> — the model's <span class="mono">RadixAttention</span> only calls one abstract base class, <span class="mono">AttentionBackend</span>, which fans out to several concrete implementations (FlashInfer / Triton / FA3 / Torch-native); swapping a backend changes not a line of the model.</div>
+</div>
+
 <h2>Which backends exist, and what each is good at</h2>
 <p>Backends are a family, not a single thing. <strong>FlashInfer</strong> is a high-performance CUDA implementation, the <strong>default</strong> on many NVIDIA GPUs — it polishes paged-KV layout, masks, and CUDA-graph integration deeply.
 The <strong>Triton</strong> backend is written in Triton; <strong>portability</strong> is its selling point: when FlashInfer doesn't yet support a case, or the hardware/dtype doesn't match, it's the safe <strong>fallback</strong>.
@@ -215,6 +318,31 @@ Because the contract is identical, <strong>swapping backends needs no model chan
   <tr><td class="mono">FlashAttention 3</td><td>another family of high-perf kernels</td><td>shave more latency on suitable hardware</td></tr>
   <tr><td class="mono">AMD / NPU…</td><td>hardware-specific implementations</td><td>non-NVIDIA hardware (Lesson 42)</td></tr>
 </table>
+
+<div class="fig">
+  <svg viewBox="0 0 800 280" role="img" aria-label="At deploy the backend is chosen by hardware and model: Hopper plus a general model picks FlashInfer or FA3, AMD or other hardware picks Triton, fallback picks Torch-native, selected by --attention-backend or auto">
+    <text x="24" y="30" style="fill:var(--muted);font-size:13px">at deploy, <tspan class="mono" style="fill:var(--ink)">--attention-backend</tspan> selects (or auto by hardware)</text>
+    <rect x="24" y="54" width="250" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="149" y="86" text-anchor="middle" style="fill:var(--ink)">Hopper / general model</text>
+    <rect x="24" y="128" width="250" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="149" y="160" text-anchor="middle" style="fill:var(--ink)">AMD / other hardware</text>
+    <rect x="24" y="202" width="250" height="52" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="149" y="234" text-anchor="middle" style="fill:var(--ink)">fallback (any hardware)</text>
+    <line x1="274" y1="80" x2="500" y2="80" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="506,80 494,74 494,86" style="fill:var(--line)"/>
+    <line x1="274" y1="154" x2="500" y2="154" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="506,154 494,148 494,160" style="fill:var(--line)"/>
+    <line x1="274" y1="228" x2="500" y2="228" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="506,228 494,222 494,234" style="fill:var(--line)"/>
+    <rect x="506" y="54" width="270" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="641" y="86" text-anchor="middle" style="fill:var(--blue);font-weight:700">FlashInfer / FA3</text>
+    <rect x="506" y="128" width="270" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="641" y="160" text-anchor="middle" style="fill:var(--teal);font-weight:700">Triton</text>
+    <rect x="506" y="202" width="270" height="52" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="641" y="234" text-anchor="middle" style="fill:var(--purple);font-weight:700">Torch-native</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Backend chosen at deploy by hardware/model</b> — at startup <span class="mono">--attention-backend</span> selects (or auto): Hopper + general model → FlashInfer/FA3; AMD/other → Triton; fallback → Torch-native. What changes is the backend, never a line of model code.</div>
+</div>
 
 <h2>One forward: plan metadata, then dispatch EXTEND / DECODE</h2>
 <p>Each forward, a backend does two things. <strong>First, "plan metadata."</strong> Before calling any kernel, the backend works out this batch's <strong>read/write map</strong> —
@@ -283,6 +411,24 @@ How the lower-level kernels are written (Lessons 38/40) and the details of multi
         <span class="kw">raise</span> NotImplementedError()</pre>
 </div>
 
+<p>The ABC only lays down the contract; the real work is done by a <strong>concrete backend</strong>. Below is <span class="mono">FlashInferAttnBackend</span> — it <strong>subclasses</strong> <span class="mono">AttentionBackend</span> and <strong>fills those three methods with FlashInfer's real implementation</strong>: <span class="mono">init_forward_metadata</span> builds the wrappers/indices FlashInfer needs, <span class="mono">forward_extend</span> takes the prefill path, <span class="mono">forward_decode</span> takes the decode path.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/attention/flashinfer_backend.py ::FlashInferAttnBackend</span><span class="ln">a concrete backend: implements the ABC contract via FlashInfer</span></div>
+  <pre><span class="kw">class</span> <span class="st">FlashInferAttnBackend</span>(AttentionBackend):
+    <span class="cm"># a CONCRETE backend for NVIDIA GPUs, built on the FlashInfer</span>
+    <span class="cm"># library (paged KV + fast prefill/decode kernels).</span>
+    <span class="kw">def</span> init_forward_metadata(self, forward_batch):
+        <span class="cm"># build the per-step wrappers/indices FlashInfer needs.</span>
+        ...
+    <span class="kw">def</span> forward_extend(self, q, k, v, layer, forward_batch):
+        ...   <span class="cm"># prefill: attend over the whole new chunk</span>
+    <span class="kw">def</span> forward_decode(self, q, k, v, layer, forward_batch):
+        ...   <span class="cm"># decode: one new query token vs cached K/V</span></pre>
+</div>
+
+<p>Concretely on the command line: <span class="mono">--attention-backend flashinfer</span> picks the implementation above, while <span class="mono">--attention-backend triton</span> or <span class="mono">fa3</span> swaps in another family of kernels — <strong>without touching a single word of model code</strong>. Because the model forward only ever has that one line <span class="mono">self.attn(...)</span>, the swapped backend simply spins underneath it.</p>
+
 <div class="card key">
   <div class="tag">🔑 Key points</div>
   <strong>① The model's attention layer (RadixAttention, Lesson 29) holds no kernel</strong> — it carries shape params and <strong>delegates</strong> the real attention math to an <span class="mono">AttentionBackend</span> (ABC).
@@ -334,6 +480,79 @@ DeepSeek-V3、Mixtral、Qwen-MoE 都用它。它的核心反直觉之处在于�
   <div class="col"><h4>MoE 层（sparse）</h4><p><strong>N 个小专家 + 1 个路由器</strong>，每个 token 只走 <span class="mono">top-k</span> 个（如 64 选 2）。<strong>参数随专家数猛涨，单 token 算力被 top-k 钉住</strong>。又大又快，代价是路由、通信与显存（见下文）。</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="路由器给一个 token 对全部 8 个专家打分，只选 top-k=2 个专家计算，其余专家跳过，最后按门控权重把两个专家的输出加权合并">
+    <text x="24" y="20" style="font-weight:700;fill:var(--muted)">一个 token → 路由器打分 → 只走 top-k 个专家</text>
+    <rect x="24" y="120" width="96" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="72" y="147" text-anchor="middle" class="mono">token x</text>
+    <line x1="120" y1="142" x2="150" y2="142" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="150" y="104" width="140" height="76" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="220" y="134" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">路由器 / 门控</text>
+    <text x="220" y="156" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">给 8 个专家打分</text>
+    <line x1="290" y1="142" x2="340" y2="29" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="63" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="97" style="stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="290" y1="142" x2="340" y2="131" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="165" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="199" style="stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="290" y1="142" x2="340" y2="233" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="267" style="stroke:var(--faint);stroke-width:1"/>
+    <rect x="340" y="16" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="33" class="mono" style="fill:var(--faint);font-size:12px">E0</text>
+    <text x="462" y="33" text-anchor="end" style="fill:var(--faint);font-size:11px">跳过</text>
+    <rect x="340" y="50" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="67" class="mono" style="fill:var(--faint);font-size:12px">E1</text>
+    <text x="462" y="67" text-anchor="end" style="fill:var(--faint);font-size:11px">跳过</text>
+    <rect x="340" y="84" width="130" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="350" y="101" class="mono" style="fill:var(--blue);font-size:12px">E2</text>
+    <text x="462" y="101" text-anchor="end" style="fill:var(--blue);font-size:11px">选中 ·0.6</text>
+    <rect x="340" y="118" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="135" class="mono" style="fill:var(--faint);font-size:12px">E3</text>
+    <text x="462" y="135" text-anchor="end" style="fill:var(--faint);font-size:11px">跳过</text>
+    <rect x="340" y="152" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="169" class="mono" style="fill:var(--faint);font-size:12px">E4</text>
+    <text x="462" y="169" text-anchor="end" style="fill:var(--faint);font-size:11px">跳过</text>
+    <rect x="340" y="186" width="130" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="350" y="203" class="mono" style="fill:var(--blue);font-size:12px">E5</text>
+    <text x="462" y="203" text-anchor="end" style="fill:var(--blue);font-size:11px">选中 ·0.4</text>
+    <rect x="340" y="220" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="237" class="mono" style="fill:var(--faint);font-size:12px">E6</text>
+    <text x="462" y="237" text-anchor="end" style="fill:var(--faint);font-size:11px">跳过</text>
+    <rect x="340" y="254" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="271" class="mono" style="fill:var(--faint);font-size:12px">E7</text>
+    <text x="462" y="271" text-anchor="end" style="fill:var(--faint);font-size:11px">跳过</text>
+    <line x1="470" y1="97" x2="520" y2="132" style="stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="470" y1="199" x2="520" y2="160" style="stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="520" y="110" width="150" height="74" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="595" y="140" text-anchor="middle" style="fill:var(--teal);font-weight:700">加权合并</text>
+    <text x="595" y="162" text-anchor="middle" class="mono" style="font-size:11px">0.6·E2 + 0.4·E5</text>
+    <line x1="670" y1="147" x2="700" y2="147" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="706" y="151" style="fill:var(--muted);font-size:12px">输出</text>
+  </svg>
+  <div class="figcap"><b>图 3 · 路由器把每个 token 发给它的 top-k 专家</b> — 路由器给全部 8 个专家打分，<strong>只选 top-k=2</strong>（这里 E2、E5）真正计算，其余专家对该 token <strong>一动不动</strong>；最后按门控权重 <span class="mono">0.6·E2 + 0.4·E5</span> 合并成输出。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="稠密 FFN 的参数容量与每 token 算力焊死在一起，二者一样大；稀疏 MoE 的参数容量很大但每 token 算力被 top-k 钉得很小">
+    <line x1="390" y1="40" x2="390" y2="232" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">稠密 FFN：全部参数都算</text>
+    <text x="24" y="92" style="fill:var(--muted);font-size:12px">参数容量</text>
+    <rect x="150" y="76" width="110" height="26" rx="5" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="24" y="142" style="fill:var(--muted);font-size:12px">每 token 算力</text>
+    <rect x="150" y="126" width="110" height="26" rx="5" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="150" y="196" style="fill:var(--accent-ink);font-weight:700;font-size:12px">参数 = 算力，焊死</text>
+    <text x="410" y="26" style="font-weight:700;fill:var(--accent-ink)">稀疏 MoE：只算 k 个专家</text>
+    <text x="410" y="92" style="fill:var(--muted);font-size:12px">参数容量</text>
+    <rect x="545" y="76" width="195" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="555" y="93" style="fill:var(--blue);font-size:11px">N 个专家（很大）</text>
+    <text x="410" y="142" style="fill:var(--muted);font-size:12px">每 token 算力</text>
+    <rect x="545" y="126" width="60" height="26" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="611" y="143" style="fill:var(--teal);font-size:11px">只算 k 个</text>
+    <text x="410" y="196" style="fill:var(--teal);font-weight:700;font-size:12px">容量大涨，算力被 top-k 钉住</text>
+  </svg>
+  <div class="figcap"><b>图 4 · 稠密（全部参数）vs 稀疏 MoE（只算 k 个专家）</b> — 稠密 FFN 的<strong>参数容量与每 token 算力焊死</strong>、一起涨；稀疏 MoE 有一个<strong>巨大的专家池</strong>（容量大涨），但每个 token 只激活 <span class="mono">N 选 k</span> 个 → <strong>算力被 top-k 钉得很小</strong>。</div>
+</div>
+
 <h2>一次 MoE 前向：路由 → 分组 → 分组 GEMM → 加权合并</h2>
 <p>把一个 token 进入 MoE 层后的旅程拆成四步，你就懂了这层在算什么。<strong>第一步，路由（route）</strong>：路由器对每个 token 算出对所有专家的得分，取 <span class="mono">top-k</span>，得到"这个 token 该去哪几个专家"以及对应的<strong>路由权重</strong>（一组归一化的分数）。
 <strong>第二步，分组（group）</strong>：一个 batch 里有成千上万个 token，各自被分派到不同专家。直接逐 token 调用专家会极其低效，所以要<strong>按目标专家把 token 重新归拢到一起</strong>——
@@ -381,6 +600,22 @@ SGLang 的 <span class="mono">FusedMoE</span> 层正是为此而生：它把<str
         self.num_experts = num_experts <span class="cm"># 参数随它涨，单 token 算力随 top_k 定</span>
         self.moe_ep_size = get_parallel().moe_ep_size  <span class="cm"># 专家并行规模（第 46 课）</span></pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/moe/topk.py ::TopKConfig</span><span class="ln">路由配置：每 token 选几个专家、如何打分/归一</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="st">TopKConfig</span>:
+    <span class="cm"># 路由器怎么为每个 token 挑专家。</span>
+    top_k: int                       <span class="cm"># 每个 token 选几个专家（如 2）</span>
+    use_grouped_topk: bool = False   <span class="cm"># 分组受限路由（DeepSeek）</span>
+    renormalize: bool = True         <span class="cm"># 对 top-k 门控权重重新归一化</span>
+    scoring_func: str = <span class="st">"softmax"</span>    <span class="cm"># 对专家得分用 softmax / sigmoid</span>
+    num_expert_group: Optional[int] = None
+    topk_group: Optional[int] = None
+    ...</pre>
+</div>
+
+<p>举两个具体例子把数字坐实。<strong>Mixtral</strong>：每个 token 在 8 个专家里选 2 个（<span class="mono">top_k=2, N=8</span>）——参数大约是稠密版的 8 倍，但每个 token 只付"<strong>2 个专家</strong>"的算力。<strong>DeepSeek-V3</strong>：专家上百，于是先把专家分成若干<strong>组</strong>，用<strong>分组 top-k</strong>（<span class="mono">use_grouped_topk=True</span>，配合 <span class="mono">num_expert_group / topk_group</span>）——先在组级筛掉大部分组，再在选中的组里挑专家，既省路由开销又利于专家并行下的通信。两种都只是 <span class="mono">TopKConfig</span> 里几个字段的不同取值。</p>
 
 <h2>几个绕不开的名词</h2>
 <p>MoE 的文档里高频出现一小撮术语，提前钉死含义，后面读 DeepSeek-V3、Mixtral 的代码就不会卡壳。它们其实就是上面四步流程里的几个关键角色，把它们对号入座即可。要特别分清两个最容易混的：
@@ -463,6 +698,79 @@ That is why people say MoE "<strong>scales parameters, not per-token compute</st
   <div class="col"><h4>MoE layer (sparse)</h4><p><strong>N small experts + 1 router</strong>; each token visits only <span class="mono">top-k</span> (e.g. 2 of 64). <strong>Parameters soar with expert count; per-token compute pinned by top-k</strong>. Big and fast — at the cost of routing, communication, and memory (below).</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="The router scores one token against all 8 experts, keeps only top-k=2 experts to compute, skips the rest, then combines the two expert outputs weighted by the gate scores">
+    <text x="24" y="20" style="font-weight:700;fill:var(--muted)">one token → router scores → only top-k experts run</text>
+    <rect x="24" y="120" width="96" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="72" y="147" text-anchor="middle" class="mono">token x</text>
+    <line x1="120" y1="142" x2="150" y2="142" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="150" y="104" width="140" height="76" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="220" y="134" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">router / gate</text>
+    <text x="220" y="156" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">scores 8 experts</text>
+    <line x1="290" y1="142" x2="340" y2="29" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="63" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="97" style="stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="290" y1="142" x2="340" y2="131" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="165" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="199" style="stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="290" y1="142" x2="340" y2="233" style="stroke:var(--faint);stroke-width:1"/>
+    <line x1="290" y1="142" x2="340" y2="267" style="stroke:var(--faint);stroke-width:1"/>
+    <rect x="340" y="16" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="33" class="mono" style="fill:var(--faint);font-size:12px">E0</text>
+    <text x="462" y="33" text-anchor="end" style="fill:var(--faint);font-size:11px">skip</text>
+    <rect x="340" y="50" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="67" class="mono" style="fill:var(--faint);font-size:12px">E1</text>
+    <text x="462" y="67" text-anchor="end" style="fill:var(--faint);font-size:11px">skip</text>
+    <rect x="340" y="84" width="130" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="350" y="101" class="mono" style="fill:var(--blue);font-size:12px">E2</text>
+    <text x="462" y="101" text-anchor="end" style="fill:var(--blue);font-size:11px">pick ·0.6</text>
+    <rect x="340" y="118" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="135" class="mono" style="fill:var(--faint);font-size:12px">E3</text>
+    <text x="462" y="135" text-anchor="end" style="fill:var(--faint);font-size:11px">skip</text>
+    <rect x="340" y="152" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="169" class="mono" style="fill:var(--faint);font-size:12px">E4</text>
+    <text x="462" y="169" text-anchor="end" style="fill:var(--faint);font-size:11px">skip</text>
+    <rect x="340" y="186" width="130" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="350" y="203" class="mono" style="fill:var(--blue);font-size:12px">E5</text>
+    <text x="462" y="203" text-anchor="end" style="fill:var(--blue);font-size:11px">pick ·0.4</text>
+    <rect x="340" y="220" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="237" class="mono" style="fill:var(--faint);font-size:12px">E6</text>
+    <text x="462" y="237" text-anchor="end" style="fill:var(--faint);font-size:11px">skip</text>
+    <rect x="340" y="254" width="130" height="26" rx="5" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5"/>
+    <text x="350" y="271" class="mono" style="fill:var(--faint);font-size:12px">E7</text>
+    <text x="462" y="271" text-anchor="end" style="fill:var(--faint);font-size:11px">skip</text>
+    <line x1="470" y1="97" x2="520" y2="132" style="stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="470" y1="199" x2="520" y2="160" style="stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="520" y="110" width="150" height="74" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="595" y="140" text-anchor="middle" style="fill:var(--teal);font-weight:700">combine</text>
+    <text x="595" y="162" text-anchor="middle" class="mono" style="font-size:11px">0.6·E2 + 0.4·E5</text>
+    <line x1="670" y1="147" x2="700" y2="147" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="706" y="151" style="fill:var(--muted);font-size:12px">output</text>
+  </svg>
+  <div class="figcap"><b>Fig 3 · The router sends each token to its top-k experts</b> — the router scores all 8 experts but <strong>keeps only top-k=2</strong> (here E2, E5) to actually compute; the rest <strong>do nothing</strong> for this token. The output is combined by gate weights <span class="mono">0.6·E2 + 0.4·E5</span>.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="A dense FFN welds parameter capacity to per-token compute so both bars are equal; a sparse MoE has a huge parameter capacity but its per-token compute bar is pinned small by top-k">
+    <line x1="390" y1="40" x2="390" y2="232" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">Dense FFN: all params active</text>
+    <text x="24" y="92" style="fill:var(--muted);font-size:12px">capacity</text>
+    <rect x="150" y="76" width="110" height="26" rx="5" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="24" y="142" style="fill:var(--muted);font-size:12px">per-tok compute</text>
+    <rect x="150" y="126" width="110" height="26" rx="5" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="150" y="196" style="fill:var(--accent-ink);font-weight:700;font-size:12px">params = compute, welded</text>
+    <text x="410" y="26" style="font-weight:700;fill:var(--accent-ink)">Sparse MoE: only k experts run</text>
+    <text x="410" y="92" style="fill:var(--muted);font-size:12px">capacity</text>
+    <rect x="545" y="76" width="195" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="555" y="93" style="fill:var(--blue);font-size:11px">N experts (huge)</text>
+    <text x="410" y="142" style="fill:var(--muted);font-size:12px">per-tok compute</text>
+    <rect x="545" y="126" width="60" height="26" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="611" y="143" style="fill:var(--teal);font-size:11px">only k</text>
+    <text x="410" y="196" style="fill:var(--teal);font-weight:700;font-size:12px">capacity soars, compute pinned by top-k</text>
+  </svg>
+  <div class="figcap"><b>Fig 4 · Dense (all params) vs sparse MoE (only k experts)</b> — a dense FFN <strong>welds capacity to per-token compute</strong>, so both rise together; a sparse MoE owns a <strong>huge expert pool</strong> (capacity soars) yet each token activates only <span class="mono">k of N</span> → <strong>compute stays small, pinned by top-k</strong>.</div>
+</div>
+
 <h2>One MoE forward: route → group → grouped GEMM → weighted combine</h2>
 <p>Break a token's journey through an MoE layer into four steps and you'll see what it computes. <strong>Step 1, route</strong>: the router scores each token against all experts, takes <span class="mono">top-k</span>, yielding "which experts this token goes to" plus the matching <strong>routing weights</strong> (a set of normalized scores).
 <strong>Step 2, group</strong>: a batch holds thousands of tokens, each dispatched to different experts. Calling experts token-by-token is wildly inefficient, so tokens are <strong>regrouped by target expert</strong> —
@@ -505,6 +813,22 @@ SGLang's <span class="mono">FusedMoE</span> exists precisely for this: it <stron
         self.num_experts = num_experts <span class="cm"># params grow with this; compute set by top_k</span>
         self.moe_ep_size = get_parallel().moe_ep_size  <span class="cm"># expert-parallel size (Lesson 46)</span></pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/moe/topk.py ::TopKConfig</span><span class="ln">routing config: how many experts per token, scoring &amp; renorm</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="st">TopKConfig</span>:
+    <span class="cm"># how the router picks experts for each token.</span>
+    top_k: int                       <span class="cm"># experts per token (e.g. 2)</span>
+    use_grouped_topk: bool = False   <span class="cm"># group-limited routing (DeepSeek)</span>
+    renormalize: bool = True         <span class="cm"># renormalize the top-k gate weights</span>
+    scoring_func: str = <span class="st">"softmax"</span>    <span class="cm"># softmax / sigmoid over expert scores</span>
+    num_expert_group: Optional[int] = None
+    topk_group: Optional[int] = None
+    ...</pre>
+</div>
+
+<p>Two concrete examples to pin the numbers. <strong>Mixtral</strong>: each token picks 2 of 8 experts (<span class="mono">top_k=2, N=8</span>) — roughly 8x the parameters, but each token pays only "<strong>2 experts'</strong>" compute. <strong>DeepSeek-V3</strong>: with hundreds of experts it first splits them into <strong>groups</strong> and uses <strong>grouped top-k</strong> (<span class="mono">use_grouped_topk=True</span>, with <span class="mono">num_expert_group / topk_group</span>) — prune most groups at the group level, then pick experts within the chosen groups, saving routing cost and easing all-to-all communication under expert parallelism. Both are just different field values in <span class="mono">TopKConfig</span>.</p>
 
 <h2>A few unavoidable terms</h2>
 <p>MoE docs lean on a small set of terms. Pin their meanings now and the DeepSeek-V3 / Mixtral code won't trip you up later. They are just the key roles in the four-step flow above — match each to its slot.</p>
@@ -578,11 +902,60 @@ LESSON_35 = {
 
 <p>把内存账算具体些：一个 70 亿参数（7B）的模型，fp16 下每个权重 2 字节，光权重就要约 14GB；换成 INT4，每个权重只占半个字节（外加每组一个很小的 scale），权重整体塌缩到约 3.5GB，<strong>连四分之一都不到</strong>。省下的这十来个 GB 不是凭空消失，而是直接变成更多的 <strong>KV 缓存槽位</strong>（第 8 课）：KV 池能多放几千个 token、多塞几十条并发请求，于是同一张卡的<strong>吞吐</strong>和<strong>可服务并发</strong>都水涨船高（第 4/8 课）。这也是为什么"量化省的是内存"在工程上往往比"省算力"更值钱——在 LLM 服务里，显存常常才是真正卡住并发的那道墙，而带宽才是拖慢解码的那根绳。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="同一份权重在 fp16、fp8、int4 下的显存占用对比，位宽越低占用越小">
+    <text x="20" y="30" style="font-weight:700;fill:var(--ink)">同一份权重 · 位宽越低越省显存</text>
+    <text x="20" y="76" style="fill:var(--muted);font-size:13px">fp16 · 2B</text>
+    <rect x="130" y="58" width="540" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="400" y="77" text-anchor="middle" style="font-size:12px">×1 基准</text>
+    <text x="20" y="136" style="fill:var(--muted);font-size:13px">fp8 · 1B</text>
+    <rect x="130" y="118" width="270" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="265" y="137" text-anchor="middle" style="font-size:12px">×½</text>
+    <text x="20" y="196" style="fill:var(--muted);font-size:13px">int4 · 0.5B</text>
+    <rect x="130" y="178" width="135" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="197" y="197" text-anchor="middle" style="font-size:12px">×¼</text>
+    <text x="20" y="234" style="fill:var(--faint);font-size:12px">更小 = 更省显存 + 带宽</text>
+  </svg>
+  <div class="figcap"><b>图 A · 位宽与显存：fp16 vs fp8 vs int4</b> — 同一份权重，fp16 每参数 2 字节为基准，fp8 减半（1 字节），int4 仅四分之一（0.5 字节）；更小 = 更省显存与访存带宽。</div>
+</div>
+
+<div class="card detail">
+  <div class="tag">🧮 具体例子</div>
+  <strong>例：一个 7B 模型。</strong>fp16 下权重约 <strong>14 GB</strong>（每参数 2 字节）；换成 <strong>fp8</strong> 约 <strong>7 GB</strong>（每参数 1 字节）；再压到 <strong>int4</strong> 只约 <strong>3.5 GB</strong>（每参数 0.5 字节）。启动时加 <span class="mono">--quantization fp8</span>，激活走<strong>动态 per-tensor</strong> 定标（或权重配 <span class="mono">[128,128]</span> 分块 scale），省下的十来 GB 直接变成更多 KV 缓存槽位与并发。
+</div>
+
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>原始 fp16 权重</h4><p>每个数 16 位，精确但又大又慢搬。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>定标 + 取整</h4><p>为一组数算一个 <span class="mono">scale</span>，把它们映射到 8/4 位整数或低精度浮点。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>紧凑存储</h4><p>显存里只存<strong>低位权重 + scale</strong>，体积小一半到四分之一。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>反量化 / 低精度矩阵乘</h4><p>要么先还原回高精度再算，要么直接跑量化 kernel（最快）。</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 270" role="img" aria-label="量化流程：高精度权重→量化→低位存储→反量化或低位 kernel→矩阵乘">
+    <text x="12" y="34" style="font-weight:700;fill:var(--ink)">量化 → 低位存储 → 用时反量化</text>
+    <rect x="12" y="100" width="140" height="72" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="82" y="130" text-anchor="middle" style="font-size:12px">fp16 权重</text>
+    <text x="82" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">高精度</text>
+    <polygon points="154,131 166,136 154,141" style="fill:var(--muted)"/>
+    <rect x="168" y="100" width="140" height="72" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="238" y="130" text-anchor="middle" style="font-size:12px">量化</text>
+    <text x="238" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">scale + 转低位</text>
+    <polygon points="310,131 322,136 310,141" style="fill:var(--muted)"/>
+    <rect x="324" y="100" width="140" height="72" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="394" y="130" text-anchor="middle" style="font-size:12px">低位权重</text>
+    <text x="394" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">+ scale 存储</text>
+    <polygon points="466,131 478,136 466,141" style="fill:var(--muted)"/>
+    <rect x="480" y="100" width="140" height="72" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="550" y="130" text-anchor="middle" style="font-size:12px">反量化</text>
+    <text x="550" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">或低位 kernel</text>
+    <polygon points="622,131 634,136 622,141" style="fill:var(--muted)"/>
+    <rect x="636" y="100" width="140" height="72" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="706" y="130" text-anchor="middle" style="font-size:12px">矩阵乘</text>
+    <text x="706" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">matmul</text>
+    <text x="12" y="214" style="fill:var(--faint);font-size:12px">显存只存低位权重 + scale；计算时还原到可用范围</text>
+  </svg>
+  <div class="figcap"><b>图 B · 量化 → 低位存储 → 用时反量化</b> — 高精度权重经量化（定 scale、转 fp8/int4）压成紧凑低位权重（连同 scale）；计算时再反量化（或直接跑低位 kernel）回到可用范围去做矩阵乘。</div>
 </div>
 
 <h2>有哪些格式：从 FP8 到 AWQ/GPTQ</h2>
@@ -646,6 +1019,18 @@ SGLang"<strong>一切皆可插拔</strong>"的第三个例子。权重则由模�
         self.cutlass_fp8_supported = cutlass_fp8_supported()  <span class="cm"># 有 FP8 硬件就走快路</span></pre>
 </div>
 
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/quantization/fp8.py ::Fp8Config</span><span class="ln">FP8 配置：激活量化方案、按块缩放、忽略层</span></div>
+  <pre><span class="kw">class</span> Fp8Config(QuantizationConfig):
+    <span class="cm"># 告诉 SGLang 该怎么用 FP8 跑这个模型。</span>
+    <span class="kw">def</span> __init__(self, is_checkpoint_fp8_serialized=False,
+                 activation_scheme="dynamic",  <span class="cm"># "dynamic" 或 "static"</span>
+                 ignored_layers=None,
+                 weight_block_size=None):       <span class="cm"># 如 [128,128] 分块 scale</span>
+        ...
+    <span class="cm"># -&gt; 给每个 Linear 层一个 Fp8LinearMethod 来量化它。</span></pre>
+</div>
+
 <p>还有一个<strong>相关但独立</strong>的旋钮：<strong>KV 缓存量化</strong>。前面说的都是给<strong>权重</strong>瘦身，但解码时不断堆积的 <strong>KV 缓存</strong>（第 8 课）本身也是显存大户，尤其在长上下文、高并发下，它往往比权重还吃显存。把 KV 也从 fp16 压到 FP8 甚至更低，能让 KV 池一下子多装将近一倍的 token，<strong>直接拔高可服务的上下文长度与并发数</strong>。它和权重量化是<strong>两套独立的配置</strong>：你可以只量化权重、只量化 KV、或者两个一起开——因为它们压的是不同的东西、走的也是不同的代码路径（一个落在线性层的 <span class="mono">LinearMethod</span> 上，一个落在 KV 池的存取上）。把这两个旋钮分开来看，能帮你在"省显存"和"保精度"之间更精细地调。</p>
 
 <p>退一步看，量化是 SGLang"<strong>一切皆可插拔</strong>"哲学的<strong>第三个</strong>样板：第一个是注意力后端（第 33 课）——同一个注意力层，底下换 FlashAttention 还是 FlashInfer，由配置说了算；第二个是 KV 池——同一套读写接口，底下可以是连续、分页或分层缓存；现在是量化——同一个 <span class="mono">RowParallelLinear</span>，底下是 fp16 还是 fp8、走不走量化 kernel，同样由一个 <span class="mono">QuantizationConfig</span> 注入，模型文件（第 26 课）一个字都不用改。这正是<strong>第 8 部分</strong>的主线：把 Transformer 的每一块——注意力、MoE（第 34 课）、量化、各类算子（第 36 课）——都打磨成<strong>可替换的策略</strong>，于是新格式、新硬件、新算法都能直接"插"进来，而不必每次都重写模型。理解了这层抽象，你看 SGLang 加一种新量化方案，就只是"再写一个 <span class="mono">LinearMethod</span>"那么自然，而整套服务调度、KV 管理、注意力计算都原封不动地复用。</p>
@@ -695,11 +1080,60 @@ single-request decode. Third, on hardware with low-precision compute (FP8 on H10
 
 <p>Make the memory math concrete: a 7-billion-parameter (7B) model at fp16 stores each weight in 2 bytes, so the weights alone need ~14GB; in INT4 each weight is half a byte (plus a tiny per-group scale), collapsing the weights to ~3.5GB — <strong>under a quarter</strong>. Those reclaimed gigabytes don't vanish; they turn directly into more <strong>KV-cache slots</strong> (Lesson 8): the KV pool holds thousands more tokens and dozens more concurrent requests, so the same GPU's <strong>throughput</strong> and <strong>serviceable concurrency</strong> both climb (Lessons 4/8). That's why "quantization saves memory" is usually worth more in practice than "saves compute" — in LLM serving, HBM is often the wall that actually caps concurrency, and bandwidth is the rope that drags decode down.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="same weights compared in fp16, fp8 and int4: lower bit-width uses less memory">
+    <text x="20" y="30" style="font-weight:700;fill:var(--ink)">Same weights · lower bits, less VRAM</text>
+    <text x="20" y="76" style="fill:var(--muted);font-size:13px">fp16 · 2B</text>
+    <rect x="130" y="58" width="540" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="400" y="77" text-anchor="middle" style="font-size:12px">×1 base</text>
+    <text x="20" y="136" style="fill:var(--muted);font-size:13px">fp8 · 1B</text>
+    <rect x="130" y="118" width="270" height="28" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="265" y="137" text-anchor="middle" style="font-size:12px">×½</text>
+    <text x="20" y="196" style="fill:var(--muted);font-size:13px">int4 · 0.5B</text>
+    <rect x="130" y="178" width="135" height="28" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="197" y="197" text-anchor="middle" style="font-size:12px">×¼</text>
+    <text x="20" y="234" style="fill:var(--faint);font-size:12px">smaller = less VRAM + bandwidth</text>
+  </svg>
+  <div class="figcap"><b>Fig A · bit-width vs memory: fp16 vs fp8 vs int4</b> — same weights: fp16 is 2 bytes/param (baseline), fp8 halves it (1 byte), int4 is a quarter (0.5 byte); smaller = less VRAM and memory bandwidth.</div>
+</div>
+
+<div class="card detail">
+  <div class="tag">🧮 Concrete example</div>
+  <strong>Example: a 7B model.</strong> In fp16 the weights are ~<strong>14 GB</strong> (2 bytes/param); in <strong>fp8</strong> ~<strong>7 GB</strong> (1 byte/param); in <strong>int4</strong> only ~<strong>3.5 GB</strong> (0.5 byte/param). Launch with <span class="mono">--quantization fp8</span> and activations use <strong>dynamic per-tensor</strong> scaling (or weights with <span class="mono">[128,128]</span> block scales) — the dozen-odd GB reclaimed turns straight into more KV-cache slots and concurrency.
+</div>
+
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Original fp16 weight</h4><p>16 bits each — precise but big and slow to move.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Scale + round</h4><p>Compute one <span class="mono">scale</span> for a group, map them to 8/4-bit ints or low-precision floats.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Compact storage</h4><p>HBM holds only <strong>low-bit weights + scale</strong>, half to a quarter the size.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Dequant / low-precision matmul</h4><p>Either restore to high precision first, or run a quantized kernel (fastest).</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 270" role="img" aria-label="quantization flow: high-precision weights, quantize, store low-bit, dequantize or low-bit kernel, matmul">
+    <text x="12" y="34" style="font-weight:700;fill:var(--ink)">quantize → store low-bit → dequant</text>
+    <rect x="12" y="100" width="140" height="72" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="82" y="130" text-anchor="middle" style="font-size:12px">fp16 weights</text>
+    <text x="82" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">high precision</text>
+    <polygon points="154,131 166,136 154,141" style="fill:var(--muted)"/>
+    <rect x="168" y="100" width="140" height="72" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="238" y="130" text-anchor="middle" style="font-size:12px">quantize</text>
+    <text x="238" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">scale + cast</text>
+    <polygon points="310,131 322,136 310,141" style="fill:var(--muted)"/>
+    <rect x="324" y="100" width="140" height="72" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="394" y="130" text-anchor="middle" style="font-size:12px">low-bit weights</text>
+    <text x="394" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">+ scales stored</text>
+    <polygon points="466,131 478,136 466,141" style="fill:var(--muted)"/>
+    <rect x="480" y="100" width="140" height="72" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="550" y="130" text-anchor="middle" style="font-size:12px">dequantize</text>
+    <text x="550" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">or low-bit kernel</text>
+    <polygon points="622,131 634,136 622,141" style="fill:var(--muted)"/>
+    <rect x="636" y="100" width="140" height="72" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="706" y="130" text-anchor="middle" style="font-size:12px">matmul</text>
+    <text x="706" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">GEMM</text>
+    <text x="12" y="214" style="fill:var(--faint);font-size:12px">HBM stores only low-bit weights + scales; restore on use</text>
+  </svg>
+  <div class="figcap"><b>Fig B · quantize → store low-bit → dequantize on use</b> — high-precision weights are quantized (pick a scale, cast to fp8/int4) into compact low-bit weights (with their scales); at compute they're dequantized (or fed to a low-bit kernel) back to a usable range for the matmul.</div>
 </div>
 
 <h2>The formats: from FP8 to AWQ/GPTQ</h2>
@@ -767,6 +1201,18 @@ Weights are read by the model loader (Lesson 25) from a <strong>pre-quantized ch
         self.cutlass_fp8_supported = cutlass_fp8_supported()  <span class="cm"># fast path if FP8 HW exists</span></pre>
 </div>
 
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/quantization/fp8.py ::Fp8Config</span><span class="ln">FP8 config: activation scheme, block scaling, ignored layers</span></div>
+  <pre><span class="kw">class</span> Fp8Config(QuantizationConfig):
+    <span class="cm"># tells SGLang HOW to run a model in FP8.</span>
+    <span class="kw">def</span> __init__(self, is_checkpoint_fp8_serialized=False,
+                 activation_scheme="dynamic",  <span class="cm"># "dynamic" or "static"</span>
+                 ignored_layers=None,
+                 weight_block_size=None):       <span class="cm"># e.g. [128,128] block scales</span>
+        ...
+    <span class="cm"># -&gt; hands each Linear layer an Fp8LinearMethod to quantize it.</span></pre>
+</div>
+
 <p>There's a <strong>related but separate</strong> knob: <strong>KV-cache quantization</strong>. Everything above slimmed the <strong>weights</strong>, but the <strong>KV cache</strong> that piles up during decode (Lesson 8) is itself an HBM hog — under long context and high concurrency it often eats more memory than the weights. Compressing KV from fp16 to FP8 or lower lets the KV pool hold nearly twice the tokens, <strong>directly raising serviceable context length and concurrency</strong>. It's a <strong>separate configuration</strong> from weight quantization: you can quantize only weights, only KV, or both — because they compress different things on different code paths (one in the linear layer's <span class="mono">LinearMethod</span>, the other in the KV pool's load/store). Keeping the two knobs distinct lets you tune the "save HBM" vs "keep accuracy" trade more finely.</p>
 
 <p>Step back and quantization is the <strong>third</strong> exemplar of SGLang's <strong>"everything pluggable"</strong> philosophy: the first was the attention backend (Lesson 33) — one attention layer, FlashAttention or FlashInfer underneath chosen by config; the second was the KV pool — one read/write interface over contiguous, paged, or tiered caches; now quantization — one <span class="mono">RowParallelLinear</span>, fp16 or fp8 underneath and quant-kernel or not, injected by a single <span class="mono">QuantizationConfig</span>, with the model file (Lesson 26) unchanged. That's the through-line of <strong>Part 8</strong>: make every Transformer block — attention, MoE (Lesson 34), quantization, the various ops (Lesson 36) — a <strong>swappable strategy</strong>, so new formats, hardware, and algorithms can "plug in" without rewriting the model each time. Once you see this abstraction, SGLang adding a new quantization scheme is just "write one more <span class="mono">LinearMethod</span>," while the whole serving scheduler, KV management, and attention compute are reused untouched.</p>
@@ -826,6 +1272,32 @@ LESSON_36 = {"zh": r"""
   <div class="cells"><span class="lab">向量 v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k 只看夹角差 = 相对位置</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RoPE 按位置旋转 q/k：同一向量在不同位置被旋转不同角度，点积只依赖两角之差即相对位置">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">旋转平面 · 单位圆</text>
+    <line x1="84" y1="170" x2="318" y2="170" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="195" y1="58" x2="195" y2="282" style="stroke:var(--faint);stroke-width:1.5"/>
+    <circle cx="195" cy="170" r="108" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="195" y1="170" x2="303" y2="170" style="stroke:var(--blue);stroke-width:2.5"/>
+    <circle cx="303" cy="170" r="4" style="fill:var(--blue)"/>
+    <text x="282" y="190" class="mono" style="fill:var(--blue);font-weight:700;font-size:12px">q@p0</text>
+    <line x1="195" y1="170" x2="288" y2="116" style="stroke:var(--teal);stroke-width:2.5"/>
+    <circle cx="288" cy="116" r="4" style="fill:var(--teal)"/>
+    <text x="294" y="110" class="mono" style="fill:var(--teal);font-weight:700;font-size:12px">q@p1</text>
+    <line x1="195" y1="170" x2="249" y2="77" style="stroke:var(--amber);stroke-width:2.5"/>
+    <circle cx="249" cy="77" r="4" style="fill:var(--amber)"/>
+    <text x="220" y="64" class="mono" style="fill:var(--amber);font-weight:700;font-size:12px">q@p2</text>
+    <path d="M237,170 A42,42 0 0 0 216,134" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <text x="240" y="150" style="fill:var(--amber);font-size:12px">θ∝pos</text>
+    <rect x="430" y="92" width="320" height="120" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="452" y="122" style="font-weight:700;fill:var(--accent-ink)">点积只看夹角差</text>
+    <text x="452" y="154" class="mono" style="font-size:13px">q·k ∝ cos(θq − θk)</text>
+    <text x="452" y="182" class="mono" style="font-size:13px">θq − θk ∝ p − p′</text>
+    <text x="452" y="206" style="fill:var(--teal);font-weight:700">⇒ 相对位置</text>
+  </svg>
+  <div class="figcap"><b>图 1 · RoPE 按位置旋转 q/k</b> — 同一向量在 p0/p1/p2 被旋转 0°/30°/60°（角度 ∝ 位置）；q 与 k 点积只依赖两角之差，于是注意力只感受<strong>相对位置</strong>。</div>
+</div>
+
 <h2>RoPE 如何撑长上下文</h2>
 <p>RoPE 还顺手解决了一个工程上的大难题：<strong>上下文长度扩展</strong>。一个模型训练时只见过比如 4k token 的序列，旋转角度的"频率表"也是按 4k 调好的。直接拿去服务 32k 的长文本，靠后位置的旋转角度会跑到训练时<strong>从没见过的范围</strong>，模型一脸懵，效果崩坏。
 解决办法不是重训，而是<strong>巧妙地拉伸旋转频率</strong>，让 4k 训出来的模型也能在 32k 甚至更长上从容工作。</p>
@@ -849,6 +1321,50 @@ LESSON_36 = {"zh": r"""
 <div class="cols">
   <div class="col"><h4>LayerNorm（经典）</h4><p><strong>减均值</strong> → <strong>÷ 标准差</strong> → 乘 scale + 加 <strong>shift（偏置）</strong>。把数据完整标准化，步骤多、要算均值方差、还多一个偏置参数。</p></div>
   <div class="col"><h4>RMSNorm（Llama 系）</h4><p><strong>不减均值、不加偏置</strong>：只 <strong>÷ 均方根</strong> 再乘 scale。更少计算、更少参数，<strong>更便宜</strong>，LLM 上效果一样好，常和残差加法<strong>融合</strong>。</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RMSNorm 先除以均方根再乘可学习权重：输入尺度参差，归一后整体拉平，再按逐通道权重缩放得到输出">
+    <text x="40" y="34" style="font-weight:700;fill:var(--muted)">前：尺度参差</text>
+    <line x1="40" y1="240" x2="224" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="46" y="100" width="26" height="140" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="82" y="185" width="26" height="55" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="118" y="75" width="26" height="165" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="154" y="155" width="26" height="85" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="190" y="125" width="26" height="115" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="40" y1="130" x2="224" y2="130" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="40" y="124" style="fill:var(--amber);font-size:12px">RMS</text>
+    <text x="252" y="86" class="mono" style="font-size:12px">RMS=√(mean x²)</text>
+    <rect x="252" y="104" width="120" height="32" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="312" y="125" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:13px">÷ RMS</text>
+    <rect x="252" y="158" width="120" height="32" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="312" y="179" text-anchor="middle" class="mono" style="fill:var(--purple);font-size:13px">× 权重 w</text>
+    <line x1="392" y1="170" x2="486" y2="170" style="stroke:var(--muted);stroke-width:2"/>
+    <polygon points="500,170 486,163 486,177" style="fill:var(--muted)"/>
+    <text x="520" y="34" style="font-weight:700;fill:var(--teal)">后：归一+缩放</text>
+    <line x1="516" y1="240" x2="700" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="522" y="130" width="26" height="110" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="558" y="145" width="26" height="95" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="594" y="122" width="26" height="118" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="630" y="148" width="26" height="92" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="666" y="112" width="26" height="128" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>图 2 · RMSNorm：÷RMS 再乘权重</b> — 输入各通道尺度参差；先除以均方根把整体尺度<strong>拉平</strong>，再乘逐通道<strong>可学习权重</strong> w 得到输出（不减均值、不加偏置）。</div>
+</div>
+
+<p>举两个具体例子：<strong>RoPE</strong> 让注意力只认<strong>相对位置</strong>——<span class="mono">q@5 · k@3</span> 的结果只取决于 <span class="mono">5−3=2</span>，与它们落在 5/3 还是 105/103 无关，这正是模型能<strong>外推到更长序列</strong>的根基；<strong>RMSNorm</strong> 比 LayerNorm 便宜，是因为它<strong>跳过了减均值（居中）和偏置</strong>，只保留"除以均方根再缩放"这一步。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/layernorm.py ::RMSNorm</span><span class="ln">按均方根归一（不减均值），再乘可学习权重</span></div>
+  <pre><span class="kw">class</span> RMSNorm(nn.Module):
+    <span class="cm"># 按均方根归一（不减均值），再乘缩放</span>
+    <span class="kw">def</span> forward_native(self, x, residual=<span class="kw">None</span>):
+        <span class="kw">if</span> residual <span class="kw">is not None</span>:
+            x = x + residual                       <span class="cm"># 融合：先加残差，再归一</span>
+        x = x.to(torch.float32)
+        variance = x.pow(<span class="st">2</span>).mean(dim=-<span class="st">1</span>, keepdim=<span class="kw">True</span>)
+        x = x * torch.rsqrt(variance + self.variance_epsilon)
+        <span class="kw">return</span> (x * self.weight).to(orig_dtype)    <span class="cm"># 逐通道可学习缩放</span></pre>
 </div>
 
 <h2>融合算子：把小步骤并成一个 kernel</h2>
@@ -920,6 +1436,32 @@ That matches the nature of language — a pronoun referring back to a noun a few
   <div class="cells"><span class="lab">vector v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k sees only the angle gap = relative position</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RoPE rotates q/k by position: the same vector is turned by different angles at different positions, and the dot product depends only on the angle difference, i.e. relative position">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">rotation plane · unit circle</text>
+    <line x1="84" y1="170" x2="318" y2="170" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="195" y1="58" x2="195" y2="282" style="stroke:var(--faint);stroke-width:1.5"/>
+    <circle cx="195" cy="170" r="108" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="195" y1="170" x2="303" y2="170" style="stroke:var(--blue);stroke-width:2.5"/>
+    <circle cx="303" cy="170" r="4" style="fill:var(--blue)"/>
+    <text x="282" y="190" class="mono" style="fill:var(--blue);font-weight:700;font-size:12px">q@p0</text>
+    <line x1="195" y1="170" x2="288" y2="116" style="stroke:var(--teal);stroke-width:2.5"/>
+    <circle cx="288" cy="116" r="4" style="fill:var(--teal)"/>
+    <text x="294" y="110" class="mono" style="fill:var(--teal);font-weight:700;font-size:12px">q@p1</text>
+    <line x1="195" y1="170" x2="249" y2="77" style="stroke:var(--amber);stroke-width:2.5"/>
+    <circle cx="249" cy="77" r="4" style="fill:var(--amber)"/>
+    <text x="220" y="64" class="mono" style="fill:var(--amber);font-weight:700;font-size:12px">q@p2</text>
+    <path d="M237,170 A42,42 0 0 0 216,134" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <text x="240" y="150" style="fill:var(--amber);font-size:12px">θ∝pos</text>
+    <rect x="430" y="92" width="320" height="120" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="452" y="122" style="font-weight:700;fill:var(--accent-ink)">dot sees angle gap</text>
+    <text x="452" y="154" class="mono" style="font-size:13px">q·k ∝ cos(θq − θk)</text>
+    <text x="452" y="182" class="mono" style="font-size:13px">θq − θk ∝ p − p′</text>
+    <text x="452" y="206" style="fill:var(--teal);font-weight:700">⇒ relative pos</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · RoPE rotates q/k by position</b> — the same vector is turned 0°/30°/60° at p0/p1/p2 (angle ∝ position); the q·k dot product depends only on the angle difference, so attention feels only <strong>relative position</strong>.</div>
+</div>
+
 <h2>How RoPE enables context-length extension</h2>
 <p>RoPE also solves a big engineering headache: <strong>context-length extension</strong>. A model trained on, say, 4k-token sequences has its rotation "frequency table" tuned for 4k. Serve 32k of long text directly and the rotation angles at late positions run into a range the model has <strong>never seen</strong>, and quality collapses.
 The fix isn't retraining but <strong>cleverly stretching the rotation frequencies</strong>, so a 4k-trained model works comfortably at 32k and beyond.</p>
@@ -941,6 +1483,50 @@ The fix isn't retraining but <strong>cleverly stretching the rotation frequencie
 <div class="cols">
   <div class="col"><h4>LayerNorm (classic)</h4><p><strong>Subtract mean</strong> → <strong>÷ std</strong> → multiply by scale + add <strong>shift (bias)</strong>. Fully standardizes the data: more steps, computes mean/variance, plus one extra bias parameter.</p></div>
   <div class="col"><h4>RMSNorm (Llama family)</h4><p><strong>No mean subtraction, no bias</strong>: just <strong>÷ root-mean-square</strong> then multiply by scale. Less compute, fewer params, <strong>cheaper</strong>, as good for LLMs, often <strong>fused</strong> with the residual add.</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RMSNorm divides by root-mean-square then multiplies by a learnable weight: inputs have uneven scale, normalization flattens the overall scale, then a per-channel weight rescales to the output">
+    <text x="40" y="34" style="font-weight:700;fill:var(--muted)">Before: uneven scale</text>
+    <line x1="40" y1="240" x2="224" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="46" y="100" width="26" height="140" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="82" y="185" width="26" height="55" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="118" y="75" width="26" height="165" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="154" y="155" width="26" height="85" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="190" y="125" width="26" height="115" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="40" y1="130" x2="224" y2="130" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="40" y="124" style="fill:var(--amber);font-size:12px">RMS</text>
+    <text x="252" y="86" class="mono" style="font-size:12px">RMS=√(mean x²)</text>
+    <rect x="252" y="104" width="120" height="32" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="312" y="125" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:13px">÷ RMS</text>
+    <rect x="252" y="158" width="120" height="32" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="312" y="179" text-anchor="middle" class="mono" style="fill:var(--purple);font-size:13px">× weight w</text>
+    <line x1="392" y1="170" x2="486" y2="170" style="stroke:var(--muted);stroke-width:2"/>
+    <polygon points="500,170 486,163 486,177" style="fill:var(--muted)"/>
+    <text x="520" y="34" style="font-weight:700;fill:var(--teal)">After: norm+scale</text>
+    <line x1="516" y1="240" x2="700" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="522" y="130" width="26" height="110" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="558" y="145" width="26" height="95" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="594" y="122" width="26" height="118" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="630" y="148" width="26" height="92" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="666" y="112" width="26" height="128" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>Fig 2 · RMSNorm: ÷RMS then scale</b> — input channels have uneven scale; dividing by the root-mean-square <strong>flattens</strong> the overall scale, then a per-channel <strong>learnable weight</strong> w rescales to the output (no mean subtraction, no bias).</div>
+</div>
+
+<p>Two concrete examples: <strong>RoPE</strong> makes attention see only <strong>relative position</strong> — <span class="mono">q@5 · k@3</span> depends only on <span class="mono">5−3=2</span>, the same whether they sit at 5/3 or 105/103, which is exactly why the model can <strong>extrapolate to longer sequences</strong>; <strong>RMSNorm</strong> is cheaper than LayerNorm because it <strong>skips mean-centering and the bias</strong>, keeping only "divide by root-mean-square, then scale".</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/layernorm.py ::RMSNorm</span><span class="ln">normalize by root-mean-square (no mean subtraction), then scale</span></div>
+  <pre><span class="kw">class</span> RMSNorm(nn.Module):
+    <span class="cm"># normalize by Root-Mean-Square (NO mean subtraction), then scale.</span>
+    <span class="kw">def</span> forward_native(self, x, residual=<span class="kw">None</span>):
+        <span class="kw">if</span> residual <span class="kw">is not None</span>:
+            x = x + residual                       <span class="cm"># fused add, then norm</span>
+        x = x.to(torch.float32)
+        variance = x.pow(<span class="st">2</span>).mean(dim=-<span class="st">1</span>, keepdim=<span class="kw">True</span>)
+        x = x * torch.rsqrt(variance + self.variance_epsilon)
+        <span class="kw">return</span> (x * self.weight).to(orig_dtype)    <span class="cm"># learned per-channel scale</span></pre>
 </div>
 
 <h2>Fused ops: merging small steps into one kernel</h2>
@@ -1001,6 +1587,29 @@ LESSON_37 = {
 这就是 <strong>logits</strong>。logits 越大的 token，模型越认为它该是下一个词。logits 接着交给采样器（第 28 课）做温度、top-k/p、采样，最终落成一个具体 token。
 很多模型还会让 lm_head 与输入词嵌入<strong>共享权重</strong>（tied embedding），因为"把词变向量"和"把向量变回词分数"本就是一对互逆的事。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="最后一个隐藏向量乘以 lm_head 权重矩阵，得到长度等于词表的 logits，每个词一个分数，再 argmax 或采样选出下一个 token">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">hidden × lm_head → logits</text>
+    <rect x="40" y="70" width="54" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="67" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="67" y="135" text-anchor="middle" class="mono" style="font-size:12px">4096</text>
+    <text x="112" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">×</text>
+    <rect x="134" y="58" width="190" height="144" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="229" y="120" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">lm_head</text>
+    <text x="229" y="142" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">[hidden × vocab]</text>
+    <text x="229" y="164" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">4096 × 32000</text>
+    <text x="346" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="368" y="70" width="54" height="120" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="395" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">logits</text>
+    <text x="395" y="135" text-anchor="middle" class="mono" style="font-size:12px">32000</text>
+    <text x="444" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="470" y="100" width="286" height="60" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="613" y="126" text-anchor="middle" style="font-size:13px">argmax / 采样</text>
+    <text x="613" y="146" text-anchor="middle" style="font-size:12px;fill:var(--muted)">选出下一个 token</text>
+  </svg>
+  <div class="figcap"><b>图 1 · hidden × lm_head → logits</b> — 最后一位的隐藏向量（长 4096）乘以 lm_head 权重 [hidden × vocab]，得到长度等于词表（32000）的 logits，每个词一个分数；再由 argmax 或采样选出下一个 token。</div>
+</div>
+
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>主体前向</h4><p>嵌入 → N 层 → 末端归一（第 36 课），得到每位置的 hidden。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>取末位</h4><p>解码时<strong>只留每条请求的最后一个位置</strong>——只有它的 logits 用来预测下一个词。</p></div></div>
@@ -1037,6 +1646,33 @@ LESSON_37 = {
 得到的是一个<strong>残缺的</strong>分数向量（只有自己负责那段是真值）。要得到完整的 logits，就需要把各卡的片段拼起来——这一步是跨卡的 <strong>all-gather</strong>（或在 argmax/采样里就地汇总）。
 这样，谁也不用独存整张词表头，显存与算力都被均摊到了多卡上。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="词表按 TP rank 切分：rank0 拥有 token 0 到 16000，rank1 拥有 16000 到 32000，各算自己那段的 logits，再 all-gather 拼成完整的 32000 长 logits">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">词表按 rank 切 → all-gather</text>
+    <rect x="24" y="120" width="54" height="80" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="51" y="110" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="51" y="165" text-anchor="middle" class="mono" style="font-size:11px">4096</text>
+    <line x1="78" y1="160" x2="132" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="78" y1="160" x2="132" y2="225" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="134" y="60" width="220" height="70" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="86" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">rank0 · lm_head</text>
+    <text x="244" y="108" text-anchor="middle" style="font-size:12px">vocab 0–16000</text>
+    <rect x="134" y="190" width="220" height="70" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="244" y="216" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">rank1 · lm_head</text>
+    <text x="244" y="238" text-anchor="middle" style="font-size:12px">vocab 16000–32000</text>
+    <line x1="354" y1="95" x2="408" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="354" y1="225" x2="408" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="115" width="140" height="70" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="480" y="148" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">all-gather</text>
+    <text x="480" y="168" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">拼接各段</text>
+    <text x="566" y="155" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="588" y="115" width="168" height="70" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="672" y="148" text-anchor="middle" style="font-size:13px;fill:var(--purple)">完整 logits</text>
+    <text x="672" y="168" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--purple)">长度 32000</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 词表按 TP rank 切分</b> — lm_head 的词表维切给各 rank：rank0 管 token 0–16000、rank1 管 16000–32000，各自只算本段 logits；再用 all-gather 把两段首尾拼成完整的 32000 长 logits。</div>
+</div>
+
 <p>把这套机制摊开看：每个 rank 手里的 lm_head 只有 <span class="mono">[hidden × vocab/N]</span> 那一窄条，算出来的自然是一个<strong>只有自己那段是真值、其余全空</strong>的部分分数向量。<strong>all-gather</strong> 做的事，就是让 N 张卡各自把"本段那截"发出去、也收下别人那截，最后<strong>按 rank 顺序首尾拼接</strong>成一条完整的、长度等于整个词表的 logits。值得一提的是，如果只是要<strong>贪心解码</strong>（argmax 取分数最大那个 token），其实可以更省：每张卡先在<strong>本段内求局部最大</strong>，只把"局部最大值 + 它对应的全局 token id"这一点点信息做 all-reduce，就能选出全局最大，<strong>根本不必把十几万维的完整向量物化出来</strong>。SGLang 会在不需要完整 logits（不算 logprob、不做复杂采样）时尽量走这种更省带宽的就地汇总路径。</p>
 
 <p>词表并行并不是一个孤立技巧，它和第 25/46 课里 q/k/v、MLP 的切法是<strong>同一套思路</strong>：把一个大矩阵沿某个维度切成 N 片、每卡算一片、再用一次集合通信把结果对齐。注意力把<strong>注意力头</strong>切开、MLP 把<strong>中间维</strong>切开，而这里把<strong>词表维</strong>切开；区别只在"切哪一维、最后用 all-reduce 还是 all-gather 收口"。理解了词表并行，也就把 TP 在模型首尾两端（输入嵌入、输出头）和中间各层的切分图景<strong>补全</strong>了——整张网络从头到尾都是按同一条规则切开、再拼回来的。</p>
@@ -1052,6 +1688,21 @@ LESSON_37 = {
   <div class="col"><h4>整张词表头放一张卡</h4><p>lm_head 与嵌入十几亿参数全压在一卡上：<strong>显存吃紧、这步算力也成瓶颈</strong>，和 TP 切分其它层的思路也不一致。</p></div>
   <div class="col"><h4>词表并行</h4><p>每 rank 只持有、只算<strong>一段词表</strong>；末了 <strong>all-gather</strong> 拼完整 logits。<strong>显存与算力均摊</strong>，与 TP 一脉相承。</p></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/vocab_parallel_embedding.py ::ParallelLMHead</span><span class="ln">输出投影：把 hidden 映射成每个词的 logit，词表按 TP 切</span></div>
+  <pre><span class="kw">class</span> ParallelLMHead(VocabParallelEmbedding):
+    <span class="cm"># 输出投影：hidden_state -&gt; 每个词表 token 一个 logit。</span>
+    <span class="cm"># 词表维按 TP rank 切分（每个 rank 只持有一段行），</span>
+    <span class="cm"># 词表大小会向上补齐到能被 TP 数整除。</span>
+    <span class="kw">def</span> __init__(self, num_embeddings, embedding_dim, *, bias=False, ...):
+        <span class="cm"># num_embeddings = 词表大小，embedding_dim = 隐藏维</span>
+        ...
+    <span class="cm"># 每个 rank 只产出自己那段词表的 logits；all-gather</span>
+    <span class="cm"># （在 LogitsProcessor 里）把各段拼成完整词表向量。</span></pre>
+</div>
+
+<p>举个具体的数：Llama 词表 <span class="mono">32000</span>、hidden <span class="mono">4096</span>，于是 lm_head 是一张 <span class="mono">4096 × 32000</span> 的矩阵。开 <span class="mono">--tp-size 2</span> 时，每个 rank 只持有 <strong>16000</strong> 行词表、只算这 16000 个 token 的 logits；随后 all-gather 把两段拼成长度 <span class="mono">32000</span> 的完整 logits 向量。</p>
 
 <h2>LogitsProcessor 的活：末位切片 + 跨卡汇总</h2>
 <p>把上面这套流程编排起来的，是 <span class="mono">LogitsProcessor</span>。它在前向的最后接过 hidden states，做三件事：
@@ -1132,6 +1783,29 @@ as the vocabulary</strong> = the <strong>logits</strong>. The larger a token's l
 Logits then go to the Sampler (Lesson 28) for temperature, top-k/p and sampling, ending in a concrete token. Many models <strong>tie</strong>
 the lm_head with the input embedding, since "word→vector" and "vector→word scores" are naturally inverse operations.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="The last hidden vector times the lm_head weight matrix gives a logits vector as long as the vocab, one score per token, then argmax or sample picks the next token">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">hidden × lm_head → logits</text>
+    <rect x="40" y="70" width="54" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="67" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="67" y="135" text-anchor="middle" class="mono" style="font-size:12px">4096</text>
+    <text x="112" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">×</text>
+    <rect x="134" y="58" width="190" height="144" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="229" y="120" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">lm_head</text>
+    <text x="229" y="142" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">[hidden × vocab]</text>
+    <text x="229" y="164" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">4096 × 32000</text>
+    <text x="346" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="368" y="70" width="54" height="120" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="395" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">logits</text>
+    <text x="395" y="135" text-anchor="middle" class="mono" style="font-size:12px">32000</text>
+    <text x="444" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="470" y="100" width="286" height="60" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="613" y="126" text-anchor="middle" style="font-size:13px">argmax / sample</text>
+    <text x="613" y="146" text-anchor="middle" style="font-size:12px;fill:var(--muted)">pick next token</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · hidden × lm_head → logits</b> — the last position's hidden vector (length 4096) times the lm_head weight [hidden × vocab] gives a logits vector as long as the vocab (32000), one score per token; argmax or sampling then picks the next token.</div>
+</div>
+
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Body forward</h4><p>embed → N layers → final norm (Lesson 36) → a hidden per position.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Take the last token</h4><p>In decode, keep <strong>only each request's last position</strong> — only its logits predict the next word.</p></div></div>
@@ -1170,6 +1844,33 @@ split the <strong>vocab dimension</strong> into segments, one per TP rank — e.
 score vector (only its own segment is real). To get the full logits you stitch the segments together — that step is a cross-GPU
 <strong>all-gather</strong> (or gathered in-place inside argmax/sampling). So no one holds the whole vocab head; HBM and FLOPs are spread across GPUs.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="The vocab is sharded across TP ranks: rank0 owns tokens 0 to 16000, rank1 owns 16000 to 32000, each computes logits for its slice, then all-gather concatenates them into the full 32000-length logits">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">vocab sharded by rank → all-gather</text>
+    <rect x="24" y="120" width="54" height="80" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="51" y="110" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="51" y="165" text-anchor="middle" class="mono" style="font-size:11px">4096</text>
+    <line x1="78" y1="160" x2="132" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="78" y1="160" x2="132" y2="225" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="134" y="60" width="220" height="70" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="86" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">rank0 · lm_head</text>
+    <text x="244" y="108" text-anchor="middle" style="font-size:12px">vocab 0–16000</text>
+    <rect x="134" y="190" width="220" height="70" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="244" y="216" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">rank1 · lm_head</text>
+    <text x="244" y="238" text-anchor="middle" style="font-size:12px">vocab 16000–32000</text>
+    <line x1="354" y1="95" x2="408" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="354" y1="225" x2="408" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="115" width="140" height="70" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="480" y="148" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">all-gather</text>
+    <text x="480" y="168" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">concat slices</text>
+    <text x="566" y="155" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="588" y="115" width="168" height="70" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="672" y="148" text-anchor="middle" style="font-size:13px;fill:var(--purple)">full logits</text>
+    <text x="672" y="168" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--purple)">length 32000</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Vocab sharded across TP ranks</b> — lm_head's vocab dimension is split across ranks: rank0 owns tokens 0–16000, rank1 owns 16000–32000, each computes only its slice's logits; an all-gather then concatenates the two into the full 32000-length logits.</div>
+</div>
+
 <p>Unpacking the mechanism: each rank's lm_head is just that narrow strip <span class="mono">[hidden × vocab/N]</span>, so what it computes is a partial score vector that is <strong>real only for its own segment and empty elsewhere</strong>. What <strong>all-gather</strong> does is have all N GPUs each send out "their stretch" and receive everyone else's, finally <strong>concatenating them end-to-end in rank order</strong> into one full logits vector as long as the entire vocab. Worth noting: for plain <strong>greedy decoding</strong> (argmax of the highest score), you can do even better — each GPU first takes a <strong>local max within its segment</strong> and all-reduces only "the local max value + its global token id", which suffices to pick the global max <strong>without ever materializing the full hundred-thousand-dim vector</strong>. SGLang takes this cheaper in-place reduction path whenever full logits aren't needed (no logprobs, no complex sampling).</p>
 
 <p>Vocab parallelism isn't an isolated trick — it's the <strong>same idea</strong> as the q/k/v and MLP splits in Lessons 25/46: cut a big matrix along some dimension into N slices, each GPU computes one, then one collective realigns the results. Attention splits the <strong>attention heads</strong>, MLP splits the <strong>intermediate dim</strong>, and here we split the <strong>vocab dim</strong>; the only difference is "which dim, and whether all-reduce or all-gather closes it out". Grasp vocab parallelism and you've <strong>completed</strong> the picture of TP's sharding at the model's two ends (input embedding, output head) and its middle layers — the whole network, end to end, is cut and reassembled by one rule.</p>
@@ -1185,6 +1886,21 @@ score vector (only its own segment is real). To get the full logits you stitch t
   <div class="col"><h4>Whole vocab head on one GPU</h4><p>lm_head + embedding's billion+ params all on one GPU: <strong>HBM pressure, and this step's compute becomes a bottleneck</strong>, inconsistent with TP-splitting the other layers.</p></div>
   <div class="col"><h4>Vocab parallel</h4><p>Each rank holds and computes <strong>one vocab segment</strong>; then <strong>all-gather</strong> assembles full logits. <strong>HBM and FLOPs spread</strong>, in line with TP.</p></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/vocab_parallel_embedding.py ::ParallelLMHead</span><span class="ln">output projection: hidden -&gt; per-token logit, vocab sharded by TP</span></div>
+  <pre><span class="kw">class</span> ParallelLMHead(VocabParallelEmbedding):
+    <span class="cm"># output projection: hidden_state -&gt; one logit per vocab token.</span>
+    <span class="cm"># the VOCAB dimension is sharded across TP ranks (each rank owns a</span>
+    <span class="cm"># slice of rows); vocab size is padded to divide evenly by TP size.</span>
+    <span class="kw">def</span> __init__(self, num_embeddings, embedding_dim, *, bias=False, ...):
+        <span class="cm"># num_embeddings = vocab size, embedding_dim = hidden size</span>
+        ...
+    <span class="cm"># each rank produces logits for ITS vocab slice; an all-gather</span>
+    <span class="cm"># (in LogitsProcessor) stitches them into the full-vocab vector.</span></pre>
+</div>
+
+<p>A concrete instance: Llama's vocab is <span class="mono">32000</span> and hidden <span class="mono">4096</span>, so lm_head is a <span class="mono">4096 × 32000</span> matrix. Under <span class="mono">--tp-size 2</span> each rank holds only <strong>16000</strong> vocab rows and computes logits for just those 16000 tokens; an all-gather then forms the full <span class="mono">32000</span>-length logits vector.</p>
 
 <h2>LogitsProcessor's job: last-token slice + cross-GPU gather</h2>
 <p>The thing that orchestrates all this is <span class="mono">LogitsProcessor</span>. At the end of the forward it takes hidden states and

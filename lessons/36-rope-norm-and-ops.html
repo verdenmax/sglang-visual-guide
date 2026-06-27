@@ -384,6 +384,32 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="cells"><span class="lab">向量 v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k 只看夹角差 = 相对位置</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RoPE 按位置旋转 q/k：同一向量在不同位置被旋转不同角度，点积只依赖两角之差即相对位置">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">旋转平面 · 单位圆</text>
+    <line x1="84" y1="170" x2="318" y2="170" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="195" y1="58" x2="195" y2="282" style="stroke:var(--faint);stroke-width:1.5"/>
+    <circle cx="195" cy="170" r="108" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="195" y1="170" x2="303" y2="170" style="stroke:var(--blue);stroke-width:2.5"/>
+    <circle cx="303" cy="170" r="4" style="fill:var(--blue)"/>
+    <text x="282" y="190" class="mono" style="fill:var(--blue);font-weight:700;font-size:12px">q@p0</text>
+    <line x1="195" y1="170" x2="288" y2="116" style="stroke:var(--teal);stroke-width:2.5"/>
+    <circle cx="288" cy="116" r="4" style="fill:var(--teal)"/>
+    <text x="294" y="110" class="mono" style="fill:var(--teal);font-weight:700;font-size:12px">q@p1</text>
+    <line x1="195" y1="170" x2="249" y2="77" style="stroke:var(--amber);stroke-width:2.5"/>
+    <circle cx="249" cy="77" r="4" style="fill:var(--amber)"/>
+    <text x="220" y="64" class="mono" style="fill:var(--amber);font-weight:700;font-size:12px">q@p2</text>
+    <path d="M237,170 A42,42 0 0 0 216,134" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <text x="240" y="150" style="fill:var(--amber);font-size:12px">θ∝pos</text>
+    <rect x="430" y="92" width="320" height="120" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="452" y="122" style="font-weight:700;fill:var(--accent-ink)">点积只看夹角差</text>
+    <text x="452" y="154" class="mono" style="font-size:13px">q·k ∝ cos(θq − θk)</text>
+    <text x="452" y="182" class="mono" style="font-size:13px">θq − θk ∝ p − p′</text>
+    <text x="452" y="206" style="fill:var(--teal);font-weight:700">⇒ 相对位置</text>
+  </svg>
+  <div class="figcap"><b>图 1 · RoPE 按位置旋转 q/k</b> — 同一向量在 p0/p1/p2 被旋转 0°/30°/60°（角度 ∝ 位置）；q 与 k 点积只依赖两角之差，于是注意力只感受<strong>相对位置</strong>。</div>
+</div>
+
 <h2>RoPE 如何撑长上下文</h2>
 <p>RoPE 还顺手解决了一个工程上的大难题：<strong>上下文长度扩展</strong>。一个模型训练时只见过比如 4k token 的序列，旋转角度的"频率表"也是按 4k 调好的。直接拿去服务 32k 的长文本，靠后位置的旋转角度会跑到训练时<strong>从没见过的范围</strong>，模型一脸懵，效果崩坏。
 解决办法不是重训，而是<strong>巧妙地拉伸旋转频率</strong>，让 4k 训出来的模型也能在 32k 甚至更长上从容工作。</p>
@@ -407,6 +433,50 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="cols">
   <div class="col"><h4>LayerNorm（经典）</h4><p><strong>减均值</strong> → <strong>÷ 标准差</strong> → 乘 scale + 加 <strong>shift（偏置）</strong>。把数据完整标准化，步骤多、要算均值方差、还多一个偏置参数。</p></div>
   <div class="col"><h4>RMSNorm（Llama 系）</h4><p><strong>不减均值、不加偏置</strong>：只 <strong>÷ 均方根</strong> 再乘 scale。更少计算、更少参数，<strong>更便宜</strong>，LLM 上效果一样好，常和残差加法<strong>融合</strong>。</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RMSNorm 先除以均方根再乘可学习权重：输入尺度参差，归一后整体拉平，再按逐通道权重缩放得到输出">
+    <text x="40" y="34" style="font-weight:700;fill:var(--muted)">前：尺度参差</text>
+    <line x1="40" y1="240" x2="224" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="46" y="100" width="26" height="140" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="82" y="185" width="26" height="55" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="118" y="75" width="26" height="165" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="154" y="155" width="26" height="85" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="190" y="125" width="26" height="115" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="40" y1="130" x2="224" y2="130" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="40" y="124" style="fill:var(--amber);font-size:12px">RMS</text>
+    <text x="252" y="86" class="mono" style="font-size:12px">RMS=√(mean x²)</text>
+    <rect x="252" y="104" width="120" height="32" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="312" y="125" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:13px">÷ RMS</text>
+    <rect x="252" y="158" width="120" height="32" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="312" y="179" text-anchor="middle" class="mono" style="fill:var(--purple);font-size:13px">× 权重 w</text>
+    <line x1="392" y1="170" x2="486" y2="170" style="stroke:var(--muted);stroke-width:2"/>
+    <polygon points="500,170 486,163 486,177" style="fill:var(--muted)"/>
+    <text x="520" y="34" style="font-weight:700;fill:var(--teal)">后：归一+缩放</text>
+    <line x1="516" y1="240" x2="700" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="522" y="130" width="26" height="110" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="558" y="145" width="26" height="95" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="594" y="122" width="26" height="118" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="630" y="148" width="26" height="92" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="666" y="112" width="26" height="128" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>图 2 · RMSNorm：÷RMS 再乘权重</b> — 输入各通道尺度参差；先除以均方根把整体尺度<strong>拉平</strong>，再乘逐通道<strong>可学习权重</strong> w 得到输出（不减均值、不加偏置）。</div>
+</div>
+
+<p>举两个具体例子：<strong>RoPE</strong> 让注意力只认<strong>相对位置</strong>——<span class="mono">q@5 · k@3</span> 的结果只取决于 <span class="mono">5−3=2</span>，与它们落在 5/3 还是 105/103 无关，这正是模型能<strong>外推到更长序列</strong>的根基；<strong>RMSNorm</strong> 比 LayerNorm 便宜，是因为它<strong>跳过了减均值（居中）和偏置</strong>，只保留"除以均方根再缩放"这一步。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/layernorm.py ::RMSNorm</span><span class="ln">按均方根归一（不减均值），再乘可学习权重</span></div>
+  <pre><span class="kw">class</span> RMSNorm(nn.Module):
+    <span class="cm"># 按均方根归一（不减均值），再乘缩放</span>
+    <span class="kw">def</span> forward_native(self, x, residual=<span class="kw">None</span>):
+        <span class="kw">if</span> residual <span class="kw">is not None</span>:
+            x = x + residual                       <span class="cm"># 融合：先加残差，再归一</span>
+        x = x.to(torch.float32)
+        variance = x.pow(<span class="st">2</span>).mean(dim=-<span class="st">1</span>, keepdim=<span class="kw">True</span>)
+        x = x * torch.rsqrt(variance + self.variance_epsilon)
+        <span class="kw">return</span> (x * self.weight).to(orig_dtype)    <span class="cm"># 逐通道可学习缩放</span></pre>
 </div>
 
 <h2>融合算子：把小步骤并成一个 kernel</h2>
@@ -526,6 +596,32 @@ That matches the nature of language — a pronoun referring back to a noun a few
   <div class="cells"><span class="lab">vector v</span><span class="cell">pos 0 → 0°</span><span class="sep">→</span><span class="cell">pos 1 → 30°</span><span class="sep">→</span><span class="cell hl">pos 2 → 60°</span><span class="sep">⇒</span><span class="cell q">q·k sees only the angle gap = relative position</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RoPE rotates q/k by position: the same vector is turned by different angles at different positions, and the dot product depends only on the angle difference, i.e. relative position">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">rotation plane · unit circle</text>
+    <line x1="84" y1="170" x2="318" y2="170" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="195" y1="58" x2="195" y2="282" style="stroke:var(--faint);stroke-width:1.5"/>
+    <circle cx="195" cy="170" r="108" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="195" y1="170" x2="303" y2="170" style="stroke:var(--blue);stroke-width:2.5"/>
+    <circle cx="303" cy="170" r="4" style="fill:var(--blue)"/>
+    <text x="282" y="190" class="mono" style="fill:var(--blue);font-weight:700;font-size:12px">q@p0</text>
+    <line x1="195" y1="170" x2="288" y2="116" style="stroke:var(--teal);stroke-width:2.5"/>
+    <circle cx="288" cy="116" r="4" style="fill:var(--teal)"/>
+    <text x="294" y="110" class="mono" style="fill:var(--teal);font-weight:700;font-size:12px">q@p1</text>
+    <line x1="195" y1="170" x2="249" y2="77" style="stroke:var(--amber);stroke-width:2.5"/>
+    <circle cx="249" cy="77" r="4" style="fill:var(--amber)"/>
+    <text x="220" y="64" class="mono" style="fill:var(--amber);font-weight:700;font-size:12px">q@p2</text>
+    <path d="M237,170 A42,42 0 0 0 216,134" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <text x="240" y="150" style="fill:var(--amber);font-size:12px">θ∝pos</text>
+    <rect x="430" y="92" width="320" height="120" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="452" y="122" style="font-weight:700;fill:var(--accent-ink)">dot sees angle gap</text>
+    <text x="452" y="154" class="mono" style="font-size:13px">q·k ∝ cos(θq − θk)</text>
+    <text x="452" y="182" class="mono" style="font-size:13px">θq − θk ∝ p − p′</text>
+    <text x="452" y="206" style="fill:var(--teal);font-weight:700">⇒ relative pos</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · RoPE rotates q/k by position</b> — the same vector is turned 0°/30°/60° at p0/p1/p2 (angle ∝ position); the q·k dot product depends only on the angle difference, so attention feels only <strong>relative position</strong>.</div>
+</div>
+
 <h2>How RoPE enables context-length extension</h2>
 <p>RoPE also solves a big engineering headache: <strong>context-length extension</strong>. A model trained on, say, 4k-token sequences has its rotation "frequency table" tuned for 4k. Serve 32k of long text directly and the rotation angles at late positions run into a range the model has <strong>never seen</strong>, and quality collapses.
 The fix isn't retraining but <strong>cleverly stretching the rotation frequencies</strong>, so a 4k-trained model works comfortably at 32k and beyond.</p>
@@ -547,6 +643,50 @@ The fix isn't retraining but <strong>cleverly stretching the rotation frequencie
 <div class="cols">
   <div class="col"><h4>LayerNorm (classic)</h4><p><strong>Subtract mean</strong> → <strong>÷ std</strong> → multiply by scale + add <strong>shift (bias)</strong>. Fully standardizes the data: more steps, computes mean/variance, plus one extra bias parameter.</p></div>
   <div class="col"><h4>RMSNorm (Llama family)</h4><p><strong>No mean subtraction, no bias</strong>: just <strong>÷ root-mean-square</strong> then multiply by scale. Less compute, fewer params, <strong>cheaper</strong>, as good for LLMs, often <strong>fused</strong> with the residual add.</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RMSNorm divides by root-mean-square then multiplies by a learnable weight: inputs have uneven scale, normalization flattens the overall scale, then a per-channel weight rescales to the output">
+    <text x="40" y="34" style="font-weight:700;fill:var(--muted)">Before: uneven scale</text>
+    <line x1="40" y1="240" x2="224" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="46" y="100" width="26" height="140" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="82" y="185" width="26" height="55" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="118" y="75" width="26" height="165" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="154" y="155" width="26" height="85" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="190" y="125" width="26" height="115" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="40" y1="130" x2="224" y2="130" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="40" y="124" style="fill:var(--amber);font-size:12px">RMS</text>
+    <text x="252" y="86" class="mono" style="font-size:12px">RMS=√(mean x²)</text>
+    <rect x="252" y="104" width="120" height="32" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="312" y="125" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:13px">÷ RMS</text>
+    <rect x="252" y="158" width="120" height="32" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="312" y="179" text-anchor="middle" class="mono" style="fill:var(--purple);font-size:13px">× weight w</text>
+    <line x1="392" y1="170" x2="486" y2="170" style="stroke:var(--muted);stroke-width:2"/>
+    <polygon points="500,170 486,163 486,177" style="fill:var(--muted)"/>
+    <text x="520" y="34" style="font-weight:700;fill:var(--teal)">After: norm+scale</text>
+    <line x1="516" y1="240" x2="700" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="522" y="130" width="26" height="110" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="558" y="145" width="26" height="95" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="594" y="122" width="26" height="118" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="630" y="148" width="26" height="92" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="666" y="112" width="26" height="128" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>Fig 2 · RMSNorm: ÷RMS then scale</b> — input channels have uneven scale; dividing by the root-mean-square <strong>flattens</strong> the overall scale, then a per-channel <strong>learnable weight</strong> w rescales to the output (no mean subtraction, no bias).</div>
+</div>
+
+<p>Two concrete examples: <strong>RoPE</strong> makes attention see only <strong>relative position</strong> — <span class="mono">q@5 · k@3</span> depends only on <span class="mono">5−3=2</span>, the same whether they sit at 5/3 or 105/103, which is exactly why the model can <strong>extrapolate to longer sequences</strong>; <strong>RMSNorm</strong> is cheaper than LayerNorm because it <strong>skips mean-centering and the bias</strong>, keeping only "divide by root-mean-square, then scale".</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/layernorm.py ::RMSNorm</span><span class="ln">normalize by root-mean-square (no mean subtraction), then scale</span></div>
+  <pre><span class="kw">class</span> RMSNorm(nn.Module):
+    <span class="cm"># normalize by Root-Mean-Square (NO mean subtraction), then scale.</span>
+    <span class="kw">def</span> forward_native(self, x, residual=<span class="kw">None</span>):
+        <span class="kw">if</span> residual <span class="kw">is not None</span>:
+            x = x + residual                       <span class="cm"># fused add, then norm</span>
+        x = x.to(torch.float32)
+        variance = x.pow(<span class="st">2</span>).mean(dim=-<span class="st">1</span>, keepdim=<span class="kw">True</span>)
+        x = x * torch.rsqrt(variance + self.variance_epsilon)
+        <span class="kw">return</span> (x * self.weight).to(orig_dtype)    <span class="cm"># learned per-channel scale</span></pre>
 </div>
 
 <h2>Fused ops: merging small steps into one kernel</h2>

@@ -371,6 +371,29 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 这就是 <strong>logits</strong>。logits 越大的 token，模型越认为它该是下一个词。logits 接着交给采样器（第 28 课）做温度、top-k/p、采样，最终落成一个具体 token。
 很多模型还会让 lm_head 与输入词嵌入<strong>共享权重</strong>（tied embedding），因为"把词变向量"和"把向量变回词分数"本就是一对互逆的事。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="最后一个隐藏向量乘以 lm_head 权重矩阵，得到长度等于词表的 logits，每个词一个分数，再 argmax 或采样选出下一个 token">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">hidden × lm_head → logits</text>
+    <rect x="40" y="70" width="54" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="67" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="67" y="135" text-anchor="middle" class="mono" style="font-size:12px">4096</text>
+    <text x="112" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">×</text>
+    <rect x="134" y="58" width="190" height="144" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="229" y="120" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">lm_head</text>
+    <text x="229" y="142" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">[hidden × vocab]</text>
+    <text x="229" y="164" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">4096 × 32000</text>
+    <text x="346" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="368" y="70" width="54" height="120" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="395" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">logits</text>
+    <text x="395" y="135" text-anchor="middle" class="mono" style="font-size:12px">32000</text>
+    <text x="444" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="470" y="100" width="286" height="60" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="613" y="126" text-anchor="middle" style="font-size:13px">argmax / 采样</text>
+    <text x="613" y="146" text-anchor="middle" style="font-size:12px;fill:var(--muted)">选出下一个 token</text>
+  </svg>
+  <div class="figcap"><b>图 1 · hidden × lm_head → logits</b> — 最后一位的隐藏向量（长 4096）乘以 lm_head 权重 [hidden × vocab]，得到长度等于词表（32000）的 logits，每个词一个分数；再由 argmax 或采样选出下一个 token。</div>
+</div>
+
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>主体前向</h4><p>嵌入 → N 层 → 末端归一（第 36 课），得到每位置的 hidden。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>取末位</h4><p>解码时<strong>只留每条请求的最后一个位置</strong>——只有它的 logits 用来预测下一个词。</p></div></div>
@@ -407,6 +430,33 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 得到的是一个<strong>残缺的</strong>分数向量（只有自己负责那段是真值）。要得到完整的 logits，就需要把各卡的片段拼起来——这一步是跨卡的 <strong>all-gather</strong>（或在 argmax/采样里就地汇总）。
 这样，谁也不用独存整张词表头，显存与算力都被均摊到了多卡上。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="词表按 TP rank 切分：rank0 拥有 token 0 到 16000，rank1 拥有 16000 到 32000，各算自己那段的 logits，再 all-gather 拼成完整的 32000 长 logits">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">词表按 rank 切 → all-gather</text>
+    <rect x="24" y="120" width="54" height="80" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="51" y="110" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="51" y="165" text-anchor="middle" class="mono" style="font-size:11px">4096</text>
+    <line x1="78" y1="160" x2="132" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="78" y1="160" x2="132" y2="225" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="134" y="60" width="220" height="70" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="86" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">rank0 · lm_head</text>
+    <text x="244" y="108" text-anchor="middle" style="font-size:12px">vocab 0–16000</text>
+    <rect x="134" y="190" width="220" height="70" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="244" y="216" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">rank1 · lm_head</text>
+    <text x="244" y="238" text-anchor="middle" style="font-size:12px">vocab 16000–32000</text>
+    <line x1="354" y1="95" x2="408" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="354" y1="225" x2="408" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="115" width="140" height="70" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="480" y="148" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">all-gather</text>
+    <text x="480" y="168" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">拼接各段</text>
+    <text x="566" y="155" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="588" y="115" width="168" height="70" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="672" y="148" text-anchor="middle" style="font-size:13px;fill:var(--purple)">完整 logits</text>
+    <text x="672" y="168" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--purple)">长度 32000</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 词表按 TP rank 切分</b> — lm_head 的词表维切给各 rank：rank0 管 token 0–16000、rank1 管 16000–32000，各自只算本段 logits；再用 all-gather 把两段首尾拼成完整的 32000 长 logits。</div>
+</div>
+
 <p>把这套机制摊开看：每个 rank 手里的 lm_head 只有 <span class="mono">[hidden × vocab/N]</span> 那一窄条，算出来的自然是一个<strong>只有自己那段是真值、其余全空</strong>的部分分数向量。<strong>all-gather</strong> 做的事，就是让 N 张卡各自把"本段那截"发出去、也收下别人那截，最后<strong>按 rank 顺序首尾拼接</strong>成一条完整的、长度等于整个词表的 logits。值得一提的是，如果只是要<strong>贪心解码</strong>（argmax 取分数最大那个 token），其实可以更省：每张卡先在<strong>本段内求局部最大</strong>，只把"局部最大值 + 它对应的全局 token id"这一点点信息做 all-reduce，就能选出全局最大，<strong>根本不必把十几万维的完整向量物化出来</strong>。SGLang 会在不需要完整 logits（不算 logprob、不做复杂采样）时尽量走这种更省带宽的就地汇总路径。</p>
 
 <p>词表并行并不是一个孤立技巧，它和第 25/46 课里 q/k/v、MLP 的切法是<strong>同一套思路</strong>：把一个大矩阵沿某个维度切成 N 片、每卡算一片、再用一次集合通信把结果对齐。注意力把<strong>注意力头</strong>切开、MLP 把<strong>中间维</strong>切开，而这里把<strong>词表维</strong>切开；区别只在"切哪一维、最后用 all-reduce 还是 all-gather 收口"。理解了词表并行，也就把 TP 在模型首尾两端（输入嵌入、输出头）和中间各层的切分图景<strong>补全</strong>了——整张网络从头到尾都是按同一条规则切开、再拼回来的。</p>
@@ -422,6 +472,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="col"><h4>整张词表头放一张卡</h4><p>lm_head 与嵌入十几亿参数全压在一卡上：<strong>显存吃紧、这步算力也成瓶颈</strong>，和 TP 切分其它层的思路也不一致。</p></div>
   <div class="col"><h4>词表并行</h4><p>每 rank 只持有、只算<strong>一段词表</strong>；末了 <strong>all-gather</strong> 拼完整 logits。<strong>显存与算力均摊</strong>，与 TP 一脉相承。</p></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/vocab_parallel_embedding.py ::ParallelLMHead</span><span class="ln">输出投影：把 hidden 映射成每个词的 logit，词表按 TP 切</span></div>
+  <pre><span class="kw">class</span> ParallelLMHead(VocabParallelEmbedding):
+    <span class="cm"># 输出投影：hidden_state -&gt; 每个词表 token 一个 logit。</span>
+    <span class="cm"># 词表维按 TP rank 切分（每个 rank 只持有一段行），</span>
+    <span class="cm"># 词表大小会向上补齐到能被 TP 数整除。</span>
+    <span class="kw">def</span> __init__(self, num_embeddings, embedding_dim, *, bias=False, ...):
+        <span class="cm"># num_embeddings = 词表大小，embedding_dim = 隐藏维</span>
+        ...
+    <span class="cm"># 每个 rank 只产出自己那段词表的 logits；all-gather</span>
+    <span class="cm"># （在 LogitsProcessor 里）把各段拼成完整词表向量。</span></pre>
+</div>
+
+<p>举个具体的数：Llama 词表 <span class="mono">32000</span>、hidden <span class="mono">4096</span>，于是 lm_head 是一张 <span class="mono">4096 × 32000</span> 的矩阵。开 <span class="mono">--tp-size 2</span> 时，每个 rank 只持有 <strong>16000</strong> 行词表、只算这 16000 个 token 的 logits；随后 all-gather 把两段拼成长度 <span class="mono">32000</span> 的完整 logits 向量。</p>
 
 <h2>LogitsProcessor 的活：末位切片 + 跨卡汇总</h2>
 <p>把上面这套流程编排起来的，是 <span class="mono">LogitsProcessor</span>。它在前向的最后接过 hidden states，做三件事：
@@ -550,6 +615,29 @@ as the vocabulary</strong> = the <strong>logits</strong>. The larger a token's l
 Logits then go to the Sampler (Lesson 28) for temperature, top-k/p and sampling, ending in a concrete token. Many models <strong>tie</strong>
 the lm_head with the input embedding, since "word→vector" and "vector→word scores" are naturally inverse operations.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="The last hidden vector times the lm_head weight matrix gives a logits vector as long as the vocab, one score per token, then argmax or sample picks the next token">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">hidden × lm_head → logits</text>
+    <rect x="40" y="70" width="54" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="67" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="67" y="135" text-anchor="middle" class="mono" style="font-size:12px">4096</text>
+    <text x="112" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">×</text>
+    <rect x="134" y="58" width="190" height="144" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="229" y="120" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">lm_head</text>
+    <text x="229" y="142" text-anchor="middle" style="font-size:12px;fill:var(--accent-ink)">[hidden × vocab]</text>
+    <text x="229" y="164" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">4096 × 32000</text>
+    <text x="346" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="368" y="70" width="54" height="120" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="395" y="60" text-anchor="middle" style="font-size:12px;fill:var(--muted)">logits</text>
+    <text x="395" y="135" text-anchor="middle" class="mono" style="font-size:12px">32000</text>
+    <text x="444" y="136" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="470" y="100" width="286" height="60" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="613" y="126" text-anchor="middle" style="font-size:13px">argmax / sample</text>
+    <text x="613" y="146" text-anchor="middle" style="font-size:12px;fill:var(--muted)">pick next token</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · hidden × lm_head → logits</b> — the last position's hidden vector (length 4096) times the lm_head weight [hidden × vocab] gives a logits vector as long as the vocab (32000), one score per token; argmax or sampling then picks the next token.</div>
+</div>
+
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Body forward</h4><p>embed → N layers → final norm (Lesson 36) → a hidden per position.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Take the last token</h4><p>In decode, keep <strong>only each request's last position</strong> — only its logits predict the next word.</p></div></div>
@@ -588,6 +676,33 @@ split the <strong>vocab dimension</strong> into segments, one per TP rank — e.
 score vector (only its own segment is real). To get the full logits you stitch the segments together — that step is a cross-GPU
 <strong>all-gather</strong> (or gathered in-place inside argmax/sampling). So no one holds the whole vocab head; HBM and FLOPs are spread across GPUs.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="The vocab is sharded across TP ranks: rank0 owns tokens 0 to 16000, rank1 owns 16000 to 32000, each computes logits for its slice, then all-gather concatenates them into the full 32000-length logits">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">vocab sharded by rank → all-gather</text>
+    <rect x="24" y="120" width="54" height="80" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="51" y="110" text-anchor="middle" style="font-size:12px;fill:var(--muted)">hidden</text>
+    <text x="51" y="165" text-anchor="middle" class="mono" style="font-size:11px">4096</text>
+    <line x1="78" y1="160" x2="132" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="78" y1="160" x2="132" y2="225" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="134" y="60" width="220" height="70" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="244" y="86" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">rank0 · lm_head</text>
+    <text x="244" y="108" text-anchor="middle" style="font-size:12px">vocab 0–16000</text>
+    <rect x="134" y="190" width="220" height="70" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="244" y="216" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">rank1 · lm_head</text>
+    <text x="244" y="238" text-anchor="middle" style="font-size:12px">vocab 16000–32000</text>
+    <line x1="354" y1="95" x2="408" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="354" y1="225" x2="408" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="115" width="140" height="70" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="480" y="148" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">all-gather</text>
+    <text x="480" y="168" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">concat slices</text>
+    <text x="566" y="155" text-anchor="middle" style="font-size:20px;fill:var(--muted)">→</text>
+    <rect x="588" y="115" width="168" height="70" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="672" y="148" text-anchor="middle" style="font-size:13px;fill:var(--purple)">full logits</text>
+    <text x="672" y="168" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--purple)">length 32000</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Vocab sharded across TP ranks</b> — lm_head's vocab dimension is split across ranks: rank0 owns tokens 0–16000, rank1 owns 16000–32000, each computes only its slice's logits; an all-gather then concatenates the two into the full 32000-length logits.</div>
+</div>
+
 <p>Unpacking the mechanism: each rank's lm_head is just that narrow strip <span class="mono">[hidden × vocab/N]</span>, so what it computes is a partial score vector that is <strong>real only for its own segment and empty elsewhere</strong>. What <strong>all-gather</strong> does is have all N GPUs each send out "their stretch" and receive everyone else's, finally <strong>concatenating them end-to-end in rank order</strong> into one full logits vector as long as the entire vocab. Worth noting: for plain <strong>greedy decoding</strong> (argmax of the highest score), you can do even better — each GPU first takes a <strong>local max within its segment</strong> and all-reduces only "the local max value + its global token id", which suffices to pick the global max <strong>without ever materializing the full hundred-thousand-dim vector</strong>. SGLang takes this cheaper in-place reduction path whenever full logits aren't needed (no logprobs, no complex sampling).</p>
 
 <p>Vocab parallelism isn't an isolated trick — it's the <strong>same idea</strong> as the q/k/v and MLP splits in Lessons 25/46: cut a big matrix along some dimension into N slices, each GPU computes one, then one collective realigns the results. Attention splits the <strong>attention heads</strong>, MLP splits the <strong>intermediate dim</strong>, and here we split the <strong>vocab dim</strong>; the only difference is "which dim, and whether all-reduce or all-gather closes it out". Grasp vocab parallelism and you've <strong>completed</strong> the picture of TP's sharding at the model's two ends (input embedding, output head) and its middle layers — the whole network, end to end, is cut and reassembled by one rule.</p>
@@ -603,6 +718,21 @@ score vector (only its own segment is real). To get the full logits you stitch t
   <div class="col"><h4>Whole vocab head on one GPU</h4><p>lm_head + embedding's billion+ params all on one GPU: <strong>HBM pressure, and this step's compute becomes a bottleneck</strong>, inconsistent with TP-splitting the other layers.</p></div>
   <div class="col"><h4>Vocab parallel</h4><p>Each rank holds and computes <strong>one vocab segment</strong>; then <strong>all-gather</strong> assembles full logits. <strong>HBM and FLOPs spread</strong>, in line with TP.</p></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/vocab_parallel_embedding.py ::ParallelLMHead</span><span class="ln">output projection: hidden -&gt; per-token logit, vocab sharded by TP</span></div>
+  <pre><span class="kw">class</span> ParallelLMHead(VocabParallelEmbedding):
+    <span class="cm"># output projection: hidden_state -&gt; one logit per vocab token.</span>
+    <span class="cm"># the VOCAB dimension is sharded across TP ranks (each rank owns a</span>
+    <span class="cm"># slice of rows); vocab size is padded to divide evenly by TP size.</span>
+    <span class="kw">def</span> __init__(self, num_embeddings, embedding_dim, *, bias=False, ...):
+        <span class="cm"># num_embeddings = vocab size, embedding_dim = hidden size</span>
+        ...
+    <span class="cm"># each rank produces logits for ITS vocab slice; an all-gather</span>
+    <span class="cm"># (in LogitsProcessor) stitches them into the full-vocab vector.</span></pre>
+</div>
+
+<p>A concrete instance: Llama's vocab is <span class="mono">32000</span> and hidden <span class="mono">4096</span>, so lm_head is a <span class="mono">4096 × 32000</span> matrix. Under <span class="mono">--tp-size 2</span> each rank holds only <strong>16000</strong> vocab rows and computes logits for just those 16000 tokens; an all-gather then forms the full <span class="mono">32000</span>-length logits vector.</p>
 
 <h2>LogitsProcessor's job: last-token slice + cross-GPU gather</h2>
 <p>The thing that orchestrates all this is <span class="mono">LogitsProcessor</span>. At the end of the forward it takes hidden states and
