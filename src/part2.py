@@ -179,7 +179,7 @@ LESSON_04 = {
 </div>
 
 <div class="fig">
-  <svg viewBox="0 0 760 300" role="img" aria-label="折线图：KV 缓存随序列长度线性增长，横轴为 token 数、纵轴为 KV 显存（MB）；示意 Llama-7B 每 token 的 KV 约 0.5 MB，2048 token 约 1 GB 每请求">
+  <svg viewBox="0 0 760 300" role="img" aria-label="折线图：KV 缓存随序列长度线性增长，横轴为 token 数、纵轴为 KV 显存（MB）；示意 Llama-2-7B（无 GQA）每 token 的 KV 约 0.5 MB，2048 token 约 1 GB 每请求">
     <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV 显存（MB）</text>
@@ -194,11 +194,11 @@ LESSON_04 = {
     <line x1="668" y1="60" x2="668" y2="246" style="stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4"/>
     <circle cx="668" cy="60" r="5" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1.5"/>
     <rect x="356" y="80" width="336" height="54" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
-    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-7B：每 token KV ≈ 0.5 MB</text>
+    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-2-7B（无 GQA）：每 token ≈ 0.5 MB</text>
     <text x="524" y="123" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">2048 token ≈ 1 GB / 请求（示意）</text>
     <text x="150" y="206" style="fill:var(--muted);font-size:12px">线性增长：上下文翻倍 → 显存翻倍</text>
   </svg>
-  <div class="figcap"><b>图 2 · KV 缓存随 token 线性增长</b> — 横轴是序列长度、纵轴是 KV 显存；缓存随上下文成正比上升（数字为示意：Llama-7B 每 token 的 KV 约 0.5 MB，2048 token 约 1 GB/请求）。</div>
+  <div class="figcap"><b>图 2 · KV 缓存随 token 线性增长</b> — 横轴是序列长度、纵轴是 KV 显存；缓存随上下文成正比上升（数字为示意：Llama-2-7B 无 GQA 每 token 约 0.5 MB、2048 token 约 1 GB/请求；启用 GQA 的模型如前述账本只需约 1/4）。</div>
 </div>
 
 <p>给个更具体的数：一条 <strong>2048 token</strong> 的请求按上面账本约占 <strong>256 MB</strong> KV 缓存；<strong>100 条并发</strong>就是约 <strong>25 GB</strong>——一张 80 GB 显卡近三分之一的显存，全压在 KV 上。</p>
@@ -422,7 +422,7 @@ parameter count</strong> but with <strong>context length</strong> — longer con
 </div>
 
 <div class="fig">
-  <svg viewBox="0 0 760 300" role="img" aria-label="Line chart: KV cache grows linearly with sequence length; x-axis is token count, y-axis is KV memory (MB); illustrative Llama-7B with about 0.5 MB of KV per token, so 2048 tokens is about 1 GB per request">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Line chart: KV cache grows linearly with sequence length; x-axis is token count, y-axis is KV memory (MB); illustrative Llama-2-7B (no GQA) with about 0.5 MB of KV per token, so 2048 tokens is about 1 GB per request">
     <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV memory (MB)</text>
@@ -437,11 +437,11 @@ parameter count</strong> but with <strong>context length</strong> — longer con
     <line x1="668" y1="60" x2="668" y2="246" style="stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4"/>
     <circle cx="668" cy="60" r="5" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1.5"/>
     <rect x="356" y="80" width="336" height="54" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
-    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-7B: KV ≈ 0.5 MB / token</text>
+    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-2-7B (no GQA): KV ≈ 0.5 MB / token</text>
     <text x="524" y="123" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">2048 tokens ≈ 1 GB / request (illustrative)</text>
     <text x="150" y="206" style="fill:var(--muted);font-size:12px">linear growth: double context → double memory</text>
   </svg>
-  <div class="figcap"><b>Fig 2 · KV cache grows linearly with tokens</b> — x-axis is sequence length, y-axis is KV memory; the cache rises in proportion to context (numbers illustrative: Llama-7B, KV ≈ 0.5 MB per token, 2048 tokens ≈ 1 GB/request).</div>
+  <div class="figcap"><b>Fig 2 · KV cache grows linearly with tokens</b> — x-axis is sequence length, y-axis is KV memory; the cache rises in proportion to context (numbers illustrative: Llama-2-7B without GQA ≈ 0.5 MB per token, 2048 tokens ≈ 1 GB/request; GQA models like the ledger above need only ~1/4).</div>
 </div>
 
 <p>To make it concrete: one <strong>2048-token</strong> request takes about <strong>256 MB</strong> of KV cache by the ledger above; <strong>100 concurrent</strong> requests is roughly <strong>25 GB</strong> — nearly a third of an 80 GB GPU, all spent on KV.</p>
@@ -1142,6 +1142,7 @@ LESSON_06 = {
     <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">长请求的 6 个红页散落各处、全部填满——物理页无需相邻</text>
   </svg>
+  <div class="figcap"><b>图 1 · 碎片化 vs 分页</b> — 连续分配会留下放不下长请求的碎片空洞（总空闲够、却没有连续段）；分页把 KV 切成固定大小的页，散落填进任意空槽，零浪费。</div>
 </div>
 
 <p>用一个具体口径感受这种差别：取 <span class="mono">page_size = 16</span> token/页，一条只生成 60 token 的请求只需 <span class="mono">⌈60/16⌉ = 4</span> 页（64 槽），
@@ -1208,6 +1209,7 @@ LESSON_06 = {
     <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
     <text x="312" y="200" style="font-size:11px;fill:var(--muted)">逻辑连续 · 物理分散 · 页表牵线</text>
   </svg>
+  <div class="figcap"><b>图 2 · 页表映射</b> — 逻辑上连续的 token 位置（0、1、2、3）经页表映射到分散的物理页（#7、#2）：逻辑连续、物理分散。</div>
 </div>
 
 <p>这里有个常被忽略的取舍：<strong>page_size 不是越小越好</strong>。页越小，内部浪费越少（最多浪费小半页），但页表更长、查表与算子里的间接寻址开销更大；
@@ -1254,10 +1256,10 @@ LESSON_06 = {
     <span class="kw">def</span> __init__(self, size, max_context_len, ...):
         <span class="cm"># req_to_token[req][pos] -&gt; 该 token 的物理 KV 槽位</span>
         self.req_to_token = ...   <span class="cm"># 形状 [size, max_context_len]</span>
-    <span class="kw">def</span> alloc(self, need_size):
-        ...   <span class="cm"># 为一条新请求预留若干槽位</span>
-    <span class="kw">def</span> free(self, req_index):
-        ...   <span class="cm"># 请求结束后把它的槽位整批还回池中</span></pre>
+    <span class="kw">def</span> alloc(self, reqs):
+        ...   <span class="cm"># 为每条新请求分配一行 req_pool_idx（整行索引）</span>
+    <span class="kw">def</span> free(self, req):
+        ...   <span class="cm"># 请求结束后把它的 req_pool_idx 行还回池中</span></pre>
 </div>
 
 <p>读懂这段就抓住了分页的精髓：<strong>显存不再按"请求"整片预留，而是按"页"零售。</strong>
@@ -1393,6 +1395,7 @@ down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the
     <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">The long request's 6 red pages scatter everywhere and all fit — physical pages need not be adjacent</text>
   </svg>
+  <div class="figcap"><b>Fig 1 · Fragmentation vs paging</b> — contiguous allocation leaves holes a long request can't fit (enough total free space, but no contiguous run); paging cuts KV into fixed-size pages that fill any free slot, scattered, with zero waste.</div>
 </div>
 
 <p>A concrete sense of the gap: take <span class="mono">page_size = 16</span> tokens/page. A request that generates only 60 tokens needs just
@@ -1462,6 +1465,7 @@ physically scattered, page-table-linked":</p>
     <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
     <text x="312" y="200" style="font-size:11px;fill:var(--muted)">logically contiguous · physically scattered · linked by the table</text>
   </svg>
+  <div class="figcap"><b>Fig 2 · The page table</b> — logically contiguous token positions (0, 1, 2, 3) map through the page table to scattered physical pages (#7, #2): logically contiguous, physically scattered.</div>
 </div>
 
 <p>One often-missed tradeoff: <strong>smaller page_size is not always better</strong>. Smaller pages waste less internally (at most a fraction of a page), but the
@@ -1503,10 +1507,10 @@ in-code incarnation of that "page table." Below is the allocator's skeleton: <st
     <span class="kw">def</span> __init__(self, size, max_context_len, ...):
         <span class="cm"># req_to_token[req][pos] -&gt; the physical KV slot for that token</span>
         self.req_to_token = ...   <span class="cm"># shape [size, max_context_len]</span>
-    <span class="kw">def</span> alloc(self, need_size):
-        ...   <span class="cm"># reserve slots for a new request</span>
-    <span class="kw">def</span> free(self, req_index):
-        ...   <span class="cm"># release a finished request's slots back to the pool</span></pre>
+    <span class="kw">def</span> alloc(self, reqs):
+        ...   <span class="cm"># assign one req_pool_idx row per new request</span>
+    <span class="kw">def</span> free(self, req):
+        ...   <span class="cm"># release that request's req_pool_idx row back to the pool</span></pre>
 </div>
 
 <p>Read this and you grasp the essence of paging: <strong>HBM is no longer reserved wholesale per "request" but retailed per "page."</strong>
