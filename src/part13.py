@@ -465,14 +465,17 @@ LESSON_59 = {"zh": r"""
     # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
     # results while the current batch is still running on the GPU.
     self.result_queue = deque()
+    self.last_batch = None
     while True:
         recv = self.request_receiver.recv_requests()
         self.process_input_requests(recv)
         batch = self.get_next_batch_to_run()        # build batch N (CPU)
         result = self.run_batch(batch)              # launch forward N (GPU)
         self.result_queue.append((batch, result))
-        # one step out of phase: process batch N-1 now
-        self.process_batch_result(*self.result_queue.popleft())</pre></div>
+        if self.last_batch is not None:             # skip on the 1st iter, so
+            self.process_batch_result(              # we always finish batch N-1
+                *self.result_queue.popleft())       # while forward N runs (GPU)
+        self.last_batch = batch</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一条主线</strong>：CPU 绝不能让 GPU 等。任何前向<strong>前后</strong>的 CPU 工作都是潜在气泡。</li>
@@ -626,14 +629,17 @@ LESSON_59 = {"zh": r"""
     # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
     # results while the current batch is still running on the GPU.
     self.result_queue = deque()
+    self.last_batch = None
     while True:
         recv = self.request_receiver.recv_requests()
         self.process_input_requests(recv)
         batch = self.get_next_batch_to_run()        # build batch N (CPU)
         result = self.run_batch(batch)              # launch forward N (GPU)
         self.result_queue.append((batch, result))
-        # one step out of phase: process batch N-1 now
-        self.process_batch_result(*self.result_queue.popleft())</pre></div>
+        if self.last_batch is not None:             # skip on the 1st iter, so
+            self.process_batch_result(              # we always finish batch N-1
+                *self.result_queue.popleft())       # while forward N runs (GPU)
+        self.last_batch = batch</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>
@@ -1413,7 +1419,7 @@ LESSON_62 = {"zh": r"""
     def get_graph_runner_cls(self) -&gt; type:
         raise NotImplementedError</pre></div>
 
-<p>一个具体的画面：同一套引擎，在 <strong>NVIDIA</strong> 上 <span class="mono">get_default_attention_backend()</span> 返回 FlashInfer，在 <strong>AMD</strong> 上返回 Triton——上层调度与模型循环<strong>从不改动</strong>，因为它们只调用 <span class="mono">SRTPlatform</span> 这个接口，至于背后是哪块芯片、哪种内核，对它们透明。想新增一种加速器，做法不是在调度器里到处加 <span class="mono">if</span> 分支，而是<strong>新增一个 SRTPlatform 子类</strong>、覆写这几个方法，再在部署时选上它即可：改动被收在一个文件里，核心代码一行不动。</p>
+<p>一个具体的画面：同一套引擎，在 <strong>NVIDIA</strong> 上默认选用 FlashInfer/FA3 这族注意力后端，在 <strong>AMD</strong> 上选用 Triton——这个选择在启动时由所在平台（<span class="mono">SRTPlatform</span> 的实现配合服务器参数默认值）按硬件与架构自动定下，上层调度与模型循环<strong>从不改动</strong>，因为它们只调用 <span class="mono">SRTPlatform</span> 这个接口，至于背后是哪块芯片、哪种内核，对它们透明。想新增一种加速器，做法不是在调度器里到处加 <span class="mono">if</span> 分支，而是<strong>新增一个 SRTPlatform 子类</strong>、覆写这几个方法，再在部署时选上它即可：改动被收在一个文件里，核心代码一行不动。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一个模式，处处复现</strong>：面向接口（抽象基类）编程，具体实现在<span class="mono">部署时</span>选定；这是贯穿全书的同一副骨架。</li>
@@ -1555,7 +1561,7 @@ LESSON_62 = {"zh": r"""
     def get_graph_runner_cls(self) -&gt; type:
         raise NotImplementedError</pre></div>
 
-<p>A concrete picture: the same engine has <span class="mono">get_default_attention_backend()</span> return FlashInfer on <strong>NVIDIA</strong> and Triton on <strong>AMD</strong>—the upper scheduler and model loop <strong>never change</strong>, because they only call the <span class="mono">SRTPlatform</span> interface; which chip or kernel sits behind it is transparent to them. To add a new accelerator you do not sprinkle <span class="mono">if</span> branches through the scheduler; you <strong>add one SRTPlatform subclass</strong>, override these few methods, and select it at deploy time: the change is contained in a single file and not a line of core code moves.</p>
+<p>A concrete picture: the same engine defaults to the FlashInfer/FA3 family of attention backends on <strong>NVIDIA</strong> and to Triton on <strong>AMD</strong>—that choice is made at startup by the active platform (the <span class="mono">SRTPlatform</span> implementation plus the server-arg defaults) according to the hardware and architecture, and the upper scheduler and model loop <strong>never change</strong>, because they only call the <span class="mono">SRTPlatform</span> interface; which chip or kernel sits behind it is transparent to them. To add a new accelerator you do not sprinkle <span class="mono">if</span> branches through the scheduler; you <strong>add one SRTPlatform subclass</strong>, override these few methods, and select it at deploy time: the change is contained in a single file and not a line of core code moves.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One pattern, everywhere</strong>: program to an interface (an ABC); the concrete implementation is selected <span class="mono">at deploy time</span>—the same skeleton runs through the whole book.</li>
@@ -1694,10 +1700,10 @@ class SchedulePolicy:
 </pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">连续批处理的核心杠杆：每步决定跑哪个批</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
-    # the continuous-batching lever, run EVERY step: merge any finished
-    # prefill into the running batch, then decide what to run next —
-    # admit a new prefill batch (more work) or keep decoding.
-    merge_finished_prefill_into(self.running_batch)
+    # the continuous-batching lever, run EVERY step:
+    # 1) merge any finished prefill (last_batch) into the running batch
+    ...
+    # 2) then decide what to run next:
     new_batch = self.get_new_batch_prefill()    # admit within token budget
     if new_batch is not None:
         return new_batch                         # run prefill this step
@@ -1852,10 +1858,10 @@ class SchedulePolicy:
 </pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">the continuous-batching lever: each step pick which batch to run</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
-    # the continuous-batching lever, run EVERY step: merge any finished
-    # prefill into the running batch, then decide what to run next —
-    # admit a new prefill batch (more work) or keep decoding.
-    merge_finished_prefill_into(self.running_batch)
+    # the continuous-batching lever, run EVERY step:
+    # 1) merge any finished prefill (last_batch) into the running batch
+    ...
+    # 2) then decide what to run next:
     new_batch = self.get_new_batch_prefill()    # admit within token budget
     if new_batch is not None:
         return new_batch                         # run prefill this step
