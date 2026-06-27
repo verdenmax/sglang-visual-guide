@@ -359,12 +359,66 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>那么什么时候用哪一招？可以顺着"瓶颈是什么"来判断：模型大到<strong>一张卡装不下</strong>，先上 TP 把每一层切薄；单机的卡数还不够，再叠 PP 把层分到更多机器上。模型是<strong>专家众多的 MoE</strong>、总参数把显存撑爆，就上 EP 把专家摊开。模型本来就<strong>装得下</strong>、只是想要<strong>更高吞吐</strong>，那就上 DP 多复制几份、把请求分摊出去。绝大多数真实部署都不是单选题，而是按这套优先级把几招叠起来用：TP 吃满单机内的高速链路，PP 跨机扩展模型规模，EP 摊开专家，DP 复制换吞吐。</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="四种并行切分：TP 切一层内的矩阵、PP 切层堆叠成阶段、EP 把专家摊到各卡、DP 复制整模型分请求">
+    <rect x="20" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="46" style="font-weight:700;fill:var(--blue)">TP 张量并行</text>
+    <text x="36" y="66" style="fill:var(--muted);font-size:12px">每卡持一层的 ¼ 切片</text>
+    <rect x="40" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="62" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="110" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="132" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="180" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="202" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="250" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="272" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="410" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="46" style="font-weight:700;fill:var(--teal)">PP 流水线并行</text>
+    <text x="426" y="66" style="fill:var(--muted);font-size:12px">每卡持连续几层（一个阶段）</text>
+    <rect x="430" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="452" y="119" text-anchor="middle" class="mono" style="font-size:11px">段1</text>
+    <text x="487" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="500" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="522" y="119" text-anchor="middle" class="mono" style="font-size:11px">段2</text>
+    <text x="557" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="570" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="592" y="119" text-anchor="middle" class="mono" style="font-size:11px">段3</text>
+    <text x="627" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="640" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="662" y="119" text-anchor="middle" class="mono" style="font-size:11px">段4</text>
+    <rect x="20" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="196" style="font-weight:700;fill:var(--amber)">EP 专家并行</text>
+    <text x="36" y="216" style="fill:var(--muted);font-size:12px">每卡持一部分专家</text>
+    <rect x="40" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="62" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="110" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="132" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="180" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="202" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="250" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="272" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="410" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="196" style="font-weight:700;fill:var(--purple)">DP 数据并行</text>
+    <text x="426" y="216" style="fill:var(--muted);font-size:12px">每卡持整份模型副本</text>
+    <rect x="430" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="452" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+    <rect x="500" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="522" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+    <rect x="570" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="592" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+    <rect x="640" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="662" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 四种切分</b> — 同样 4 张卡：TP 让每卡持一层的 ¼ 切片（切层内矩阵），PP 让每卡持连续几层即一个阶段（切层堆叠），EP 让每卡持一部分专家，DP 让每卡持整份模型副本、只分请求。</div>
+</div>
+
 <h2>TP 张量并行：切开"一层之内"的矩阵</h2>
 <p><strong>TP（tensor parallel）</strong>把每一层的<strong>权重矩阵</strong>沿某个维度切成若干片，分给同组的各个 rank。最典型的就是第25课讲的注意力 q/k/v 投影按列切、第37课讲的 MLP 上投影按列切、词表（vocab）按行切。每个 rank 只持有矩阵的一片，于是只算出<strong>部分结果</strong>；要得到完整的层输出，就必须把各 rank 的部分和<strong>合并</strong>——列切+行切的组合用一次 <span class="mono">all_reduce</span> 求和，词表并行的 logits 则用 <span class="mono">all_gather</span> 拼接。</p>
 <p>TP 的特点是：它把<strong>单层的算力和显存</strong>都摊薄了，一张卡装不下的大矩阵被切成几片分别存放、分别计算。代价是<strong>每一层</strong>都要通信一次（前向一次、反向再一次），通信极其频繁。因此 TP 组内的 GPU 必须用<strong>高速近邻链路</strong>（NVLink / NVSwitch），通常局限在<strong>单机之内</strong>；跨机做 TP 会被慢链路拖垮。</p>
 <div class="layers"><div class="layer">Rank0：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank1：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank2：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank3：每一层都只持有该层权重的 1/4 切片</div></div>
 <p>注意上图：TP 下<strong>每个 rank 都"纵向"贯穿了所有层</strong>，只是每层都只拿到一小条。这正是 TP 与 PP 的根本区别——TP 横向切一层的宽度，PP 纵向切层的深度。</p>
 <p>举个具体的数：一个 70B 模型的单层权重动辄上百 MB，配成 TP=8 时每张卡只存其中 1/8、也只算 1/8，但<strong>每过一层</strong>就要做一次覆盖这 8 张卡的 <span class="mono">all_reduce</span> 把部分和加起来。正因为通信如此密集，TP 的并行度通常<strong>不超过单机的卡数</strong>（例如 8）；再往上扩就该换成 PP 或 DP，否则频繁的跨机 all_reduce 会让通信时间盖过省下来的计算时间。一句话记住 TP 的取舍：它同时摊薄了"单层算力"和"单层显存"两样东西，代价是"每层都要通信、通信最贵、必须近邻高速链路"。</p>
+<p>把这些落到一条具体命令上：<span class="mono">--tp-size 8</span> 会把<strong>每一层</strong>的矩阵切到 8 张卡上，每过一层就做<strong>一次</strong> <span class="mono">all_reduce</span> 把部分和加起来——正因为它<strong>每层都通信</strong>，TP 组必须用机内的高速链路（NVLink）；相比之下 <span class="mono">--dp-size</span> 复制整份模型、每步<strong>几乎不通信</strong>，慢链路也无所谓。这正是"TP 吃满机内 NVLink、DP 几乎不通信"这条经验法则的由来。</p>
 
 <h2>PP 流水线并行：把"层"切成前后接力的阶段</h2>
 <p><strong>PP（pipeline parallel）</strong>把模型的<strong>层</strong>按顺序分成几个连续的<strong>阶段（stage）</strong>，放在不同 GPU 上。第 1～k 层在 rank0，第 k+1～2k 层在 rank1，依此类推。前向时，激活值从一个阶段<strong>流向</strong>下一个阶段（向 <span class="mono">next_rank</span> 发送、从 <span class="mono">prev_rank</span> 接收，第23课）；反向时梯度沿相反方向回传。</p>
@@ -394,6 +448,37 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="flow"><div class="node">EP token 批</div><div class="arrow">→</div><div class="node">all_to_all 路由到专家</div><div class="arrow">→</div><div class="node">汇总结果</div></div>
 <div class="flow"><div class="node">PP 阶段 i 激活</div><div class="arrow">→</div><div class="node">send / recv 给下一阶段</div><div class="arrow">→</div><div class="node">阶段 i+1 继续</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="每种并行各自的通信：TP 用 all-reduce、EP 用 all-to-all、PP 用 send-recv、DP 几乎不通信">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">每种并行各自通信什么</text>
+    <rect x="24" y="50" width="120" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="84" y="75" text-anchor="middle" style="font-weight:700;fill:var(--blue)">TP</text>
+    <text x="156" y="76" style="fill:var(--muted)">→</text>
+    <rect x="180" y="50" width="190" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="275" y="75" text-anchor="middle" class="mono" style="font-size:12px">all-reduce 求和</text>
+    <text x="392" y="75" style="fill:var(--faint);font-size:12px">每层一次 · 最贵 · 需 NVLink</text>
+    <rect x="24" y="110" width="120" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="84" y="135" text-anchor="middle" style="font-weight:700;fill:var(--amber)">EP</text>
+    <text x="156" y="136" style="fill:var(--muted)">→</text>
+    <rect x="180" y="110" width="190" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="275" y="135" text-anchor="middle" class="mono" style="font-size:12px">all-to-all 路由</text>
+    <text x="392" y="135" style="fill:var(--faint);font-size:12px">随 token × top-k 增长</text>
+    <rect x="24" y="170" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="84" y="195" text-anchor="middle" style="font-weight:700;fill:var(--teal)">PP</text>
+    <text x="156" y="196" style="fill:var(--muted)">→</text>
+    <rect x="180" y="170" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="275" y="195" text-anchor="middle" class="mono" style="font-size:12px">send · recv 激活</text>
+    <text x="392" y="195" style="fill:var(--faint);font-size:12px">仅在阶段交界 · 便宜</text>
+    <rect x="24" y="230" width="120" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="84" y="255" text-anchor="middle" style="font-weight:700;fill:var(--purple)">DP</text>
+    <text x="156" y="256" style="fill:var(--muted)">→</text>
+    <rect x="180" y="230" width="190" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="275" y="255" text-anchor="middle" class="mono" style="font-size:12px">几乎不通信</text>
+    <text x="392" y="255" style="fill:var(--faint);font-size:12px">每步 ≈ 0 · 链路无所谓</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 各自的通信</b> — 每根主轴对应一种集合通信：TP 每层做 all-reduce 求部分和（最贵、需 NVLink），EP 用两次 all-to-all 把 token 路由到专家再送回，PP 只在阶段交界 send/recv 激活，DP 每步近乎零通信。</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">一个统一抽象：TP/PP/EP/DP 都是它在不同 rank 布局上的实例</span></div><pre>class GroupCoordinator:
     # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
     rank: int             # this process's global rank
@@ -413,6 +498,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     @property
     def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator.all_reduce</span><span class="ln">把张量在本组（如 TP 组）内求和，人人拿到同一结果</span></div><pre>def all_reduce(self, input_: torch.Tensor) -&gt; torch.Tensor:
+    # sum `input_` across every rank in THIS group (e.g. the TP group),
+    # so each rank ends with the same reduced tensor.
+    if self.world_size == 1:        # single GPU: nothing to reduce
+        return input_
+    ...   # dispatch to the group's all-reduce (custom op / NCCL)
+    return input_</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>TP</strong> 切<strong>一层之内的权重矩阵</strong>（q/k/v、MLP 列、词表，第25/37课），每层用 <span class="mono">all_reduce</span>/<span class="mono">all_gather</span> 合并；通信最频繁，需 NVLink、通常单机内。</li>
@@ -489,12 +582,66 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>So when do you reach for which? Follow the bottleneck: if the model is <strong>too big to fit on one card</strong>, first apply TP to thin each layer; if a single node doesn't have enough cards, add PP to spread layers across more machines. If it is a <strong>many-expert MoE</strong> whose total parameters blow past memory, apply EP to scatter the experts. If the model already <strong>fits</strong> and you just want <strong>more throughput</strong>, apply DP to replicate it and share out requests. Almost every real deployment is not single-choice but stacks several by this priority: TP saturates the fast intra-node link, PP scales model size across nodes, EP spreads experts, DP replicates for throughput.</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="Four ways to split a model: TP splits a layer's matrices, PP splits the layer stack into stages, EP spreads experts across cards, DP replicates the model and splits requests">
+    <rect x="20" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="46" style="font-weight:700;fill:var(--blue)">TP tensor</text>
+    <text x="36" y="66" style="fill:var(--muted);font-size:12px">each holds a ¼ slice of a layer</text>
+    <rect x="40" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="62" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="110" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="132" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="180" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="202" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="250" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="272" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="410" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="46" style="font-weight:700;fill:var(--teal)">PP pipeline</text>
+    <text x="426" y="66" style="fill:var(--muted);font-size:12px">each holds consecutive layers (a stage)</text>
+    <rect x="430" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="452" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg1</text>
+    <text x="487" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="500" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="522" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg2</text>
+    <text x="557" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="570" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="592" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg3</text>
+    <text x="627" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="640" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="662" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg4</text>
+    <rect x="20" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="196" style="font-weight:700;fill:var(--amber)">EP expert</text>
+    <text x="36" y="216" style="fill:var(--muted);font-size:12px">each holds some experts</text>
+    <rect x="40" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="62" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="110" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="132" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="180" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="202" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="250" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="272" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="410" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="196" style="font-weight:700;fill:var(--purple)">DP data</text>
+    <text x="426" y="216" style="fill:var(--muted);font-size:12px">each holds a full model replica</text>
+    <rect x="430" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="452" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+    <rect x="500" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="522" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+    <rect x="570" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="592" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+    <rect x="640" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="662" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · four ways to split</b> — same 4 cards: TP gives each a ¼ slice of a layer (split within a layer), PP gives each consecutive layers i.e. a stage (split the stack), EP gives each some experts, DP gives each a full model replica and only splits requests.</div>
+</div>
+
 <h2>TP tensor parallel: split the matrices "within a layer"</h2>
 <p><strong>TP (tensor parallel)</strong> shards each layer's <strong>weight matrices</strong> along some dimension across the ranks of a group. The classic cases: the q/k/v projections column-split (lesson 25), the MLP up-projection column-split (lesson 37), and the vocab row-split. Each rank holds only one slice of the matrix, so it computes only a <strong>partial result</strong>; to get the full layer output the partial sums must be <strong>merged</strong>—a column+row combo uses one <span class="mono">all_reduce</span> sum, while vocab-parallel logits use <span class="mono">all_gather</span> to concatenate.</p>
 <p>TP's signature is that it thins out both the <strong>compute and memory of a single layer</strong>: a giant matrix that won't fit on one card is split into slices, stored and computed separately. The price is that <strong>every layer</strong> communicates (once forward, once backward)—extremely frequent. So GPUs in a TP group must use a <strong>fast neighbor link</strong> (NVLink / NVSwitch) and usually stay <strong>within one node</strong>; doing TP across machines gets choked by slow links.</p>
 <div class="layers"><div class="layer">Rank0: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank1: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank2: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank3: holds a 1/4 slice of every layer's weights</div></div>
 <p>Note the diagram: under TP <strong>every rank runs "vertically" through all layers</strong>, just holding a thin strip of each. This is the fundamental difference from PP—TP splits the width of a layer, PP splits the depth of the stack.</p>
 <p>Concrete numbers help: a 70B model's per-layer weights are easily hundreds of MB; at TP=8 each card stores only 1/8 and computes only 1/8, but <strong>every single layer</strong> must run an <span class="mono">all_reduce</span> across those 8 cards to sum the partial results. Because the communication is so dense, TP's degree usually <strong>does not exceed the number of cards in one node</strong> (e.g. 8); to scale further you switch to PP or DP, otherwise frequent cross-node all_reduce would outweigh the compute it saves. Remember TP's trade-off in one line: it thins both "per-layer compute" and "per-layer memory", at the cost of "communicating every layer—the most expensive—over a fast neighbor link".</p>
+<p>Pin this to a real command: <span class="mono">--tp-size 8</span> shards <strong>every layer</strong>'s matrices over 8 GPUs and does <strong>one</strong> <span class="mono">all_reduce</span> per layer to sum the partial results—because it <strong>communicates every layer</strong>, the TP group needs a fast intra-node link (NVLink); by contrast <span class="mono">--dp-size</span> replicates the whole model and <strong>barely communicates</strong> per step, so a slow link is fine. That is exactly where the rule "TP saturates intra-node NVLink, DP barely communicates" comes from.</p>
 
 <h2>PP pipeline parallel: split "layers" into a relay of stages</h2>
 <p><strong>PP (pipeline parallel)</strong> splits the model's <strong>layers</strong> in order into consecutive <strong>stages</strong>, placed on different GPUs. Layers 1…k on rank0, k+1…2k on rank1, and so on. In the forward pass activations <strong>flow</strong> from one stage to the next (send to <span class="mono">next_rank</span>, receive from <span class="mono">prev_rank</span>, lesson 23); in the backward pass gradients flow the opposite way.</p>
@@ -524,6 +671,37 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="flow"><div class="node">EP token batch</div><div class="arrow">→</div><div class="node">all_to_all route to experts</div><div class="arrow">→</div><div class="node">gathered result</div></div>
 <div class="flow"><div class="node">PP stage i activations</div><div class="arrow">→</div><div class="node">send / recv to next stage</div><div class="arrow">→</div><div class="node">stage i+1 continues</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="What each parallelism communicates: TP uses all-reduce, EP uses all-to-all, PP uses send-recv, DP barely communicates">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">what each parallelism communicates</text>
+    <rect x="24" y="50" width="120" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="84" y="75" text-anchor="middle" style="font-weight:700;fill:var(--blue)">TP</text>
+    <text x="156" y="76" style="fill:var(--muted)">→</text>
+    <rect x="180" y="50" width="190" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="275" y="75" text-anchor="middle" class="mono" style="font-size:12px">all-reduce (sum)</text>
+    <text x="392" y="75" style="fill:var(--faint);font-size:12px">every layer · priciest · NVLink</text>
+    <rect x="24" y="110" width="120" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="84" y="135" text-anchor="middle" style="font-weight:700;fill:var(--amber)">EP</text>
+    <text x="156" y="136" style="fill:var(--muted)">→</text>
+    <rect x="180" y="110" width="190" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="275" y="135" text-anchor="middle" class="mono" style="font-size:12px">all-to-all (route)</text>
+    <text x="392" y="135" style="fill:var(--faint);font-size:12px">grows with token × top-k</text>
+    <rect x="24" y="170" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="84" y="195" text-anchor="middle" style="font-weight:700;fill:var(--teal)">PP</text>
+    <text x="156" y="196" style="fill:var(--muted)">→</text>
+    <rect x="180" y="170" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="275" y="195" text-anchor="middle" class="mono" style="font-size:12px">send · recv (acts)</text>
+    <text x="392" y="195" style="fill:var(--faint);font-size:12px">only at stage edges · cheap</text>
+    <rect x="24" y="230" width="120" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="84" y="255" text-anchor="middle" style="font-weight:700;fill:var(--purple)">DP</text>
+    <text x="156" y="256" style="fill:var(--muted)">→</text>
+    <rect x="180" y="230" width="190" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="275" y="255" text-anchor="middle" class="mono" style="font-size:12px">almost none</text>
+    <text x="392" y="255" style="fill:var(--faint);font-size:12px">≈ 0 per step · any link</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · what each communicates</b> — each axis maps to one collective: TP does an all-reduce every layer to sum partials (priciest, needs NVLink), EP does two all-to-all to route tokens to experts and back, PP only send/recv activations at stage edges, DP is near-zero communication per step.</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">one unified abstraction: TP/PP/EP/DP are all instances over different rank layouts</span></div><pre>class GroupCoordinator:
     # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
     rank: int             # this process's global rank
@@ -543,6 +721,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     @property
     def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator.all_reduce</span><span class="ln">sum a tensor across this group (e.g. TP), everyone gets the same result</span></div><pre>def all_reduce(self, input_: torch.Tensor) -&gt; torch.Tensor:
+    # sum `input_` across every rank in THIS group (e.g. the TP group),
+    # so each rank ends with the same reduced tensor.
+    if self.world_size == 1:        # single GPU: nothing to reduce
+        return input_
+    ...   # dispatch to the group's all-reduce (custom op / NCCL)
+    return input_</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>TP</strong> splits the <strong>weight matrices within a layer</strong> (q/k/v, MLP columns, vocab; lessons 25/37), merging each layer with <span class="mono">all_reduce</span>/<span class="mono">all_gather</span>; the most frequent communication, needs NVLink, usually single node.</li>

@@ -26,11 +26,74 @@ LESSON_43 = {"zh": r"""
 
 <div class="flow"><div class="node">draft 提议 k 个 token</div><div class="arrow">→</div><div class="node">target 一次前向并行验完 k 个</div><div class="arrow">→</div><div class="node">接受最长正确前缀 + 补 bonus_token</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="草稿提议 k 个，目标一次前向并行验证，接受最长前缀再补一个 bonus">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">草稿提议 k 个 token</text>
+    <rect x="24" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="66" y="64" text-anchor="middle" class="mono" style="font-size:12px">d1</text>
+    <rect x="120" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="162" y="64" text-anchor="middle" class="mono" style="font-size:12px">d2</text>
+    <rect x="216" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="258" y="64" text-anchor="middle" class="mono" style="font-size:12px">d3</text>
+    <rect x="312" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="354" y="64" text-anchor="middle" class="mono" style="font-size:12px">d4</text>
+    <line x1="210" y1="80" x2="210" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="104" style="fill:var(--muted);font-size:12px">target：一次前向</text>
+    <rect x="24" y="114" width="540" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="294" y="139" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ONE forward 并行验完 k 个</text>
+    <line x1="210" y1="154" x2="210" y2="182" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="178" style="fill:var(--muted);font-size:12px">接受最长前缀 + bonus</text>
+    <rect x="24" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="212" text-anchor="middle" class="mono" style="font-size:12px">d1 ✓</text>
+    <rect x="120" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="162" y="212" text-anchor="middle" class="mono" style="font-size:12px">d2 ✓</text>
+    <rect x="216" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="258" y="212" text-anchor="middle" class="mono" style="font-size:12px">d3 ✓</text>
+    <rect x="312" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="354" y="212" text-anchor="middle" class="mono" style="font-size:12px">bonus</text>
+    <rect x="430" y="190" width="84" height="34" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="472" y="212" text-anchor="middle" class="mono" style="font-size:12px">d4 ✗</text>
+    <rect x="24" y="258" width="16" height="12" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="48" y="269" style="fill:var(--muted);font-size:12px">接受</text>
+    <rect x="120" y="258" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="144" y="269" style="fill:var(--muted);font-size:12px">拒绝</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 草稿提议 → 目标一次验证</b> — 便宜的草稿模型先猜 k 个 token，昂贵的 target 在<strong>同一次前向</strong>里并行打分；从头比对，匹配的前缀（绿）被接受，第一个不匹配处（红）拒绝其后全部，再由 target 补一个 <span class="mono">bonus</span>。图中 4 个里中了 3 个，加 bonus 共吐 4 个 token。</div>
+</div>
+
 <h2>三、两个核心指标：accept_rate(α) 与 accept_length(τ)</h2>
 <p>衡量投机解码好坏，论文里用两个术语，务必分清楚。<strong>accept_rate</strong>（接受率 α）= <span class="mono">correct_drafts / proposed_drafts</span>，即<strong>每个草稿 token</strong>被接受的概率，它<strong>不包含</strong>那个白送的 bonus_token——它衡量草稿模型"猜得准不准"。<strong>accept_length</strong>（接受长度 τ）= <strong>每个验证步平均吐出的 token 数</strong>，它<strong>包含</strong>那个一定会吐的 bonus_token——它衡量"一次目标前向到底能产出几个 token"。两者都越大越好：α 越高说明草稿越靠谱，τ 越大说明每次昂贵前向摊到的 token 越多、加速越猛。直觉上 τ 随 α 单调上升，但因为有 bonus，<strong>即使 α 很低，τ 也至少为 1</strong>（最坏情况退化成普通自回归，绝不更慢）。</p>
 <p>把这两个指标和成本放在一起，就能估算加速比。设草稿一次提议 k 个，则每个验证步的<strong>收益</strong>是 τ 个 token，而<strong>代价</strong>主要是一次目标前向加上草稿模型跑 k 步的小开销。粗略地说，理想加速比约等于 τ 除以"一次目标前向 + 草稿开销"折算出的等效前向数；当草稿很小、几乎免费时，加速比就近似正比于 τ。这也揭示了一个实践权衡：<strong>k 不是越大越好</strong>。k 太小，τ 的上限被压低，省不了多少；k 太大，靠后的草稿位置因为前缀更长、越来越难猜中，α 会下滑，被拒后白白浪费草稿算力，还增大了一次验证的张量规模。因此真实系统会围绕模型对、任务难度去调 k，让 α 和 τ 的乘积效应落在最甜的点上。一个常被引用的经验是：<strong>α 决定了 τ 的天花板，而 bonus 决定了 τ 的地板</strong>。在实践中，人们会把这两个指标连同端到端吞吐一起打点观测：α 偏低往往提示草稿模型与目标不够合拍、需要换草稿方法或重训草稿头；τ 上不去则提示 k 设得太保守或接受太苛刻。把它们当成<strong>投机解码的体温计</strong>，调参时就有了明确的抓手。</p>
 
 <div class="cols"><div class="col"><strong>基线（普通自回归）</strong><br/>每次目标前向 = <span class="mono">1</span> 个 token<br/>付一次全权重搬运只换一个 token<br/>带宽受限、算力空转</div><div class="col"><strong>投机解码</strong><br/>每次目标前向 = <span class="mono">m</span> 个 token（被接受前缀 + bonus）<br/>同一次搬运摊薄到多个 token<br/>m 由 accept_length(τ) 决定</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 260" role="img" aria-label="基线每次前向只吐 1 个 token，投机每次前向吐 m 个 token，两条时间线对比">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">基线：1 token / 前向</text>
+    <rect x="24" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="70" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="124" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="170" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="224" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="324" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="370" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="424" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="470" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="524" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="570" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <text x="628" y="65" style="fill:var(--amber);font-weight:700;font-size:12px">6 前向</text>
+    <text x="24" y="128" style="font-weight:700;fill:var(--muted)">投机：m token / 前向 (m&gt;1)</text>
+    <rect x="24" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="70" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <rect x="124" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="170" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <text x="228" y="165" style="fill:var(--teal);font-weight:700;font-size:12px">2 前向 · 同样 6 token</text>
+    <line x1="24" y1="210" x2="616" y2="210" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="232" style="fill:var(--faint);font-size:12px">时间 →（更少昂贵前向 = 更快）</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 基线 vs 投机时间线</b> — 基线每次昂贵的目标前向只产出 <strong>1</strong> 个 token，6 个 token 要 6 次前向；投机每次前向平均吐 <span class="mono">m</span>(&gt;1) 个被接受 token，同样 6 个 token 只需 2 次前向 → <strong>更少昂贵前向、更短总时间</strong>。</div>
+</div>
 
 <h2>四、SGLang 把"出草稿的方法"做成可插拔</h2>
 <p>不同的"怎么提议草稿"对应不同算法，SGLang 用一个 <span class="mono">SpeculativeAlgorithm</span> 枚举来选择，成员包括 <span class="mono">EAGLE</span>、<span class="mono">EAGLE3</span>、<span class="mono">NGRAM</span>、<span class="mono">STANDALONE</span>、<span class="mono">DFLASH</span>、<span class="mono">FROZEN_KV_MTP</span>、<span class="mono">NONE</span>。它们共享同一套"提议→验证→接受"骨架，只在"草稿从哪来"上不同：有的训练一个轻量草稿头复用目标的隐藏态（EAGLE 系列，详见<strong>第44课</strong>），有的直接用 n-gram 命中历史文本，有的挂一个独立小模型。编排这一切的是 <span class="mono">BaseSpecWorker</span>：它持有一个 <span class="mono">target_worker</span>（大模型，负责一次验完 k 个）和一个 <span class="mono">draft_worker</span>（小模型，负责提议 k 个），并暴露 <span class="mono">clear_cache_pool</span> 在多次运行之间重置草稿/目标的 KV 池。验证这一步本身复用了第28课的<strong>采样器</strong>——接受/拒绝判据就是在采样层面比对目标分布。</p>
@@ -63,6 +126,20 @@ LESSON_43 = {"zh": r"""
     def clear_cache_pool(self):  # reset the draft/target KV pools between runs
         ...</pre></div>
 
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/spec_info.py ::SpeculativeAlgorithm</span><span class="ln">枚举：选哪种投机算法（或不投机）</span></div><pre>class SpeculativeAlgorithm(Enum):
+    # which speculative method to run (or NONE = plain decoding).
+    EAGLE = auto()
+    EAGLE3 = auto()
+    NGRAM = auto()
+    STANDALONE = auto()
+    NONE = auto()
+    @classmethod
+    def from_string(cls, name):
+        # "eagle" -&gt; EAGLE ; None -&gt; NONE
+        ...</pre></div>
+
+<p><span class="mono">--speculative-algorithm EAGLE</span> 即开启投机解码；选 <span class="mono">NONE</span>（默认）就关掉、退回普通自回归。再看一个具体例子：草稿一次提议 4 个 token、其中 3 个被接受，则这<strong>一次</strong> target 前向就吐出 3 + 1 个 bonus = <strong>4 个 token</strong>；接受率（α）越高，每次昂贵前向省下的步数越多，端到端加速就越大。</p>
+
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>普通自回归一次前向只吐 1 个 token，且解码<strong>带宽受限</strong>（第4课）：每步重读全部权重 + KV，GPU 在等内存。</li>
 <li>投机解码用便宜 <span class="mono">draft</span> 提议 k 个、昂贵 <span class="mono">target</span> <strong>一次前向并行验完</strong>，<span class="mono">accept</span> 最长正确前缀再加一个一定吐的 <span class="mono">bonus_token</span>，输出分布<strong>可证明无损</strong>。</li>
@@ -91,11 +168,74 @@ LESSON_43 = {"zh": r"""
 
 <div class="flow"><div class="node">draft proposes k tokens</div><div class="arrow">→</div><div class="node">target verifies all k in ONE forward</div><div class="arrow">→</div><div class="node">accept longest correct prefix + bonus_token</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="draft proposes k tokens, target verifies in one forward, accept longest prefix plus a bonus">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">draft proposes k tokens</text>
+    <rect x="24" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="66" y="64" text-anchor="middle" class="mono" style="font-size:12px">d1</text>
+    <rect x="120" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="162" y="64" text-anchor="middle" class="mono" style="font-size:12px">d2</text>
+    <rect x="216" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="258" y="64" text-anchor="middle" class="mono" style="font-size:12px">d3</text>
+    <rect x="312" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="354" y="64" text-anchor="middle" class="mono" style="font-size:12px">d4</text>
+    <line x1="210" y1="80" x2="210" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="104" style="fill:var(--muted);font-size:12px">target: ONE forward</text>
+    <rect x="24" y="114" width="540" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="294" y="139" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ONE forward verifies all k</text>
+    <line x1="210" y1="154" x2="210" y2="182" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="178" style="fill:var(--muted);font-size:12px">accept prefix + bonus</text>
+    <rect x="24" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="212" text-anchor="middle" class="mono" style="font-size:12px">d1 ✓</text>
+    <rect x="120" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="162" y="212" text-anchor="middle" class="mono" style="font-size:12px">d2 ✓</text>
+    <rect x="216" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="258" y="212" text-anchor="middle" class="mono" style="font-size:12px">d3 ✓</text>
+    <rect x="312" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="354" y="212" text-anchor="middle" class="mono" style="font-size:12px">bonus</text>
+    <rect x="430" y="190" width="84" height="34" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="472" y="212" text-anchor="middle" class="mono" style="font-size:12px">d4 ✗</text>
+    <rect x="24" y="258" width="16" height="12" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="48" y="269" style="fill:var(--muted);font-size:12px">accept</text>
+    <rect x="120" y="258" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="144" y="269" style="fill:var(--muted);font-size:12px">reject</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · draft proposes → target verifies once</b> — the cheap draft guesses k tokens; the expensive target scores them all in <strong>ONE forward</strong>. Comparing from the start, the matching prefix (green) is accepted, the first mismatch (red) rejects everything after it, and the target appends one <span class="mono">bonus</span>. Here 3 of 4 match, so 3 + bonus = 4 tokens come out.</div>
+</div>
+
 <h2>3. Two core metrics: accept_rate(α) and accept_length(τ)</h2>
 <p>To judge speculative decoding, the papers use two terms — keep them straight. <strong>accept_rate</strong> (α) = <span class="mono">correct_drafts / proposed_drafts</span>, the probability that <strong>a single draft token</strong> is accepted; it <strong>excludes</strong> the free bonus_token — it measures how accurately the draft guesses. <strong>accept_length</strong> (τ) = <strong>the average number of tokens emitted per verify step</strong>; it <strong>includes</strong> the always-emitted bonus_token — it measures how many tokens one target forward actually produces. Both are better when larger: higher α means a more reliable draft, larger τ means more tokens amortizing each expensive forward, i.e. more speedup. Intuitively τ rises monotonically with α, but thanks to the bonus, <strong>even if α is very low, τ is at least 1</strong> (the worst case degrades to plain autoregression — never slower).</p>
 <p>Put these two metrics together with cost and you can estimate the speedup. If the draft proposes k per round, the <strong>gain</strong> per verify step is τ tokens, while the <strong>cost</strong> is mainly one target forward plus the small overhead of running the draft for k steps. Roughly, the ideal speedup is about τ divided by the effective number of forwards that "one target forward + draft overhead" amounts to; when the draft is tiny and nearly free, the speedup is approximately proportional to τ. This reveals a practical trade-off: <strong>bigger k is not always better</strong>. Too small a k caps τ low and saves little; too large a k makes the later draft positions — sitting on longer prefixes — harder to guess, so α drops, rejected drafts waste compute, and the verify forward grows larger. Real systems therefore tune k around the model pair and task difficulty to land the α·τ product at the sweet spot. A frequently cited rule of thumb: <strong>α sets the ceiling of τ, while the bonus sets the floor of τ</strong>. In practice people instrument both metrics alongside end-to-end throughput: a low α usually signals that the draft is poorly aligned with the target and the drafting method should be swapped or the draft head retrained; a τ that will not climb signals that k is set too conservatively or acceptance is too strict. Treat them as the <strong>thermometer of speculative decoding</strong> and tuning gains a concrete handle.</p>
 
 <div class="cols"><div class="col"><strong>Baseline (plain autoregression)</strong><br/>per target forward = <span class="mono">1</span> token<br/>one full weight haul buys one token<br/>bandwidth-bound, compute idle</div><div class="col"><strong>Speculative decoding</strong><br/>per target forward = <span class="mono">m</span> tokens (accepted prefix + bonus)<br/>same haul amortized over many tokens<br/>m is governed by accept_length(τ)</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 260" role="img" aria-label="baseline emits 1 token per forward versus speculative emits m tokens per forward, two timelines">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">baseline: 1 tok / forward</text>
+    <rect x="24" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="70" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="124" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="170" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="224" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="324" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="370" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="424" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="470" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="524" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="570" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <text x="628" y="65" style="fill:var(--amber);font-weight:700;font-size:12px">6 fwds</text>
+    <text x="24" y="128" style="font-weight:700;fill:var(--muted)">spec: m tok / forward (m&gt;1)</text>
+    <rect x="24" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="70" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <rect x="124" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="170" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <text x="228" y="165" style="fill:var(--teal);font-weight:700;font-size:12px">2 fwds · same 6 tok</text>
+    <line x1="24" y1="210" x2="616" y2="210" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="232" style="fill:var(--faint);font-size:12px">time →  (fewer costly forwards = faster)</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · baseline vs speculative timeline</b> — each expensive target forward in the baseline yields just <strong>1</strong> token, so 6 tokens need 6 forwards; speculative emits <span class="mono">m</span>(&gt;1) accepted tokens per forward, so the same 6 tokens take only 2 forwards → <strong>fewer costly forwards, shorter total time</strong>.</div>
+</div>
 
 <h2>4. SGLang makes "how to draft" pluggable</h2>
 <p>Different ways to "propose drafts" map to different algorithms, which SGLang selects via a <span class="mono">SpeculativeAlgorithm</span> enum whose members include <span class="mono">EAGLE</span>, <span class="mono">EAGLE3</span>, <span class="mono">NGRAM</span>, <span class="mono">STANDALONE</span>, <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">NONE</span>. They share one "propose→verify→accept" skeleton and differ only in "where the draft comes from": some train a lightweight draft head reusing the target's hidden states (the EAGLE family, see <strong>Lesson 44</strong>), some hit history text with n-grams, some attach an independent small model. Orchestrating all this is <span class="mono">BaseSpecWorker</span>: it holds a <span class="mono">target_worker</span> (the big model, verifies k in one forward) and a <span class="mono">draft_worker</span> (the small model, proposes k), and exposes <span class="mono">clear_cache_pool</span> to reset the draft/target KV pools between runs. Verification itself reuses the <strong>sampler</strong> from Lesson 28 — the accept/reject criterion compares against the target distribution at the sampling layer.</p>
@@ -128,6 +268,20 @@ LESSON_43 = {"zh": r"""
     def clear_cache_pool(self):  # reset the draft/target KV pools between runs
         ...</pre></div>
 
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/spec_info.py ::SpeculativeAlgorithm</span><span class="ln">enum: which speculative algorithm (or none)</span></div><pre>class SpeculativeAlgorithm(Enum):
+    # which speculative method to run (or NONE = plain decoding).
+    EAGLE = auto()
+    EAGLE3 = auto()
+    NGRAM = auto()
+    STANDALONE = auto()
+    NONE = auto()
+    @classmethod
+    def from_string(cls, name):
+        # "eagle" -&gt; EAGLE ; None -&gt; NONE
+        ...</pre></div>
+
+<p><span class="mono">--speculative-algorithm EAGLE</span> turns it on; <span class="mono">NONE</span> (the default) turns it off and falls back to plain autoregression. Concretely: if the draft proposes 4 tokens and 3 match, that <strong>single</strong> target forward emits 3 + 1 bonus = <strong>4 tokens</strong>; the higher the acceptance rate (α), the more steps each expensive forward skips, and the bigger the end-to-end speedup.</p>
+
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>Plain autoregression emits 1 token per forward and decode is <strong>bandwidth-bound</strong> (Lesson 4): every step re-reads all weights + KV, so the GPU waits on memory.</li>
 <li>Speculative decoding has a cheap <span class="mono">draft</span> propose k and an expensive <span class="mono">target</span> <strong>verify all k in ONE forward</strong>, <span class="mono">accept</span> the longest correct prefix plus one always-emitted <span class="mono">bonus_token</span>; the output distribution is <strong>provably lossless</strong>.</li>
@@ -146,6 +300,88 @@ LESSON_44 = {"zh": r"""
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
 <p>把投机解码看成一场赌注：每一次目标模型前向都很贵，我们希望「一次前向换回尽量多的已确认 token」。第43课用链把期望收益从 1 提到 τ；EAGLE 在<strong>不增加目标前向次数</strong>的前提下，用两招继续抬高 τ：<strong>特征级起草</strong>让草稿更准（每个分支更可能被接受），<strong>树状草稿 + 树注意力</strong>让一次验证同时考察很多条候选路径（接受到更长的那条）。两者叠加，<span class="mono">accept_length</span> 显著上升，而每个 token 的目标算力摊销下降。这就是为什么从 <span class="mono">EAGLE</span> 到 <span class="mono">EAGLE3</span>，再到 <span class="mono">DFLASH</span>、<span class="mono">FROZEN_KV_MTP</span>、<span class="mono">STANDALONE</span>、<span class="mono">NGRAM</span> 这一整列 <span class="mono">SpeculativeAlgorithm</span>，都是围绕「让草稿更准、让一次验证覆盖更多」这条主线在演化。值得强调的是，这一切都建立在第43课那条无损保证之上：树注意力只是改变了「怎么提议、怎么并行验证」，最终的接受/拒绝判据依旧与目标采样数学等价，所以无论树有多复杂，输出分布都和普通自回归一模一样，绝不会因为追求速度而牺牲质量。</p>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="EAGLE 候选 token 树：根是上一个真实 token，向 topk 个子分支展开，每个子再生孙，目标一次前向验证整棵树，接受 root→A→a1→x 这条最长合法路径">
+    <text x="78" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">根</text>
+    <text x="235" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">topk 子</text>
+    <text x="399" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">孙</text>
+    <text x="600" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">更深 ✓</text>
+    <line x1="126" y1="160" x2="200" y2="63" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="270" y1="63" x2="360" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="438" y1="37" x2="540" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="126" y1="160" x2="200" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="126" y1="160" x2="200" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="63" x2="360" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="160" x2="360" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="257" x2="360" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="138" width="96" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="78" y="156" text-anchor="middle" style="font-weight:700;fill:var(--ink);font-size:12px">root</text>
+    <text x="78" y="173" text-anchor="middle" style="fill:var(--muted);font-size:10px">上一个 token</text>
+    <rect x="200" y="46" width="70" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="235" y="68" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="200" y="143" width="70" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="235" y="165" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="200" y="240" width="70" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="235" y="262" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="360" y="20" width="78" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="399" y="42" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="360" y="78" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="100" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <rect x="360" y="143" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="165" text-anchor="middle" class="mono" style="font-size:12px">b1</text>
+    <rect x="360" y="240" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="262" text-anchor="middle" class="mono" style="font-size:12px">c1</text>
+    <rect x="540" y="20" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="600" y="42" text-anchor="middle" class="mono" style="font-size:12px">x ✓ 接受</text>
+    <text x="40" y="306" style="fill:var(--teal);font-size:12px">绿色 = 接受的最长路径 root→A→a1→x</text>
+  </svg>
+  <div class="figcap"><b>图 1 · EAGLE 候选 token 树</b> — 根是上一个真实 token，向 <span class="mono">topk</span> 个子分支展开，每个子再生孙，共 <span class="mono">spec_steps</span> 层；目标<strong>一次前向</strong>验证整棵树，接受 <span class="mono">root→A→a1→x</span> 这条最长合法路径，旁支被掩码隔开互不污染。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="链式草稿对比树状草稿：左边一条直链 root 到 t4，t2 错则后面全废，一次只查一条；右边一棵树同时押多条分支，更可能命中更长前缀，一次接受更多 token">
+    <line x1="390" y1="30" x2="390" y2="270" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="42" style="font-weight:700;fill:var(--muted)">链式草稿</text>
+    <line x1="82" y1="121" x2="92" y2="121" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="150" y1="121" x2="160" y2="121" style="stroke:var(--amber);stroke-width:3"/>
+    <line x1="218" y1="121" x2="228" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="286" y1="121" x2="296" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <rect x="24" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="53" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="92" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="121" y="126" text-anchor="middle" class="mono" style="font-size:12px">t1 ✓</text>
+    <rect x="160" y="104" width="58" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="189" y="126" text-anchor="middle" class="mono" style="font-size:12px">t2 ✗</text>
+    <rect x="228" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="257" y="126" text-anchor="middle" class="mono" style="font-size:12px">t3</text>
+    <rect x="296" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="325" y="126" text-anchor="middle" class="mono" style="font-size:12px">t4</text>
+    <text x="24" y="182" style="fill:var(--amber);font-size:12px">t2 错 → t3/t4 全废</text>
+    <text x="24" y="206" style="fill:var(--muted);font-size:12px">一次前向只查 1 条续写</text>
+    <text x="410" y="42" style="font-weight:700;fill:var(--accent-ink)">树状草稿</text>
+    <line x1="468" y1="121" x2="520" y2="71" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="468" y1="121" x2="520" y2="121" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="468" y1="121" x2="520" y2="171" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="576" y1="71" x2="636" y2="57" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="576" y1="71" x2="636" y2="109" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="439" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="520" y="54" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="548" y="76" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="520" y="104" width="56" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="548" y="126" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="520" y="154" width="56" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="548" y="176" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="636" y="40" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="664" y="62" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="636" y="92" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="664" y="114" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <text x="410" y="214" style="fill:var(--teal);font-size:12px">多分支 → 命中更长前缀</text>
+    <text x="410" y="238" style="fill:var(--muted);font-size:12px">一次前向接受更多 token</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 链式草稿 vs 树状草稿</b> — 左边一条直链：<span class="mono">t2</span> 一错，<span class="mono">t3/t4</span> 全废，一次前向只考察 1 条续写；右边一棵树同时押 <span class="mono">topk</span> 条分支，更长前缀更可能命中，于是同样一次目标前向能接受更多 token。</div>
 </div>
 
 <h2>一、从「链」到「树」：为什么 EAGLE 不再浪费</h2>
@@ -212,6 +448,21 @@ LESSON_44 = {"zh": r"""
     topk: int                          # branches kept per step
     draft_token_num: int               # total tree nodes verified in one target forward</pre></div>
 
+<p>举个具体例子：<span class="mono">--speculative-eagle-topk 8 --speculative-num-steps 5 --speculative-num-draft-tokens 64</span> 会构建一棵<strong>深度 5、每层 top-8</strong> 的树，共 <span class="mono">64</span> 个候选 token，由目标模型<strong>一次前向</strong>全部验证。注意 EAGLE 在<strong>特征空间</strong>起草，所以它的草稿头很便宜——只续写一个特征向量，而不是从头跑一个完整语言模型。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_worker_v2.py ::EAGLEWorkerV2</span><span class="ln">EAGLE 工作器：草稿头展开 token 树，target 一次验证</span></div><pre>class EAGLEWorkerV2(BaseSpecWorker):
+    def __init__(self, server_args, ..., target_worker):
+        self.topk = server_args.speculative_eagle_topk          # branches/level
+        self.speculative_num_steps = server_args.speculative_num_steps   # tree depth
+        self.speculative_num_draft_tokens = \
+            server_args.speculative_num_draft_tokens             # nodes to verify
+
+    def draft(self, batch):
+        ...   # EAGLE draft head expands a TREE of candidate tokens
+
+    def verify(self, batch):
+        ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
+
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>EAGLE 在<strong>特征级</strong>起草：复用目标模型的<span class="mono">隐藏状态</span>（第8课）+ 上一个采样 token 预测下一个特征，草稿头很小且与目标天然对齐，<span class="mono">accept_rate</span>（α）更高。它站在目标模型的肩膀上做一小步外推，而非从零理解语言。</li>
 <li>EAGLE 提议一棵<strong>token 树</strong>而非链：在 <span class="mono">spec_steps</span> 个草稿步里每步保留 <span class="mono">topk</span> 分支，共 <span class="mono">draft_token_num</span> 个节点。链会因「最早一个错误」连锁失效，树则把赌注分散到多条分支，覆盖更多合理后续。</li>
@@ -229,6 +480,88 @@ LESSON_44 = {"zh": r"""
 
 <div class="card macro"><div class="tag">🌍 The big picture</div>
 <p>Think of speculative decoding as a bet: every target forward is expensive, and we want "as many confirmed tokens as possible per forward". Lesson 43 raised the expected payoff from 1 to τ using a chain; EAGLE pushes τ higher <strong>without adding target forwards</strong> via two moves: <strong>feature-level drafting</strong> makes the draft more accurate (each branch is more likely accepted), and <strong>tree drafting + tree attention</strong> lets one verification examine many candidate paths at once (accepting the longest). Together, <span class="mono">accept_length</span> rises noticeably while per-token target compute amortizes down. That is why the whole list of <span class="mono">SpeculativeAlgorithm</span>—from <span class="mono">EAGLE</span> to <span class="mono">EAGLE3</span>, then <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">STANDALONE</span>, <span class="mono">NGRAM</span>—evolves along the same line: make the draft more accurate, and cover more per verification.</p>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="EAGLE candidate-token tree: the root is the last real token, branching into topk children, each into grandchildren; the target verifies the whole tree in one forward and accepts the longest valid path root to A to a1 to x">
+    <text x="78" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">root</text>
+    <text x="235" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">children</text>
+    <text x="399" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">grandkids</text>
+    <text x="600" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">deeper ✓</text>
+    <line x1="126" y1="160" x2="200" y2="63" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="270" y1="63" x2="360" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="438" y1="37" x2="540" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="126" y1="160" x2="200" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="126" y1="160" x2="200" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="63" x2="360" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="160" x2="360" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="257" x2="360" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="138" width="96" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="78" y="156" text-anchor="middle" style="font-weight:700;fill:var(--ink);font-size:12px">root</text>
+    <text x="78" y="173" text-anchor="middle" style="fill:var(--muted);font-size:10px">last token</text>
+    <rect x="200" y="46" width="70" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="235" y="68" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="200" y="143" width="70" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="235" y="165" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="200" y="240" width="70" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="235" y="262" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="360" y="20" width="78" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="399" y="42" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="360" y="78" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="100" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <rect x="360" y="143" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="165" text-anchor="middle" class="mono" style="font-size:12px">b1</text>
+    <rect x="360" y="240" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="262" text-anchor="middle" class="mono" style="font-size:12px">c1</text>
+    <rect x="540" y="20" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="600" y="42" text-anchor="middle" class="mono" style="font-size:12px">x ✓ accept</text>
+    <text x="40" y="306" style="fill:var(--teal);font-size:12px">teal = accepted longest path root→A→a1→x</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · EAGLE candidate-token tree</b> — the root is the last real token, branching into <span class="mono">topk</span> children, each into grandchildren for <span class="mono">spec_steps</span> levels; the target verifies the whole tree in <strong>one forward</strong> and accepts the longest valid path <span class="mono">root→A→a1→x</span>, with side branches masked off so they cannot contaminate each other.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Chain draft vs tree draft: on the left a single chain root to t4, where a wrong t2 wastes the rest and one forward checks just one path; on the right a tree bets on many branches at once, more likely to match a longer prefix and accept more tokens per step">
+    <line x1="390" y1="30" x2="390" y2="270" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="42" style="font-weight:700;fill:var(--muted)">Chain draft</text>
+    <line x1="82" y1="121" x2="92" y2="121" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="150" y1="121" x2="160" y2="121" style="stroke:var(--amber);stroke-width:3"/>
+    <line x1="218" y1="121" x2="228" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="286" y1="121" x2="296" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <rect x="24" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="53" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="92" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="121" y="126" text-anchor="middle" class="mono" style="font-size:12px">t1 ✓</text>
+    <rect x="160" y="104" width="58" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="189" y="126" text-anchor="middle" class="mono" style="font-size:12px">t2 ✗</text>
+    <rect x="228" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="257" y="126" text-anchor="middle" class="mono" style="font-size:12px">t3</text>
+    <rect x="296" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="325" y="126" text-anchor="middle" class="mono" style="font-size:12px">t4</text>
+    <text x="24" y="182" style="fill:var(--amber);font-size:12px">t2 wrong → t3/t4 wasted</text>
+    <text x="24" y="206" style="fill:var(--muted);font-size:12px">1 path per forward</text>
+    <text x="410" y="42" style="font-weight:700;fill:var(--accent-ink)">Tree draft</text>
+    <line x1="468" y1="121" x2="520" y2="71" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="468" y1="121" x2="520" y2="121" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="468" y1="121" x2="520" y2="171" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="576" y1="71" x2="636" y2="57" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="576" y1="71" x2="636" y2="109" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="439" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="520" y="54" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="548" y="76" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="520" y="104" width="56" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="548" y="126" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="520" y="154" width="56" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="548" y="176" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="636" y="40" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="664" y="62" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="636" y="92" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="664" y="114" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <text x="410" y="214" style="fill:var(--teal);font-size:12px">more branches → longer prefix hit</text>
+    <text x="410" y="238" style="fill:var(--muted);font-size:12px">more tokens accepted / forward</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Chain draft vs tree draft</b> — left: a single chain where one wrong <span class="mono">t2</span> wastes <span class="mono">t3/t4</span>, so one forward examines just 1 continuation; right: a tree bets on <span class="mono">topk</span> branches at once, so a longer prefix is more likely to match and the same target forward accepts more tokens.</div>
 </div>
 
 <h2>1. From "chain" to "tree": why EAGLE stops wasting</h2>
@@ -287,6 +620,21 @@ LESSON_44 = {"zh": r"""
     topk: int                          # branches kept per step
     draft_token_num: int               # total tree nodes verified in one target forward</pre></div>
 
+<p>A concrete example: <span class="mono">--speculative-eagle-topk 8 --speculative-num-steps 5 --speculative-num-draft-tokens 64</span> builds a <strong>depth-5, top-8</strong> tree of <span class="mono">64</span> candidate tokens, all verified by the target in <strong>one forward</strong>. Note EAGLE drafts in <strong>feature space</strong>, so its draft head is cheap—it just continues one feature vector instead of running a full language model from scratch.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_worker_v2.py ::EAGLEWorkerV2</span><span class="ln">EAGLE worker: draft head expands a token tree, target verifies once</span></div><pre>class EAGLEWorkerV2(BaseSpecWorker):
+    def __init__(self, server_args, ..., target_worker):
+        self.topk = server_args.speculative_eagle_topk          # branches/level
+        self.speculative_num_steps = server_args.speculative_num_steps   # tree depth
+        self.speculative_num_draft_tokens = \
+            server_args.speculative_num_draft_tokens             # nodes to verify
+
+    def draft(self, batch):
+        ...   # EAGLE draft head expands a TREE of candidate tokens
+
+    def verify(self, batch):
+        ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
+
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>EAGLE drafts at the <strong>feature level</strong>: it reuses the target model's <span class="mono">hidden state</span> (Lesson 8) + the previously sampled token to predict the next feature, so the draft head is tiny and naturally aligned with the target, giving higher <span class="mono">accept_rate</span> (α).</li>
 <li>EAGLE proposes a <strong>token tree</strong>, not a chain: across <span class="mono">spec_steps</span> draft steps it keeps <span class="mono">topk</span> branches per step, totaling <span class="mono">draft_token_num</span> nodes.</li>
@@ -320,6 +668,38 @@ LESSON_45 = {"zh": r"""
 
 <div class="flow"><div class="node">请求到达</div><div class="arrow">→</div><div class="node">prefill 池<br><span class="mono">算力密集</span></div><div class="arrow">→</div><div class="node">KV 传输<br><span class="mono">RDMA/NVLink</span></div><div class="arrow">→</div><div class="node">decode 池<br><span class="mono">带宽密集</span></div><div class="arrow">→</div><div class="node">流式吐 token</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="prefill 池算好整段 KV，经 RDMA/NVLink 传到 decode 池，decode 读这份 KV 逐 token 流式输出">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">一次请求穿过两个池</text>
+    <rect x="20" y="96" width="74" height="66" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="126" text-anchor="middle" style="font-size:12px">请求</text>
+    <text x="57" y="146" text-anchor="middle" style="fill:var(--faint);font-size:11px">prompt</text>
+    <line x1="98" y1="129" x2="126" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="128,129 118,124 118,134" style="fill:var(--line)"/>
+    <rect x="132" y="90" width="150" height="78" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="207" y="116" text-anchor="middle" style="fill:var(--blue);font-weight:700">Prefill 池</text>
+    <text x="207" y="136" text-anchor="middle" style="font-size:12px">一次算完整段</text>
+    <text x="207" y="155" text-anchor="middle" class="mono" style="font-size:11px">→ KV 缓存</text>
+    <line x1="286" y1="129" x2="314" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="316,129 306,124 306,134" style="fill:var(--amber)"/>
+    <rect x="320" y="96" width="140" height="66" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="390" y="124" text-anchor="middle" style="fill:var(--amber);font-weight:700">KV 传输</text>
+    <text x="390" y="144" text-anchor="middle" class="mono" style="font-size:11px">RDMA / NVLink</text>
+    <line x1="464" y1="129" x2="492" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="494,129 484,124 484,134" style="fill:var(--amber)"/>
+    <rect x="498" y="90" width="150" height="78" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="573" y="116" text-anchor="middle" style="fill:var(--teal);font-weight:700">Decode 池</text>
+    <text x="573" y="136" text-anchor="middle" style="font-size:12px">逐 token 生成</text>
+    <text x="573" y="155" text-anchor="middle" class="mono" style="font-size:11px">读 KV</text>
+    <line x1="652" y1="129" x2="680" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="682,129 672,124 672,134" style="fill:var(--line)"/>
+    <rect x="686" y="96" width="96" height="66" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="734" y="124" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">流式输出</text>
+    <text x="734" y="144" text-anchor="middle" class="mono" style="font-size:11px">tokens</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 两池流水线</b> — 请求先进 prefill 池算出整段 KV，经 RDMA/NVLink 传到 decode 池，decode 读着这份 KV 逐 token 流式输出。</div>
+</div>
+
 <h2>二、分离之后：两个独立的池</h2>
 <p>PD 分离把集群切成两半。<strong>Prefill 池</strong>追求<strong>吞吐</strong>：它处理的是一阵阵爆发式的大批并行计算，适合配置高算力、可以容忍稍大的批；它的产出不是 token，而是<strong>一份算好的 KV 缓存</strong>。<strong>Decode 池</strong>追求<strong>低延迟、稳定的 token 流</strong>：它需要的是高显存带宽与小而稳的批，把每个请求的 ITL 压到最低。两个池的规模、批策略、并行方式都能<strong>各自独立调优</strong>——这是绑在一起时做不到的。</p>
 <p>"独立"还体现在<strong>故障与扩缩容</strong>上。decode 池某个节点挂了，路由器可以把后续请求改派给别的 decode worker，而 prefill 池完全不受影响；反过来想临时加大 prefill 吞吐，直接往 prefill 池里加卡即可，不必动 decode。这种<strong>解耦的弹性</strong>，让在线服务在流量突变时能更平滑地应对，也让灰度升级、容量规划这些运维动作可以分池进行、互不打断。</p>
@@ -328,6 +708,56 @@ LESSON_45 = {"zh": r"""
 <p>当然，分离不是免费的午餐。它引入了一次<strong>跨节点的 KV 传输</strong>，多了网络这一环；如果互联不够快，搬运时间会反过来侵蚀掉省下的收益，甚至抬高 TTFT。所以 PD 分离的成立前提是<strong>有足够快的互联</strong>（RDMA/NVLink）以及<strong>把传输与计算尽量重叠</strong>。理解这条边界，才知道它适合大规模、互联完善的集群，而不是随便两张卡都该拆。</p>
 
 <div class="cols"><div class="col"><strong>Prefill 节点</strong><br><span class="mono">compute-bound</span><br>一次大并行算完整段 prompt<br>打满 Tensor Core / 算力<br>产出：算好的 <strong>KV 缓存</strong></div><div class="col"><strong>Decode 节点</strong><br><span class="mono">bandwidth-bound</span><br>每步只生成 1 个 token<br>反复重读权重 + KV，算力闲置<br>产出：<strong>流式 token</strong></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="左 prefill 节点算力受限：整段 prompt 并行、算力打满；右 decode 节点带宽受限：每步 1 token 读大 KV 缓存、算力闲置">
+    <line x1="400" y1="44" x2="400" y2="272" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="32" style="font-weight:700;fill:var(--blue)">Prefill 节点</text>
+    <rect x="30" y="44" width="140" height="26" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">compute-bound</text>
+    <text x="30" y="92" style="font-size:12px;fill:var(--muted)">整段 prompt 并行 → 算力打满</text>
+    <rect x="40" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <text x="252" y="158" style="fill:var(--blue);font-size:12px">算力全忙</text>
+    <text x="30" y="258" style="font-size:12px">瓶颈：GPU 算力 / FLOPs</text>
+    <text x="430" y="32" style="font-weight:700;fill:var(--teal)">Decode 节点</text>
+    <rect x="430" y="44" width="160" height="26" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">bandwidth-bound</text>
+    <text x="430" y="92" style="font-size:12px;fill:var(--muted)">每步 1 token → 算力闲置</text>
+    <rect x="430" y="112" width="30" height="22" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.2"/>
+    <rect x="472" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <line x1="598" y1="150" x2="550" y2="150" style="stroke:var(--amber);stroke-width:2.5"/>
+    <polygon points="548,150 558,145 558,155" style="fill:var(--amber)"/>
+    <text x="556" y="138" style="fill:var(--amber);font-size:11px">带宽满载</text>
+    <rect x="600" y="108" width="120" height="92" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="660" y="148" text-anchor="middle" style="fill:var(--teal);font-weight:700">大 KV 缓存</text>
+    <text x="660" y="170" text-anchor="middle" style="font-size:11px">每步全读</text>
+    <text x="430" y="258" style="font-size:12px">瓶颈：显存带宽</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 算力受限 vs 带宽受限</b> — prefill 把整段 prompt 一次并行算完、算力全忙；decode 每步只出 1 token，却要满带宽重读一大块 KV，算力大半闲置。分池后各按自己的瓶颈选硬件、定批量。</div>
+</div>
+
+<p><strong>落到部署上：</strong>启动时加 <span class="mono">--disaggregation-mode prefill</span> 与 <span class="mono">--disaggregation-mode decode</span>，就把同一份模型拆成 prefill worker 与 decode worker 两组进程。设想一个 <strong>2000 token</strong> 的长提示词：prefill 池一次把它整段算成 KV，这份 KV 只<strong>搬运一次</strong>到 decode 池；之后 decode 连续吐出几百个 token，<strong>全程不再重算 prompt</strong>。若线上是"长 prompt、短答案"，就多配 prefill 卡；若是"短 prompt、长答案"，就多配 decode 卡——P∶D 比例随流量自由伸缩。</p>
 
 <h2>三、SGLang 怎么抽象这次搬运</h2>
 <p>不同集群的互联硬件五花八门，SGLang 不把传输逻辑写死，而是藏在一个<strong>可插拔的连接器</strong>后面。Prefill 侧持有一个 <span class="mono">BaseKVSender</span>，decode 侧持有一个镜像的 <span class="mono">BaseKVReceiver</span>。发送方的接口很克制：<span class="mono">init</span> 先<strong>宣告</strong>这次要搬多少页 KV；<span class="mono">send</span> 把这个请求的 KV 页<strong>推</strong>给 decode worker；<span class="mono">poll</span> 返回一个<strong>非阻塞</strong>的 <span class="mono">KVPoll</span> 状态（Bootstrapping / WaitingForInput / Transferring / Success / Failed），让调度器不必卡死等待；<span class="mono">get_transfer_metric</span> 则吐出 <span class="mono">KVTransferMetric</span>（字节数、延迟）供观测。</p>
@@ -362,6 +792,16 @@ LESSON_45 = {"zh": r"""
         ...
 # BaseKVReceiver mirrors this on the DECODE side (init + send_metadata + poll)</pre></div>
 
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVReceiver</span><span class="ln">decode 侧：接收 prefill 传来的 KV，再开始解码</span></div><pre>class BaseKVReceiver(ABC):
+    # the DECODE side of PD disaggregation: pull the KV that the
+    # prefill node produced, into this node's KV pool.
+    @abstractmethod
+    def init(self, kv_indices, ...): ...
+    @abstractmethod
+    def poll(self) -&gt; KVPoll:
+        ...   # WaitingForInput -&gt; Transferring -&gt; Success
+    # once KV has arrived, the decode node generates tokens from it.</pre></div>
+
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>两副面孔，资源相反</strong>：prefill 是 compute-bound 的一次大并行；decode 是 bandwidth-bound 的逐 token 生成。同卡共存必然在 TTFT 与 ITL 之间打架。</li>
 <li><strong>PD 分离 = 分池而治</strong>：prefill 池只做预填充，decode 池只做解码，各自吃饱自己的瓶颈、独立调优。</li>
@@ -395,6 +835,38 @@ LESSON_45 = {"zh": r"""
 
 <div class="flow"><div class="node">request arrives</div><div class="arrow">→</div><div class="node">prefill pool<br><span class="mono">compute-bound</span></div><div class="arrow">→</div><div class="node">KV transfer<br><span class="mono">RDMA/NVLink</span></div><div class="arrow">→</div><div class="node">decode pool<br><span class="mono">bandwidth-bound</span></div><div class="arrow">→</div><div class="node">stream tokens</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="prefill pool computes the whole KV, transferred over RDMA/NVLink to the decode pool, which reads it and streams tokens one by one">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">one request crosses two pools</text>
+    <rect x="20" y="96" width="74" height="66" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="126" text-anchor="middle" style="font-size:12px">request</text>
+    <text x="57" y="146" text-anchor="middle" style="fill:var(--faint);font-size:11px">prompt</text>
+    <line x1="98" y1="129" x2="126" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="128,129 118,124 118,134" style="fill:var(--line)"/>
+    <rect x="132" y="90" width="150" height="78" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="207" y="116" text-anchor="middle" style="fill:var(--blue);font-weight:700">Prefill pool</text>
+    <text x="207" y="136" text-anchor="middle" style="font-size:12px">computes all KV</text>
+    <text x="207" y="155" text-anchor="middle" class="mono" style="font-size:11px">→ KV cache</text>
+    <line x1="286" y1="129" x2="314" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="316,129 306,124 306,134" style="fill:var(--amber)"/>
+    <rect x="320" y="96" width="140" height="66" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="390" y="124" text-anchor="middle" style="fill:var(--amber);font-weight:700">KV transfer</text>
+    <text x="390" y="144" text-anchor="middle" class="mono" style="font-size:11px">RDMA / NVLink</text>
+    <line x1="464" y1="129" x2="492" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="494,129 484,124 484,134" style="fill:var(--amber)"/>
+    <rect x="498" y="90" width="150" height="78" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="573" y="116" text-anchor="middle" style="fill:var(--teal);font-weight:700">Decode pool</text>
+    <text x="573" y="136" text-anchor="middle" style="font-size:12px">1 token/step</text>
+    <text x="573" y="155" text-anchor="middle" class="mono" style="font-size:11px">reads KV</text>
+    <line x1="652" y1="129" x2="680" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="682,129 672,124 672,134" style="fill:var(--line)"/>
+    <rect x="686" y="96" width="96" height="66" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="734" y="124" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">Stream</text>
+    <text x="734" y="144" text-anchor="middle" class="mono" style="font-size:11px">tokens</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Two-pool pipeline</b> — a request enters the prefill pool, which computes the whole prompt's KV; that KV is transferred over RDMA/NVLink to the decode pool, which reads it and streams tokens one by one.</div>
+</div>
+
 <h2>2. After the split: two independent pools</h2>
 <p>PD disaggregation cuts the cluster in two. The <strong>prefill pool</strong> chases <strong>throughput</strong>: it handles bursts of big parallel computation, suits high-compute configs and can tolerate slightly larger batches; its output isn't tokens but <strong>a computed KV cache</strong>. The <strong>decode pool</strong> chases <strong>low, steady token latency</strong>: it wants high memory bandwidth and small, stable batches to drive each request's ITL down. The two pools' sizes, batching strategies, and parallelism can be <strong>tuned independently</strong>—impossible when they're bolted together.</p>
 <p>"Independent" also shows up in <strong>failure handling and scaling</strong>. If a node in the decode pool dies, the router can redirect subsequent requests to other decode workers while the prefill pool is wholly unaffected; conversely, to temporarily boost prefill throughput you just add cards to the prefill pool without touching decode. This <strong>decoupled elasticity</strong> lets online serving ride out traffic swings more smoothly, and lets ops actions like canary upgrades and capacity planning proceed pool by pool without interrupting each other.</p>
@@ -403,6 +875,56 @@ LESSON_45 = {"zh": r"""
 <p>Of course, disaggregation is no free lunch. It introduces a <strong>cross-node KV transfer</strong>, adding the network as one more link; if the interconnect isn't fast enough, transfer time eats back into the savings and can even raise TTFT. So PD disaggregation is premised on having a <strong>fast enough interconnect</strong> (RDMA/NVLink) and on <strong>overlapping transfer with compute</strong> as much as possible. Understanding this boundary tells you it suits large, well-interconnected clusters—not any random pair of cards that should be split.</p>
 
 <div class="cols"><div class="col"><strong>Prefill node</strong><br><span class="mono">compute-bound</span><br>computes the whole prompt in one parallel pass<br>saturates Tensor Cores / compute<br>output: a computed <strong>KV cache</strong></div><div class="col"><strong>Decode node</strong><br><span class="mono">bandwidth-bound</span><br>generates only 1 token per step<br>re-reads weights + KV, compute idle<br>output: <strong>streamed tokens</strong></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="left prefill node is compute-bound: whole prompt in parallel, compute maxed; right decode node is bandwidth-bound: 1 token per step reading a large KV cache, compute idle">
+    <line x1="400" y1="44" x2="400" y2="272" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="32" style="font-weight:700;fill:var(--blue)">Prefill node</text>
+    <rect x="30" y="44" width="140" height="26" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">compute-bound</text>
+    <text x="30" y="92" style="font-size:12px;fill:var(--muted)">all tokens parallel → busy</text>
+    <rect x="40" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <text x="252" y="158" style="fill:var(--blue);font-size:12px">all busy</text>
+    <text x="30" y="258" style="font-size:12px">bottleneck: GPU FLOPs</text>
+    <text x="430" y="32" style="font-weight:700;fill:var(--teal)">Decode node</text>
+    <rect x="430" y="44" width="160" height="26" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">bandwidth-bound</text>
+    <text x="430" y="92" style="font-size:12px;fill:var(--muted)">1 token/step → mostly idle</text>
+    <rect x="430" y="112" width="30" height="22" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.2"/>
+    <rect x="472" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <line x1="598" y1="150" x2="550" y2="150" style="stroke:var(--amber);stroke-width:2.5"/>
+    <polygon points="548,150 558,145 558,155" style="fill:var(--amber)"/>
+    <text x="556" y="138" style="fill:var(--amber);font-size:11px">bandwidth</text>
+    <rect x="600" y="108" width="120" height="92" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="660" y="148" text-anchor="middle" style="fill:var(--teal);font-weight:700">large KV</text>
+    <text x="660" y="170" text-anchor="middle" style="font-size:11px">read each step</text>
+    <text x="430" y="258" style="font-size:12px">bottleneck: memory BW</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Compute-bound vs bandwidth-bound</b> — prefill computes the whole prompt in one parallel pass with compute fully busy; decode emits just 1 token per step yet re-reads a large KV cache at full bandwidth, leaving compute mostly idle. Split into pools, each picks its own hardware and batch size.</div>
+</div>
+
+<p><strong>In deployment:</strong> launch with <span class="mono">--disaggregation-mode prefill</span> and <span class="mono">--disaggregation-mode decode</span> to split one model into prefill workers and decode workers. Take a <strong>2000-token</strong> prompt: the prefill pool computes its KV in one pass, and that KV is <strong>transferred once</strong> to the decode pool; decode then streams hundreds of tokens <strong>without recomputing the prompt</strong>. If traffic is "long prompt, short answer," provision more prefill cards; if "short prompt, long answer," provision more decode cards — the P∶D ratio flexes with the traffic.</p>
 
 <h2>3. How SGLang abstracts the transfer</h2>
 <p>Interconnect hardware varies wildly across clusters, so SGLang doesn't hard-code the transfer logic—it hides it behind a <strong>pluggable connector</strong>. The prefill side holds a <span class="mono">BaseKVSender</span>; the decode side holds a mirrored <span class="mono">BaseKVReceiver</span>. The sender's interface is deliberately spare: <span class="mono">init</span> first <strong>announces</strong> how many KV pages will move; <span class="mono">send</span> <strong>pushes</strong> this request's KV pages to the decode worker; <span class="mono">poll</span> returns a <strong>non-blocking</strong> <span class="mono">KVPoll</span> status (Bootstrapping / WaitingForInput / Transferring / Success / Failed) so the scheduler never has to block; <span class="mono">get_transfer_metric</span> yields a <span class="mono">KVTransferMetric</span> (bytes, latency) for observability.</p>
@@ -436,6 +958,16 @@ LESSON_45 = {"zh": r"""
         ...
 # BaseKVReceiver mirrors this on the DECODE side (init + send_metadata + poll)</pre></div>
 
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVReceiver</span><span class="ln">decode side: receive the KV from prefill, then start decoding</span></div><pre>class BaseKVReceiver(ABC):
+    # the DECODE side of PD disaggregation: pull the KV that the
+    # prefill node produced, into this node's KV pool.
+    @abstractmethod
+    def init(self, kv_indices, ...): ...
+    @abstractmethod
+    def poll(self) -&gt; KVPoll:
+        ...   # WaitingForInput -&gt; Transferring -&gt; Success
+    # once KV has arrived, the decode node generates tokens from it.</pre></div>
+
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Two faces, opposite resources</strong>: prefill is a compute-bound parallel pass; decode is bandwidth-bound token-by-token generation. Co-locating them inevitably pits TTFT against ITL.</li>
 <li><strong>PD disaggregation = pool and conquer</strong>: the prefill pool only prefills, the decode pool only decodes, each saturating its own bottleneck and tuned independently.</li>
@@ -462,12 +994,66 @@ LESSON_46 = {"zh": r"""
 <p>那么什么时候用哪一招？可以顺着"瓶颈是什么"来判断：模型大到<strong>一张卡装不下</strong>，先上 TP 把每一层切薄；单机的卡数还不够，再叠 PP 把层分到更多机器上。模型是<strong>专家众多的 MoE</strong>、总参数把显存撑爆，就上 EP 把专家摊开。模型本来就<strong>装得下</strong>、只是想要<strong>更高吞吐</strong>，那就上 DP 多复制几份、把请求分摊出去。绝大多数真实部署都不是单选题，而是按这套优先级把几招叠起来用：TP 吃满单机内的高速链路，PP 跨机扩展模型规模，EP 摊开专家，DP 复制换吞吐。</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="四种并行切分：TP 切一层内的矩阵、PP 切层堆叠成阶段、EP 把专家摊到各卡、DP 复制整模型分请求">
+    <rect x="20" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="46" style="font-weight:700;fill:var(--blue)">TP 张量并行</text>
+    <text x="36" y="66" style="fill:var(--muted);font-size:12px">每卡持一层的 ¼ 切片</text>
+    <rect x="40" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="62" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="110" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="132" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="180" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="202" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="250" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="272" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼层</text>
+    <rect x="410" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="46" style="font-weight:700;fill:var(--teal)">PP 流水线并行</text>
+    <text x="426" y="66" style="fill:var(--muted);font-size:12px">每卡持连续几层（一个阶段）</text>
+    <rect x="430" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="452" y="119" text-anchor="middle" class="mono" style="font-size:11px">段1</text>
+    <text x="487" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="500" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="522" y="119" text-anchor="middle" class="mono" style="font-size:11px">段2</text>
+    <text x="557" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="570" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="592" y="119" text-anchor="middle" class="mono" style="font-size:11px">段3</text>
+    <text x="627" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="640" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="662" y="119" text-anchor="middle" class="mono" style="font-size:11px">段4</text>
+    <rect x="20" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="196" style="font-weight:700;fill:var(--amber)">EP 专家并行</text>
+    <text x="36" y="216" style="fill:var(--muted);font-size:12px">每卡持一部分专家</text>
+    <rect x="40" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="62" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="110" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="132" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="180" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="202" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="250" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="272" y="269" text-anchor="middle" class="mono" style="font-size:11px">专家</text>
+    <rect x="410" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="196" style="font-weight:700;fill:var(--purple)">DP 数据并行</text>
+    <text x="426" y="216" style="fill:var(--muted);font-size:12px">每卡持整份模型副本</text>
+    <rect x="430" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="452" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+    <rect x="500" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="522" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+    <rect x="570" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="592" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+    <rect x="640" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="662" y="269" text-anchor="middle" class="mono" style="font-size:11px">整模</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 四种切分</b> — 同样 4 张卡：TP 让每卡持一层的 ¼ 切片（切层内矩阵），PP 让每卡持连续几层即一个阶段（切层堆叠），EP 让每卡持一部分专家，DP 让每卡持整份模型副本、只分请求。</div>
+</div>
+
 <h2>TP 张量并行：切开"一层之内"的矩阵</h2>
 <p><strong>TP（tensor parallel）</strong>把每一层的<strong>权重矩阵</strong>沿某个维度切成若干片，分给同组的各个 rank。最典型的就是第25课讲的注意力 q/k/v 投影按列切、第37课讲的 MLP 上投影按列切、词表（vocab）按行切。每个 rank 只持有矩阵的一片，于是只算出<strong>部分结果</strong>；要得到完整的层输出，就必须把各 rank 的部分和<strong>合并</strong>——列切+行切的组合用一次 <span class="mono">all_reduce</span> 求和，词表并行的 logits 则用 <span class="mono">all_gather</span> 拼接。</p>
 <p>TP 的特点是：它把<strong>单层的算力和显存</strong>都摊薄了，一张卡装不下的大矩阵被切成几片分别存放、分别计算。代价是<strong>每一层</strong>都要通信一次（前向一次、反向再一次），通信极其频繁。因此 TP 组内的 GPU 必须用<strong>高速近邻链路</strong>（NVLink / NVSwitch），通常局限在<strong>单机之内</strong>；跨机做 TP 会被慢链路拖垮。</p>
 <div class="layers"><div class="layer">Rank0：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank1：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank2：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank3：每一层都只持有该层权重的 1/4 切片</div></div>
 <p>注意上图：TP 下<strong>每个 rank 都"纵向"贯穿了所有层</strong>，只是每层都只拿到一小条。这正是 TP 与 PP 的根本区别——TP 横向切一层的宽度，PP 纵向切层的深度。</p>
 <p>举个具体的数：一个 70B 模型的单层权重动辄上百 MB，配成 TP=8 时每张卡只存其中 1/8、也只算 1/8，但<strong>每过一层</strong>就要做一次覆盖这 8 张卡的 <span class="mono">all_reduce</span> 把部分和加起来。正因为通信如此密集，TP 的并行度通常<strong>不超过单机的卡数</strong>（例如 8）；再往上扩就该换成 PP 或 DP，否则频繁的跨机 all_reduce 会让通信时间盖过省下来的计算时间。一句话记住 TP 的取舍：它同时摊薄了"单层算力"和"单层显存"两样东西，代价是"每层都要通信、通信最贵、必须近邻高速链路"。</p>
+<p>把这些落到一条具体命令上：<span class="mono">--tp-size 8</span> 会把<strong>每一层</strong>的矩阵切到 8 张卡上，每过一层就做<strong>一次</strong> <span class="mono">all_reduce</span> 把部分和加起来——正因为它<strong>每层都通信</strong>，TP 组必须用机内的高速链路（NVLink）；相比之下 <span class="mono">--dp-size</span> 复制整份模型、每步<strong>几乎不通信</strong>，慢链路也无所谓。这正是"TP 吃满机内 NVLink、DP 几乎不通信"这条经验法则的由来。</p>
 
 <h2>PP 流水线并行：把"层"切成前后接力的阶段</h2>
 <p><strong>PP（pipeline parallel）</strong>把模型的<strong>层</strong>按顺序分成几个连续的<strong>阶段（stage）</strong>，放在不同 GPU 上。第 1～k 层在 rank0，第 k+1～2k 层在 rank1，依此类推。前向时，激活值从一个阶段<strong>流向</strong>下一个阶段（向 <span class="mono">next_rank</span> 发送、从 <span class="mono">prev_rank</span> 接收，第23课）；反向时梯度沿相反方向回传。</p>
@@ -497,6 +1083,37 @@ LESSON_46 = {"zh": r"""
 <div class="flow"><div class="node">EP token 批</div><div class="arrow">→</div><div class="node">all_to_all 路由到专家</div><div class="arrow">→</div><div class="node">汇总结果</div></div>
 <div class="flow"><div class="node">PP 阶段 i 激活</div><div class="arrow">→</div><div class="node">send / recv 给下一阶段</div><div class="arrow">→</div><div class="node">阶段 i+1 继续</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="每种并行各自的通信：TP 用 all-reduce、EP 用 all-to-all、PP 用 send-recv、DP 几乎不通信">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">每种并行各自通信什么</text>
+    <rect x="24" y="50" width="120" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="84" y="75" text-anchor="middle" style="font-weight:700;fill:var(--blue)">TP</text>
+    <text x="156" y="76" style="fill:var(--muted)">→</text>
+    <rect x="180" y="50" width="190" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="275" y="75" text-anchor="middle" class="mono" style="font-size:12px">all-reduce 求和</text>
+    <text x="392" y="75" style="fill:var(--faint);font-size:12px">每层一次 · 最贵 · 需 NVLink</text>
+    <rect x="24" y="110" width="120" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="84" y="135" text-anchor="middle" style="font-weight:700;fill:var(--amber)">EP</text>
+    <text x="156" y="136" style="fill:var(--muted)">→</text>
+    <rect x="180" y="110" width="190" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="275" y="135" text-anchor="middle" class="mono" style="font-size:12px">all-to-all 路由</text>
+    <text x="392" y="135" style="fill:var(--faint);font-size:12px">随 token × top-k 增长</text>
+    <rect x="24" y="170" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="84" y="195" text-anchor="middle" style="font-weight:700;fill:var(--teal)">PP</text>
+    <text x="156" y="196" style="fill:var(--muted)">→</text>
+    <rect x="180" y="170" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="275" y="195" text-anchor="middle" class="mono" style="font-size:12px">send · recv 激活</text>
+    <text x="392" y="195" style="fill:var(--faint);font-size:12px">仅在阶段交界 · 便宜</text>
+    <rect x="24" y="230" width="120" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="84" y="255" text-anchor="middle" style="font-weight:700;fill:var(--purple)">DP</text>
+    <text x="156" y="256" style="fill:var(--muted)">→</text>
+    <rect x="180" y="230" width="190" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="275" y="255" text-anchor="middle" class="mono" style="font-size:12px">几乎不通信</text>
+    <text x="392" y="255" style="fill:var(--faint);font-size:12px">每步 ≈ 0 · 链路无所谓</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 各自的通信</b> — 每根主轴对应一种集合通信：TP 每层做 all-reduce 求部分和（最贵、需 NVLink），EP 用两次 all-to-all 把 token 路由到专家再送回，PP 只在阶段交界 send/recv 激活，DP 每步近乎零通信。</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">一个统一抽象：TP/PP/EP/DP 都是它在不同 rank 布局上的实例</span></div><pre>class GroupCoordinator:
     # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
     rank: int             # this process's global rank
@@ -516,6 +1133,14 @@ LESSON_46 = {"zh": r"""
     @property
     def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator.all_reduce</span><span class="ln">把张量在本组（如 TP 组）内求和，人人拿到同一结果</span></div><pre>def all_reduce(self, input_: torch.Tensor) -&gt; torch.Tensor:
+    # sum `input_` across every rank in THIS group (e.g. the TP group),
+    # so each rank ends with the same reduced tensor.
+    if self.world_size == 1:        # single GPU: nothing to reduce
+        return input_
+    ...   # dispatch to the group's all-reduce (custom op / NCCL)
+    return input_</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>TP</strong> 切<strong>一层之内的权重矩阵</strong>（q/k/v、MLP 列、词表，第25/37课），每层用 <span class="mono">all_reduce</span>/<span class="mono">all_gather</span> 合并；通信最频繁，需 NVLink、通常单机内。</li>
@@ -543,12 +1168,66 @@ LESSON_46 = {"zh": r"""
 <p>So when do you reach for which? Follow the bottleneck: if the model is <strong>too big to fit on one card</strong>, first apply TP to thin each layer; if a single node doesn't have enough cards, add PP to spread layers across more machines. If it is a <strong>many-expert MoE</strong> whose total parameters blow past memory, apply EP to scatter the experts. If the model already <strong>fits</strong> and you just want <strong>more throughput</strong>, apply DP to replicate it and share out requests. Almost every real deployment is not single-choice but stacks several by this priority: TP saturates the fast intra-node link, PP scales model size across nodes, EP spreads experts, DP replicates for throughput.</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="Four ways to split a model: TP splits a layer's matrices, PP splits the layer stack into stages, EP spreads experts across cards, DP replicates the model and splits requests">
+    <rect x="20" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="46" style="font-weight:700;fill:var(--blue)">TP tensor</text>
+    <text x="36" y="66" style="fill:var(--muted);font-size:12px">each holds a ¼ slice of a layer</text>
+    <rect x="40" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="62" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="110" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="132" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="180" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="202" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="250" y="92" width="44" height="44" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="272" y="119" text-anchor="middle" class="mono" style="font-size:11px">¼ lyr</text>
+    <rect x="410" y="20" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="46" style="font-weight:700;fill:var(--teal)">PP pipeline</text>
+    <text x="426" y="66" style="fill:var(--muted);font-size:12px">each holds consecutive layers (a stage)</text>
+    <rect x="430" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="452" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg1</text>
+    <text x="487" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="500" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="522" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg2</text>
+    <text x="557" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="570" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="592" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg3</text>
+    <text x="627" y="119" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="640" y="92" width="44" height="44" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="662" y="119" text-anchor="middle" class="mono" style="font-size:11px">stg4</text>
+    <rect x="20" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="36" y="196" style="font-weight:700;fill:var(--amber)">EP expert</text>
+    <text x="36" y="216" style="fill:var(--muted);font-size:12px">each holds some experts</text>
+    <rect x="40" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="62" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="110" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="132" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="180" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="202" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="250" y="242" width="44" height="44" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="272" y="269" text-anchor="middle" class="mono" style="font-size:11px">exp</text>
+    <rect x="410" y="170" width="370" height="130" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="426" y="196" style="font-weight:700;fill:var(--purple)">DP data</text>
+    <text x="426" y="216" style="fill:var(--muted);font-size:12px">each holds a full model replica</text>
+    <rect x="430" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="452" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+    <rect x="500" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="522" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+    <rect x="570" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="592" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+    <rect x="640" y="242" width="44" height="44" rx="5" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="662" y="269" text-anchor="middle" class="mono" style="font-size:11px">full</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · four ways to split</b> — same 4 cards: TP gives each a ¼ slice of a layer (split within a layer), PP gives each consecutive layers i.e. a stage (split the stack), EP gives each some experts, DP gives each a full model replica and only splits requests.</div>
+</div>
+
 <h2>TP tensor parallel: split the matrices "within a layer"</h2>
 <p><strong>TP (tensor parallel)</strong> shards each layer's <strong>weight matrices</strong> along some dimension across the ranks of a group. The classic cases: the q/k/v projections column-split (lesson 25), the MLP up-projection column-split (lesson 37), and the vocab row-split. Each rank holds only one slice of the matrix, so it computes only a <strong>partial result</strong>; to get the full layer output the partial sums must be <strong>merged</strong>—a column+row combo uses one <span class="mono">all_reduce</span> sum, while vocab-parallel logits use <span class="mono">all_gather</span> to concatenate.</p>
 <p>TP's signature is that it thins out both the <strong>compute and memory of a single layer</strong>: a giant matrix that won't fit on one card is split into slices, stored and computed separately. The price is that <strong>every layer</strong> communicates (once forward, once backward)—extremely frequent. So GPUs in a TP group must use a <strong>fast neighbor link</strong> (NVLink / NVSwitch) and usually stay <strong>within one node</strong>; doing TP across machines gets choked by slow links.</p>
 <div class="layers"><div class="layer">Rank0: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank1: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank2: holds a 1/4 slice of every layer's weights</div><div class="layer">Rank3: holds a 1/4 slice of every layer's weights</div></div>
 <p>Note the diagram: under TP <strong>every rank runs "vertically" through all layers</strong>, just holding a thin strip of each. This is the fundamental difference from PP—TP splits the width of a layer, PP splits the depth of the stack.</p>
 <p>Concrete numbers help: a 70B model's per-layer weights are easily hundreds of MB; at TP=8 each card stores only 1/8 and computes only 1/8, but <strong>every single layer</strong> must run an <span class="mono">all_reduce</span> across those 8 cards to sum the partial results. Because the communication is so dense, TP's degree usually <strong>does not exceed the number of cards in one node</strong> (e.g. 8); to scale further you switch to PP or DP, otherwise frequent cross-node all_reduce would outweigh the compute it saves. Remember TP's trade-off in one line: it thins both "per-layer compute" and "per-layer memory", at the cost of "communicating every layer—the most expensive—over a fast neighbor link".</p>
+<p>Pin this to a real command: <span class="mono">--tp-size 8</span> shards <strong>every layer</strong>'s matrices over 8 GPUs and does <strong>one</strong> <span class="mono">all_reduce</span> per layer to sum the partial results—because it <strong>communicates every layer</strong>, the TP group needs a fast intra-node link (NVLink); by contrast <span class="mono">--dp-size</span> replicates the whole model and <strong>barely communicates</strong> per step, so a slow link is fine. That is exactly where the rule "TP saturates intra-node NVLink, DP barely communicates" comes from.</p>
 
 <h2>PP pipeline parallel: split "layers" into a relay of stages</h2>
 <p><strong>PP (pipeline parallel)</strong> splits the model's <strong>layers</strong> in order into consecutive <strong>stages</strong>, placed on different GPUs. Layers 1…k on rank0, k+1…2k on rank1, and so on. In the forward pass activations <strong>flow</strong> from one stage to the next (send to <span class="mono">next_rank</span>, receive from <span class="mono">prev_rank</span>, lesson 23); in the backward pass gradients flow the opposite way.</p>
@@ -578,6 +1257,37 @@ LESSON_46 = {"zh": r"""
 <div class="flow"><div class="node">EP token batch</div><div class="arrow">→</div><div class="node">all_to_all route to experts</div><div class="arrow">→</div><div class="node">gathered result</div></div>
 <div class="flow"><div class="node">PP stage i activations</div><div class="arrow">→</div><div class="node">send / recv to next stage</div><div class="arrow">→</div><div class="node">stage i+1 continues</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="What each parallelism communicates: TP uses all-reduce, EP uses all-to-all, PP uses send-recv, DP barely communicates">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">what each parallelism communicates</text>
+    <rect x="24" y="50" width="120" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="84" y="75" text-anchor="middle" style="font-weight:700;fill:var(--blue)">TP</text>
+    <text x="156" y="76" style="fill:var(--muted)">→</text>
+    <rect x="180" y="50" width="190" height="40" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="275" y="75" text-anchor="middle" class="mono" style="font-size:12px">all-reduce (sum)</text>
+    <text x="392" y="75" style="fill:var(--faint);font-size:12px">every layer · priciest · NVLink</text>
+    <rect x="24" y="110" width="120" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="84" y="135" text-anchor="middle" style="font-weight:700;fill:var(--amber)">EP</text>
+    <text x="156" y="136" style="fill:var(--muted)">→</text>
+    <rect x="180" y="110" width="190" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="275" y="135" text-anchor="middle" class="mono" style="font-size:12px">all-to-all (route)</text>
+    <text x="392" y="135" style="fill:var(--faint);font-size:12px">grows with token × top-k</text>
+    <rect x="24" y="170" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="84" y="195" text-anchor="middle" style="font-weight:700;fill:var(--teal)">PP</text>
+    <text x="156" y="196" style="fill:var(--muted)">→</text>
+    <rect x="180" y="170" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="275" y="195" text-anchor="middle" class="mono" style="font-size:12px">send · recv (acts)</text>
+    <text x="392" y="195" style="fill:var(--faint);font-size:12px">only at stage edges · cheap</text>
+    <rect x="24" y="230" width="120" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="84" y="255" text-anchor="middle" style="font-weight:700;fill:var(--purple)">DP</text>
+    <text x="156" y="256" style="fill:var(--muted)">→</text>
+    <rect x="180" y="230" width="190" height="40" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="275" y="255" text-anchor="middle" class="mono" style="font-size:12px">almost none</text>
+    <text x="392" y="255" style="fill:var(--faint);font-size:12px">≈ 0 per step · any link</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · what each communicates</b> — each axis maps to one collective: TP does an all-reduce every layer to sum partials (priciest, needs NVLink), EP does two all-to-all to route tokens to experts and back, PP only send/recv activations at stage edges, DP is near-zero communication per step.</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator</span><span class="ln">one unified abstraction: TP/PP/EP/DP are all instances over different rank layouts</span></div><pre>class GroupCoordinator:
     # ONE process group; TP / PP / EP / DP are each an instance over a rank layout
     rank: int             # this process's global rank
@@ -597,6 +1307,14 @@ LESSON_46 = {"zh": r"""
     @property
     def prev_rank(self):   # PP: the upstream pipeline stage (recv activations from here)
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/distributed/parallel_state.py ::GroupCoordinator.all_reduce</span><span class="ln">sum a tensor across this group (e.g. TP), everyone gets the same result</span></div><pre>def all_reduce(self, input_: torch.Tensor) -&gt; torch.Tensor:
+    # sum `input_` across every rank in THIS group (e.g. the TP group),
+    # so each rank ends with the same reduced tensor.
+    if self.world_size == 1:        # single GPU: nothing to reduce
+        return input_
+    ...   # dispatch to the group's all-reduce (custom op / NCCL)
+    return input_</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>TP</strong> splits the <strong>weight matrices within a layer</strong> (q/k/v, MLP columns, vocab; lessons 25/37), merging each layer with <span class="mono">all_reduce</span>/<span class="mono">all_gather</span>; the most frequent communication, needs NVLink, usually single node.</li>
@@ -654,6 +1372,78 @@ LESSON_47 = {"zh": r"""
   <div class="step"><div class="num">3</div><div class="sc"><h4>更新地图</h4><p>把新放置写回 <span class="mono">expert_location</span>（专家→GPU 映射），后续步骤按这张新地图路由。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>重复</h4><p>负载随流量持续演化，统计继续累积，放置周期性刷新——回到第 1 步。</p></div></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="四张 GPU 各持有专家，GPU2 上是一个热专家收到远超平均的 token（高高的红柱），其余三张近乎空转；同步墙意味着整步耗时由最忙的 GPU2 决定">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">倾斜：一个热专家拖慢整步</text>
+    <line x1="30" y1="250" x2="752" y2="250" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="30" y1="80" x2="700" y2="80" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="430" y="72" style="fill:var(--red);font-size:12px;font-weight:700">整步 = 最忙的 GPU</text>
+    <rect x="70" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="100" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">空转</text>
+    <rect x="50" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="274" text-anchor="middle" style="font-size:12px">GPU0</text>
+    <rect x="250" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="280" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="280" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">空转</text>
+    <rect x="230" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="280" y="274" text-anchor="middle" style="font-size:12px">GPU1</text>
+    <rect x="430" y="80" width="60" height="170" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="104" text-anchor="middle" class="mono" style="font-size:11px">4000</text>
+    <text x="460" y="124" text-anchor="middle" style="fill:var(--red);font-size:11px">热专家</text>
+    <rect x="410" y="256" width="100" height="28" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="274" text-anchor="middle" style="font-size:12px">GPU2 · 热点</text>
+    <rect x="610" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="640" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">空转</text>
+    <rect x="590" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="640" y="274" text-anchor="middle" style="font-size:12px">GPU3</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 专家负载倾斜</b> — 四张 GPU 各持专家，GPU2 上的热专家收到 4000 个 token，其余各 1000 个。同步墙让整步耗时取决于最忙的 GPU2，其余三张干等空转。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="重平衡前后对比：之前一根红色高柱（热专家）远高于其余三根矮柱；EPLB 复制并迁移后，右侧四根柱高度大致相等，新的最大值更低，墙时间下降">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">重平衡：抹平各 GPU 的 token 计数</text>
+    <text x="60" y="56" style="fill:var(--muted);font-size:12px">之前 · 倾斜</text>
+    <text x="560" y="56" style="fill:var(--teal);font-size:12px">之后 · 平坦</text>
+    <line x1="40" y1="240" x2="330" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="40" y1="90" x2="330" y2="90" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="44" y="84" style="fill:var(--red);font-size:11px">旧 max</text>
+    <rect x="60" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="130" y="90" width="40" height="150" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="150" y="112" text-anchor="middle" style="fill:var(--red);font-size:10px">热</text>
+    <rect x="200" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="388" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">EPLB</text>
+    <text x="388" y="178" text-anchor="middle" style="fill:var(--accent);font-size:30px">→</text>
+    <text x="388" y="212" text-anchor="middle" style="fill:var(--muted);font-size:11px">复制+迁移</text>
+    <line x1="450" y1="240" x2="760" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="450" y1="168" x2="760" y2="168" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="470" y="160" style="fill:var(--teal);font-size:11px;font-weight:700">新 max ↓</text>
+    <rect x="480" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="550" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="620" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>图 2 · 重平衡抹平负载</b> — 之前一根红色高柱（热逻辑专家）远高于其余；EPLB 复制并迁移后，右侧四柱高度大致相等，新的最大值更低，墙时间随之下降。</div>
+</div>
+
+<p>用具体数字感受这一切：若平均每个专家每步收到 128 个 token，一个爆款<strong>逻辑专家</strong>可能收到 640–1280 个，即均值的 <strong>5–10×</strong>。EPLB 把这个热逻辑专家<strong>复制到多个物理槽位</strong>上——于是 <span class="mono">num_physical_experts &gt; num_logical_experts</span>，原本指向它的洪流被几个物理副本分摊。例如 256 个逻辑专家配 288 个物理槽位，意味着有 32 个最热的逻辑专家各多出一份副本，专属于它们的那股流量被切成两半。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/expert_location.py ::ExpertLocationMetadata</span><span class="ln">放置图：每层哪些物理槽位装哪些逻辑专家</span></div><pre>@dataclass
+class ExpertLocationMetadata:
+    # the placement map EPLB rewrites to balance load: which PHYSICAL
+    # expert slots hold which LOGICAL experts, per layer.
+    physical_to_logical_map: torch.Tensor      # (layers, num_physical)
+    logical_to_all_physical_map: torch.Tensor  # (layers, num_logical, X)
+    @property
+    def num_physical_experts(self):
+        return self.physical_to_logical_map.shape[1]
+    @property
+    def num_logical_experts(self):
+        return self.logical_to_all_physical_map.shape[1]</pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">采集专家负载 + 周期性重平衡放置</span></div><pre>class EPLBManager:
     def __init__(self, model_runner):
@@ -723,6 +1513,78 @@ LESSON_47 = {"zh": r"""
   <div class="step"><div class="num">4</div><div class="sc"><h4>Repeat</h4><p>Load keeps evolving with traffic, stats keep accumulating, placement refreshes periodically — back to step 1.</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Four GPUs each hold experts; GPU2 holds a hot expert receiving far more tokens (tall red bar) while the others sit near-idle; the sync wall means the step time is set by the busiest GPU2">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">skew: one hot expert stalls step</text>
+    <line x1="30" y1="250" x2="752" y2="250" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="30" y1="80" x2="700" y2="80" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="430" y="72" style="fill:var(--red);font-size:12px;font-weight:700">step = busiest GPU</text>
+    <rect x="70" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="100" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">idle</text>
+    <rect x="50" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="274" text-anchor="middle" style="font-size:12px">GPU0</text>
+    <rect x="250" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="280" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="280" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">idle</text>
+    <rect x="230" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="280" y="274" text-anchor="middle" style="font-size:12px">GPU1</text>
+    <rect x="430" y="80" width="60" height="170" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="104" text-anchor="middle" class="mono" style="font-size:11px">4000</text>
+    <text x="460" y="124" text-anchor="middle" style="fill:var(--red);font-size:11px">hot exp</text>
+    <rect x="410" y="256" width="100" height="28" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="274" text-anchor="middle" style="font-size:12px">GPU2 · hot</text>
+    <rect x="610" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="640" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">idle</text>
+    <rect x="590" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="640" y="274" text-anchor="middle" style="font-size:12px">GPU3</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Skewed expert load</b> — four GPUs each hold experts; the hot expert on GPU2 gets 4000 tokens while the others get 1000 each. The sync wall ties step time to the busiest GPU2, leaving the other three stalling idle.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Before/after rebalance: before, one tall red bar (hot expert) towers over three short bars; after EPLB replicates and migrates, the four right-hand bars are roughly equal height and the new max is lower, so wall time drops">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">rebalance: flatten per-GPU token counts</text>
+    <text x="60" y="56" style="fill:var(--muted);font-size:12px">before · skew</text>
+    <text x="560" y="56" style="fill:var(--teal);font-size:12px">after · flat</text>
+    <line x1="40" y1="240" x2="330" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="40" y1="90" x2="330" y2="90" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="44" y="84" style="fill:var(--red);font-size:11px">old max</text>
+    <rect x="60" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="130" y="90" width="40" height="150" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="150" y="112" text-anchor="middle" style="fill:var(--red);font-size:10px">hot</text>
+    <rect x="200" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="388" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">EPLB</text>
+    <text x="388" y="178" text-anchor="middle" style="fill:var(--accent);font-size:30px">→</text>
+    <text x="388" y="212" text-anchor="middle" style="fill:var(--muted);font-size:11px">copy+move</text>
+    <line x1="450" y1="240" x2="760" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="450" y1="168" x2="760" y2="168" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="470" y="160" style="fill:var(--teal);font-size:11px;font-weight:700">new max ↓</text>
+    <rect x="480" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="550" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="620" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Rebalance flattens load</b> — before, one tall red bar (hot logical expert) towers over the rest; after EPLB replicates and migrates, the four right-hand bars are roughly equal and the new max is lower, so wall time drops.</div>
+</div>
+
+<p>Put concrete numbers on it: if each expert averages 128 tokens per step, a blockbuster <strong>logical expert</strong> might get 640–1280, i.e. <strong>5–10×</strong> the average. EPLB <strong>replicates that hot logical expert onto multiple physical slots</strong>—so <span class="mono">num_physical_experts &gt; num_logical_experts</span>, and the flood that pointed at it is split across the physical copies. For example, 256 logical experts mapped onto 288 physical slots means the 32 hottest logical experts each get an extra copy, halving the traffic any single copy must carry.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/expert_location.py ::ExpertLocationMetadata</span><span class="ln">placement map: which physical slots hold which logical experts, per layer</span></div><pre>@dataclass
+class ExpertLocationMetadata:
+    # the placement map EPLB rewrites to balance load: which PHYSICAL
+    # expert slots hold which LOGICAL experts, per layer.
+    physical_to_logical_map: torch.Tensor      # (layers, num_physical)
+    logical_to_all_physical_map: torch.Tensor  # (layers, num_logical, X)
+    @property
+    def num_physical_experts(self):
+        return self.physical_to_logical_map.shape[1]
+    @property
+    def num_logical_experts(self):
+        return self.logical_to_all_physical_map.shape[1]</pre></div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">gather expert load + periodically rebalance placement</span></div><pre>class EPLBManager:
     def __init__(self, model_runner):
         self.model_runner = model_runner
@@ -759,6 +1621,59 @@ LESSON_48 = {"zh": r"""
 
 <div class="flow"><div class="node">logits（第37课）</div><div class="arrow">→</div><div class="node">词表掩码：FSM 只放行合法 token，其余设 −∞</div><div class="arrow">→</div><div class="node">采样器（第28课）只能采到合法 token</div><div class="arrow">→</div><div class="node">accept_token：FSM 前进一步</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="受限解码的一步：FSM 当前状态算出词表掩码，把非法 token 的 logits 设为负无穷，采样只会落在合法 token 上">
+    <rect x="20" y="18" width="340" height="32" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="190" y="39" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">FSM S0：刚写下 { → 只允许 "</text>
+
+    <text x="178" y="72" text-anchor="middle" class="mono" style="font-size:12px">"</text>
+    <text x="242" y="72" text-anchor="middle" class="mono" style="font-size:12px">}</text>
+    <text x="306" y="72" text-anchor="middle" class="mono" style="font-size:12px">n</text>
+    <text x="370" y="72" text-anchor="middle" class="mono" style="font-size:12px">5</text>
+    <text x="434" y="72" text-anchor="middle" class="mono" style="font-size:12px">,</text>
+
+    <text x="20" y="100" style="fill:var(--muted);font-size:12px">logits</text>
+    <rect x="150" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="178" y="101" text-anchor="middle" class="mono" style="font-size:11px">2.1</text>
+    <rect x="214" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="242" y="101" text-anchor="middle" class="mono" style="font-size:11px">1.8</text>
+    <rect x="278" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="101" text-anchor="middle" class="mono" style="font-size:11px">3.0</text>
+    <rect x="342" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="370" y="101" text-anchor="middle" class="mono" style="font-size:11px">0.4</text>
+    <rect x="406" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="434" y="101" text-anchor="middle" class="mono" style="font-size:11px">1.2</text>
+
+    <text x="20" y="150" style="fill:var(--muted);font-size:12px">FSM 掩码</text>
+    <rect x="150" y="132" width="56" height="30" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="178" y="151" text-anchor="middle" style="fill:var(--teal);font-size:12px">✓</text>
+    <rect x="214" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="242" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+    <rect x="278" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+    <rect x="342" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="370" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+    <rect x="406" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="434" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+
+    <text x="20" y="200" style="fill:var(--muted);font-size:12px">−∞ 后</text>
+    <rect x="150" y="182" width="56" height="30" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="178" y="201" text-anchor="middle" class="mono" style="font-size:11px">2.1</text>
+    <rect x="214" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="242" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+    <rect x="278" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+    <rect x="342" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="370" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+    <rect x="406" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="434" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+
+    <rect x="150" y="232" width="312" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="306" y="254" text-anchor="middle" style="fill:var(--blue);font-size:12px">采样只会选到 " → FSM 前进到 S1</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 词表掩码挡在采样前</b> — FSM 当前状态算出哪些 token 合法，把非法 token 的 logits 设为 <span class="mono">−∞</span>；采样器只能落在亮着的合法 token 上，随后 FSM 前进一步。</div>
+</div>
+
 <h2>每请求一台 FSM：BaseGrammarObject</h2>
 <p>结构约束是<strong>逐请求</strong>的：不同请求可能带着不同的 schema，而且每个请求的解码进度各不相同。因此 SGLang 为每个请求维护一个属于它自己的语法对象，抽象基类就是 <span class="mono">BaseGrammarObject</span>。可以把它想成"这一条请求当前走到了 FSM 的哪个状态"的随身记录本，每生成一个 token 就翻一页。它对外暴露的接口非常精简，却覆盖了受限解码的全部需求。之所以采用"每请求一个对象"的设计，是因为受限解码的状态<strong>无法在请求之间共享</strong>：哪怕两条请求用的是同一份 schema，它们也可能停在 FSM 的不同状态上，需要各自独立的进度、各自独立的回退历史。把状态封装进对象，调度器就能在一个批次里同时驱动几十上百条处于不同进度的请求，互不干扰。</p>
 <p>第一组是<strong>推进</strong>：当采样器最终选定一个 token，调度器调用 <span class="mono">accept_token(token)</span>，让 FSM 根据这个 token 转移到下一个状态——下一步的"允许集合"也随之更新。第二组是<strong>掩码构造</strong>：<span class="mono">allocate_vocab_mask(...)</span> 先按词表大小、批大小、设备分配一块掩码缓冲区，<span class="mono">fill_vocab_mask(vocab_mask, idx)</span> 再把"此刻哪些 token 合法"标记进去（idx 指明这是批里的第几条请求）。这块掩码随后被叠加到 logits 上。第三组是<strong>回退</strong>：<span class="mono">rollback(k)</span> 让 FSM 倒退 k 步，这在两种场景下至关重要——一是需要回溯（backtracking）的语法，二是投机解码（<span class="inline">第43课</span>）里草稿模型一次提出多个候选 token，但其中部分被验证拒绝，那么 FSM 必须把"已经按这些被拒 token 前进过"的状态精确退回去。最后是<strong>终止判断</strong>：<span class="mono">is_terminated()</span> 检查 FSM 是否已抵达接受状态（accept state），即结构是否已经完整闭合，可以收尾。这四组接口看似简单，却恰好对应了一台 FSM 在解码过程中会经历的全部生命周期事件：前进、查询当前可行集、必要时倒带、以及判断是否抵达终点。掌握了它们，你就掌握了 SGLang 受限解码对外的全部契约。</p>
@@ -773,6 +1688,39 @@ LESSON_48 = {"zh": r"""
 
 <div class="cols"><div class="col"><strong>逐 token 解码</strong><br>对被钉死的 <span class="mono">" n a m e " :</span> 每个字符都老老实实跑一次模型前向去"预测"，明明只有唯一答案，却步步耗算力。</div><div class="col"><strong>跳跃前进</strong><br>检测到唯一续接，<span class="mono">jump_forward_symbol</span> 直接吐出整段 <span class="mono">"name":</span>，FSM 一次跳过这些步，<strong>不调用模型</strong>，更快也更稳。</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 230" role="img" aria-label="jump-forward：被文法钉死的强制串一次性吐出，FSM 跳过对应步数，省下逐字符的模型前向">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">jump-forward：强制串一次吐出</text>
+
+    <text x="20" y="78" style="fill:var(--amber);font-size:12px">逐 token</text>
+    <rect x="120" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="146" y="77" text-anchor="middle" class="mono" style="font-size:12px">"</text>
+    <rect x="180" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="206" y="77" text-anchor="middle" class="mono" style="font-size:12px">n</text>
+    <rect x="240" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="266" y="77" text-anchor="middle" class="mono" style="font-size:12px">a</text>
+    <rect x="300" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="326" y="77" text-anchor="middle" class="mono" style="font-size:12px">m</text>
+    <rect x="360" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="386" y="77" text-anchor="middle" class="mono" style="font-size:12px">e</text>
+    <rect x="420" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="446" y="77" text-anchor="middle" class="mono" style="font-size:12px">"</text>
+    <rect x="480" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="506" y="77" text-anchor="middle" class="mono" style="font-size:12px">:</text>
+    <text x="120" y="110" style="fill:var(--amber);font-size:12px">7 次模型前向 · 浪费</text>
+
+    <text x="20" y="170" style="fill:var(--teal);font-size:12px">jump-forward</text>
+    <rect x="120" y="148" width="412" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="326" y="169" text-anchor="middle" class="mono" style="font-size:12px">"name": 一次跳过</text>
+    <rect x="548" y="148" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="608" y="169" text-anchor="middle" style="fill:var(--blue);font-size:12px">值：采样</text>
+    <text x="120" y="202" style="fill:var(--teal);font-size:12px">1 步跳过 → 省下 7 次前向</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 跳过被钉死的强制串</b> — 当 FSM 在一段里只有唯一续接，<span class="mono">jump_forward_symbol</span> 把整段 <span class="mono">"name":</span> 一次拼进输出、跳过对应步数，省掉逐字符的模型前向；之后才回到正常采样去填那个自由的值。</div>
+</div>
+
+<div class="card"><div class="tag">🧪 具体例子</div><p>给定 schema <span class="mono">{"name": string}</span>：一旦 FSM 走过 <span class="mono">{</span>，接下来 <span class="mono">"name":</span> 这约 8 个字符<strong>完全确定</strong>、没有任何分支。逐 token 解码要为这 8 个字符各跑一次模型前向；而 <span class="mono">jump_forward_symbol</span> 一次性把 <span class="mono">"name":</span> 整段拼进输出、FSM 跳过这 8 步，<strong>0 次前向</strong>。真正需要采样的只有后面那个自由的<strong>值</strong>（比如 <span class="mono">"Ada"</span>）。</p></div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/base_grammar_backend.py ::BaseGrammarObject</span><span class="ln">每请求一个语法 FSM：屏蔽 logits 保证合法 + 可回滚</span></div><pre>class BaseGrammarObject:                 # one per request: the compiled grammar FSM
     def accept_token(self, token):
         ...                              # advance the FSM by the sampled token
@@ -785,6 +1733,21 @@ LESSON_48 = {"zh": r"""
     def is_terminated(self):
         ...                              # has the grammar reached an accept state?
 # jump-forward lives in constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</span><span class="ln">按 FSM 状态预存"只有一条路"时的强制串</span></div><pre>class OutlinesJumpForwardMap:
+    def __init__(self, regex_string):
+        # per FSM state, precompute the forced string for any stretch
+        # where the path is deterministic (a single way forward).
+        self.state_to_jump_forward = init_state_to_jump_forward(regex_string)
+    def jump_forward_symbol(self, state):
+        # walk while each state has ONE outgoing edge, concatenating
+        # the forced characters.
+        jump_forward_str = ""
+        while state in self.state_to_jump_forward:
+            e = self.state_to_jump_forward[state]
+            jump_forward_str += e.symbol
+            ...
+        return jump_forward_str, next_state</pre></div>
 
 <h2>回滚、终止与投机解码的配合</h2>
 <p>最后看三个易被忽略却很关键的细节。其一，<strong>回滚不是可有可无的</strong>。在投机解码里，草稿模型一口气提出若干 token，目标模型并行验证，常常只接受前几个、拒绝后几个。语法 FSM 在验证前必须假定这些 token 都被接受、据此前进；一旦验证拒绝，就得用 <span class="mono">rollback(k)</span> 把多走的 k 步精确退回，保证 FSM 状态与真正被接受的序列严格一致——否则后续掩码就会基于错误状态构造，约束随之失效。其二，<strong>终止判断决定何时收尾</strong>：<span class="mono">is_terminated()</span> 返回真，意味着结构已经完整闭合（例如 JSON 的最外层大括号已配平），可以安全停止生成，避免画蛇添足。其三，<strong>掩码构造要高效</strong>：<span class="mono">allocate_vocab_mask</span> 与 <span class="mono">fill_vocab_mask</span> 被设计成可在 GPU 上按批处理的形态，让受限解码的额外开销尽量被前向计算掩盖，从而几乎不拖慢吞吐。这一点尤其重要：受限解码若实现得笨拙，每步都在 CPU 上逐个 token 判断合法性、再同步回 GPU，开销会轻易吃掉它省下的算力。SGLang 的做法是把"判断合法"尽量提前到编译期完成，运行期只剩一次轻量的掩码填充与一次张量相加，于是它能在保证严格结构的同时几乎不付出吞吐代价。把推进、掩码、回滚、终止这四件事拼在一起，就是 SGLang 受限解码完整而稳固的骨架。</p>
@@ -813,6 +1776,59 @@ LESSON_48 = {"zh": r"""
 
 <div class="flow"><div class="node">logits (Lesson 37)</div><div class="arrow">→</div><div class="node">vocab mask: FSM allows only valid tokens, rest set to −∞</div><div class="arrow">→</div><div class="node">sampler (Lesson 28) can only pick a valid token</div><div class="arrow">→</div><div class="node">accept_token: FSM advances one step</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="one constrained-decode step: the FSM state computes a vocab mask, sets illegal token logits to negative infinity, so sampling only lands on a valid token">
+    <rect x="20" y="18" width="340" height="32" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="190" y="39" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">FSM S0: wrote { → only " allowed</text>
+
+    <text x="178" y="72" text-anchor="middle" class="mono" style="font-size:12px">"</text>
+    <text x="242" y="72" text-anchor="middle" class="mono" style="font-size:12px">}</text>
+    <text x="306" y="72" text-anchor="middle" class="mono" style="font-size:12px">n</text>
+    <text x="370" y="72" text-anchor="middle" class="mono" style="font-size:12px">5</text>
+    <text x="434" y="72" text-anchor="middle" class="mono" style="font-size:12px">,</text>
+
+    <text x="20" y="100" style="fill:var(--muted);font-size:12px">logits</text>
+    <rect x="150" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="178" y="101" text-anchor="middle" class="mono" style="font-size:11px">2.1</text>
+    <rect x="214" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="242" y="101" text-anchor="middle" class="mono" style="font-size:11px">1.8</text>
+    <rect x="278" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="101" text-anchor="middle" class="mono" style="font-size:11px">3.0</text>
+    <rect x="342" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="370" y="101" text-anchor="middle" class="mono" style="font-size:11px">0.4</text>
+    <rect x="406" y="82" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="434" y="101" text-anchor="middle" class="mono" style="font-size:11px">1.2</text>
+
+    <text x="20" y="150" style="fill:var(--muted);font-size:12px">FSM mask</text>
+    <rect x="150" y="132" width="56" height="30" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="178" y="151" text-anchor="middle" style="fill:var(--teal);font-size:12px">✓</text>
+    <rect x="214" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="242" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+    <rect x="278" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+    <rect x="342" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="370" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+    <rect x="406" y="132" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="434" y="151" text-anchor="middle" style="fill:var(--faint);font-size:12px">✗</text>
+
+    <text x="20" y="200" style="fill:var(--muted);font-size:12px">after −∞</text>
+    <rect x="150" y="182" width="56" height="30" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="178" y="201" text-anchor="middle" class="mono" style="font-size:11px">2.1</text>
+    <rect x="214" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="242" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+    <rect x="278" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="306" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+    <rect x="342" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="370" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+    <rect x="406" y="182" width="56" height="30" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="434" y="201" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--faint)">−∞</text>
+
+    <rect x="150" y="232" width="312" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="306" y="254" text-anchor="middle" style="fill:var(--blue);font-size:12px">sampler can only pick " → FSM to S1</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · the vocab mask gates the sampler</b> — the current FSM state computes which tokens are legal and sets illegal tokens' logits to <span class="mono">−∞</span>; the sampler can only land on a lit, valid token, after which the FSM advances one step.</div>
+</div>
+
 <h2>One FSM per request: BaseGrammarObject</h2>
 <p>Structural constraints are <strong>per-request</strong>: different requests may carry different schemas, and each request's decode progress differs. SGLang therefore keeps a grammar object that belongs to each request, with the abstract base class <span class="mono">BaseGrammarObject</span>. Think of it as a personal notebook recording "where this request currently stands in the FSM." Its interface is tiny yet covers everything constrained decoding needs. The "one object per request" design exists because constrained-decoding state <strong>cannot be shared across requests</strong>: even two requests using the same schema may sit at different FSM states, each needing its own progress and its own rollback history. Encapsulating state in an object lets the scheduler drive dozens or hundreds of requests at different progress points within one batch without interference.</p>
 <p>The first group is <strong>advancing</strong>: once the sampler finally chooses a token, the scheduler calls <span class="mono">accept_token(token)</span>, transitioning the FSM to the next state—and the next step's "allowed set" updates accordingly. The second group is <strong>mask construction</strong>: <span class="mono">allocate_vocab_mask(...)</span> first allocates a mask buffer sized by vocab, batch, and device, then <span class="mono">fill_vocab_mask(vocab_mask, idx)</span> marks "which tokens are legal now" (idx says which request in the batch). That mask is then added onto the logits. The third group is <strong>rollback</strong>: <span class="mono">rollback(k)</span> backs the FSM up k steps, which is crucial in two scenarios—grammars that need backtracking, and speculative decoding (<span class="inline">Lesson 43</span>), where the draft model proposes several candidate tokens at once but some are rejected by verification, so the FSM must precisely undo the states it advanced through for those rejected tokens. Finally, <strong>termination</strong>: <span class="mono">is_terminated()</span> checks whether the FSM has reached an accept state—whether the structure is fully closed and generation can wrap up. These four groups look simple but map exactly onto every lifecycle event an FSM goes through during decoding: advance, query the current feasible set, rewind when needed, and check whether the end has been reached. Master them and you have grasped the entire outward contract of SGLang's constrained decoding.</p>
@@ -827,6 +1843,39 @@ LESSON_48 = {"zh": r"""
 
 <div class="cols"><div class="col"><strong>Plain per-token decode</strong><br>For the nailed-down <span class="mono">" n a m e " :</span> it dutifully runs a model forward to "predict" each character—burning compute step by step even though there is only one answer.</div><div class="col"><strong>Jump-forward</strong><br>Detecting the unique continuation, <span class="mono">jump_forward_symbol</span> emits the whole <span class="mono">"name":</span> directly; the FSM jumps over these steps <strong>without calling the model</strong>—faster and steadier.</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 230" role="img" aria-label="jump-forward: a grammar-forced span is emitted at once, the FSM jumps the matching steps and skips the per-character model forwards">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">jump-forward: emit the forced span once</text>
+
+    <text x="20" y="78" style="fill:var(--amber);font-size:12px">per-token</text>
+    <rect x="120" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="146" y="77" text-anchor="middle" class="mono" style="font-size:12px">"</text>
+    <rect x="180" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="206" y="77" text-anchor="middle" class="mono" style="font-size:12px">n</text>
+    <rect x="240" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="266" y="77" text-anchor="middle" class="mono" style="font-size:12px">a</text>
+    <rect x="300" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="326" y="77" text-anchor="middle" class="mono" style="font-size:12px">m</text>
+    <rect x="360" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="386" y="77" text-anchor="middle" class="mono" style="font-size:12px">e</text>
+    <rect x="420" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="446" y="77" text-anchor="middle" class="mono" style="font-size:12px">"</text>
+    <rect x="480" y="56" width="52" height="32" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="506" y="77" text-anchor="middle" class="mono" style="font-size:12px">:</text>
+    <text x="120" y="110" style="fill:var(--amber);font-size:12px">7 model forwards · wasted</text>
+
+    <text x="20" y="170" style="fill:var(--teal);font-size:12px">jump-forward</text>
+    <rect x="120" y="148" width="412" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="326" y="169" text-anchor="middle" class="mono" style="font-size:12px">"name": jumped at once</text>
+    <rect x="548" y="148" width="120" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="608" y="169" text-anchor="middle" style="fill:var(--blue);font-size:12px">value: sample</text>
+    <text x="120" y="202" style="fill:var(--teal);font-size:12px">1 step → saves 7 forwards</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · skip the nailed-down forced span</b> — when the FSM has only one continuation over a span, <span class="mono">jump_forward_symbol</span> splices the whole <span class="mono">"name":</span> in at once and jumps the matching steps, skipping the per-character model forwards; only then does it return to normal sampling for the free value.</div>
+</div>
+
+<div class="card"><div class="tag">🧪 Concrete example</div><p>Given the schema <span class="mono">{"name": string}</span>: once the FSM passes <span class="mono">{</span>, the next ~8 characters <span class="mono">"name":</span> are <strong>fully determined</strong>, with no branching. Per-token decode would run a model forward for each of those 8 characters; <span class="mono">jump_forward_symbol</span> instead splices the whole <span class="mono">"name":</span> in at once and the FSM jumps those 8 steps with <strong>zero forwards</strong>. Only the free <strong>value</strong> that follows (e.g. <span class="mono">"Ada"</span>) actually needs sampling.</p></div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/base_grammar_backend.py ::BaseGrammarObject</span><span class="ln">one grammar FSM per request: mask logits to stay valid + rollback</span></div><pre>class BaseGrammarObject:                 # one per request: the compiled grammar FSM
     def accept_token(self, token):
         ...                              # advance the FSM by the sampled token
@@ -839,6 +1888,21 @@ LESSON_48 = {"zh": r"""
     def is_terminated(self):
         ...                              # has the grammar reached an accept state?
 # jump-forward lives in constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/constrained/outlines_jump_forward.py ::OutlinesJumpForwardMap</span><span class="ln">per FSM state, precompute the forced string when only one path exists</span></div><pre>class OutlinesJumpForwardMap:
+    def __init__(self, regex_string):
+        # per FSM state, precompute the forced string for any stretch
+        # where the path is deterministic (a single way forward).
+        self.state_to_jump_forward = init_state_to_jump_forward(regex_string)
+    def jump_forward_symbol(self, state):
+        # walk while each state has ONE outgoing edge, concatenating
+        # the forced characters.
+        jump_forward_str = ""
+        while state in self.state_to_jump_forward:
+            e = self.state_to_jump_forward[state]
+            jump_forward_str += e.symbol
+            ...
+        return jump_forward_str, next_state</pre></div>
 
 <h2>Rollback, termination, and the speculative-decoding interplay</h2>
 <p>Finally, three easily overlooked yet crucial details. First, <strong>rollback is not optional</strong>. In speculative decoding the draft model proposes several tokens at once and the target model verifies them in parallel, often accepting only the first few and rejecting the rest. The grammar FSM must assume all are accepted and advance accordingly before verification; once some are rejected it must use <span class="mono">rollback(k)</span> to precisely undo the extra k steps, keeping the FSM state strictly consistent with the truly accepted sequence—otherwise subsequent masks would be built from a wrong state and the constraint would fail. Second, <strong>termination decides when to stop</strong>: when <span class="mono">is_terminated()</span> returns true the structure is fully closed (e.g. the outermost JSON braces are balanced) and generation can safely stop without adding noise. Third, <strong>mask construction must be efficient</strong>: <span class="mono">allocate_vocab_mask</span> and <span class="mono">fill_vocab_mask</span> are designed to be batched on the GPU so that constrained decoding's overhead is largely hidden behind the forward compute, barely slowing throughput. This matters especially: if constrained decoding were implemented clumsily—judging each token's legality on the CPU every step and syncing back to the GPU—the overhead would easily eat the compute it saves. SGLang instead pushes "deciding legality" into compile time as much as possible, leaving the runtime with just one lightweight mask fill and one tensor add, so it guarantees strict structure at almost no throughput cost. Stitch advancing, masking, rollback, and termination together and you get the complete, sturdy skeleton of SGLang's constrained decoding.</p>

@@ -367,6 +367,38 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">请求到达</div><div class="arrow">→</div><div class="node">prefill 池<br><span class="mono">算力密集</span></div><div class="arrow">→</div><div class="node">KV 传输<br><span class="mono">RDMA/NVLink</span></div><div class="arrow">→</div><div class="node">decode 池<br><span class="mono">带宽密集</span></div><div class="arrow">→</div><div class="node">流式吐 token</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="prefill 池算好整段 KV，经 RDMA/NVLink 传到 decode 池，decode 读这份 KV 逐 token 流式输出">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">一次请求穿过两个池</text>
+    <rect x="20" y="96" width="74" height="66" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="126" text-anchor="middle" style="font-size:12px">请求</text>
+    <text x="57" y="146" text-anchor="middle" style="fill:var(--faint);font-size:11px">prompt</text>
+    <line x1="98" y1="129" x2="126" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="128,129 118,124 118,134" style="fill:var(--line)"/>
+    <rect x="132" y="90" width="150" height="78" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="207" y="116" text-anchor="middle" style="fill:var(--blue);font-weight:700">Prefill 池</text>
+    <text x="207" y="136" text-anchor="middle" style="font-size:12px">一次算完整段</text>
+    <text x="207" y="155" text-anchor="middle" class="mono" style="font-size:11px">→ KV 缓存</text>
+    <line x1="286" y1="129" x2="314" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="316,129 306,124 306,134" style="fill:var(--amber)"/>
+    <rect x="320" y="96" width="140" height="66" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="390" y="124" text-anchor="middle" style="fill:var(--amber);font-weight:700">KV 传输</text>
+    <text x="390" y="144" text-anchor="middle" class="mono" style="font-size:11px">RDMA / NVLink</text>
+    <line x1="464" y1="129" x2="492" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="494,129 484,124 484,134" style="fill:var(--amber)"/>
+    <rect x="498" y="90" width="150" height="78" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="573" y="116" text-anchor="middle" style="fill:var(--teal);font-weight:700">Decode 池</text>
+    <text x="573" y="136" text-anchor="middle" style="font-size:12px">逐 token 生成</text>
+    <text x="573" y="155" text-anchor="middle" class="mono" style="font-size:11px">读 KV</text>
+    <line x1="652" y1="129" x2="680" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="682,129 672,124 672,134" style="fill:var(--line)"/>
+    <rect x="686" y="96" width="96" height="66" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="734" y="124" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">流式输出</text>
+    <text x="734" y="144" text-anchor="middle" class="mono" style="font-size:11px">tokens</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 两池流水线</b> — 请求先进 prefill 池算出整段 KV，经 RDMA/NVLink 传到 decode 池，decode 读着这份 KV 逐 token 流式输出。</div>
+</div>
+
 <h2>二、分离之后：两个独立的池</h2>
 <p>PD 分离把集群切成两半。<strong>Prefill 池</strong>追求<strong>吞吐</strong>：它处理的是一阵阵爆发式的大批并行计算，适合配置高算力、可以容忍稍大的批；它的产出不是 token，而是<strong>一份算好的 KV 缓存</strong>。<strong>Decode 池</strong>追求<strong>低延迟、稳定的 token 流</strong>：它需要的是高显存带宽与小而稳的批，把每个请求的 ITL 压到最低。两个池的规模、批策略、并行方式都能<strong>各自独立调优</strong>——这是绑在一起时做不到的。</p>
 <p>"独立"还体现在<strong>故障与扩缩容</strong>上。decode 池某个节点挂了，路由器可以把后续请求改派给别的 decode worker，而 prefill 池完全不受影响；反过来想临时加大 prefill 吞吐，直接往 prefill 池里加卡即可，不必动 decode。这种<strong>解耦的弹性</strong>，让在线服务在流量突变时能更平滑地应对，也让灰度升级、容量规划这些运维动作可以分池进行、互不打断。</p>
@@ -375,6 +407,56 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>当然，分离不是免费的午餐。它引入了一次<strong>跨节点的 KV 传输</strong>，多了网络这一环；如果互联不够快，搬运时间会反过来侵蚀掉省下的收益，甚至抬高 TTFT。所以 PD 分离的成立前提是<strong>有足够快的互联</strong>（RDMA/NVLink）以及<strong>把传输与计算尽量重叠</strong>。理解这条边界，才知道它适合大规模、互联完善的集群，而不是随便两张卡都该拆。</p>
 
 <div class="cols"><div class="col"><strong>Prefill 节点</strong><br><span class="mono">compute-bound</span><br>一次大并行算完整段 prompt<br>打满 Tensor Core / 算力<br>产出：算好的 <strong>KV 缓存</strong></div><div class="col"><strong>Decode 节点</strong><br><span class="mono">bandwidth-bound</span><br>每步只生成 1 个 token<br>反复重读权重 + KV，算力闲置<br>产出：<strong>流式 token</strong></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="左 prefill 节点算力受限：整段 prompt 并行、算力打满；右 decode 节点带宽受限：每步 1 token 读大 KV 缓存、算力闲置">
+    <line x1="400" y1="44" x2="400" y2="272" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="32" style="font-weight:700;fill:var(--blue)">Prefill 节点</text>
+    <rect x="30" y="44" width="140" height="26" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">compute-bound</text>
+    <text x="30" y="92" style="font-size:12px;fill:var(--muted)">整段 prompt 并行 → 算力打满</text>
+    <rect x="40" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <text x="252" y="158" style="fill:var(--blue);font-size:12px">算力全忙</text>
+    <text x="30" y="258" style="font-size:12px">瓶颈：GPU 算力 / FLOPs</text>
+    <text x="430" y="32" style="font-weight:700;fill:var(--teal)">Decode 节点</text>
+    <rect x="430" y="44" width="160" height="26" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">bandwidth-bound</text>
+    <text x="430" y="92" style="font-size:12px;fill:var(--muted)">每步 1 token → 算力闲置</text>
+    <rect x="430" y="112" width="30" height="22" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.2"/>
+    <rect x="472" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <line x1="598" y1="150" x2="550" y2="150" style="stroke:var(--amber);stroke-width:2.5"/>
+    <polygon points="548,150 558,145 558,155" style="fill:var(--amber)"/>
+    <text x="556" y="138" style="fill:var(--amber);font-size:11px">带宽满载</text>
+    <rect x="600" y="108" width="120" height="92" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="660" y="148" text-anchor="middle" style="fill:var(--teal);font-weight:700">大 KV 缓存</text>
+    <text x="660" y="170" text-anchor="middle" style="font-size:11px">每步全读</text>
+    <text x="430" y="258" style="font-size:12px">瓶颈：显存带宽</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 算力受限 vs 带宽受限</b> — prefill 把整段 prompt 一次并行算完、算力全忙；decode 每步只出 1 token，却要满带宽重读一大块 KV，算力大半闲置。分池后各按自己的瓶颈选硬件、定批量。</div>
+</div>
+
+<p><strong>落到部署上：</strong>启动时加 <span class="mono">--disaggregation-mode prefill</span> 与 <span class="mono">--disaggregation-mode decode</span>，就把同一份模型拆成 prefill worker 与 decode worker 两组进程。设想一个 <strong>2000 token</strong> 的长提示词：prefill 池一次把它整段算成 KV，这份 KV 只<strong>搬运一次</strong>到 decode 池；之后 decode 连续吐出几百个 token，<strong>全程不再重算 prompt</strong>。若线上是"长 prompt、短答案"，就多配 prefill 卡；若是"短 prompt、长答案"，就多配 decode 卡——P∶D 比例随流量自由伸缩。</p>
 
 <h2>三、SGLang 怎么抽象这次搬运</h2>
 <p>不同集群的互联硬件五花八门，SGLang 不把传输逻辑写死，而是藏在一个<strong>可插拔的连接器</strong>后面。Prefill 侧持有一个 <span class="mono">BaseKVSender</span>，decode 侧持有一个镜像的 <span class="mono">BaseKVReceiver</span>。发送方的接口很克制：<span class="mono">init</span> 先<strong>宣告</strong>这次要搬多少页 KV；<span class="mono">send</span> 把这个请求的 KV 页<strong>推</strong>给 decode worker；<span class="mono">poll</span> 返回一个<strong>非阻塞</strong>的 <span class="mono">KVPoll</span> 状态（Bootstrapping / WaitingForInput / Transferring / Success / Failed），让调度器不必卡死等待；<span class="mono">get_transfer_metric</span> 则吐出 <span class="mono">KVTransferMetric</span>（字节数、延迟）供观测。</p>
@@ -408,6 +490,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     def get_transfer_metric(self):       # -&gt; KVTransferMetric (bytes, latency)
         ...
 # BaseKVReceiver mirrors this on the DECODE side (init + send_metadata + poll)</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVReceiver</span><span class="ln">decode 侧：接收 prefill 传来的 KV，再开始解码</span></div><pre>class BaseKVReceiver(ABC):
+    # the DECODE side of PD disaggregation: pull the KV that the
+    # prefill node produced, into this node's KV pool.
+    @abstractmethod
+    def init(self, kv_indices, ...): ...
+    @abstractmethod
+    def poll(self) -&gt; KVPoll:
+        ...   # WaitingForInput -&gt; Transferring -&gt; Success
+    # once KV has arrived, the decode node generates tokens from it.</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>两副面孔，资源相反</strong>：prefill 是 compute-bound 的一次大并行；decode 是 bandwidth-bound 的逐 token 生成。同卡共存必然在 TTFT 与 ITL 之间打架。</li>
@@ -491,6 +583,38 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">request arrives</div><div class="arrow">→</div><div class="node">prefill pool<br><span class="mono">compute-bound</span></div><div class="arrow">→</div><div class="node">KV transfer<br><span class="mono">RDMA/NVLink</span></div><div class="arrow">→</div><div class="node">decode pool<br><span class="mono">bandwidth-bound</span></div><div class="arrow">→</div><div class="node">stream tokens</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="prefill pool computes the whole KV, transferred over RDMA/NVLink to the decode pool, which reads it and streams tokens one by one">
+    <text x="20" y="30" style="font-weight:700;fill:var(--muted)">one request crosses two pools</text>
+    <rect x="20" y="96" width="74" height="66" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="126" text-anchor="middle" style="font-size:12px">request</text>
+    <text x="57" y="146" text-anchor="middle" style="fill:var(--faint);font-size:11px">prompt</text>
+    <line x1="98" y1="129" x2="126" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="128,129 118,124 118,134" style="fill:var(--line)"/>
+    <rect x="132" y="90" width="150" height="78" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="207" y="116" text-anchor="middle" style="fill:var(--blue);font-weight:700">Prefill pool</text>
+    <text x="207" y="136" text-anchor="middle" style="font-size:12px">computes all KV</text>
+    <text x="207" y="155" text-anchor="middle" class="mono" style="font-size:11px">→ KV cache</text>
+    <line x1="286" y1="129" x2="314" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="316,129 306,124 306,134" style="fill:var(--amber)"/>
+    <rect x="320" y="96" width="140" height="66" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="390" y="124" text-anchor="middle" style="fill:var(--amber);font-weight:700">KV transfer</text>
+    <text x="390" y="144" text-anchor="middle" class="mono" style="font-size:11px">RDMA / NVLink</text>
+    <line x1="464" y1="129" x2="492" y2="129" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="494,129 484,124 484,134" style="fill:var(--amber)"/>
+    <rect x="498" y="90" width="150" height="78" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="573" y="116" text-anchor="middle" style="fill:var(--teal);font-weight:700">Decode pool</text>
+    <text x="573" y="136" text-anchor="middle" style="font-size:12px">1 token/step</text>
+    <text x="573" y="155" text-anchor="middle" class="mono" style="font-size:11px">reads KV</text>
+    <line x1="652" y1="129" x2="680" y2="129" style="stroke:var(--line);stroke-width:2"/>
+    <polygon points="682,129 672,124 672,134" style="fill:var(--line)"/>
+    <rect x="686" y="96" width="96" height="66" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="734" y="124" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">Stream</text>
+    <text x="734" y="144" text-anchor="middle" class="mono" style="font-size:11px">tokens</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Two-pool pipeline</b> — a request enters the prefill pool, which computes the whole prompt's KV; that KV is transferred over RDMA/NVLink to the decode pool, which reads it and streams tokens one by one.</div>
+</div>
+
 <h2>2. After the split: two independent pools</h2>
 <p>PD disaggregation cuts the cluster in two. The <strong>prefill pool</strong> chases <strong>throughput</strong>: it handles bursts of big parallel computation, suits high-compute configs and can tolerate slightly larger batches; its output isn't tokens but <strong>a computed KV cache</strong>. The <strong>decode pool</strong> chases <strong>low, steady token latency</strong>: it wants high memory bandwidth and small, stable batches to drive each request's ITL down. The two pools' sizes, batching strategies, and parallelism can be <strong>tuned independently</strong>—impossible when they're bolted together.</p>
 <p>"Independent" also shows up in <strong>failure handling and scaling</strong>. If a node in the decode pool dies, the router can redirect subsequent requests to other decode workers while the prefill pool is wholly unaffected; conversely, to temporarily boost prefill throughput you just add cards to the prefill pool without touching decode. This <strong>decoupled elasticity</strong> lets online serving ride out traffic swings more smoothly, and lets ops actions like canary upgrades and capacity planning proceed pool by pool without interrupting each other.</p>
@@ -499,6 +623,56 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Of course, disaggregation is no free lunch. It introduces a <strong>cross-node KV transfer</strong>, adding the network as one more link; if the interconnect isn't fast enough, transfer time eats back into the savings and can even raise TTFT. So PD disaggregation is premised on having a <strong>fast enough interconnect</strong> (RDMA/NVLink) and on <strong>overlapping transfer with compute</strong> as much as possible. Understanding this boundary tells you it suits large, well-interconnected clusters—not any random pair of cards that should be split.</p>
 
 <div class="cols"><div class="col"><strong>Prefill node</strong><br><span class="mono">compute-bound</span><br>computes the whole prompt in one parallel pass<br>saturates Tensor Cores / compute<br>output: a computed <strong>KV cache</strong></div><div class="col"><strong>Decode node</strong><br><span class="mono">bandwidth-bound</span><br>generates only 1 token per step<br>re-reads weights + KV, compute idle<br>output: <strong>streamed tokens</strong></div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 290" role="img" aria-label="left prefill node is compute-bound: whole prompt in parallel, compute maxed; right decode node is bandwidth-bound: 1 token per step reading a large KV cache, compute idle">
+    <line x1="400" y1="44" x2="400" y2="272" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="32" style="font-weight:700;fill:var(--blue)">Prefill node</text>
+    <rect x="30" y="44" width="140" height="26" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">compute-bound</text>
+    <text x="30" y="92" style="font-size:12px;fill:var(--muted)">all tokens parallel → busy</text>
+    <rect x="40" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="112" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="142" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="40" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="82" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="124" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="166" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="208" y="172" width="30" height="22" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <text x="252" y="158" style="fill:var(--blue);font-size:12px">all busy</text>
+    <text x="30" y="258" style="font-size:12px">bottleneck: GPU FLOPs</text>
+    <text x="430" y="32" style="font-weight:700;fill:var(--teal)">Decode node</text>
+    <rect x="430" y="44" width="160" height="26" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="62" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">bandwidth-bound</text>
+    <text x="430" y="92" style="font-size:12px;fill:var(--muted)">1 token/step → mostly idle</text>
+    <rect x="430" y="112" width="30" height="22" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.2"/>
+    <rect x="472" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="112" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="142" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="430" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="472" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <rect x="514" y="172" width="30" height="22" rx="3" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.2"/>
+    <line x1="598" y1="150" x2="550" y2="150" style="stroke:var(--amber);stroke-width:2.5"/>
+    <polygon points="548,150 558,145 558,155" style="fill:var(--amber)"/>
+    <text x="556" y="138" style="fill:var(--amber);font-size:11px">bandwidth</text>
+    <rect x="600" y="108" width="120" height="92" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="660" y="148" text-anchor="middle" style="fill:var(--teal);font-weight:700">large KV</text>
+    <text x="660" y="170" text-anchor="middle" style="font-size:11px">read each step</text>
+    <text x="430" y="258" style="font-size:12px">bottleneck: memory BW</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Compute-bound vs bandwidth-bound</b> — prefill computes the whole prompt in one parallel pass with compute fully busy; decode emits just 1 token per step yet re-reads a large KV cache at full bandwidth, leaving compute mostly idle. Split into pools, each picks its own hardware and batch size.</div>
+</div>
+
+<p><strong>In deployment:</strong> launch with <span class="mono">--disaggregation-mode prefill</span> and <span class="mono">--disaggregation-mode decode</span> to split one model into prefill workers and decode workers. Take a <strong>2000-token</strong> prompt: the prefill pool computes its KV in one pass, and that KV is <strong>transferred once</strong> to the decode pool; decode then streams hundreds of tokens <strong>without recomputing the prompt</strong>. If traffic is "long prompt, short answer," provision more prefill cards; if "short prompt, long answer," provision more decode cards — the P∶D ratio flexes with the traffic.</p>
 
 <h2>3. How SGLang abstracts the transfer</h2>
 <p>Interconnect hardware varies wildly across clusters, so SGLang doesn't hard-code the transfer logic—it hides it behind a <strong>pluggable connector</strong>. The prefill side holds a <span class="mono">BaseKVSender</span>; the decode side holds a mirrored <span class="mono">BaseKVReceiver</span>. The sender's interface is deliberately spare: <span class="mono">init</span> first <strong>announces</strong> how many KV pages will move; <span class="mono">send</span> <strong>pushes</strong> this request's KV pages to the decode worker; <span class="mono">poll</span> returns a <strong>non-blocking</strong> <span class="mono">KVPoll</span> status (Bootstrapping / WaitingForInput / Transferring / Success / Failed) so the scheduler never has to block; <span class="mono">get_transfer_metric</span> yields a <span class="mono">KVTransferMetric</span> (bytes, latency) for observability.</p>
@@ -531,6 +705,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     def get_transfer_metric(self):       # -&gt; KVTransferMetric (bytes, latency)
         ...
 # BaseKVReceiver mirrors this on the DECODE side (init + send_metadata + poll)</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/disaggregation/base/conn.py ::BaseKVReceiver</span><span class="ln">decode side: receive the KV from prefill, then start decoding</span></div><pre>class BaseKVReceiver(ABC):
+    # the DECODE side of PD disaggregation: pull the KV that the
+    # prefill node produced, into this node's KV pool.
+    @abstractmethod
+    def init(self, kv_indices, ...): ...
+    @abstractmethod
+    def poll(self) -&gt; KVPoll:
+        ...   # WaitingForInput -&gt; Transferring -&gt; Success
+    # once KV has arrived, the decode node generates tokens from it.</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Two faces, opposite resources</strong>: prefill is a compute-bound parallel pass; decode is bandwidth-bound token-by-token generation. Co-locating them inevitably pits TTFT against ITL.</li>

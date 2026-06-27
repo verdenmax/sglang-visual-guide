@@ -389,6 +389,78 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="step"><div class="num">4</div><div class="sc"><h4>重复</h4><p>负载随流量持续演化，统计继续累积，放置周期性刷新——回到第 1 步。</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="四张 GPU 各持有专家，GPU2 上是一个热专家收到远超平均的 token（高高的红柱），其余三张近乎空转；同步墙意味着整步耗时由最忙的 GPU2 决定">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">倾斜：一个热专家拖慢整步</text>
+    <line x1="30" y1="250" x2="752" y2="250" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="30" y1="80" x2="700" y2="80" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="430" y="72" style="fill:var(--red);font-size:12px;font-weight:700">整步 = 最忙的 GPU</text>
+    <rect x="70" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="100" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">空转</text>
+    <rect x="50" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="274" text-anchor="middle" style="font-size:12px">GPU0</text>
+    <rect x="250" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="280" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="280" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">空转</text>
+    <rect x="230" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="280" y="274" text-anchor="middle" style="font-size:12px">GPU1</text>
+    <rect x="430" y="80" width="60" height="170" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="104" text-anchor="middle" class="mono" style="font-size:11px">4000</text>
+    <text x="460" y="124" text-anchor="middle" style="fill:var(--red);font-size:11px">热专家</text>
+    <rect x="410" y="256" width="100" height="28" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="274" text-anchor="middle" style="font-size:12px">GPU2 · 热点</text>
+    <rect x="610" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="640" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">空转</text>
+    <rect x="590" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="640" y="274" text-anchor="middle" style="font-size:12px">GPU3</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 专家负载倾斜</b> — 四张 GPU 各持专家，GPU2 上的热专家收到 4000 个 token，其余各 1000 个。同步墙让整步耗时取决于最忙的 GPU2，其余三张干等空转。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="重平衡前后对比：之前一根红色高柱（热专家）远高于其余三根矮柱；EPLB 复制并迁移后，右侧四根柱高度大致相等，新的最大值更低，墙时间下降">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">重平衡：抹平各 GPU 的 token 计数</text>
+    <text x="60" y="56" style="fill:var(--muted);font-size:12px">之前 · 倾斜</text>
+    <text x="560" y="56" style="fill:var(--teal);font-size:12px">之后 · 平坦</text>
+    <line x1="40" y1="240" x2="330" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="40" y1="90" x2="330" y2="90" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="44" y="84" style="fill:var(--red);font-size:11px">旧 max</text>
+    <rect x="60" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="130" y="90" width="40" height="150" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="150" y="112" text-anchor="middle" style="fill:var(--red);font-size:10px">热</text>
+    <rect x="200" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="388" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">EPLB</text>
+    <text x="388" y="178" text-anchor="middle" style="fill:var(--accent);font-size:30px">→</text>
+    <text x="388" y="212" text-anchor="middle" style="fill:var(--muted);font-size:11px">复制+迁移</text>
+    <line x1="450" y1="240" x2="760" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="450" y1="168" x2="760" y2="168" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="470" y="160" style="fill:var(--teal);font-size:11px;font-weight:700">新 max ↓</text>
+    <rect x="480" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="550" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="620" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>图 2 · 重平衡抹平负载</b> — 之前一根红色高柱（热逻辑专家）远高于其余；EPLB 复制并迁移后，右侧四柱高度大致相等，新的最大值更低，墙时间随之下降。</div>
+</div>
+
+<p>用具体数字感受这一切：若平均每个专家每步收到 128 个 token，一个爆款<strong>逻辑专家</strong>可能收到 640–1280 个，即均值的 <strong>5–10×</strong>。EPLB 把这个热逻辑专家<strong>复制到多个物理槽位</strong>上——于是 <span class="mono">num_physical_experts &gt; num_logical_experts</span>，原本指向它的洪流被几个物理副本分摊。例如 256 个逻辑专家配 288 个物理槽位，意味着有 32 个最热的逻辑专家各多出一份副本，专属于它们的那股流量被切成两半。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/expert_location.py ::ExpertLocationMetadata</span><span class="ln">放置图：每层哪些物理槽位装哪些逻辑专家</span></div><pre>@dataclass
+class ExpertLocationMetadata:
+    # the placement map EPLB rewrites to balance load: which PHYSICAL
+    # expert slots hold which LOGICAL experts, per layer.
+    physical_to_logical_map: torch.Tensor      # (layers, num_physical)
+    logical_to_all_physical_map: torch.Tensor  # (layers, num_logical, X)
+    @property
+    def num_physical_experts(self):
+        return self.physical_to_logical_map.shape[1]
+    @property
+    def num_logical_experts(self):
+        return self.logical_to_all_physical_map.shape[1]</pre></div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">采集专家负载 + 周期性重平衡放置</span></div><pre>class EPLBManager:
     def __init__(self, model_runner):
         self.model_runner = model_runner
@@ -505,6 +577,78 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="step"><div class="num">3</div><div class="sc"><h4>Update the map</h4><p>Write the new placement back to <span class="mono">expert_location</span> (the expert→GPU map); subsequent steps route against this new map.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Repeat</h4><p>Load keeps evolving with traffic, stats keep accumulating, placement refreshes periodically — back to step 1.</p></div></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Four GPUs each hold experts; GPU2 holds a hot expert receiving far more tokens (tall red bar) while the others sit near-idle; the sync wall means the step time is set by the busiest GPU2">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">skew: one hot expert stalls step</text>
+    <line x1="30" y1="250" x2="752" y2="250" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="30" y1="80" x2="700" y2="80" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="430" y="72" style="fill:var(--red);font-size:12px;font-weight:700">step = busiest GPU</text>
+    <rect x="70" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="100" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">idle</text>
+    <rect x="50" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="274" text-anchor="middle" style="font-size:12px">GPU0</text>
+    <rect x="250" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="280" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="280" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">idle</text>
+    <rect x="230" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="280" y="274" text-anchor="middle" style="font-size:12px">GPU1</text>
+    <rect x="430" y="80" width="60" height="170" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="104" text-anchor="middle" class="mono" style="font-size:11px">4000</text>
+    <text x="460" y="124" text-anchor="middle" style="fill:var(--red);font-size:11px">hot exp</text>
+    <rect x="410" y="256" width="100" height="28" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="460" y="274" text-anchor="middle" style="font-size:12px">GPU2 · hot</text>
+    <rect x="610" y="204" width="60" height="46" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="232" text-anchor="middle" class="mono" style="font-size:11px">1000</text>
+    <text x="640" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">idle</text>
+    <rect x="590" y="256" width="100" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="640" y="274" text-anchor="middle" style="font-size:12px">GPU3</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Skewed expert load</b> — four GPUs each hold experts; the hot expert on GPU2 gets 4000 tokens while the others get 1000 each. The sync wall ties step time to the busiest GPU2, leaving the other three stalling idle.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Before/after rebalance: before, one tall red bar (hot expert) towers over three short bars; after EPLB replicates and migrates, the four right-hand bars are roughly equal height and the new max is lower, so wall time drops">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">rebalance: flatten per-GPU token counts</text>
+    <text x="60" y="56" style="fill:var(--muted);font-size:12px">before · skew</text>
+    <text x="560" y="56" style="fill:var(--teal);font-size:12px">after · flat</text>
+    <line x1="40" y1="240" x2="330" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="40" y1="90" x2="330" y2="90" style="stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="44" y="84" style="fill:var(--red);font-size:11px">old max</text>
+    <rect x="60" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="130" y="90" width="40" height="150" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="150" y="112" text-anchor="middle" style="fill:var(--red);font-size:10px">hot</text>
+    <rect x="200" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="200" width="40" height="40" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="388" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">EPLB</text>
+    <text x="388" y="178" text-anchor="middle" style="fill:var(--accent);font-size:30px">→</text>
+    <text x="388" y="212" text-anchor="middle" style="fill:var(--muted);font-size:11px">copy+move</text>
+    <line x1="450" y1="240" x2="760" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="450" y1="168" x2="760" y2="168" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="470" y="160" style="fill:var(--teal);font-size:11px;font-weight:700">new max ↓</text>
+    <rect x="480" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="550" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="620" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="168" width="40" height="72" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Rebalance flattens load</b> — before, one tall red bar (hot logical expert) towers over the rest; after EPLB replicates and migrates, the four right-hand bars are roughly equal and the new max is lower, so wall time drops.</div>
+</div>
+
+<p>Put concrete numbers on it: if each expert averages 128 tokens per step, a blockbuster <strong>logical expert</strong> might get 640–1280, i.e. <strong>5–10×</strong> the average. EPLB <strong>replicates that hot logical expert onto multiple physical slots</strong>—so <span class="mono">num_physical_experts &gt; num_logical_experts</span>, and the flood that pointed at it is split across the physical copies. For example, 256 logical experts mapped onto 288 physical slots means the 32 hottest logical experts each get an extra copy, halving the traffic any single copy must carry.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/expert_location.py ::ExpertLocationMetadata</span><span class="ln">placement map: which physical slots hold which logical experts, per layer</span></div><pre>@dataclass
+class ExpertLocationMetadata:
+    # the placement map EPLB rewrites to balance load: which PHYSICAL
+    # expert slots hold which LOGICAL experts, per layer.
+    physical_to_logical_map: torch.Tensor      # (layers, num_physical)
+    logical_to_all_physical_map: torch.Tensor  # (layers, num_logical, X)
+    @property
+    def num_physical_experts(self):
+        return self.physical_to_logical_map.shape[1]
+    @property
+    def num_logical_experts(self):
+        return self.logical_to_all_physical_map.shape[1]</pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/eplb/eplb_manager.py ::EPLBManager</span><span class="ln">gather expert load + periodically rebalance placement</span></div><pre>class EPLBManager:
     def __init__(self, model_runner):

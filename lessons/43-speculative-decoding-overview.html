@@ -363,11 +363,74 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">draft 提议 k 个 token</div><div class="arrow">→</div><div class="node">target 一次前向并行验完 k 个</div><div class="arrow">→</div><div class="node">接受最长正确前缀 + 补 bonus_token</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="草稿提议 k 个，目标一次前向并行验证，接受最长前缀再补一个 bonus">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">草稿提议 k 个 token</text>
+    <rect x="24" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="66" y="64" text-anchor="middle" class="mono" style="font-size:12px">d1</text>
+    <rect x="120" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="162" y="64" text-anchor="middle" class="mono" style="font-size:12px">d2</text>
+    <rect x="216" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="258" y="64" text-anchor="middle" class="mono" style="font-size:12px">d3</text>
+    <rect x="312" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="354" y="64" text-anchor="middle" class="mono" style="font-size:12px">d4</text>
+    <line x1="210" y1="80" x2="210" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="104" style="fill:var(--muted);font-size:12px">target：一次前向</text>
+    <rect x="24" y="114" width="540" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="294" y="139" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ONE forward 并行验完 k 个</text>
+    <line x1="210" y1="154" x2="210" y2="182" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="178" style="fill:var(--muted);font-size:12px">接受最长前缀 + bonus</text>
+    <rect x="24" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="212" text-anchor="middle" class="mono" style="font-size:12px">d1 ✓</text>
+    <rect x="120" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="162" y="212" text-anchor="middle" class="mono" style="font-size:12px">d2 ✓</text>
+    <rect x="216" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="258" y="212" text-anchor="middle" class="mono" style="font-size:12px">d3 ✓</text>
+    <rect x="312" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="354" y="212" text-anchor="middle" class="mono" style="font-size:12px">bonus</text>
+    <rect x="430" y="190" width="84" height="34" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="472" y="212" text-anchor="middle" class="mono" style="font-size:12px">d4 ✗</text>
+    <rect x="24" y="258" width="16" height="12" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="48" y="269" style="fill:var(--muted);font-size:12px">接受</text>
+    <rect x="120" y="258" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="144" y="269" style="fill:var(--muted);font-size:12px">拒绝</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 草稿提议 → 目标一次验证</b> — 便宜的草稿模型先猜 k 个 token，昂贵的 target 在<strong>同一次前向</strong>里并行打分；从头比对，匹配的前缀（绿）被接受，第一个不匹配处（红）拒绝其后全部，再由 target 补一个 <span class="mono">bonus</span>。图中 4 个里中了 3 个，加 bonus 共吐 4 个 token。</div>
+</div>
+
 <h2>三、两个核心指标：accept_rate(α) 与 accept_length(τ)</h2>
 <p>衡量投机解码好坏，论文里用两个术语，务必分清楚。<strong>accept_rate</strong>（接受率 α）= <span class="mono">correct_drafts / proposed_drafts</span>，即<strong>每个草稿 token</strong>被接受的概率，它<strong>不包含</strong>那个白送的 bonus_token——它衡量草稿模型"猜得准不准"。<strong>accept_length</strong>（接受长度 τ）= <strong>每个验证步平均吐出的 token 数</strong>，它<strong>包含</strong>那个一定会吐的 bonus_token——它衡量"一次目标前向到底能产出几个 token"。两者都越大越好：α 越高说明草稿越靠谱，τ 越大说明每次昂贵前向摊到的 token 越多、加速越猛。直觉上 τ 随 α 单调上升，但因为有 bonus，<strong>即使 α 很低，τ 也至少为 1</strong>（最坏情况退化成普通自回归，绝不更慢）。</p>
 <p>把这两个指标和成本放在一起，就能估算加速比。设草稿一次提议 k 个，则每个验证步的<strong>收益</strong>是 τ 个 token，而<strong>代价</strong>主要是一次目标前向加上草稿模型跑 k 步的小开销。粗略地说，理想加速比约等于 τ 除以"一次目标前向 + 草稿开销"折算出的等效前向数；当草稿很小、几乎免费时，加速比就近似正比于 τ。这也揭示了一个实践权衡：<strong>k 不是越大越好</strong>。k 太小，τ 的上限被压低，省不了多少；k 太大，靠后的草稿位置因为前缀更长、越来越难猜中，α 会下滑，被拒后白白浪费草稿算力，还增大了一次验证的张量规模。因此真实系统会围绕模型对、任务难度去调 k，让 α 和 τ 的乘积效应落在最甜的点上。一个常被引用的经验是：<strong>α 决定了 τ 的天花板，而 bonus 决定了 τ 的地板</strong>。在实践中，人们会把这两个指标连同端到端吞吐一起打点观测：α 偏低往往提示草稿模型与目标不够合拍、需要换草稿方法或重训草稿头；τ 上不去则提示 k 设得太保守或接受太苛刻。把它们当成<strong>投机解码的体温计</strong>，调参时就有了明确的抓手。</p>
 
 <div class="cols"><div class="col"><strong>基线（普通自回归）</strong><br/>每次目标前向 = <span class="mono">1</span> 个 token<br/>付一次全权重搬运只换一个 token<br/>带宽受限、算力空转</div><div class="col"><strong>投机解码</strong><br/>每次目标前向 = <span class="mono">m</span> 个 token（被接受前缀 + bonus）<br/>同一次搬运摊薄到多个 token<br/>m 由 accept_length(τ) 决定</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 260" role="img" aria-label="基线每次前向只吐 1 个 token，投机每次前向吐 m 个 token，两条时间线对比">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">基线：1 token / 前向</text>
+    <rect x="24" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="70" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="124" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="170" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="224" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="324" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="370" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="424" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="470" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="524" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="570" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <text x="628" y="65" style="fill:var(--amber);font-weight:700;font-size:12px">6 前向</text>
+    <text x="24" y="128" style="font-weight:700;fill:var(--muted)">投机：m token / 前向 (m&gt;1)</text>
+    <rect x="24" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="70" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <rect x="124" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="170" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <text x="228" y="165" style="fill:var(--teal);font-weight:700;font-size:12px">2 前向 · 同样 6 token</text>
+    <line x1="24" y1="210" x2="616" y2="210" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="232" style="fill:var(--faint);font-size:12px">时间 →（更少昂贵前向 = 更快）</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 基线 vs 投机时间线</b> — 基线每次昂贵的目标前向只产出 <strong>1</strong> 个 token，6 个 token 要 6 次前向；投机每次前向平均吐 <span class="mono">m</span>(&gt;1) 个被接受 token，同样 6 个 token 只需 2 次前向 → <strong>更少昂贵前向、更短总时间</strong>。</div>
+</div>
 
 <h2>四、SGLang 把"出草稿的方法"做成可插拔</h2>
 <p>不同的"怎么提议草稿"对应不同算法，SGLang 用一个 <span class="mono">SpeculativeAlgorithm</span> 枚举来选择，成员包括 <span class="mono">EAGLE</span>、<span class="mono">EAGLE3</span>、<span class="mono">NGRAM</span>、<span class="mono">STANDALONE</span>、<span class="mono">DFLASH</span>、<span class="mono">FROZEN_KV_MTP</span>、<span class="mono">NONE</span>。它们共享同一套"提议→验证→接受"骨架，只在"草稿从哪来"上不同：有的训练一个轻量草稿头复用目标的隐藏态（EAGLE 系列，详见<strong>第44课</strong>），有的直接用 n-gram 命中历史文本，有的挂一个独立小模型。编排这一切的是 <span class="mono">BaseSpecWorker</span>：它持有一个 <span class="mono">target_worker</span>（大模型，负责一次验完 k 个）和一个 <span class="mono">draft_worker</span>（小模型，负责提议 k 个），并暴露 <span class="mono">clear_cache_pool</span> 在多次运行之间重置草稿/目标的 KV 池。验证这一步本身复用了第28课的<strong>采样器</strong>——接受/拒绝判据就是在采样层面比对目标分布。</p>
@@ -399,6 +462,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     @abstractmethod
     def clear_cache_pool(self):  # reset the draft/target KV pools between runs
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/spec_info.py ::SpeculativeAlgorithm</span><span class="ln">枚举：选哪种投机算法（或不投机）</span></div><pre>class SpeculativeAlgorithm(Enum):
+    # which speculative method to run (or NONE = plain decoding).
+    EAGLE = auto()
+    EAGLE3 = auto()
+    NGRAM = auto()
+    STANDALONE = auto()
+    NONE = auto()
+    @classmethod
+    def from_string(cls, name):
+        # "eagle" -&gt; EAGLE ; None -&gt; NONE
+        ...</pre></div>
+
+<p><span class="mono">--speculative-algorithm EAGLE</span> 即开启投机解码；选 <span class="mono">NONE</span>（默认）就关掉、退回普通自回归。再看一个具体例子：草稿一次提议 4 个 token、其中 3 个被接受，则这<strong>一次</strong> target 前向就吐出 3 + 1 个 bonus = <strong>4 个 token</strong>；接受率（α）越高，每次昂贵前向省下的步数越多，端到端加速就越大。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>普通自回归一次前向只吐 1 个 token，且解码<strong>带宽受限</strong>（第4课）：每步重读全部权重 + KV，GPU 在等内存。</li>
@@ -477,11 +554,74 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">draft proposes k tokens</div><div class="arrow">→</div><div class="node">target verifies all k in ONE forward</div><div class="arrow">→</div><div class="node">accept longest correct prefix + bonus_token</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="draft proposes k tokens, target verifies in one forward, accept longest prefix plus a bonus">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">draft proposes k tokens</text>
+    <rect x="24" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="66" y="64" text-anchor="middle" class="mono" style="font-size:12px">d1</text>
+    <rect x="120" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="162" y="64" text-anchor="middle" class="mono" style="font-size:12px">d2</text>
+    <rect x="216" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="258" y="64" text-anchor="middle" class="mono" style="font-size:12px">d3</text>
+    <rect x="312" y="42" width="84" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="354" y="64" text-anchor="middle" class="mono" style="font-size:12px">d4</text>
+    <line x1="210" y1="80" x2="210" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="104" style="fill:var(--muted);font-size:12px">target: ONE forward</text>
+    <rect x="24" y="114" width="540" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="294" y="139" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ONE forward verifies all k</text>
+    <line x1="210" y1="154" x2="210" y2="182" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="178" style="fill:var(--muted);font-size:12px">accept prefix + bonus</text>
+    <rect x="24" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="212" text-anchor="middle" class="mono" style="font-size:12px">d1 ✓</text>
+    <rect x="120" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="162" y="212" text-anchor="middle" class="mono" style="font-size:12px">d2 ✓</text>
+    <rect x="216" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="258" y="212" text-anchor="middle" class="mono" style="font-size:12px">d3 ✓</text>
+    <rect x="312" y="190" width="84" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="354" y="212" text-anchor="middle" class="mono" style="font-size:12px">bonus</text>
+    <rect x="430" y="190" width="84" height="34" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="472" y="212" text-anchor="middle" class="mono" style="font-size:12px">d4 ✗</text>
+    <rect x="24" y="258" width="16" height="12" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="48" y="269" style="fill:var(--muted);font-size:12px">accept</text>
+    <rect x="120" y="258" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="144" y="269" style="fill:var(--muted);font-size:12px">reject</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · draft proposes → target verifies once</b> — the cheap draft guesses k tokens; the expensive target scores them all in <strong>ONE forward</strong>. Comparing from the start, the matching prefix (green) is accepted, the first mismatch (red) rejects everything after it, and the target appends one <span class="mono">bonus</span>. Here 3 of 4 match, so 3 + bonus = 4 tokens come out.</div>
+</div>
+
 <h2>3. Two core metrics: accept_rate(α) and accept_length(τ)</h2>
 <p>To judge speculative decoding, the papers use two terms — keep them straight. <strong>accept_rate</strong> (α) = <span class="mono">correct_drafts / proposed_drafts</span>, the probability that <strong>a single draft token</strong> is accepted; it <strong>excludes</strong> the free bonus_token — it measures how accurately the draft guesses. <strong>accept_length</strong> (τ) = <strong>the average number of tokens emitted per verify step</strong>; it <strong>includes</strong> the always-emitted bonus_token — it measures how many tokens one target forward actually produces. Both are better when larger: higher α means a more reliable draft, larger τ means more tokens amortizing each expensive forward, i.e. more speedup. Intuitively τ rises monotonically with α, but thanks to the bonus, <strong>even if α is very low, τ is at least 1</strong> (the worst case degrades to plain autoregression — never slower).</p>
 <p>Put these two metrics together with cost and you can estimate the speedup. If the draft proposes k per round, the <strong>gain</strong> per verify step is τ tokens, while the <strong>cost</strong> is mainly one target forward plus the small overhead of running the draft for k steps. Roughly, the ideal speedup is about τ divided by the effective number of forwards that "one target forward + draft overhead" amounts to; when the draft is tiny and nearly free, the speedup is approximately proportional to τ. This reveals a practical trade-off: <strong>bigger k is not always better</strong>. Too small a k caps τ low and saves little; too large a k makes the later draft positions — sitting on longer prefixes — harder to guess, so α drops, rejected drafts waste compute, and the verify forward grows larger. Real systems therefore tune k around the model pair and task difficulty to land the α·τ product at the sweet spot. A frequently cited rule of thumb: <strong>α sets the ceiling of τ, while the bonus sets the floor of τ</strong>. In practice people instrument both metrics alongside end-to-end throughput: a low α usually signals that the draft is poorly aligned with the target and the drafting method should be swapped or the draft head retrained; a τ that will not climb signals that k is set too conservatively or acceptance is too strict. Treat them as the <strong>thermometer of speculative decoding</strong> and tuning gains a concrete handle.</p>
 
 <div class="cols"><div class="col"><strong>Baseline (plain autoregression)</strong><br/>per target forward = <span class="mono">1</span> token<br/>one full weight haul buys one token<br/>bandwidth-bound, compute idle</div><div class="col"><strong>Speculative decoding</strong><br/>per target forward = <span class="mono">m</span> tokens (accepted prefix + bonus)<br/>same haul amortized over many tokens<br/>m is governed by accept_length(τ)</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 260" role="img" aria-label="baseline emits 1 token per forward versus speculative emits m tokens per forward, two timelines">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">baseline: 1 tok / forward</text>
+    <rect x="24" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="70" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="124" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="170" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="224" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="324" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="370" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="424" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="470" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <rect x="524" y="40" width="92" height="40" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="570" y="65" text-anchor="middle" class="mono" style="font-size:11px">1 tok</text>
+    <text x="628" y="65" style="fill:var(--amber);font-weight:700;font-size:12px">6 fwds</text>
+    <text x="24" y="128" style="font-weight:700;fill:var(--muted)">spec: m tok / forward (m&gt;1)</text>
+    <rect x="24" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="70" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <rect x="124" y="140" width="92" height="40" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="170" y="165" text-anchor="middle" class="mono" style="font-size:11px">3 tok</text>
+    <text x="228" y="165" style="fill:var(--teal);font-weight:700;font-size:12px">2 fwds · same 6 tok</text>
+    <line x1="24" y1="210" x2="616" y2="210" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="24" y="232" style="fill:var(--faint);font-size:12px">time →  (fewer costly forwards = faster)</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · baseline vs speculative timeline</b> — each expensive target forward in the baseline yields just <strong>1</strong> token, so 6 tokens need 6 forwards; speculative emits <span class="mono">m</span>(&gt;1) accepted tokens per forward, so the same 6 tokens take only 2 forwards → <strong>fewer costly forwards, shorter total time</strong>.</div>
+</div>
 
 <h2>4. SGLang makes "how to draft" pluggable</h2>
 <p>Different ways to "propose drafts" map to different algorithms, which SGLang selects via a <span class="mono">SpeculativeAlgorithm</span> enum whose members include <span class="mono">EAGLE</span>, <span class="mono">EAGLE3</span>, <span class="mono">NGRAM</span>, <span class="mono">STANDALONE</span>, <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">NONE</span>. They share one "propose→verify→accept" skeleton and differ only in "where the draft comes from": some train a lightweight draft head reusing the target's hidden states (the EAGLE family, see <strong>Lesson 44</strong>), some hit history text with n-grams, some attach an independent small model. Orchestrating all this is <span class="mono">BaseSpecWorker</span>: it holds a <span class="mono">target_worker</span> (the big model, verifies k in one forward) and a <span class="mono">draft_worker</span> (the small model, proposes k), and exposes <span class="mono">clear_cache_pool</span> to reset the draft/target KV pools between runs. Verification itself reuses the <strong>sampler</strong> from Lesson 28 — the accept/reject criterion compares against the target distribution at the sampling layer.</p>
@@ -513,6 +653,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     @abstractmethod
     def clear_cache_pool(self):  # reset the draft/target KV pools between runs
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/spec_info.py ::SpeculativeAlgorithm</span><span class="ln">enum: which speculative algorithm (or none)</span></div><pre>class SpeculativeAlgorithm(Enum):
+    # which speculative method to run (or NONE = plain decoding).
+    EAGLE = auto()
+    EAGLE3 = auto()
+    NGRAM = auto()
+    STANDALONE = auto()
+    NONE = auto()
+    @classmethod
+    def from_string(cls, name):
+        # "eagle" -&gt; EAGLE ; None -&gt; NONE
+        ...</pre></div>
+
+<p><span class="mono">--speculative-algorithm EAGLE</span> turns it on; <span class="mono">NONE</span> (the default) turns it off and falls back to plain autoregression. Concretely: if the draft proposes 4 tokens and 3 match, that <strong>single</strong> target forward emits 3 + 1 bonus = <strong>4 tokens</strong>; the higher the acceptance rate (α), the more steps each expensive forward skips, and the bigger the end-to-end speedup.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>Plain autoregression emits 1 token per forward and decode is <strong>bandwidth-bound</strong> (Lesson 4): every step re-reads all weights + KV, so the GPU waits on memory.</li>

@@ -354,6 +354,88 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>把投机解码看成一场赌注：每一次目标模型前向都很贵，我们希望「一次前向换回尽量多的已确认 token」。第43课用链把期望收益从 1 提到 τ；EAGLE 在<strong>不增加目标前向次数</strong>的前提下，用两招继续抬高 τ：<strong>特征级起草</strong>让草稿更准（每个分支更可能被接受），<strong>树状草稿 + 树注意力</strong>让一次验证同时考察很多条候选路径（接受到更长的那条）。两者叠加，<span class="mono">accept_length</span> 显著上升，而每个 token 的目标算力摊销下降。这就是为什么从 <span class="mono">EAGLE</span> 到 <span class="mono">EAGLE3</span>，再到 <span class="mono">DFLASH</span>、<span class="mono">FROZEN_KV_MTP</span>、<span class="mono">STANDALONE</span>、<span class="mono">NGRAM</span> 这一整列 <span class="mono">SpeculativeAlgorithm</span>，都是围绕「让草稿更准、让一次验证覆盖更多」这条主线在演化。值得强调的是，这一切都建立在第43课那条无损保证之上：树注意力只是改变了「怎么提议、怎么并行验证」，最终的接受/拒绝判据依旧与目标采样数学等价，所以无论树有多复杂，输出分布都和普通自回归一模一样，绝不会因为追求速度而牺牲质量。</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="EAGLE 候选 token 树：根是上一个真实 token，向 topk 个子分支展开，每个子再生孙，目标一次前向验证整棵树，接受 root→A→a1→x 这条最长合法路径">
+    <text x="78" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">根</text>
+    <text x="235" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">topk 子</text>
+    <text x="399" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">孙</text>
+    <text x="600" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">更深 ✓</text>
+    <line x1="126" y1="160" x2="200" y2="63" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="270" y1="63" x2="360" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="438" y1="37" x2="540" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="126" y1="160" x2="200" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="126" y1="160" x2="200" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="63" x2="360" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="160" x2="360" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="257" x2="360" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="138" width="96" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="78" y="156" text-anchor="middle" style="font-weight:700;fill:var(--ink);font-size:12px">root</text>
+    <text x="78" y="173" text-anchor="middle" style="fill:var(--muted);font-size:10px">上一个 token</text>
+    <rect x="200" y="46" width="70" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="235" y="68" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="200" y="143" width="70" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="235" y="165" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="200" y="240" width="70" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="235" y="262" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="360" y="20" width="78" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="399" y="42" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="360" y="78" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="100" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <rect x="360" y="143" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="165" text-anchor="middle" class="mono" style="font-size:12px">b1</text>
+    <rect x="360" y="240" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="262" text-anchor="middle" class="mono" style="font-size:12px">c1</text>
+    <rect x="540" y="20" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="600" y="42" text-anchor="middle" class="mono" style="font-size:12px">x ✓ 接受</text>
+    <text x="40" y="306" style="fill:var(--teal);font-size:12px">绿色 = 接受的最长路径 root→A→a1→x</text>
+  </svg>
+  <div class="figcap"><b>图 1 · EAGLE 候选 token 树</b> — 根是上一个真实 token，向 <span class="mono">topk</span> 个子分支展开，每个子再生孙，共 <span class="mono">spec_steps</span> 层；目标<strong>一次前向</strong>验证整棵树，接受 <span class="mono">root→A→a1→x</span> 这条最长合法路径，旁支被掩码隔开互不污染。</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="链式草稿对比树状草稿：左边一条直链 root 到 t4，t2 错则后面全废，一次只查一条；右边一棵树同时押多条分支，更可能命中更长前缀，一次接受更多 token">
+    <line x1="390" y1="30" x2="390" y2="270" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="42" style="font-weight:700;fill:var(--muted)">链式草稿</text>
+    <line x1="82" y1="121" x2="92" y2="121" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="150" y1="121" x2="160" y2="121" style="stroke:var(--amber);stroke-width:3"/>
+    <line x1="218" y1="121" x2="228" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="286" y1="121" x2="296" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <rect x="24" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="53" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="92" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="121" y="126" text-anchor="middle" class="mono" style="font-size:12px">t1 ✓</text>
+    <rect x="160" y="104" width="58" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="189" y="126" text-anchor="middle" class="mono" style="font-size:12px">t2 ✗</text>
+    <rect x="228" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="257" y="126" text-anchor="middle" class="mono" style="font-size:12px">t3</text>
+    <rect x="296" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="325" y="126" text-anchor="middle" class="mono" style="font-size:12px">t4</text>
+    <text x="24" y="182" style="fill:var(--amber);font-size:12px">t2 错 → t3/t4 全废</text>
+    <text x="24" y="206" style="fill:var(--muted);font-size:12px">一次前向只查 1 条续写</text>
+    <text x="410" y="42" style="font-weight:700;fill:var(--accent-ink)">树状草稿</text>
+    <line x1="468" y1="121" x2="520" y2="71" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="468" y1="121" x2="520" y2="121" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="468" y1="121" x2="520" y2="171" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="576" y1="71" x2="636" y2="57" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="576" y1="71" x2="636" y2="109" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="439" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="520" y="54" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="548" y="76" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="520" y="104" width="56" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="548" y="126" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="520" y="154" width="56" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="548" y="176" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="636" y="40" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="664" y="62" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="636" y="92" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="664" y="114" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <text x="410" y="214" style="fill:var(--teal);font-size:12px">多分支 → 命中更长前缀</text>
+    <text x="410" y="238" style="fill:var(--muted);font-size:12px">一次前向接受更多 token</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 链式草稿 vs 树状草稿</b> — 左边一条直链：<span class="mono">t2</span> 一错，<span class="mono">t3/t4</span> 全废，一次前向只考察 1 条续写；右边一棵树同时押 <span class="mono">topk</span> 条分支，更长前缀更可能命中，于是同样一次目标前向能接受更多 token。</div>
+</div>
+
 <h2>一、从「链」到「树」：为什么 EAGLE 不再浪费</h2>
 <p>朴素草稿模型一次提议一条<strong>链</strong>：token #1 → #2 → … → #k。验证时，只要中途某个 token 和目标分布不符，从那里往后全部丢弃。问题是，语言天生有分叉：在很多位置上，「下一个词」本来就有好几个都说得通。链只押注其中一个，赌错就血本无归。EAGLE 的核心洞察是——既然一次目标前向已经付了钱，何不让它同时验证<strong>多条</strong>候选？于是 EAGLE 在 <span class="mono">spec_steps</span> 个草稿步里，每一步都保留 <span class="mono">topk</span> 个候选分支，把它们组织成一棵共有 <span class="mono">draft_token_num</span> 个节点的<strong>token 树</strong>。根到任意节点的每一条路径，都是一段合法的候选续写。</p>
 <p>这里要特别理解链的「连锁失效」是多么浪费。假设草稿一次提议 5 个 token，单个 token 被接受的概率是 0.8，那么整条链全中的概率只有 0.8 的五次方，约等于三成出头；一旦第二个 token 被否，第三到第五个不论多么合理都只能丢弃。换句话说，链的期望接受长度被「最早一个错误」死死卡住。树则把赌注分散开：当第二步同时押了好几个分支，哪怕主分支错了，旁边的兄弟分支仍有机会延续下去，于是「最早一个错误」不再是全局的死刑，而只是砍掉一棵子树。覆盖面变大，期望接受长度自然水涨船高。这就是从链到树最根本的收益来源——用一次本就要付费的目标前向，换回对更多「合理后续」的并行考察。</p>
@@ -417,6 +499,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     spec_steps: int                    # draft depth (tree height)
     topk: int                          # branches kept per step
     draft_token_num: int               # total tree nodes verified in one target forward</pre></div>
+
+<p>举个具体例子：<span class="mono">--speculative-eagle-topk 8 --speculative-num-steps 5 --speculative-num-draft-tokens 64</span> 会构建一棵<strong>深度 5、每层 top-8</strong> 的树，共 <span class="mono">64</span> 个候选 token，由目标模型<strong>一次前向</strong>全部验证。注意 EAGLE 在<strong>特征空间</strong>起草，所以它的草稿头很便宜——只续写一个特征向量，而不是从头跑一个完整语言模型。</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_worker_v2.py ::EAGLEWorkerV2</span><span class="ln">EAGLE 工作器：草稿头展开 token 树，target 一次验证</span></div><pre>class EAGLEWorkerV2(BaseSpecWorker):
+    def __init__(self, server_args, ..., target_worker):
+        self.topk = server_args.speculative_eagle_topk          # branches/level
+        self.speculative_num_steps = server_args.speculative_num_steps   # tree depth
+        self.speculative_num_draft_tokens = \
+            server_args.speculative_num_draft_tokens             # nodes to verify
+
+    def draft(self, batch):
+        ...   # EAGLE draft head expands a TREE of candidate tokens
+
+    def verify(self, batch):
+        ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>EAGLE 在<strong>特征级</strong>起草：复用目标模型的<span class="mono">隐藏状态</span>（第8课）+ 上一个采样 token 预测下一个特征，草稿头很小且与目标天然对齐，<span class="mono">accept_rate</span>（α）更高。它站在目标模型的肩膀上做一小步外推，而非从零理解语言。</li>
@@ -486,6 +583,88 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Think of speculative decoding as a bet: every target forward is expensive, and we want "as many confirmed tokens as possible per forward". Lesson 43 raised the expected payoff from 1 to τ using a chain; EAGLE pushes τ higher <strong>without adding target forwards</strong> via two moves: <strong>feature-level drafting</strong> makes the draft more accurate (each branch is more likely accepted), and <strong>tree drafting + tree attention</strong> lets one verification examine many candidate paths at once (accepting the longest). Together, <span class="mono">accept_length</span> rises noticeably while per-token target compute amortizes down. That is why the whole list of <span class="mono">SpeculativeAlgorithm</span>—from <span class="mono">EAGLE</span> to <span class="mono">EAGLE3</span>, then <span class="mono">DFLASH</span>, <span class="mono">FROZEN_KV_MTP</span>, <span class="mono">STANDALONE</span>, <span class="mono">NGRAM</span>—evolves along the same line: make the draft more accurate, and cover more per verification.</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 320" role="img" aria-label="EAGLE candidate-token tree: the root is the last real token, branching into topk children, each into grandchildren; the target verifies the whole tree in one forward and accepts the longest valid path root to A to a1 to x">
+    <text x="78" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">root</text>
+    <text x="235" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">children</text>
+    <text x="399" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">grandkids</text>
+    <text x="600" y="16" text-anchor="middle" style="fill:var(--muted);font-size:12px">deeper ✓</text>
+    <line x1="126" y1="160" x2="200" y2="63" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="270" y1="63" x2="360" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="438" y1="37" x2="540" y2="37" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="126" y1="160" x2="200" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="126" y1="160" x2="200" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="63" x2="360" y2="95" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="160" x2="360" y2="160" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="270" y1="257" x2="360" y2="257" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="138" width="96" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="78" y="156" text-anchor="middle" style="font-weight:700;fill:var(--ink);font-size:12px">root</text>
+    <text x="78" y="173" text-anchor="middle" style="fill:var(--muted);font-size:10px">last token</text>
+    <rect x="200" y="46" width="70" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="235" y="68" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="200" y="143" width="70" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="235" y="165" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="200" y="240" width="70" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="235" y="262" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="360" y="20" width="78" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="399" y="42" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="360" y="78" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="100" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <rect x="360" y="143" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="165" text-anchor="middle" class="mono" style="font-size:12px">b1</text>
+    <rect x="360" y="240" width="78" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="399" y="262" text-anchor="middle" class="mono" style="font-size:12px">c1</text>
+    <rect x="540" y="20" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="600" y="42" text-anchor="middle" class="mono" style="font-size:12px">x ✓ accept</text>
+    <text x="40" y="306" style="fill:var(--teal);font-size:12px">teal = accepted longest path root→A→a1→x</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · EAGLE candidate-token tree</b> — the root is the last real token, branching into <span class="mono">topk</span> children, each into grandchildren for <span class="mono">spec_steps</span> levels; the target verifies the whole tree in <strong>one forward</strong> and accepts the longest valid path <span class="mono">root→A→a1→x</span>, with side branches masked off so they cannot contaminate each other.</div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Chain draft vs tree draft: on the left a single chain root to t4, where a wrong t2 wastes the rest and one forward checks just one path; on the right a tree bets on many branches at once, more likely to match a longer prefix and accept more tokens per step">
+    <line x1="390" y1="30" x2="390" y2="270" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="42" style="font-weight:700;fill:var(--muted)">Chain draft</text>
+    <line x1="82" y1="121" x2="92" y2="121" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="150" y1="121" x2="160" y2="121" style="stroke:var(--amber);stroke-width:3"/>
+    <line x1="218" y1="121" x2="228" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="286" y1="121" x2="296" y2="121" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <rect x="24" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="53" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="92" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="121" y="126" text-anchor="middle" class="mono" style="font-size:12px">t1 ✓</text>
+    <rect x="160" y="104" width="58" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="189" y="126" text-anchor="middle" class="mono" style="font-size:12px">t2 ✗</text>
+    <rect x="228" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="257" y="126" text-anchor="middle" class="mono" style="font-size:12px">t3</text>
+    <rect x="296" y="104" width="58" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="325" y="126" text-anchor="middle" class="mono" style="font-size:12px">t4</text>
+    <text x="24" y="182" style="fill:var(--amber);font-size:12px">t2 wrong → t3/t4 wasted</text>
+    <text x="24" y="206" style="fill:var(--muted);font-size:12px">1 path per forward</text>
+    <text x="410" y="42" style="font-weight:700;fill:var(--accent-ink)">Tree draft</text>
+    <line x1="468" y1="121" x2="520" y2="71" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="468" y1="121" x2="520" y2="121" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="468" y1="121" x2="520" y2="171" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="576" y1="71" x2="636" y2="57" style="stroke:var(--teal);stroke-width:3"/>
+    <line x1="576" y1="71" x2="636" y2="109" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="410" y="104" width="58" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="439" y="126" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <rect x="520" y="54" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="548" y="76" text-anchor="middle" class="mono" style="font-size:12px">A ✓</text>
+    <rect x="520" y="104" width="56" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="548" y="126" text-anchor="middle" class="mono" style="font-size:12px">B</text>
+    <rect x="520" y="154" width="56" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="548" y="176" text-anchor="middle" class="mono" style="font-size:12px">C</text>
+    <rect x="636" y="40" width="56" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="664" y="62" text-anchor="middle" class="mono" style="font-size:12px">a1 ✓</text>
+    <rect x="636" y="92" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="664" y="114" text-anchor="middle" class="mono" style="font-size:12px">a2</text>
+    <text x="410" y="214" style="fill:var(--teal);font-size:12px">more branches → longer prefix hit</text>
+    <text x="410" y="238" style="fill:var(--muted);font-size:12px">more tokens accepted / forward</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Chain draft vs tree draft</b> — left: a single chain where one wrong <span class="mono">t2</span> wastes <span class="mono">t3/t4</span>, so one forward examines just 1 continuation; right: a tree bets on <span class="mono">topk</span> branches at once, so a longer prefix is more likely to match and the same target forward accepts more tokens.</div>
+</div>
+
 <h2>1. From "chain" to "tree": why EAGLE stops wasting</h2>
 <p>A naive draft model proposes one <strong>chain</strong> per round: token #1 → #2 → … → #k. During verification, as soon as some token disagrees with the target distribution, everything after it is discarded. The problem: language naturally branches—at many positions several "next words" are all plausible. A chain bets on just one and loses everything when wrong. EAGLE's key insight is—since a target forward is already paid for, why not verify <strong>many</strong> candidates at once? So across <span class="mono">spec_steps</span> draft steps, EAGLE keeps <span class="mono">topk</span> candidate branches at each step, organizing them into a <strong>token tree</strong> of <span class="mono">draft_token_num</span> nodes. Every root→node path is a valid candidate continuation.</p>
 
@@ -541,6 +720,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     spec_steps: int                    # draft depth (tree height)
     topk: int                          # branches kept per step
     draft_token_num: int               # total tree nodes verified in one target forward</pre></div>
+
+<p>A concrete example: <span class="mono">--speculative-eagle-topk 8 --speculative-num-steps 5 --speculative-num-draft-tokens 64</span> builds a <strong>depth-5, top-8</strong> tree of <span class="mono">64</span> candidate tokens, all verified by the target in <strong>one forward</strong>. Note EAGLE drafts in <strong>feature space</strong>, so its draft head is cheap—it just continues one feature vector instead of running a full language model from scratch.</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/speculative/eagle_worker_v2.py ::EAGLEWorkerV2</span><span class="ln">EAGLE worker: draft head expands a token tree, target verifies once</span></div><pre>class EAGLEWorkerV2(BaseSpecWorker):
+    def __init__(self, server_args, ..., target_worker):
+        self.topk = server_args.speculative_eagle_topk          # branches/level
+        self.speculative_num_steps = server_args.speculative_num_steps   # tree depth
+        self.speculative_num_draft_tokens = \
+            server_args.speculative_num_draft_tokens             # nodes to verify
+
+    def draft(self, batch):
+        ...   # EAGLE draft head expands a TREE of candidate tokens
+
+    def verify(self, batch):
+        ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>EAGLE drafts at the <strong>feature level</strong>: it reuses the target model's <span class="mono">hidden state</span> (Lesson 8) + the previously sampled token to predict the next feature, so the draft head is tiny and naturally aligned with the target, giving higher <span class="mono">accept_rate</span> (α).</li>
