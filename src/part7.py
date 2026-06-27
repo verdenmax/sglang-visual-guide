@@ -690,7 +690,7 @@ LESSON_30 = {"zh": r"""
     <span class="cm"># 真正的 KV 数据仓库：每层各一个 K、一个 V 张量，</span>
     <span class="cm"># 形状均为 [size, num_kv_heads, head_dim]。ReqToTokenPool 把</span>
     <span class="cm"># 一条请求的各个位置 -&gt; 指向这些缓冲的槽位号。</span>
-    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+    <span class="kw">def</span> __init__(self, size, page_size, dtype, head_num, head_dim, layer_num, ...):
         self.k_buffer = [...]   <span class="cm"># 按层排列的 K 张量列表</span>
         self.v_buffer = [...]   <span class="cm"># 按层排列的 V 张量列表</span>
     <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):
@@ -935,7 +935,7 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
     <span class="cm"># the actual KV DATA store: ONE K and ONE V tensor PER layer,</span>
     <span class="cm"># each shaped [size, num_kv_heads, head_dim]. ReqToTokenPool maps</span>
     <span class="cm"># a request's positions -&gt; slot indices INTO these buffers.</span>
-    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+    <span class="kw">def</span> __init__(self, size, page_size, dtype, head_num, head_dim, layer_num, ...):
         self.k_buffer = [...]   <span class="cm"># list over layers of K tensors</span>
         self.v_buffer = [...]   <span class="cm"># list over layers of V tensors</span>
     <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):

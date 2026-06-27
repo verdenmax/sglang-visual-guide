@@ -1899,14 +1899,15 @@ LESSON_28 = {"zh": r"""
 <p>logits 不能直接当答案，因为它只是<strong>未归一化的偏好分</strong>。Sampler 要把它<strong>一步步</strong>塑形，最后才掷一次"骰子"。
 完整管线（对每条请求并行做）是这样的：先做<strong>惩罚</strong>（repetition / frequency / presence penalty——压制已经出现过的词，避免复读机），
 再做<strong>温度</strong>缩放（拿 logits 去除以温度：小于 1 让分布更尖、更确定，大于 1 让它更平、更敢冒险，等于 0 就退化成贪心 argmax），
+接着 <strong>softmax</strong> 把分数<strong>归一成概率</strong>，
 然后是三道<strong>截断闸门</strong>——<strong>top-k</strong>（只留分数最高的 k 个）、<strong>top-p / nucleus</strong>（按概率从大到小累加，留下刚好凑够 p 的最小集合）、
-<strong>min-p</strong>（凡是概率低于"最大概率 × 某个比例"的，一律丢掉）——最后 <strong>softmax</strong> 把活下来的 token 归一成概率，再用<strong>多项式采样</strong>掷一次得到结果。
+<strong>min-p</strong>（凡是概率低于"最大概率 × 某个比例"的，一律丢掉）——最后用<strong>多项式采样</strong>掷一次得到结果。
 如果整条请求是贪心的，前面这些花活全跳过，直接 <span class="mono">argmax</span> 取最大。</p>
 
 <p>顺序为什么是这个顺序，值得多想一层。<strong>惩罚必须在最前</strong>，因为它要修改的是"原始偏好"——你得先把"这个词刚说过、扣分"算进去，后面的塑形才作数。
 <strong>温度紧随其后</strong>，它是唯一一个<strong>重塑整条曲线陡峭程度</strong>的旋钮：温度不改变谁高谁低的<strong>排名</strong>，只改变高低之间的<strong>悬殊程度</strong>，所以必须在截断之前先把曲线调到位。
 <strong>top-k / top-p / min-p 三道闸门负责"划定候选圈"</strong>：它们都不改概率的相对大小，只决定"哪些 token 还有资格被摸到"，把没希望的尾巴一刀切掉，既挡住胡言乱语，又给真正合理的几个词留出空间。
-最后才 softmax + 采样——<strong>先塑形、再划圈、最后掷骰</strong>，每一步只干一件事，这正是这套代码清晰好维护的原因。</p>
+最后多项式采样掷骰——其实 <strong>softmax 就夹在温度和闸门中间</strong>：正是它把 logits 变成概率，top-p 的累加、min-p 的比例才有的算，所以完整次序是<strong>惩罚 → 温度 → softmax → 截断 → 多项式采样</strong>——先塑形、再划圈、最后掷骰，每一步只干一件事，这正是这套代码清晰好维护的原因。</p>
 
 <p>这里要澄清一个新手最容易踩的坑：<strong>logits 不是概率</strong>。它只是一排有大有小、甚至有正有负的<strong>实数分数</strong>，彼此之间没有"加起来等于一"的约束，所以你不能直接拿它当概率去抽签。
 真正把分数变成概率的是<strong>softmax</strong>：它先对每个分数取指数（让差距按指数放大、并保证全为正），再除以总和归一，得到一排<strong>和为一</strong>的概率。
@@ -1921,8 +1922,8 @@ LESSON_28 = {"zh": r"""
   <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>model.forward 出的原始分数：词表里<strong>每个 token 一个分</strong>（第 24 课）。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>惩罚 penalties</h4><p>repetition / frequency / presence——压低已出现过的词，<strong>反复读机</strong>。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>温度 temperature</h4><p>logits ÷ T：&lt;1 更尖更稳，&gt;1 更平更野，<strong>=0 ⇒ 贪心</strong>。</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>top-k / top-p / min-p</h4><p>三道闸门<strong>划定候选圈</strong>：切掉没希望的尾巴。</p></div></div>
-  <div class="step"><div class="num">5</div><div class="sc"><h4>softmax → 采样</h4><p>归一成概率，<strong>多项式掷骰</strong>出下一个 token（贪心则 argmax）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>softmax</h4><p>把 logits 指数<strong>归一成概率</strong>（top-p 的累加、min-p 的比例都要在概率上算）。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>top-k / top-p / min-p → 采样</h4><p>三道闸门在概率上<strong>划定候选圈</strong>，再<strong>多项式掷骰</strong>出下一个 token（贪心则 argmax）。</p></div></div>
 </div>
 
 <div class="fig">
@@ -2140,7 +2141,7 @@ Part 6 到此收尾：第 24 课讲 ModelRunner 这道"决策→计算"的门，
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>Sampler</strong>：一个 <span class="mono">nn.Module</span>，把 <strong>logits → 下一个 token id</strong>；读 <span class="mono">SamplingBatchInfo</span>（把每请求参数打包成张量）。</li>
-    <li><strong>管线</strong>：惩罚 → 温度（÷T；&lt;1 尖、&gt;1 平、=0 贪心）→ top-k / top-p / min-p 截断 → softmax → 多项式采样。</li>
+    <li><strong>管线</strong>：惩罚 → 温度（÷T；&lt;1 尖、&gt;1 平、=0 贪心）→ softmax → top-k / top-p / min-p 截断 → 多项式采样。</li>
     <li><strong>旋钮</strong>：<span class="mono">SamplingParams</span> 逐请求设温度/top_p/top_k/min_p/惩罚；<strong>同一 batch 不同请求可用不同参数</strong>（向量化）。</li>
     <li><strong>贪心 vs 采样</strong>：argmax 确定可复现 vs 多项式随机多样；截断管质量、温度管多样性。</li>
     <li><strong>钩子</strong>：结构化输出（第 48 课）在采样前把违规 token 置 −∞；logit-bias、min_tokens/EOS 抑制、确定性 RNG 都挂在这里。它是请求循环（第 18 课）的第 4 步、自回归（第 4 课）的一环。</li>
@@ -2172,22 +2173,22 @@ It closes Part 6, and it is <strong>step 4</strong> of the request loop (Lesson 
 <h2>From a row of scores to one token: the sampling pipeline</h2>
 <p>logits can't be the answer directly — they're just <strong>unnormalized preferences</strong>. The Sampler reshapes them <strong>step by step</strong>, then rolls a single die.
 The full pipeline (done in parallel per request): first <strong>penalties</strong> (repetition / frequency / presence — discourage words already produced, kill the parrot),
-then <strong>temperature</strong> scaling (divide the logits by T: &lt;1 sharpens and steadies, &gt;1 flattens and dares, =0 collapses to greedy argmax),
+then <strong>temperature</strong> scaling (divide the logits by T: &lt;1 sharpens and steadies, &gt;1 flattens and dares, =0 collapses to greedy argmax), then <strong>softmax</strong> turns the scores into <strong>probabilities</strong>,
 then three <strong>truncation gates</strong> — <strong>top-k</strong> (keep the k highest), <strong>top-p / nucleus</strong> (sort by prob descending and keep the smallest set summing to p),
-<strong>min-p</strong> (drop every token below "max prob × a fraction") — finally <strong>softmax</strong> renormalizes the survivors and a <strong>multinomial sample</strong> rolls the die.
+<strong>min-p</strong> (drop every token below "max prob × a fraction") — finally a <strong>multinomial sample</strong> rolls the die.
 If the whole request is greedy, all that is skipped and it's just <span class="mono">argmax</span>.</p>
 
 <p>The order is worth a second thought. <strong>Penalties come first</strong> because they edit the "raw preference" — you must fold in "this word was just said, dock points" before any reshaping counts.
 <strong>Temperature is next</strong>; it's the only knob that <strong>reshapes the steepness of the whole curve</strong>: it never changes the <strong>ranking</strong> of who's higher, only how <strong>lopsided</strong> the gaps are, so it must run before truncation.
 <strong>top-k / top-p / min-p draw the candidate circle</strong>: none of them changes relative probabilities, they only decide "which tokens are still eligible", chopping off the hopeless tail — blocking garbage while leaving room for the genuinely reasonable few.
-Only then softmax + sample — <strong>shape, then circle, then roll</strong>, each step doing one thing, which is why this code stays clean.</p>
+A multinomial roll comes last — <strong>softmax actually sits between temperature and the gates</strong>: it's what turns logits into probabilities, which top-p's cumsum and min-p's ratio then operate on, so the full order is <strong>penalties → temperature → softmax → truncation → multinomial sample</strong> — shape, then circle, then roll, each step doing one thing, which is why this code stays clean.</p>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>raw scores from model.forward: <strong>one score per token</strong> in the vocabulary (Lesson 24).</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>penalties</h4><p>repetition / frequency / presence — push down words already produced, <strong>anti-parrot</strong>.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>temperature</h4><p>logits ÷ T: &lt;1 sharper and steadier, &gt;1 flatter and wilder, <strong>=0 ⇒ greedy</strong>.</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>top-k / top-p / min-p</h4><p>three gates <strong>draw the candidate circle</strong>: chop off the hopeless tail.</p></div></div>
-  <div class="step"><div class="num">5</div><div class="sc"><h4>softmax → sample</h4><p>renormalize to probs, <strong>roll a multinomial die</strong> for the next token (or argmax if greedy).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>softmax</h4><p>exponentiate logits into <strong>probabilities</strong> (top-p's cumsum and min-p's ratio both need probs).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>top-k / top-p / min-p → sample</h4><p>three gates <strong>draw the candidate circle</strong> on the probs, then <strong>roll a multinomial die</strong> for the next token (or argmax if greedy).</p></div></div>
 </div>
 
 <div class="fig">
@@ -2394,7 +2395,7 @@ and this lesson adds the last link — <strong>how the computed logits actually 
   <div class="tag">📌 Key takeaways</div>
   <ul>
     <li><strong>Sampler</strong>: an <span class="mono">nn.Module</span> turning <strong>logits → next token id</strong>; reads <span class="mono">SamplingBatchInfo</span> (per-request params packed into tensors).</li>
-    <li><strong>Pipeline</strong>: penalties → temperature (÷T; &lt;1 sharp, &gt;1 flat, =0 greedy) → top-k / top-p / min-p truncation → softmax → multinomial sample.</li>
+    <li><strong>Pipeline</strong>: penalties → temperature (÷T; &lt;1 sharp, &gt;1 flat, =0 greedy) → softmax → top-k / top-p / min-p truncation → multinomial sample.</li>
     <li><strong>Knobs</strong>: <span class="mono">SamplingParams</span> sets temperature/top_p/top_k/min_p/penalties per request; <strong>different requests in one batch can use different params</strong> (vectorized).</li>
     <li><strong>Greedy vs sampling</strong>: argmax is deterministic/reproducible vs multinomial is random/diverse; truncation governs quality, temperature governs diversity.</li>
     <li><strong>Hooks</strong>: structured output (Lesson 48) sets disallowed-token logits to −∞ before sampling; logit-bias, min_tokens/EOS suppression, deterministic RNG all hook here. It is step 4 of the request loop (Lesson 18), one turn of autoregression (Lesson 4).</li>

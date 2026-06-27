@@ -271,9 +271,9 @@ DetokenizerManager 在第三个进程把 token 拼回文字。本课讲的事件
   <pre><span class="kw">def</span> run_batch(self, batch):
     self.forward_ct += 1
     <span class="cm"># hand the batch to the model worker for ONE forward (prefill or decode);</span>
-    <span class="cm"># get back the next-token logits and sampled ids</span>
-    logits_output, next_token_ids = self.tp_worker.forward_batch_generation(batch)
-    <span class="kw">return</span> logits_output, next_token_ids</pre>
+    <span class="cm"># get back a GenerationBatchResult (logits + sampled next-token ids)</span>
+    result = self.model_worker.forward_batch_generation(batch)
+    <span class="kw">return</span> result   <span class="cm"># a GenerationBatchResult</span></pre>
 </div>
 
 <p><strong>一个具体例子（数 step）：</strong>假设服务器刚启动、<span class="mono">forward_ct = 0</span>。第 1 个 step 组出一个含 3 条请求的 <strong>prefill 批</strong>，
@@ -537,9 +537,9 @@ the running tally of <strong>how many heartbeats the engine has taken so far</st
   <pre><span class="kw">def</span> run_batch(self, batch):
     self.forward_ct += 1
     <span class="cm"># hand the batch to the model worker for ONE forward (prefill or decode);</span>
-    <span class="cm"># get back the next-token logits and sampled ids</span>
-    logits_output, next_token_ids = self.tp_worker.forward_batch_generation(batch)
-    <span class="kw">return</span> logits_output, next_token_ids</pre>
+    <span class="cm"># get back a GenerationBatchResult (logits + sampled next-token ids)</span>
+    result = self.model_worker.forward_batch_generation(batch)
+    <span class="kw">return</span> result   <span class="cm"># a GenerationBatchResult</span></pre>
 </div>
 
 <p><strong>A concrete example (counting steps):</strong> say the server just started with <span class="mono">forward_ct = 0</span>. Step 1 forms a
@@ -2325,7 +2325,7 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 </div>
 
 <p>
-一个具体例子：默认 <span class="mono">--chunked-prefill-size 4096</span> 时，一个 32768 token 的长 prompt 会被切成 <strong>8 块</strong>（32768 ÷ 4096 = 8 拍），每拍只算 4096 个 prefill token，再混入其余请求的 decode；若把旋钮拧到 <span class="mono">--chunked-prefill-size 2048</span>，同一个 prompt 就切成 <strong>16 块</strong>——更顺滑，但多花一倍步数、长请求首字更慢。
+一个具体例子：以 <span class="mono">--chunked-prefill-size 4096</span> 为例（实际默认值随 GPU 显存自适应，常见 2048 / 4096 / 8192），一个 32768 token 的长 prompt 会被切成 <strong>8 块</strong>（32768 ÷ 4096 = 8 拍），每拍只算 4096 个 prefill token，再混入其余请求的 decode；若把旋钮拧到 <span class="mono">--chunked-prefill-size 2048</span>，同一个 prompt 就切成 <strong>16 块</strong>——更顺滑，但多花一倍步数、长请求首字更慢。
 </p>
 
 <div class="card key">
@@ -2526,7 +2526,7 @@ commit only that slice, and record the request as <span class="mono">new_chunked
 </div>
 
 <p>
-A concrete example: with the default <span class="mono">--chunked-prefill-size 4096</span>, a 32768-token prompt is cut into <strong>8 chunks</strong> (32768 ÷ 4096 = 8 steps), each step computing only 4096 prefill tokens mixed with other requests' decode; turn the knob to <span class="mono">--chunked-prefill-size 2048</span> and the same prompt becomes <strong>16 chunks</strong>—smoother, but twice the steps and a slower whale first byte.
+A concrete example: take <span class="mono">--chunked-prefill-size 4096</span> (the real default is GPU-memory-adaptive — commonly 2048 / 4096 / 8192), a 32768-token prompt is cut into <strong>8 chunks</strong> (32768 ÷ 4096 = 8 steps), each step computing only 4096 prefill tokens mixed with other requests' decode; turn the knob to <span class="mono">--chunked-prefill-size 2048</span> and the same prompt becomes <strong>16 chunks</strong>—smoother, but twice the steps and a slower whale first byte.
 </p>
 
 <div class="card key">
@@ -2786,7 +2786,7 @@ TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/data_parallel_controller.py ::DataParallelController.round_robin_scheduler</span><span class="ln">轮询把请求分发到下一个 DP 工作副本</span></div>
   <pre><span class="kw">def</span> round_robin_scheduler(self, req):
     <span class="cm"># send this request to the next DP worker in rotation, then advance.</span>
-    self.workers[self.round_robin_counter].send_pyobj(req)
+    sock_send(self.workers[self.round_robin_counter], req)
     self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(self.workers)</pre>
 </div>
 
@@ -3025,7 +3025,7 @@ it keeps a <span class="mono">round_robin_counter</span>, finds the next <strong
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/data_parallel_controller.py ::DataParallelController.round_robin_scheduler</span><span class="ln">round-robin: hand each request to the next DP worker</span></div>
   <pre><span class="kw">def</span> round_robin_scheduler(self, req):
     <span class="cm"># send this request to the next DP worker in rotation, then advance.</span>
-    self.workers[self.round_robin_counter].send_pyobj(req)
+    sock_send(self.workers[self.round_robin_counter], req)
     self.round_robin_counter = (self.round_robin_counter + <span class="mono">1</span>) % len(self.workers)</pre>
 </div>
 

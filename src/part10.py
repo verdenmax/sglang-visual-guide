@@ -132,6 +132,8 @@ LESSON_43 = {"zh": r"""
     EAGLE3 = auto()
     NGRAM = auto()
     STANDALONE = auto()
+    DFLASH = auto()
+    FROZEN_KV_MTP = auto()
     NONE = auto()
     @classmethod
     def from_string(cls, name):
@@ -274,6 +276,8 @@ LESSON_43 = {"zh": r"""
     EAGLE3 = auto()
     NGRAM = auto()
     STANDALONE = auto()
+    DFLASH = auto()
+    FROZEN_KV_MTP = auto()
     NONE = auto()
     @classmethod
     def from_string(cls, name):
@@ -1366,7 +1370,7 @@ LESSON_47 = {"zh": r"""
 
 <div class="flow"><div class="node">路由 token 到 top-k 专家</div><div class="arrow">→</div><div class="node">测量每专家负载</div><div class="arrow">→</div><div class="node">重排放置（复制热点）</div><div class="arrow">→</div><div class="node">更平坦的 GPU 负载</div></div>
 
-<div class="cols"><div class="col"><strong>倾斜（裸 EP）</strong><br>8 张卡，1 个热点专家挤在 GPU0。这一步必须等 GPU0 处理完 4000 个 token，其余 7 张卡各 1000 个，处理完只能干等。<span class="mono">最忙者决定整步耗时</span>，75% 算力在空转。</div><div class="col"><strong>平衡（EPLB 之后）</strong><br>热点专家被复制到 3 张卡上分流，冷热专家重新搭配摆放。每张 GPU 每步约 1500 个 token，墙时间由 4000 降到 1500。同步墙不再被单个热点卡住。</div></div>
+<div class="cols"><div class="col"><strong>倾斜（裸 EP）</strong><br>8 张卡，1 个热点专家挤在 GPU2。这一步必须等 GPU2 处理完 4000 个 token，其余 7 张卡各 1000 个，处理完只能干等。<span class="mono">最忙者决定整步耗时</span>，75% 算力在空转。</div><div class="col"><strong>平衡（EPLB 之后）</strong><br>热点专家被复制到 3 张卡上分流，冷热专家重新搭配摆放。每张 GPU 每步约 1500 个 token，墙时间由 4000 降到 1500。同步墙不再被单个热点卡住。</div></div>
 
 <table class="t"><tr><th>EPLBManager 钩子</th><th>它做什么</th></tr><tr><td><span class="mono">on_forward_pass_end()</span></td><td>每次前向后调用：把这一步各专家命中的 token 数累加进负载统计（经由专家分布记录器）。高频、轻量。</td></tr><tr><td><span class="mono">rebalance()</span></td><td>周期性调用：解一个新的专家→GPU 放置方案把负载摊平，热点专家可能被复制。低频、较重。</td></tr><tr><td><span class="mono">expert_location</span></td><td>专家→GPU 映射表：被 rebalance 更新，后续步骤按这张新地图路由。</td></tr></table>
 
@@ -1506,7 +1510,7 @@ class ExpertLocationMetadata:
 
 <div class="flow"><div class="node">route tokens to top-k experts</div><div class="arrow">→</div><div class="node">measure per-expert load</div><div class="arrow">→</div><div class="node">rebalance placement (replicate hot)</div><div class="arrow">→</div><div class="node">flatter GPU load</div></div>
 
-<div class="cols"><div class="col"><strong>Skewed (raw EP)</strong><br>8 cards, 1 hot expert crammed onto GPU0. This step must wait for GPU0 to process 4000 tokens; the other 7 cards handle 1000 each and then just wait. <span class="mono">The busiest sets the step time</span>; 75% of compute spins idle.</div><div class="col"><strong>Balanced (after EPLB)</strong><br>The hot expert is replicated onto 3 cards to split traffic, and hot/cold experts are re-paired. Each GPU now handles ~1500 tokens per step; wall time drops from 4000 to 1500. The sync wall is no longer stalled by a single hot card.</div></div>
+<div class="cols"><div class="col"><strong>Skewed (raw EP)</strong><br>8 cards, 1 hot expert crammed onto GPU2. This step must wait for GPU2 to process 4000 tokens; the other 7 cards handle 1000 each and then just wait. <span class="mono">The busiest sets the step time</span>; 75% of compute spins idle.</div><div class="col"><strong>Balanced (after EPLB)</strong><br>The hot expert is replicated onto 3 cards to split traffic, and hot/cold experts are re-paired. Each GPU now handles ~1500 tokens per step; wall time drops from 4000 to 1500. The sync wall is no longer stalled by a single hot card.</div></div>
 
 <table class="t"><tr><th>EPLBManager hook</th><th>What it does</th></tr><tr><td><span class="mono">on_forward_pass_end()</span></td><td>Called after each forward: accumulate the token count each expert hit this step into the load statistic (via the expert-distribution recorder). High-frequency, lightweight.</td></tr><tr><td><span class="mono">rebalance()</span></td><td>Called periodically: solve a new expert→GPU placement that flattens load; hot experts may be replicated. Low-frequency, heavier.</td></tr><tr><td><span class="mono">expert_location</span></td><td>The expert→GPU map: updated by rebalance, and subsequent steps route against this new map.</td></tr></table>
 
