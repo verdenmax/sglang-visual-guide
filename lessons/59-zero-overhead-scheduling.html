@@ -487,14 +487,17 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
     # results while the current batch is still running on the GPU.
     self.result_queue = deque()
+    self.last_batch = None
     while True:
         recv = self.request_receiver.recv_requests()
         self.process_input_requests(recv)
         batch = self.get_next_batch_to_run()        # build batch N (CPU)
         result = self.run_batch(batch)              # launch forward N (GPU)
         self.result_queue.append((batch, result))
-        # one step out of phase: process batch N-1 now
-        self.process_batch_result(*self.result_queue.popleft())</pre></div>
+        if self.last_batch is not None:             # skip on the 1st iter, so
+            self.process_batch_result(              # we always finish batch N-1
+                *self.result_queue.popleft())       # while forward N runs (GPU)
+        self.last_batch = batch</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一条主线</strong>：CPU 绝不能让 GPU 等。任何前向<strong>前后</strong>的 CPU 工作都是潜在气泡。</li>
@@ -697,14 +700,17 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
     # results while the current batch is still running on the GPU.
     self.result_queue = deque()
+    self.last_batch = None
     while True:
         recv = self.request_receiver.recv_requests()
         self.process_input_requests(recv)
         batch = self.get_next_batch_to_run()        # build batch N (CPU)
         result = self.run_batch(batch)              # launch forward N (GPU)
         self.result_queue.append((batch, result))
-        # one step out of phase: process batch N-1 now
-        self.process_batch_result(*self.result_queue.popleft())</pre></div>
+        if self.last_batch is not None:             # skip on the 1st iter, so
+            self.process_batch_result(              # we always finish batch N-1
+                *self.result_queue.popleft())       # while forward N runs (GPU)
+        self.last_batch = batch</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>

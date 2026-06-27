@@ -37,7 +37,7 @@ build, test and contribute a PR"*.
 > see `docs/superpowers/plans/` for the per-milestone specs and plans.
 
 Every lesson is self-contained, embeds both languages (toggle in the page), and uses hand-drawn
-diagrams, layered architecture maps, real (cited) code, and a short self-test quiz.
+diagrams, layered architecture maps, inline SVG figures, real (cited) code, and a short self-test quiz.
 
 ---
 
@@ -64,8 +64,10 @@ kernels → performance innovations → advanced → practice → design synthes
 | 13 | 设计专题·综合 / Design themes (synthesis) — RadixAttention, zero-overhead scheduling, PD disaggregation, speculative decoding, pluggability, built-for-throughput | L58–63 |
 
 > All **63 lessons** across these 13 parts are complete and committed. Each lesson is bilingual
-> (中文 / English, toggle in the page), ≥3500 CJK of prose, with 4+ diagrams per language and a
-> self-test quiz (the glossary, L57, is a reference table). `MAX_LESSON` in `check_html.py` is 63.
+> (中文 / English, toggle in the page), ≥3500 CJK of prose, with **2 inline SVG figures and 2 cited
+> code references per language** (plus layered diagrams/tables) and a self-test quiz (the glossary,
+> L57, is a reference table). `check_html.py` enforces this via a `MIN_FIGURES` floor (≥2 SVG figures
+> per language) and `MAX_LESSON` is 63.
 
 ## How to view
 

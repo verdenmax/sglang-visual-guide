@@ -15241,14 +15241,17 @@ class RadixCache(BasePrefixCache):
     # overlap CPU work with the GPU forward: finish the PREVIOUS batch's
     # results while the current batch is still running on the GPU.
     self.result_queue = deque()
+    self.last_batch = None
     while True:
         recv = self.request_receiver.recv_requests()
         self.process_input_requests(recv)
         batch = self.get_next_batch_to_run()        # build batch N (CPU)
         result = self.run_batch(batch)              # launch forward N (GPU)
         self.result_queue.append((batch, result))
-        # one step out of phase: process batch N-1 now
-        self.process_batch_result(*self.result_queue.popleft())</pre></div>
+        if self.last_batch is not None:             # skip on the 1st iter, so
+            self.process_batch_result(              # we always finish batch N-1
+                *self.result_queue.popleft())       # while forward N runs (GPU)
+        self.last_batch = batch</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One thread</strong>: the CPU must never make the GPU wait. Any CPU work <strong>before or after</strong> the forward is a potential bubble.</li>
@@ -15866,7 +15869,7 @@ class RadixCache(BasePrefixCache):
     def get_graph_runner_cls(self) -&gt; type:
         raise NotImplementedError</pre></div>
 
-<p>A concrete picture: the same engine has <span class="mono">get_default_attention_backend()</span> return FlashInfer on <strong>NVIDIA</strong> and Triton on <strong>AMD</strong>—the upper scheduler and model loop <strong>never change</strong>, because they only call the <span class="mono">SRTPlatform</span> interface; which chip or kernel sits behind it is transparent to them. To add a new accelerator you do not sprinkle <span class="mono">if</span> branches through the scheduler; you <strong>add one SRTPlatform subclass</strong>, override these few methods, and select it at deploy time: the change is contained in a single file and not a line of core code moves.</p>
+<p>A concrete picture: the same engine defaults to the FlashInfer/FA3 family of attention backends on <strong>NVIDIA</strong> and to Triton on <strong>AMD</strong>—that choice is made at startup by the active platform (the <span class="mono">SRTPlatform</span> implementation plus the server-arg defaults) according to the hardware and architecture, and the upper scheduler and model loop <strong>never change</strong>, because they only call the <span class="mono">SRTPlatform</span> interface; which chip or kernel sits behind it is transparent to them. To add a new accelerator you do not sprinkle <span class="mono">if</span> branches through the scheduler; you <strong>add one SRTPlatform subclass</strong>, override these few methods, and select it at deploy time: the change is contained in a single file and not a line of core code moves.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>One pattern, everywhere</strong>: program to an interface (an ABC); the concrete implementation is selected <span class="mono">at deploy time</span>—the same skeleton runs through the whole book.</li>
@@ -16057,10 +16060,10 @@ class SchedulePolicy:
 </pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_next_batch_to_run</span><span class="ln">the continuous-batching lever: each step pick which batch to run</span></div><pre>def get_next_batch_to_run(self) -&gt; Optional[ScheduleBatch]:
-    # the continuous-batching lever, run EVERY step: merge any finished
-    # prefill into the running batch, then decide what to run next —
-    # admit a new prefill batch (more work) or keep decoding.
-    merge_finished_prefill_into(self.running_batch)
+    # the continuous-batching lever, run EVERY step:
+    # 1) merge any finished prefill (last_batch) into the running batch
+    ...
+    # 2) then decide what to run next:
     new_batch = self.get_new_batch_prefill()    # admit within token budget
     if new_batch is not None:
         return new_batch                         # run prefill this step

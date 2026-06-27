@@ -39,8 +39,9 @@ PRE_INLINE = ("span", "strong", "b", "em", "u", "a")
 SOFT_EXEMPT = {"57-glossary.html"}
 
 # Visual-block density (soft): containers that count as a "diagram/table".
-DIAGRAM_CLASSES = ("layers", "vflow", "flow", "cols", "cellgroup", "timeline", "trace")
+DIAGRAM_CLASSES = ("layers", "vflow", "flow", "cols", "cellgroup", "timeline", "trace", "fig")
 MIN_DIAGRAMS = 6  # per lesson, counting BOTH languages (>= 3 per language)
+MIN_FIGURES = 4  # SVG .fig per lesson, counting BOTH languages (>= 2 per language)
 MIN_CJK = 3000  # per-lesson zh CJK chars (soft floor; authoring target ~4000+)
 
 # Every class used in generated HTML must be defined in shell.CSS. Catches
@@ -104,6 +105,9 @@ def check_lesson(fname, html):
         nvis += html.count('<table class="t"')
         if nvis < MIN_DIAGRAMS:
             add("WARN", fname, f"only {nvis} visual blocks (want >= {MIN_DIAGRAMS}; add diagrams)")
+        nfig = html.count('class="fig"')
+        if nfig < MIN_FIGURES:
+            add("ERR", fname, f"only {nfig} SVG figures (want >= {MIN_FIGURES}; >= 2 per language)")
 
     for pre in re.findall(r"<pre[^>]*>(.*?)</pre>", html, re.S):
         cleaned = re.sub(r"</?(?:%s)\b[^>]*>" % "|".join(PRE_INLINE), "", pre)
