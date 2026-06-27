@@ -382,6 +382,31 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
   <div class="step"><div class="num">4</div><div class="sc"><h4>join：把答案收回父状态</h4><p><span class="mono">forks.join()</span> 把各分支<strong>新产生的变量</strong>聚合回 <span class="mono">s</span>，于是 <span class="mono">s["answer"]</span> 成为 n 个结果的列表，可比较 / 投票 / 汇总。</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="fork 共享前缀：一段共享前缀经 s.fork(3) 原地分出三条分支，前缀的 KV 只算一次、三个分支共享，各分支只新算自己那段短后缀">
+    <text x="20" y="34" style="font-weight:700;fill:var(--accent-ink)">前缀的 KV 只算一次、3 个分支共享</text>
+    <rect x="20" y="116" width="232" height="72" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="136" y="144" text-anchor="middle" style="font-weight:700">共享前缀</text>
+    <text x="136" y="166" text-anchor="middle" style="fill:var(--muted);font-size:12px">system · few-shot · 问题</text>
+    <text x="136" y="216" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:12px">KV 只算一次</text>
+    <rect x="286" y="130" width="96" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="334" y="157" text-anchor="middle" class="mono">s.fork(3)</text>
+    <path d="M 252 152 L 286 152" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M 382 152 C 446 152, 470 70, 520 70" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <path d="M 382 152 L 520 152" style="fill:none;stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M 382 152 C 446 152, 470 234, 520 234" style="fill:none;stroke:var(--purple);stroke-width:1.5"/>
+    <rect x="520" y="48" width="220" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="630" y="75" text-anchor="middle">分支 0 → 答案 A</text>
+    <rect x="520" y="130" width="220" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="630" y="157" text-anchor="middle">分支 1 → 答案 B</text>
+    <rect x="520" y="212" width="220" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="630" y="239" text-anchor="middle">分支 2 → 答案 C</text>
+  </svg>
+  <div class="figcap"><b>图 1 · fork 共享前缀</b> — 一段共享前缀（system + few-shot + 问题）经 <span class="mono">s.fork(3)</span> 原地分出 3 条分支：前缀的 KV 只算一次、3 个分支共享，各分支只新算自己那段短后缀。</div>
+</div>
+
+<p>举个具体的数：系统设定 + few-shot + 问题一共约 <strong>2000 个 token</strong> 的前缀，<span class="mono">s.fork(3)</span> 后每个分支只续写约 <strong>100 个 token</strong>。串行跑 3 次要算 <span class="mono">3×2000 + 3×100 ≈ 6300</span> 个 token；用 fork 只算 <span class="mono">2000 + 3×100 ≈ 2300</span> 个——<strong>省下约 4000 个前缀 token 的重复计算</strong>。</p>
+
 <h2>核心：fork 与 RadixAttention 是一个想法的两半</h2>
 <p>这是全课<strong>最该划重点</strong>的地方。第 7 课讲过：RadixAttention 把所有请求的前缀<strong>组织成一棵基数树（radix tree）</strong>，<strong>公共前缀只存一份 KV、被多个请求共享</strong>。
 而 fork 做的事，恰好就是<strong>在程序里主动制造出"一段公共前缀 + 多条不同后缀"的形状</strong>。换句话说：<strong>fork 是"声明端"，RadixAttention 是"兑现端"</strong>。
@@ -397,6 +422,31 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
   <div class="cells"><span class="lab">分支 1</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 B</span></div>
   <div class="cells"><span class="lab">分支 2</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 C</span></div>
   <div class="cells"><span class="lab">复用</span><span class="cell q">高亮三段 = 整棵基数树里只存一份、三分支共享的前缀 KV</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="join 合并分支结果：三条分支各自产生一个候选答案，经 join（gather_variable）收回父状态 s，s['answer'] 变成三个候选答案的列表">
+    <text x="20" y="34" style="font-weight:700;fill:var(--accent-ink)">join：把 3 条分支的结果收回父状态</text>
+    <rect x="20" y="58" width="210" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="85" text-anchor="middle">分支 0：答案 A</text>
+    <rect x="20" y="130" width="210" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="125" y="157" text-anchor="middle">分支 1：答案 B</text>
+    <rect x="20" y="202" width="210" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="125" y="229" text-anchor="middle">分支 2：答案 C</text>
+    <path d="M 230 80 C 322 80, 360 152, 426 152" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <path d="M 230 152 L 426 152" style="fill:none;stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M 230 224 C 322 224, 360 152, 426 152" style="fill:none;stroke:var(--purple);stroke-width:1.5"/>
+    <polygon points="430,152 416,145 416,159" style="fill:var(--muted)"/>
+    <rect x="432" y="122" width="132" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="498" y="148" text-anchor="middle" class="mono" style="font-weight:700">join</text>
+    <text x="498" y="168" text-anchor="middle" style="fill:var(--muted);font-size:12px">gather_variable</text>
+    <path d="M 564 152 L 612 152" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="616,152 602,145 602,159" style="fill:var(--muted)"/>
+    <rect x="618" y="118" width="144" height="68" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="690" y="144" text-anchor="middle" style="font-weight:700">父状态 s</text>
+    <text x="690" y="168" text-anchor="middle" class="mono" style="font-size:11px">s["answer"]=[A,B,C]</text>
+  </svg>
+  <div class="figcap"><b>图 2 · join 合并分支结果</b> — 3 条分支各自产出一个候选答案，<span class="mono">join</span>（gather_variable）把它们收回父状态 <span class="mono">s</span>，于是 <span class="mono">s["answer"]</span> 成为 [A, B, C] 的列表，供比较 / 投票 / 择优。</div>
 </div>
 
 <h2>串行循环 vs fork：代价差在哪</h2>
@@ -442,6 +492,22 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
 这正是 RadixAttention 前缀树<strong>长出 size 个共享父节点的子节点</strong>的时刻；返回的 <span class="mono">ProgramStateGroup</span> 则给你 <span class="mono">join</span>，
 按 <span class="mono">gather_variable</span> 模式<strong>把各分支新变量回填进父状态</strong>。一句 <span class="mono">s.fork(n)</span>，前端声明与运行时复用就此<strong>合二为一</strong>。
 往后第 12 课会讲<strong>后端接口</strong>，把这套 fork/join 真正落到具体引擎上——至此 Part 3 的"语言 → 解释 → 分叉 → 落地"四步就连成了一条完整链路。读到这里，你应当能把全书前后打通：第 7 课的前缀复用是<strong>引擎的本事</strong>，本课的 fork 是<strong>语言的表达</strong>，二者一里一外、一声明一兑现，共同撑起 SGLang"<strong>又好写又高效</strong>"的承诺。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState</span><span class="ln">DSL 程序拿到的句柄 s：fork 分叉、join 合并、读取生成变量</span></div>
+  <pre><span class="kw">class</span> ProgramState:
+    <span class="cm"># the handle a DSL program function receives (the `s` in def prog(s, ...))</span>
+    <span class="kw">def</span> __init__(self, stream_executor):
+        self.stream_executor = stream_executor
+    <span class="kw">def</span> fork(self, number):
+        ...   <span class="cm"># branch into `number` parallel states that share the current prefix</span>
+    <span class="kw">def</span> text(self):
+        ...   <span class="cm"># the accumulated text so far</span>
+    <span class="kw">def</span> __getitem__(self, name):
+        ...   <span class="cm"># read a generated variable, e.g. s["answer"]</span></pre>
+</div>
+
+<p>把这几样拼起来就是最常见的用法：<span class="mono">forks = s.fork(3)</span> 拿到 3 个共享前缀的分支，<span class="mono">for f in forks: f += gen("answer")</span> 各写各的，再 <span class="mono">forks.join()</span> 收回——之后 <span class="mono">s["answer"]</span>（走的正是上面的 <span class="mono">__getitem__</span>）就是 <span class="mono">["答案 A", "答案 B", "答案 C"]</span> 这样一个候选列表。</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
@@ -541,6 +607,31 @@ e.g. a variable in the parent becomes a <strong>list</strong> holding all n bran
   <div class="step"><div class="num">4</div><div class="sc"><h4>join: gather answers back</h4><p><span class="mono">forks.join()</span> aggregates each branch's <strong>new variables</strong> back into <span class="mono">s</span>, so <span class="mono">s["answer"]</span> becomes a list of n results to compare / vote / aggregate.</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="fork shares the prefix: one shared prefix is split in place by s.fork(3) into three branches; the prefix KV is computed once and shared by all three branches, each adding only its own short suffix">
+    <text x="20" y="34" style="font-weight:700;fill:var(--accent-ink)">the prefix KV is computed once, shared by all 3 branches</text>
+    <rect x="20" y="116" width="232" height="72" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="136" y="144" text-anchor="middle" style="font-weight:700">shared prefix</text>
+    <text x="136" y="166" text-anchor="middle" style="fill:var(--muted);font-size:12px">system · few-shot · question</text>
+    <text x="136" y="216" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:12px">KV computed once</text>
+    <rect x="286" y="130" width="96" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="334" y="157" text-anchor="middle" class="mono">s.fork(3)</text>
+    <path d="M 252 152 L 286 152" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M 382 152 C 446 152, 470 70, 520 70" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <path d="M 382 152 L 520 152" style="fill:none;stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M 382 152 C 446 152, 470 234, 520 234" style="fill:none;stroke:var(--purple);stroke-width:1.5"/>
+    <rect x="520" y="48" width="220" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="630" y="75" text-anchor="middle">branch 0 → answer A</text>
+    <rect x="520" y="130" width="220" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="630" y="157" text-anchor="middle">branch 1 → answer B</text>
+    <rect x="520" y="212" width="220" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="630" y="239" text-anchor="middle">branch 2 → answer C</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · fork shares the prefix</b> — one shared prefix (system + few-shot + question) is split in place by <span class="mono">s.fork(3)</span> into 3 branches: the prefix KV is computed once, shared by all 3 branches, and each branch computes only its own short suffix.</div>
+</div>
+
+<p>Concretely: a prefix of about <strong>2000 tokens</strong> (system + few-shot + question), then <span class="mono">s.fork(3)</span> and each branch writes only ~<strong>100 tokens</strong>. Running it serially 3 times costs <span class="mono">3×2000 + 3×100 ≈ 6300</span> tokens; with fork it costs only <span class="mono">2000 + 3×100 ≈ 2300</span> — <strong>saving roughly 4000 tokens of duplicated prefix compute</strong>.</p>
+
 <h2>The core: fork and RadixAttention are two halves of one idea</h2>
 <p>This is the part to <strong>highlight hardest</strong>. Lesson 7 explained: RadixAttention organizes all requests' prefixes into a <strong>radix tree</strong>, where a <strong>common prefix stores one copy of KV shared by many requests</strong>.
 What fork does is exactly <strong>deliberately create a "one common prefix + many different suffixes" shape in the program</strong>. In other words: <strong>fork is the "declaration side," RadixAttention is the "redemption side."</strong>
@@ -553,6 +644,31 @@ the 8 branches <strong>share one prefix KV</strong>, each adding compute only fo
   <div class="cells"><span class="lab">Branch 1</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer B</span></div>
   <div class="cells"><span class="lab">Branch 2</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer C</span></div>
   <div class="cells"><span class="lab">reuse</span><span class="cell q">the three highlighted runs = one prefix KV stored once in the radix tree, shared by all three branches</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="join merges branch results: three branches each produce a candidate answer, then join (gather_variable) collects them back into the parent state s, so s['answer'] becomes a list of the three candidate answers">
+    <text x="20" y="34" style="font-weight:700;fill:var(--accent-ink)">join: collect the 3 branches' results back into the parent</text>
+    <rect x="20" y="58" width="210" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="85" text-anchor="middle">branch 0: answer A</text>
+    <rect x="20" y="130" width="210" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="125" y="157" text-anchor="middle">branch 1: answer B</text>
+    <rect x="20" y="202" width="210" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="125" y="229" text-anchor="middle">branch 2: answer C</text>
+    <path d="M 230 80 C 322 80, 360 152, 426 152" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <path d="M 230 152 L 426 152" style="fill:none;stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M 230 224 C 322 224, 360 152, 426 152" style="fill:none;stroke:var(--purple);stroke-width:1.5"/>
+    <polygon points="430,152 416,145 416,159" style="fill:var(--muted)"/>
+    <rect x="432" y="122" width="132" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="498" y="148" text-anchor="middle" class="mono" style="font-weight:700">join</text>
+    <text x="498" y="168" text-anchor="middle" style="fill:var(--muted);font-size:12px">gather_variable</text>
+    <path d="M 564 152 L 612 152" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="616,152 602,145 602,159" style="fill:var(--muted)"/>
+    <rect x="618" y="118" width="144" height="68" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="690" y="144" text-anchor="middle" style="font-weight:700">parent state s</text>
+    <text x="690" y="168" text-anchor="middle" class="mono" style="font-size:11px">s["answer"]=[A,B,C]</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · join merges branch results</b> — the 3 branches each produce a candidate answer; <span class="mono">join</span> (gather_variable) collects them back into the parent state <span class="mono">s</span>, so <span class="mono">s["answer"]</span> becomes the list [A, B, C] to compare / vote / pick the best.</div>
 </div>
 
 <h2>Serial loop vs fork: where the cost differs</h2>
@@ -598,6 +714,22 @@ So fork brings <strong>two benefits at once</strong>: compute-wise, RadixAttenti
 exactly the moment RadixAttention's prefix tree <strong>grows size children off a shared parent node</strong>; the returned <span class="mono">ProgramStateGroup</span> gives you <span class="mono">join</span>,
 which in <span class="mono">gather_variable</span> mode <strong>copies each branch's new variables back into the parent state</strong>. With one <span class="mono">s.fork(n)</span>, front-end declaration and runtime reuse become <strong>one and the same</strong>.
 Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/join onto concrete engines — completing Part 3's chain of "language → interpret → fork → land."</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState</span><span class="ln">the handle s a DSL program receives: fork, join, read generated variables</span></div>
+  <pre><span class="kw">class</span> ProgramState:
+    <span class="cm"># the handle a DSL program function receives (the `s` in def prog(s, ...))</span>
+    <span class="kw">def</span> __init__(self, stream_executor):
+        self.stream_executor = stream_executor
+    <span class="kw">def</span> fork(self, number):
+        ...   <span class="cm"># branch into `number` parallel states that share the current prefix</span>
+    <span class="kw">def</span> text(self):
+        ...   <span class="cm"># the accumulated text so far</span>
+    <span class="kw">def</span> __getitem__(self, name):
+        ...   <span class="cm"># read a generated variable, e.g. s["answer"]</span></pre>
+</div>
+
+<p>Putting the pieces together gives the most common usage: <span class="mono">forks = s.fork(3)</span> yields 3 branches sharing the prefix, <span class="mono">for f in forks: f += gen("answer")</span> lets each write its own, then <span class="mono">forks.join()</span> gathers them back — and <span class="mono">s["answer"]</span> (going through the <span class="mono">__getitem__</span> above) becomes a candidate list like <span class="mono">["answer A", "answer B", "answer C"]</span>.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>

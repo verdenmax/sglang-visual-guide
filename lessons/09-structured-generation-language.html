@@ -387,6 +387,36 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="step"><div class="num">4</div><div class="sc"><h4>第二次 gen：得到最终答案</h4><p><span class="mono">gen("answer", stop="\n")</span>——再挖一个空收尾。两个 gen ⇒ <strong>两次调用</strong>，共享同一段前缀。</p></div></div>
 </div>
 
+<p>把上面这条链翻译成代码也就几行：先 <span class="mono">s += gen("分析", max_new_tokens=128)</span> 生成总览，再 <span class="mono">forks = s.fork(2)</span> 分出两支，各自 <span class="mono">f += gen("观点", max_new_tokens=64)</span>，最后 join 汇总——<strong>结构一旦写出来，运行时就看得见</strong>。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="把一段 DSL 程序画成依赖图：gen 分析先执行，fork 分成两条并行分支各自 gen，再 join 合并；运行时能直接看见这张结构图，而普通 Python 循环对它是不透明的">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">DSL 程序 = 运行时能看见的依赖图</text>
+    <rect x="290" y="40" width="180" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="65" text-anchor="middle" class="mono">gen("分析")</text>
+    <rect x="320" y="120" width="120" height="36" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="380" y="143" text-anchor="middle" class="mono">fork</text>
+    <rect x="110" y="196" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="205" y="221" text-anchor="middle" class="mono">gen("优点")</text>
+    <rect x="460" y="196" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="555" y="221" text-anchor="middle" class="mono">gen("缺点")</text>
+    <rect x="300" y="272" width="160" height="36" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="380" y="295" text-anchor="middle" class="mono">join</text>
+    <line x1="380" y1="80" x2="380" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M380 120 l-4 -9 h8 z" style="fill:var(--muted)"/>
+    <line x1="350" y1="156" x2="224" y2="196" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M224 196 l2 -10 l6 5 z" style="fill:var(--muted)"/>
+    <line x1="410" y1="156" x2="536" y2="196" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M536 196 l-8 -3 l6 -8 z" style="fill:var(--muted)"/>
+    <line x1="205" y1="236" x2="338" y2="272" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M338 272 l-9 -2 l3 -8 z" style="fill:var(--muted)"/>
+    <line x1="555" y1="236" x2="422" y2="272" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M422 272 l9 -2 l-3 -8 z" style="fill:var(--muted)"/>
+    <text x="748" y="138" text-anchor="end" style="fill:var(--faint);font-size:12px">fork → 2 条并行分支</text>
+  </svg>
+  <div class="figcap"><b>图 1 · DSL 程序就是一张依赖图</b> — 一段 <span class="mono">gen→fork→gen×2→join</span> 的程序，对运行时来说是一张<strong>看得见的结构图</strong>：它能据此并行调度分支、复用共享前缀；而一个不透明的 Python 循环，框架只能<strong>一条条盲跑</strong>。</div>
+</div>
+
 <h2>核心原语：gen 与 select，以及 role 助手</h2>
 <p>SGLang 的表达力集中在<strong>一小撮原语</strong>上。最常用的是 <strong>gen</strong>（自由填空）和 <strong>select</strong>（受限多选）：前者让模型<strong>自由生成</strong>，
 后者把解码<strong>限制在给定选项内</strong>——这正是"约束解码"的入口，让分类、路由这类任务的输出<strong>永远合法、可直接用</strong>。配合 role 助手与多模态的
@@ -422,6 +452,44 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   你声明"<strong>这里要填一段</strong>、那里<strong>从这几个里选</strong>"，用 <span class="mono">s["name"]</span> 取结果。<strong>结构、约束、多步逻辑</strong>都在你眼前。</p></div>
   <div class="col"><h4>裸 API：框架替你自动做什么</h4><p>① 多次调用间<strong>共享前缀的 KV 自动复用</strong>（第 7 课），无需你手动缓存；
   ② <strong>约束解码</strong>保证 select/json 输出合法；③ 调度、连续批处理、分页全在<strong>运行时</strong>透明发生。手搓 API 这些<strong>全得自己来</strong>。</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="左边是手写 Python 循环，顺序发出三次互不相关的 API 调用，没有共享结构也没有并行；右边是 SGLang DSL，运行时把分支并行调度、并自动共享公共前缀的 KV">
+    <line x1="384" y1="20" x2="384" y2="280" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">裸调用循环：你来编排</text>
+    <rect x="24" y="48" width="330" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="40" y="70" class="mono" style="font-size:12px">for q in questions:  # 顺序、串行</text>
+    <rect x="70" y="98" width="240" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="117" text-anchor="middle" class="mono" style="font-size:11px">POST /generate ①</text>
+    <rect x="70" y="138" width="240" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="157" text-anchor="middle" class="mono" style="font-size:11px">POST /generate ②</text>
+    <rect x="70" y="178" width="240" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="197" text-anchor="middle" class="mono" style="font-size:11px">POST /generate ③</text>
+    <line x1="190" y1="126" x2="190" y2="138" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="190" y1="166" x2="190" y2="178" style="stroke:var(--faint);stroke-width:1.5"/>
+    <rect x="24" y="226" width="330" height="48" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="189" y="246" text-anchor="middle" style="fill:var(--amber);font-size:12px">无共享结构 · 无并行</text>
+    <text x="189" y="264" text-anchor="middle" style="fill:var(--amber);font-size:12px">公共前缀一遍遍重算</text>
+    <text x="410" y="34" style="font-weight:700;fill:var(--accent-ink)">SGLang DSL：运行时替你编排</text>
+    <rect x="410" y="48" width="346" height="34" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="426" y="70" class="mono" style="font-size:12px">@sgl.function → 一棵意图树</text>
+    <rect x="470" y="98" width="232" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="586" y="117" text-anchor="middle" class="mono" style="font-size:11px">共享前缀 system/few-shot</text>
+    <rect x="540" y="136" width="92" height="26" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="586" y="154" text-anchor="middle" class="mono" style="font-size:11px">fork</text>
+    <rect x="410" y="184" width="150" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="485" y="204" text-anchor="middle" class="mono" style="font-size:11px">分支 A · gen</text>
+    <rect x="596" y="184" width="160" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="676" y="204" text-anchor="middle" class="mono" style="font-size:11px">分支 B · gen</text>
+    <line x1="586" y1="126" x2="586" y2="136" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="560" y1="162" x2="485" y2="184" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="612" y1="162" x2="676" y2="184" style="stroke:var(--faint);stroke-width:1.5"/>
+    <rect x="410" y="226" width="346" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="583" y="246" text-anchor="middle" style="fill:var(--teal);font-size:12px">并行调度分支</text>
+    <text x="583" y="264" text-anchor="middle" style="fill:var(--teal);font-size:12px">自动共享前缀 KV</text>
+  </svg>
+  <div class="figcap"><b>图 2 · DSL vs 裸调用循环</b> — 左边你亲手写循环、串行发请求，框架看不见彼此的关系；右边把同一段逻辑写成 DSL，<strong>运行时替你</strong>把分支并行、把公共前缀的 KV 只算一次。<span class="mono">你来编排 → 运行时替你编排</span>。</div>
 </div>
 
 <p>第三重红利最隐蔽也最值钱：<strong>当你把程序"结构化"地写出来，框架就能看见结构、据此自动优化</strong>。多个请求若<strong>共享同一段前缀</strong>
@@ -463,6 +531,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <span class="cm"># 否则返回一个自由生成节点，交给解释器按需执行</span>
     <span class="kw">return</span> SglGen(name, max_tokens, ..., stop, ..., regex, ...)</pre>
 </div>
+
+<p>那这个"IR 节点"长什么样？再看一眼 <span class="mono">lang/ir.py</span> 里 <span class="mono">SglGen</span> 的骨架——它就是 <span class="mono">gen(...)</span> 在意图树里留下的那个节点：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/ir.py ::SglGen</span><span class="ln">DSL 里一次 gen(...) 调用对应的 IR 节点</span></div>
+  <pre><span class="kw">class</span> SglGen(SglExpr):
+    <span class="cm"># DSL 里一次 gen(...) 调用对应的 IR 节点</span>
+    <span class="kw">def</span> __init__(self, name=<span class="kw">None</span>, max_new_tokens=<span class="kw">None</span>, stop=<span class="kw">None</span>,
+                 temperature=<span class="kw">None</span>, top_p=<span class="kw">None</span>, ...):
+        <span class="cm"># 记录"要生成什么"（一个命名空位 + 采样参数）；</span>
+        <span class="cm"># 真正的执行稍后由解释器对接后端完成</span>
+        ...</pre>
+</div>
+
+<p>对照这个节点：你写的一行 <span class="mono">s += gen("answer", max_new_tokens=64, stop="\n")</span> 不会立刻请求模型，而是构造一个 <span class="mono">SglGen</span> 节点挂进意图树，<strong>等解释器来执行</strong>。</p>
 
 <p>读懂这段，你就抓住了 SGLang 前端的灵魂：<strong>你写的程序不是"立即执行的代码"，而是一棵"待执行的意图树"</strong>。
 正因为是树、是声明式的，框架才能<strong>在执行前看清全局结构</strong>——哪些前缀共享、哪些分支能并行、哪些输出要约束——
@@ -578,6 +661,36 @@ with arbitrary Python logic between them.</p>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Second gen: final answer</h4><p><span class="mono">gen("answer", stop="\n")</span> — dig one more blank. Two gens ⇒ <strong>two calls</strong>, sharing one prefix.</p></div></div>
 </div>
 
+<p>Translating that chain into code is just a few lines: first <span class="mono">s += gen("analyze", max_new_tokens=128)</span> for an overview, then <span class="mono">forks = s.fork(2)</span> to split, each branch <span class="mono">f += gen("view", max_new_tokens=64)</span>, and finally join — <strong>once the structure is written, the runtime can see it</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="A DSL program drawn as a dependency graph: gen analyze runs first, fork splits into two parallel branches each running gen, then join merges them; the runtime can see this structure directly, while a plain Python loop is opaque to it">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">A DSL program = a graph the runtime can see</text>
+    <rect x="290" y="40" width="180" height="40" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="65" text-anchor="middle" class="mono">gen("analyze")</text>
+    <rect x="320" y="120" width="120" height="36" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="380" y="143" text-anchor="middle" class="mono">fork</text>
+    <rect x="110" y="196" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="205" y="221" text-anchor="middle" class="mono">gen("pros")</text>
+    <rect x="460" y="196" width="190" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="555" y="221" text-anchor="middle" class="mono">gen("cons")</text>
+    <rect x="300" y="272" width="160" height="36" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="380" y="295" text-anchor="middle" class="mono">join</text>
+    <line x1="380" y1="80" x2="380" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M380 120 l-4 -9 h8 z" style="fill:var(--muted)"/>
+    <line x1="350" y1="156" x2="224" y2="196" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M224 196 l2 -10 l6 5 z" style="fill:var(--muted)"/>
+    <line x1="410" y1="156" x2="536" y2="196" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M536 196 l-8 -3 l6 -8 z" style="fill:var(--muted)"/>
+    <line x1="205" y1="236" x2="338" y2="272" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M338 272 l-9 -2 l3 -8 z" style="fill:var(--muted)"/>
+    <line x1="555" y1="236" x2="422" y2="272" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M422 272 l9 -2 l-3 -8 z" style="fill:var(--muted)"/>
+    <text x="748" y="138" text-anchor="end" style="fill:var(--faint);font-size:12px">fork → 2 parallel branches</text>
+  </svg>
+  <div class="figcap"><b>Figure 1 · A DSL program is a dependency graph</b> — a <span class="mono">gen→fork→gen×2→join</span> program is a <strong>visible structure</strong> to the runtime: it can schedule the branches in parallel and reuse the shared prefix; an opaque Python loop forces the framework to <strong>run blind, one call at a time</strong>.</div>
+</div>
+
 <h2>Core primitives: gen and select, plus role helpers</h2>
 <p>SGLang's expressiveness concentrates in <strong>a tiny set of primitives</strong>. The most common are <strong>gen</strong> (free fill-in)
 and <strong>select</strong> (constrained choice): the former lets the model <strong>generate freely</strong>, the latter <strong>restricts decoding to
@@ -608,6 +721,44 @@ runtime</strong>, so you write only "<strong>what to do</strong>" and leave "<st
   You declare "<strong>fill here</strong>, choose from these there," and read with <span class="mono">s["name"]</span>. <strong>Structure, constraints, multi-step logic</strong> are all in plain sight.</p></div>
   <div class="col"><h4>Raw API: what the framework auto-does</h4><p>① <strong>KV across shared prefixes is reused automatically</strong> (Lesson 7), no manual caching;
   ② <strong>constrained decoding</strong> guarantees valid select/json output; ③ scheduling, continuous batching, paging all happen transparently in the <strong>runtime</strong>. With a raw API you'd do <strong>all of it yourself</strong>.</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="On the left a hand-written Python loop fires three unrelated API calls in sequence, with no shared structure and no parallelism; on the right the SGLang DSL lets the runtime schedule branches in parallel and automatically share the common prefix KV">
+    <line x1="384" y1="20" x2="384" y2="280" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">Raw call loop: you orchestrate</text>
+    <rect x="24" y="48" width="330" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="40" y="70" class="mono" style="font-size:12px">for q in questions:  # sequential</text>
+    <rect x="70" y="98" width="240" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="117" text-anchor="middle" class="mono" style="font-size:11px">POST /generate ①</text>
+    <rect x="70" y="138" width="240" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="157" text-anchor="middle" class="mono" style="font-size:11px">POST /generate ②</text>
+    <rect x="70" y="178" width="240" height="28" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="197" text-anchor="middle" class="mono" style="font-size:11px">POST /generate ③</text>
+    <line x1="190" y1="126" x2="190" y2="138" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="190" y1="166" x2="190" y2="178" style="stroke:var(--faint);stroke-width:1.5"/>
+    <rect x="24" y="226" width="330" height="48" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="189" y="246" text-anchor="middle" style="fill:var(--amber);font-size:12px">no shared structure · no parallelism</text>
+    <text x="189" y="264" text-anchor="middle" style="fill:var(--amber);font-size:12px">common prefix recomputed each time</text>
+    <text x="410" y="34" style="font-weight:700;fill:var(--accent-ink)">SGLang DSL: the runtime orchestrates</text>
+    <rect x="410" y="48" width="346" height="34" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="426" y="70" class="mono" style="font-size:12px">@sgl.function → a tree of intent</text>
+    <rect x="470" y="98" width="232" height="28" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="586" y="117" text-anchor="middle" class="mono" style="font-size:11px">shared prefix system/few-shot</text>
+    <rect x="540" y="136" width="92" height="26" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="586" y="154" text-anchor="middle" class="mono" style="font-size:11px">fork</text>
+    <rect x="410" y="184" width="150" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="485" y="204" text-anchor="middle" class="mono" style="font-size:11px">branch A · gen</text>
+    <rect x="596" y="184" width="160" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="676" y="204" text-anchor="middle" class="mono" style="font-size:11px">branch B · gen</text>
+    <line x1="586" y1="126" x2="586" y2="136" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="560" y1="162" x2="485" y2="184" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="612" y1="162" x2="676" y2="184" style="stroke:var(--faint);stroke-width:1.5"/>
+    <rect x="410" y="226" width="346" height="48" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="583" y="246" text-anchor="middle" style="fill:var(--teal);font-size:12px">branches scheduled in parallel</text>
+    <text x="583" y="264" text-anchor="middle" style="fill:var(--teal);font-size:12px">prefix KV shared automatically</text>
+  </svg>
+  <div class="figcap"><b>Figure 2 · DSL vs a raw call loop</b> — on the left you write the loop and fire requests serially, and the framework cannot see how they relate; on the right the same logic written as a DSL lets <strong>the runtime do it for you</strong> — parallelize branches, compute the common prefix KV once. <span class="mono">you orchestrate → the runtime orchestrates</span>.</div>
 </div>
 
 <p>The third benefit is the subtlest and most valuable: <strong>when you write the program structurally, the framework can see the structure and
@@ -645,6 +796,21 @@ as needed. Here is the real snippet of <span class="mono">gen</span> from <span 
     <span class="cm"># Otherwise return a free-generation node for the interpreter to run on demand</span>
     <span class="kw">return</span> SglGen(name, max_tokens, ..., stop, ..., regex, ...)</pre>
 </div>
+
+<p>And what does that "IR node" look like? Here is the skeleton of <span class="mono">SglGen</span> in <span class="mono">lang/ir.py</span> — the very node a <span class="mono">gen(...)</span> call leaves on the intent tree:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/ir.py ::SglGen</span><span class="ln">the IR node for one gen(...) call in a DSL program</span></div>
+  <pre><span class="kw">class</span> SglGen(SglExpr):
+    <span class="cm"># the IR node for a gen(...) call in a SGLang DSL program</span>
+    <span class="kw">def</span> __init__(self, name=<span class="kw">None</span>, max_new_tokens=<span class="kw">None</span>, stop=<span class="kw">None</span>,
+                 temperature=<span class="kw">None</span>, top_p=<span class="kw">None</span>, ...):
+        <span class="cm"># records WHAT to generate (a named hole + sampling params);</span>
+        <span class="cm"># the interpreter executes it later against the backend</span>
+        ...</pre>
+</div>
+
+<p>Against this node: your one line <span class="mono">s += gen("answer", max_new_tokens=64, stop="\n")</span> does not hit the model immediately — it builds an <span class="mono">SglGen</span> node and hangs it on the intent tree, <strong>waiting for the interpreter to execute</strong>.</p>
 
 <p>Grasp this and you have the soul of the SGLang front end: <strong>the program you write is not "code that runs immediately" but a "tree of intent
 to be executed."</strong> Precisely because it is a declarative tree, the framework can <strong>see the whole structure before execution</strong> — which

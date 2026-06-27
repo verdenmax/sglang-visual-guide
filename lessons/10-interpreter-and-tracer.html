@@ -367,6 +367,44 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <strong>一个回答"现在产出什么"，一个回答"这程序长什么形状"</strong>——这就是解释器与 tracer 的分工。
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="解释器 vs 追踪器：解释器逐个节点 eager 执行、遇 gen 立刻调用后端；追踪器先把整段程序展开成图/计划，再让独立分支并行调度">
+    <line x1="380" y1="24" x2="380" y2="300" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="40" style="font-weight:700;fill:var(--blue)">解释器 INTERPRETER · 边走边执行</text>
+    <text x="24" y="60" style="fill:var(--muted);font-size:12px">逐个节点执行，遇到 gen 立刻调用后端（eager）</text>
+    <rect x="40" y="78" width="210" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="145" y="103" text-anchor="middle">① 文本节点 → 拼进 text_</text>
+    <line x1="145" y1="118" x2="145" y2="134" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="145,138 138,126 152,126" style="fill:var(--line)"/>
+    <rect x="40" y="138" width="210" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="145" y="159" text-anchor="middle">② gen 节点 → 调用后端</text>
+    <text x="145" y="175" text-anchor="middle" class="mono" style="font-size:11px">backend.generate(...)</text>
+    <text x="268" y="164" style="fill:var(--blue);font-size:12px">▶ 当前</text>
+    <line x1="145" y1="182" x2="145" y2="198" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="145,202 138,190 152,190" style="fill:var(--line)"/>
+    <rect x="40" y="202" width="210" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="145" y="227" text-anchor="middle" style="fill:var(--faint)">③ 之后的节点（尚未执行）</text>
+    <text x="40" y="276" style="fill:var(--muted);font-size:12px">结果一步步真实产出，后面的形状要跑到才知道</text>
+    <text x="404" y="40" style="font-weight:700;fill:var(--purple)">追踪器 TRACER · 先展开再调度</text>
+    <text x="404" y="60" style="fill:var(--muted);font-size:12px">不调用模型，先把整段程序展开成图 / 计划</text>
+    <rect x="470" y="78" width="180" height="38" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="560" y="102" text-anchor="middle">整个程序 → 静态图</text>
+    <line x1="560" y1="116" x2="470" y2="150" style="stroke:var(--purple);stroke-width:1.5"/>
+    <line x1="560" y1="116" x2="650" y2="150" style="stroke:var(--purple);stroke-width:1.5"/>
+    <rect x="410" y="150" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="470" y="175" text-anchor="middle" style="font-size:12px">分支 A</text>
+    <rect x="590" y="150" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="650" y="175" text-anchor="middle" style="font-size:12px">分支 B</text>
+    <text x="560" y="212" text-anchor="middle" style="fill:var(--teal);font-size:12px">独立分支 → 可并行调度</text>
+    <line x1="470" y1="190" x2="520" y2="240" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="650" y1="190" x2="600" y2="240" style="stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="470" y="240" width="180" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="560" y="262" text-anchor="middle">图 / 计划</text>
+    <text x="560" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">运行时可优化、并行、缓存前缀</text>
+  </svg>
+  <div class="figcap"><b>图 · 解释器 vs 追踪器</b> — 解释器把程序当成"立刻照办的指令"，<strong>逐节点 eager 执行</strong>、遇 gen 即调后端；追踪器把它当成"待研究的图纸"，<strong>先静态展开成图</strong>再让<strong>独立分支并行</strong>，交给运行时优化。</div>
+</div>
+
 <h2>解释路径：StreamExecutor 如何驱动一个程序</h2>
 <p>当你<strong>调用</strong>一个 <span class="inline">@sgl.function</span> 时，SGLang 会建一个 <strong>StreamExecutor</strong> 和一个 <strong>ProgramState（即你函数里的 s）</strong>。
 执行器在<strong>后台线程</strong>里跑一个 worker：你函数体里每写一句 <span class="mono">s += …</span>，本质都是把一个<strong>表达式（expr）</strong>丢进它的队列，worker 再<strong>逐个 _execute</strong>。
@@ -377,6 +415,34 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 （第二个 gen 不需要读第一个 gen 的结果）时，执行器可以<strong>同时把它们都提交给后端</strong>，而不必傻等第一个算完再算第二个。你函数里写的 <span class="mono">s += …</span> 之所以不会立刻阻塞，
 正是因为它只是<strong>把表达式投进队列</strong>，真正的等待发生在你<strong>读取结果</strong>（<span class="mono">s["name"]</span>）的那一刻——这时如果结果还没好，才会<strong>阻塞等待对应的事件</strong>。
 这套"<strong>提交即返回、读取才等待</strong>"的设计，正是第 11 课 fork/join 能把多分支真正<strong>并行跑起来</strong>的地基。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="并行执行 fork 分支：StreamExecutor 运行中，fork 把数据流分成 3 条并发分支（并行车道），每条都调用后端，并共享同一段父前缀">
+    <text x="24" y="34" style="font-weight:700;fill:var(--accent-ink)">StreamExecutor 执行 fork：多分支并行</text>
+    <rect x="280" y="48" width="200" height="38" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="72" text-anchor="middle">StreamExecutor 运行中</text>
+    <rect x="300" y="98" width="160" height="34" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="120" text-anchor="middle" class="mono" style="font-size:12px">共享前缀 prefix</text>
+    <text x="380" y="152" text-anchor="middle" style="fill:var(--muted);font-size:12px">fork(3) ↓ 分出 3 条并行分支</text>
+    <line x1="380" y1="132" x2="140" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="380" y1="132" x2="380" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="380" y1="132" x2="620" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="40" y="172" width="200" height="104" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="140" y="196" text-anchor="middle" style="font-weight:700;fill:var(--blue)">分支 1</text>
+    <text x="140" y="220" text-anchor="middle" style="font-size:12px">继承 prefix</text>
+    <text x="140" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
+    <rect x="280" y="172" width="200" height="104" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="380" y="196" text-anchor="middle" style="font-weight:700;fill:var(--teal)">分支 2</text>
+    <text x="380" y="220" text-anchor="middle" style="font-size:12px">继承 prefix</text>
+    <text x="380" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
+    <rect x="520" y="172" width="200" height="104" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="620" y="196" text-anchor="middle" style="font-weight:700;fill:var(--purple)">分支 3</text>
+    <text x="620" y="220" text-anchor="middle" style="font-size:12px">继承 prefix</text>
+    <text x="620" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
+    <text x="380" y="292" text-anchor="middle" style="fill:var(--muted);font-size:12px">三条分支并发执行、共享同一前缀的 KV（第 7 课）</text>
+  </svg>
+  <div class="figcap"><b>图 · 并行执行 fork 分支</b> — StreamExecutor 运行时，<span class="mono">fork</span> 把数据流分成 3 条<strong>并行车道</strong>，它们<strong>共享同一段父前缀</strong>、各自独立<strong>调用后端</strong>并发生成。</div>
+</div>
 
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">程序</span><span class="name">@sgl.function 函数</span></div><div class="ld">你写的意图树：role 消息 + <span class="mono">gen/select</span> 槽 + 普通 Python 控制流。被调用时交给执行器。</div></div>
@@ -462,6 +528,23 @@ worker 取出后 <span class="mono">_execute</span>，其中 <span class="mono">
         self.text_ += comp              <span class="cm"># 把生成结果接到文本末尾</span>
         self.variables[expr.name] = comp  <span class="cm"># 存进命名变量，供 s["name"] 读取</span></pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::StreamExecutor</span><span class="ln">逐节点执行 DSL 程序、对接后端、支持 fork 并行</span></div>
+  <pre><span class="kw">class</span> StreamExecutor:
+    <span class="cm"># executes a DSL program against a backend, one IR node at a time</span>
+    <span class="kw">def</span> __init__(self, backend, ...):
+        self.backend = backend
+        self.variables = {}        <span class="cm"># name -&gt; generated value</span>
+    <span class="kw">def</span> submit(self, expr):
+        ...   <span class="cm"># enqueue an IR node (gen / select / fill ...) to execute</span>
+    <span class="kw">def</span> fork(self, number):
+        ...   <span class="cm"># split into parallel branches that share the current prefix</span>
+    <span class="kw">def</span> _execute_gen(self, expr):
+        ...   <span class="cm"># call the backend to actually generate the tokens</span></pre>
+</div>
+
+<p>具体一点：<span class="mono">fork(3)</span> 会从当前位置一次<strong>分出 3 条并行分支</strong>，它们<strong>共享同一段父前缀</strong>、各自独立调用后端；而 <span class="mono">variables{}</span> 这张表存着每个 <span class="mono">gen</span> 的结果——你写的 <span class="mono">s["reason"]</span> 取的就是 <span class="mono">variables["reason"]</span>。</p>
 
 <p>读懂这段，你就抓住了解释器的灵魂：<strong>它是一个"逐表达式消费、把结果不断累积进状态"的循环</strong>。固定文字直接拼接，gen/select 打后端、再写回 text_ 与 variables——
 状态就是这样<strong>一步步长大</strong>的。而 tracer 走的是同一棵树，却把"打后端"<strong>换成了符号占位</strong>，于是能在<strong>不花一分算力</strong>的前提下看清结构、抽出前缀。
@@ -558,11 +641,77 @@ Grasp these two modes and you hold the main axis of the SGLang front end — <st
   <strong>One answers "what to produce now," the other answers "what shape is this program"</strong> — that is the division of labor between interpreter and tracer.
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="interpreter vs tracer: the interpreter runs the program node by node eagerly and calls the backend at each gen; the tracer first statically expands the whole program into a graph/plan, then schedules independent branches in parallel">
+    <line x1="380" y1="24" x2="380" y2="300" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="40" style="font-weight:700;fill:var(--blue)">INTERPRETER · runs as it goes</text>
+    <text x="24" y="60" style="fill:var(--muted);font-size:12px">node by node; on a gen it calls the backend right away (eager)</text>
+    <rect x="40" y="78" width="210" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="145" y="103" text-anchor="middle">① text node → append to text_</text>
+    <line x1="145" y1="118" x2="145" y2="134" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="145,138 138,126 152,126" style="fill:var(--line)"/>
+    <rect x="40" y="138" width="210" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="145" y="159" text-anchor="middle">② gen node → call the backend</text>
+    <text x="145" y="175" text-anchor="middle" class="mono" style="font-size:11px">backend.generate(...)</text>
+    <text x="268" y="164" style="fill:var(--blue);font-size:12px">▶ now</text>
+    <line x1="145" y1="182" x2="145" y2="198" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="145,202 138,190 152,190" style="fill:var(--line)"/>
+    <rect x="40" y="202" width="210" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--faint);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="145" y="227" text-anchor="middle" style="fill:var(--faint)">③ later nodes (not run yet)</text>
+    <text x="40" y="276" style="fill:var(--muted);font-size:12px">results grow step by step; later shape known only by running</text>
+    <text x="404" y="40" style="font-weight:700;fill:var(--purple)">TRACER · expand first, then schedule</text>
+    <text x="404" y="60" style="fill:var(--muted);font-size:12px">no model call; expand the whole program into a graph / plan</text>
+    <rect x="470" y="78" width="180" height="38" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="560" y="102" text-anchor="middle">whole program → static graph</text>
+    <line x1="560" y1="116" x2="470" y2="150" style="stroke:var(--purple);stroke-width:1.5"/>
+    <line x1="560" y1="116" x2="650" y2="150" style="stroke:var(--purple);stroke-width:1.5"/>
+    <rect x="410" y="150" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="470" y="175" text-anchor="middle" style="font-size:12px">branch A</text>
+    <rect x="590" y="150" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="650" y="175" text-anchor="middle" style="font-size:12px">branch B</text>
+    <text x="560" y="212" text-anchor="middle" style="fill:var(--teal);font-size:12px">independent branches → schedulable in parallel</text>
+    <line x1="470" y1="190" x2="520" y2="240" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="650" y1="190" x2="600" y2="240" style="stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="470" y="240" width="180" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="560" y="262" text-anchor="middle">graph / plan</text>
+    <text x="560" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">runtime can optimize, parallelize, cache prefix</text>
+  </svg>
+  <div class="figcap"><b>Figure · interpreter vs tracer</b> — the interpreter treats the program as "instructions to obey now," running it <strong>node by node, eagerly</strong> and calling the backend at each gen; the tracer treats it as "a blueprint to study," <strong>statically expanding it into a graph first</strong> so <strong>independent branches run in parallel</strong>, handing the runtime something to optimize.</div>
+</div>
+
 <h2>The interpret path: how StreamExecutor drives a program</h2>
 <p>When you <strong>call</strong> an <span class="inline">@sgl.function</span>, SGLang builds a <strong>StreamExecutor</strong> and a <strong>ProgramState (the s in your function)</strong>.
 The executor runs a worker in a <strong>background thread</strong>: every <span class="mono">s += …</span> in your body essentially drops an <strong>expression (expr)</strong> into its queue, and the worker <strong>_executes them one by one</strong>.
 Fixed text is <strong>appended to text_</strong>; a <strong>gen</strong> calls <span class="mono">backend.generate(...)</span> and <strong>appends the result to text_ and stores it in variables[name]</strong>; a <strong>select</strong> asks the backend to <strong>pick one of the choices</strong>.
 The key idea: <strong>interpreting is "produce as you go"</strong> — text and variables <strong>really grow step by step</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="executing forks in parallel: with StreamExecutor running, fork splits the stream into 3 concurrent branches (parallel lanes), each calling the backend, all sharing the common parent prefix">
+    <text x="24" y="34" style="font-weight:700;fill:var(--accent-ink)">StreamExecutor running a fork: branches in parallel</text>
+    <rect x="280" y="48" width="200" height="38" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="72" text-anchor="middle">StreamExecutor running</text>
+    <rect x="300" y="98" width="160" height="34" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="120" text-anchor="middle" class="mono" style="font-size:12px">shared prefix</text>
+    <text x="380" y="152" text-anchor="middle" style="fill:var(--muted);font-size:12px">fork(3) ↓ split into 3 parallel branches</text>
+    <line x1="380" y1="132" x2="140" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="380" y1="132" x2="380" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="380" y1="132" x2="620" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="40" y="172" width="200" height="104" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="140" y="196" text-anchor="middle" style="font-weight:700;fill:var(--blue)">branch 1</text>
+    <text x="140" y="220" text-anchor="middle" style="font-size:12px">inherits prefix</text>
+    <text x="140" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
+    <rect x="280" y="172" width="200" height="104" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="380" y="196" text-anchor="middle" style="font-weight:700;fill:var(--teal)">branch 2</text>
+    <text x="380" y="220" text-anchor="middle" style="font-size:12px">inherits prefix</text>
+    <text x="380" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
+    <rect x="520" y="172" width="200" height="104" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="620" y="196" text-anchor="middle" style="font-weight:700;fill:var(--purple)">branch 3</text>
+    <text x="620" y="220" text-anchor="middle" style="font-size:12px">inherits prefix</text>
+    <text x="620" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
+    <text x="380" y="292" text-anchor="middle" style="fill:var(--muted);font-size:12px">three branches run concurrently, sharing the same prefix KV (Lesson 7)</text>
+  </svg>
+  <div class="figcap"><b>Figure · executing forks in parallel</b> — while StreamExecutor runs, <span class="mono">fork</span> splits the stream into 3 <strong>parallel lanes</strong> that <strong>share the same parent prefix</strong> and each <strong>call the backend</strong> concurrently.</div>
+</div>
 
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">Program</span><span class="name">@sgl.function</span></div><div class="ld">Your tree of intent: role messages + <span class="mono">gen/select</span> slots + plain Python control flow. On call, handed to the executor.</div></div>
@@ -633,6 +782,23 @@ the worker pops it and <span class="mono">_execute</span>s, and <span class="mon
         self.text_ += comp              <span class="cm"># append the generated result to the text</span>
         self.variables[expr.name] = comp  <span class="cm"># store into a named variable for s["name"]</span></pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::StreamExecutor</span><span class="ln">executes a DSL program node-by-node against a backend; supports fork parallelism</span></div>
+  <pre><span class="kw">class</span> StreamExecutor:
+    <span class="cm"># executes a DSL program against a backend, one IR node at a time</span>
+    <span class="kw">def</span> __init__(self, backend, ...):
+        self.backend = backend
+        self.variables = {}        <span class="cm"># name -&gt; generated value</span>
+    <span class="kw">def</span> submit(self, expr):
+        ...   <span class="cm"># enqueue an IR node (gen / select / fill ...) to execute</span>
+    <span class="kw">def</span> fork(self, number):
+        ...   <span class="cm"># split into parallel branches that share the current prefix</span>
+    <span class="kw">def</span> _execute_gen(self, expr):
+        ...   <span class="cm"># call the backend to actually generate the tokens</span></pre>
+</div>
+
+<p>Concretely: <span class="mono">fork(3)</span> splits the current point into <strong>3 parallel branches</strong> at once; they <strong>share the same parent prefix</strong> and each call the backend independently. And the <span class="mono">variables{}</span> table holds every <span class="mono">gen</span> result — your <span class="mono">s["reason"]</span> reads exactly <span class="mono">variables["reason"]</span>.</p>
 
 <p>Read this and you grasp the interpreter's soul: <strong>it is a loop that "consumes expressions one by one and keeps accumulating results into state."</strong> Fixed text is appended; gen/select hits the backend and writes back into text_ and variables —
 that's how state <strong>grows step by step</strong>. The tracer walks the same tree but <strong>swaps "hit the backend" for a symbolic placeholder</strong>, so it can see the structure and extract the prefix <strong>without spending a single FLOP</strong>.

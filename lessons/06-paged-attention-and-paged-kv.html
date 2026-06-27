@@ -433,6 +433,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">长请求的 6 个红页散落各处、全部填满——物理页无需相邻</text>
   </svg>
+  <div class="figcap"><b>图 1 · 碎片化 vs 分页</b> — 连续分配会留下放不下长请求的碎片空洞（总空闲够、却没有连续段）；分页把 KV 切成固定大小的页，散落填进任意空槽，零浪费。</div>
 </div>
 
 <p>用一个具体口径感受这种差别：取 <span class="mono">page_size = 16</span> token/页，一条只生成 60 token 的请求只需 <span class="mono">⌈60/16⌉ = 4</span> 页（64 槽），
@@ -499,6 +500,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
     <text x="312" y="200" style="font-size:11px;fill:var(--muted)">逻辑连续 · 物理分散 · 页表牵线</text>
   </svg>
+  <div class="figcap"><b>图 2 · 页表映射</b> — 逻辑上连续的 token 位置（0、1、2、3）经页表映射到分散的物理页（#7、#2）：逻辑连续、物理分散。</div>
 </div>
 
 <p>这里有个常被忽略的取舍：<strong>page_size 不是越小越好</strong>。页越小，内部浪费越少（最多浪费小半页），但页表更长、查表与算子里的间接寻址开销更大；
@@ -545,10 +547,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <span class="kw">def</span> __init__(self, size, max_context_len, ...):
         <span class="cm"># req_to_token[req][pos] -&gt; 该 token 的物理 KV 槽位</span>
         self.req_to_token = ...   <span class="cm"># 形状 [size, max_context_len]</span>
-    <span class="kw">def</span> alloc(self, need_size):
-        ...   <span class="cm"># 为一条新请求预留若干槽位</span>
-    <span class="kw">def</span> free(self, req_index):
-        ...   <span class="cm"># 请求结束后把它的槽位整批还回池中</span></pre>
+    <span class="kw">def</span> alloc(self, reqs):
+        ...   <span class="cm"># 为每条新请求分配一行 req_pool_idx（整行索引）</span>
+    <span class="kw">def</span> free(self, req):
+        ...   <span class="cm"># 请求结束后把它的 req_pool_idx 行还回池中</span></pre>
 </div>
 
 <p>读懂这段就抓住了分页的精髓：<strong>显存不再按"请求"整片预留，而是按"页"零售。</strong>
@@ -732,6 +734,7 @@ down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the
     <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">The long request's 6 red pages scatter everywhere and all fit — physical pages need not be adjacent</text>
   </svg>
+  <div class="figcap"><b>Fig 1 · Fragmentation vs paging</b> — contiguous allocation leaves holes a long request can't fit (enough total free space, but no contiguous run); paging cuts KV into fixed-size pages that fill any free slot, scattered, with zero waste.</div>
 </div>
 
 <p>A concrete sense of the gap: take <span class="mono">page_size = 16</span> tokens/page. A request that generates only 60 tokens needs just
@@ -801,6 +804,7 @@ physically scattered, page-table-linked":</p>
     <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
     <text x="312" y="200" style="font-size:11px;fill:var(--muted)">logically contiguous · physically scattered · linked by the table</text>
   </svg>
+  <div class="figcap"><b>Fig 2 · The page table</b> — logically contiguous token positions (0, 1, 2, 3) map through the page table to scattered physical pages (#7, #2): logically contiguous, physically scattered.</div>
 </div>
 
 <p>One often-missed tradeoff: <strong>smaller page_size is not always better</strong>. Smaller pages waste less internally (at most a fraction of a page), but the
@@ -842,10 +846,10 @@ in-code incarnation of that "page table." Below is the allocator's skeleton: <st
     <span class="kw">def</span> __init__(self, size, max_context_len, ...):
         <span class="cm"># req_to_token[req][pos] -&gt; the physical KV slot for that token</span>
         self.req_to_token = ...   <span class="cm"># shape [size, max_context_len]</span>
-    <span class="kw">def</span> alloc(self, need_size):
-        ...   <span class="cm"># reserve slots for a new request</span>
-    <span class="kw">def</span> free(self, req_index):
-        ...   <span class="cm"># release a finished request's slots back to the pool</span></pre>
+    <span class="kw">def</span> alloc(self, reqs):
+        ...   <span class="cm"># assign one req_pool_idx row per new request</span>
+    <span class="kw">def</span> free(self, req):
+        ...   <span class="cm"># release that request's req_pool_idx row back to the pool</span></pre>
 </div>
 
 <p>Read this and you grasp the essence of paging: <strong>HBM is no longer reserved wholesale per "request" but retailed per "page."</strong>

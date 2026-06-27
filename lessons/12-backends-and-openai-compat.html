@@ -371,6 +371,28 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <strong>托管后端</strong>换来的是<strong>可移植性</strong>，代价是<strong>丢掉前缀缓存与 fork 共享</strong>那些红利——那些模型是黑盒，缓存与否由服务商决定，约束解码也受限。
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="同一个 DSL 程序居中，箭头指向左边本地 RuntimeEndpoint 和右边远程 OpenAI/Anthropic，程序不变只换后端">
+    <rect x="280" y="34" width="200" height="62" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="58" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">同一个 DSL 程序</text>
+    <text x="380" y="82" text-anchor="middle" class="mono" style="font-size:12px">s += gen("answer")</text>
+    <text x="380" y="128" text-anchor="middle" style="fill:var(--muted);font-weight:700;font-size:13px">程序不变，只换后端</text>
+    <line x1="332" y1="98" x2="210" y2="184" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="205,188 205,172 218,180" style="fill:var(--blue)"/>
+    <line x1="428" y1="98" x2="550" y2="184" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="555,188 542,180 555,172" style="fill:var(--amber)"/>
+    <rect x="48" y="188" width="276" height="84" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="186" y="216" text-anchor="middle" style="fill:var(--blue);font-weight:700">本地 RuntimeEndpoint</text>
+    <text x="186" y="240" text-anchor="middle" style="font-size:12px">你自己的 SGLang 服务器</text>
+    <text x="186" y="260" text-anchor="middle" class="mono" style="font-size:12px">POST /generate</text>
+    <rect x="436" y="188" width="276" height="84" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="574" y="216" text-anchor="middle" style="fill:var(--amber);font-weight:700">远程 OpenAI / Anthropic</text>
+    <text x="574" y="240" text-anchor="middle" style="font-size:12px">托管 API（黑盒）</text>
+    <text x="574" y="260" text-anchor="middle" class="mono" style="font-size:12px">api.openai.com</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 同一个程序，可换后端</b> — 中间这段 DSL 程序写一次就好：<span class="mono">set_default_backend</span> 指向左边<strong>本地 RuntimeEndpoint</strong> 就跑在你自己的服务器上，指向右边<strong>远程 OpenAI/Anthropic</strong> 就改打托管模型，程序本身一个字都不用改。</div>
+</div>
+
 <h2>一、BaseBackend：让程序与引擎解耦的那道缝</h2>
 <p>回想第 10 课：解释器（StreamExecutor）逐个执行意图树上的表达式，遇到固定文字就直接拼接，遇到 <span class="mono">gen</span> / <span class="mono">select</span> 就<strong>向后端发起一次调用</strong>。
 这里的"后端"，正是任何继承自 <span class="mono">BaseBackend</span> 的类。<span class="mono">BaseBackend</span> 把"<strong>一个能执行 SGLang 程序的引擎</strong>"抽象成一组方法：怎么生成 token、怎么在候选项里做 <span class="mono">select</span>、
@@ -385,6 +407,34 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="layer l-part"><div class="lh"><span class="badge">接口</span><span class="name">BaseBackend（抽象层）</span></div><div class="ld">规定"一个后端必须会做什么"：<span class="mono">generate / select</span>、流式、role 处理。这道缝<strong>把程序和引擎解耦</strong>。</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">本地</span><span class="name">RuntimeEndpoint（首选）</span></div><div class="ld">打向本地 <span class="mono">/generate</span> HTTP 服务（第 13–17 课）。<strong>独享</strong> RadixAttention 前缀缓存、约束解码、快速批处理。</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">托管</span><span class="name">OpenAI / Anthropic / VertexAI …</span></div><div class="ld">让同一程序改打<strong>托管模型</strong>：可移植，但模型是黑盒，<strong>失去</strong>前缀缓存与 fork 共享红利。</div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="BaseBackend 接口规定 generate 和 select 方法，DSL 解释器只调接口，RuntimeEndpoint 与 OpenAI 两个实现插入接口">
+    <rect x="288" y="22" width="184" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="380" y="44" text-anchor="middle" style="fill:var(--teal);font-weight:700">DSL 解释器</text>
+    <text x="380" y="62" text-anchor="middle" class="mono" style="font-size:11px">StreamExecutor</text>
+    <line x1="380" y1="72" x2="380" y2="104" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,110 373,96 387,96" style="fill:var(--muted)"/>
+    <rect x="250" y="112" width="260" height="92" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="138" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">BaseBackend（接口）</text>
+    <rect x="270" y="150" width="220" height="22" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="165" text-anchor="middle" class="mono" style="font-size:12px">generate(...)</text>
+    <rect x="270" y="176" width="220" height="22" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="191" text-anchor="middle" class="mono" style="font-size:12px">select(...)</text>
+    <text x="380" y="230" text-anchor="middle" style="fill:var(--muted);font-size:12px">解释器只调接口，不认具体后端</text>
+    <line x1="190" y1="252" x2="318" y2="206" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="318,206 304,208 312,219" style="fill:var(--blue)"/>
+    <line x1="570" y1="252" x2="442" y2="206" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="442,206 448,219 456,208" style="fill:var(--amber)"/>
+    <rect x="56" y="252" width="268" height="56" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="276" text-anchor="middle" style="fill:var(--blue);font-weight:700">RuntimeEndpoint</text>
+    <text x="190" y="296" text-anchor="middle" style="font-size:12px">本地 HTTP 实现</text>
+    <rect x="436" y="252" width="268" height="56" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="570" y="276" text-anchor="middle" style="fill:var(--amber);font-weight:700">OpenAI</text>
+    <text x="570" y="296" text-anchor="middle" style="font-size:12px">远程 API 实现</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 后端接口</b> — <span class="mono">BaseBackend</span> 定义 <span class="mono">generate</span>/<span class="mono">select</span> 等方法；DSL 解释器<strong>只调这层接口</strong>，<span class="mono">RuntimeEndpoint</span>（本地 HTTP）与 <span class="mono">OpenAI</span>（远程 API）作为两个实现插进来，谁都能替换谁。</div>
 </div>
 
 <h2>二、RuntimeEndpoint：前端落到运行时的那个接缝</h2>
@@ -406,6 +456,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="arrow">→</div>
   <div class="node"><div class="nt">Scheduler</div><div class="nd">调度 + RadixAttention（第 7 课）</div></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/backend/runtime_endpoint.py ::RuntimeEndpoint</span><span class="ln">对接本地 SGLang 服务器的后端：HTTP 调 /generate、/select</span></div>
+  <pre><span class="kw">class</span> RuntimeEndpoint(BaseBackend):
+    <span class="cm"># 对接一台运行中的 SGLang 服务器，全程走 HTTP</span>
+    <span class="kw">def</span> __init__(self, base_url, ...):
+        self.base_url = base_url
+    <span class="kw">def</span> generate(self, s, sampling_params):
+        ...   <span class="cm"># POST base_url + "/generate"</span>
+    <span class="kw">def</span> select(self, s, choices, ...):
+        ...   <span class="cm"># 给候选打分，挑出最好的那个</span></pre>
+</div>
+
+<p>落到代码上就一行——换后端只改这里：<span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span> 让同一个程序跑在<strong>本地运行时</strong>上；改成 <span class="mono">set_default_backend(OpenAI("gpt-4"))</span> 就让它改打<strong>托管模型</strong>，程序其余部分<strong>一个字都不用动</strong>。</p>
 
 <h2>三、本地运行时 vs 托管 API：你在交易什么</h2>
 <p>换后端不是免费的。<span class="mono">RuntimeEndpoint</span> 和 <span class="mono">OpenAI</span> 在程序里长得一模一样，但拿到手的<strong>能力天差地别</strong>。
@@ -548,6 +612,28 @@ and, through the <span class="mono">RuntimeEndpoint</span> local-runtime backend
   a <strong>hosted backend</strong> buys you <strong>portability</strong> at the cost of <strong>losing prefix-cache and fork-sharing</strong> benefits — those models are black boxes, caching is the provider's call, and constrained decoding is limited.
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="the same DSL program in the middle, arrows to a local RuntimeEndpoint on the left and a remote OpenAI/Anthropic on the right; the program is unchanged, only the backend swaps">
+    <rect x="280" y="34" width="200" height="62" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="58" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">the same DSL program</text>
+    <text x="380" y="82" text-anchor="middle" class="mono" style="font-size:12px">s += gen("answer")</text>
+    <text x="380" y="128" text-anchor="middle" style="fill:var(--muted);font-weight:700;font-size:13px">the program is unchanged, only the backend swaps</text>
+    <line x1="332" y1="98" x2="210" y2="184" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="205,188 205,172 218,180" style="fill:var(--blue)"/>
+    <line x1="428" y1="98" x2="550" y2="184" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="555,188 542,180 555,172" style="fill:var(--amber)"/>
+    <rect x="48" y="188" width="276" height="84" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="186" y="216" text-anchor="middle" style="fill:var(--blue);font-weight:700">local RuntimeEndpoint</text>
+    <text x="186" y="240" text-anchor="middle" style="font-size:12px">your own SGLang server</text>
+    <text x="186" y="260" text-anchor="middle" class="mono" style="font-size:12px">POST /generate</text>
+    <rect x="436" y="188" width="276" height="84" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="574" y="216" text-anchor="middle" style="fill:var(--amber);font-weight:700">remote OpenAI / Anthropic</text>
+    <text x="574" y="240" text-anchor="middle" style="font-size:12px">hosted API (black box)</text>
+    <text x="574" y="260" text-anchor="middle" class="mono" style="font-size:12px">api.openai.com</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · One program, swappable backend</b> — the middle DSL program is written once: point <span class="mono">set_default_backend</span> at the <strong>local RuntimeEndpoint</strong> on the left to run on your own server, or at <strong>remote OpenAI/Anthropic</strong> on the right to target a hosted model — the program itself does not change a single character.</div>
+</div>
+
 <h2>1. BaseBackend: the seam that decouples program from engine</h2>
 <p>Recall Lesson 10: the interpreter (StreamExecutor) executes the expressions of the intent tree one by one — fixed text is appended, and a <span class="mono">gen</span> / <span class="mono">select</span> <strong>issues a call to the backend</strong>.
 That "backend" is any class inheriting from <span class="mono">BaseBackend</span>. <span class="mono">BaseBackend</span> abstracts "<strong>an engine that can execute an SGLang program</strong>" into a set of methods: how to generate tokens, how to <span class="mono">select</span> among candidates,
@@ -559,6 +645,34 @@ the upper layer depends on a contract, not on the lower layer's implementation. 
   <div class="layer l-part"><div class="lh"><span class="badge">Interface</span><span class="name">BaseBackend (abstract)</span></div><div class="ld">Prescribes what a backend must do: <span class="mono">generate / select</span>, streaming, role handling. This seam <strong>decouples program from engine</strong>.</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">Local</span><span class="name">RuntimeEndpoint (preferred)</span></div><div class="ld">Targets the local <span class="mono">/generate</span> HTTP server (Lessons 13–17). <strong>Exclusively</strong> gives RadixAttention prefix cache, constrained decoding, fast batching.</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">Hosted</span><span class="name">OpenAI / Anthropic / VertexAI …</span></div><div class="ld">Points the same program at <strong>hosted models</strong>: portable, but the model is a black box, <strong>losing</strong> prefix-cache and fork-sharing benefits.</div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="BaseBackend interface prescribes generate and select; the DSL interpreter calls only the interface, and RuntimeEndpoint and OpenAI plug in as two implementations">
+    <rect x="288" y="22" width="184" height="50" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="380" y="44" text-anchor="middle" style="fill:var(--teal);font-weight:700">DSL interpreter</text>
+    <text x="380" y="62" text-anchor="middle" class="mono" style="font-size:11px">StreamExecutor</text>
+    <line x1="380" y1="72" x2="380" y2="104" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="380,110 373,96 387,96" style="fill:var(--muted)"/>
+    <rect x="250" y="112" width="260" height="92" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="380" y="138" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">BaseBackend (interface)</text>
+    <rect x="270" y="150" width="220" height="22" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="165" text-anchor="middle" class="mono" style="font-size:12px">generate(...)</text>
+    <rect x="270" y="176" width="220" height="22" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="191" text-anchor="middle" class="mono" style="font-size:12px">select(...)</text>
+    <text x="380" y="230" text-anchor="middle" style="fill:var(--muted);font-size:12px">the interpreter calls the interface, not a concrete backend</text>
+    <line x1="190" y1="252" x2="318" y2="206" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="318,206 304,208 312,219" style="fill:var(--blue)"/>
+    <line x1="570" y1="252" x2="442" y2="206" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="442,206 448,219 456,208" style="fill:var(--amber)"/>
+    <rect x="56" y="252" width="268" height="56" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="190" y="276" text-anchor="middle" style="fill:var(--blue);font-weight:700">RuntimeEndpoint</text>
+    <text x="190" y="296" text-anchor="middle" style="font-size:12px">local HTTP impl</text>
+    <rect x="436" y="252" width="268" height="56" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="570" y="276" text-anchor="middle" style="fill:var(--amber);font-weight:700">OpenAI</text>
+    <text x="570" y="296" text-anchor="middle" style="font-size:12px">remote API impl</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · The backend interface</b> — <span class="mono">BaseBackend</span> defines methods like <span class="mono">generate</span>/<span class="mono">select</span>; the DSL interpreter <strong>calls only this interface</strong>, while <span class="mono">RuntimeEndpoint</span> (local HTTP) and <span class="mono">OpenAI</span> (remote API) plug in as two implementations, each replaceable by the other.</div>
 </div>
 
 <h2>2. RuntimeEndpoint: the seam where the front-end lands on the runtime</h2>
@@ -577,6 +691,20 @@ One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localho
   <div class="arrow">→</div>
   <div class="node"><div class="nt">Scheduler</div><div class="nd">schedule + RadixAttention (Lesson 7)</div></div>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/backend/runtime_endpoint.py ::RuntimeEndpoint</span><span class="ln">a backend talking to a local SGLang server over HTTP: /generate, /select</span></div>
+  <pre><span class="kw">class</span> RuntimeEndpoint(BaseBackend):
+    <span class="cm"># a backend that talks to a running SGLang server over HTTP</span>
+    <span class="kw">def</span> __init__(self, base_url, ...):
+        self.base_url = base_url
+    <span class="kw">def</span> generate(self, s, sampling_params):
+        ...   <span class="cm"># POST base_url + "/generate"</span>
+    <span class="kw">def</span> select(self, s, choices, ...):
+        ...   <span class="cm"># score the choices and pick the best one</span></pre>
+</div>
+
+<p>In code it is just one line — switching backends changes only this: <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span> runs the same program on the <strong>local runtime</strong>; change it to <span class="mono">set_default_backend(OpenAI("gpt-4"))</span> and it targets a <strong>hosted model</strong> instead, with the rest of the program <strong>untouched</strong>.</p>
 
 <h2>3. Local runtime vs hosted API: what are you trading?</h2>
 <p>Switching backends is not free. <span class="mono">RuntimeEndpoint</span> and <span class="mono">OpenAI</span> look identical in the program, but the <strong>capabilities you get differ vastly</strong>.
