@@ -494,7 +494,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 <p>真正决定"清谁"的那行代码出奇地短——驱逐策略的全部分歧，就浓缩在 <span class="mono">get_priority</span> 返回什么：</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/evict_policy.py ::LRUStrategy</span><span class="ln">优先级 = 最近访问时间</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/evict_policy.py ::LRUStrategy</span><span class="ln">优先级 = 最近访问时间</span></div>
   <pre><span class="kw">class</span> <span class="st">EvictionStrategy</span>(ABC):
     <span class="cm"># 抽象基类：所有策略只需回答“谁的优先级最低、该先被清”</span>
     <span class="kw">@abstractmethod</span>
@@ -535,7 +535,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 <p>用具体数字感受这套机制：一段 <strong>2000 token 的共享系统提示</strong>在 90% 命中率下，意味着绝大多数请求<strong>直接跳过约 2000 个 prefill token</strong>、几乎零重算就进入解码；而正在跑的请求把这条前缀链锁着（<span class="mono">lock_ref&gt;0</span>），所以哪怕显存告急、<span class="mono">evict</span> 正忙，它也<strong>绝不会在生成中途被清掉</strong>——堆里弹出的只会是没人锁、最久没碰的冷叶。</p>
 
 <div class="card key">
-  <div class="tag">🔑 本课要点</div>
+  <div class="tag">📌 本课要点</div>
   <strong>① 驱逐是被逼的、按需的</strong>：节点占着第 30 课池里的 KV 槽位，分配器凑不出新空间时，调度器才触发 <span class="mono">evict</span> 回收若干槽位。
   <strong>② 清谁由 EvictionStrategy 排序</strong>：默认 LRU（<span class="mono">get_priority = last_access_time</span>，最久未访问先走），另有 LFU / FIFO / MRU；<strong>只有叶子可驱逐</strong>，回收从叶往根。
   <strong>③ 铁律：lock_ref&gt;0 永不驱逐</strong>——在飞的前向正读那段 KV，回收即崩坏；inc/dec_lock_ref 在可驱逐集与受保护集之间搬节点（第 29 课）。
@@ -739,7 +739,7 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 <p>The line that actually decides "who to clear" is surprisingly short — a strategy's entire difference is condensed into what <span class="mono">get_priority</span> returns:</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/evict_policy.py ::LRUStrategy</span><span class="ln">priority = last access time</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/evict_policy.py ::LRUStrategy</span><span class="ln">priority = last access time</span></div>
   <pre><span class="kw">class</span> <span class="st">EvictionStrategy</span>(ABC):
     <span class="cm"># Abstract base: every strategy need only answer “whose priority is lowest, clear first”</span>
     <span class="kw">@abstractmethod</span>
@@ -780,7 +780,7 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 <p>Feel the mechanism with concrete numbers: a <strong>2000-token shared system prompt</strong> at a 90% hit rate means most requests <strong>skip about 2000 prefill tokens</strong> and enter decode with almost zero recompute; meanwhile a running request keeps that prefix chain locked (<span class="mono">lock_ref&gt;0</span>), so however starved HBM gets and however busy <span class="mono">evict</span> is, it is <strong>never cleared mid-flight</strong> — the heap only ever pops the unlocked, longest-untouched cold leaves.</p>
 
 <div class="card key">
-  <div class="tag">🔑 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <strong>① Eviction is forced and on-demand</strong>: nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble new space does the scheduler fire <span class="mono">evict</span> to reclaim some.
   <strong>② What to clear is ordered by EvictionStrategy</strong>: default LRU (<span class="mono">get_priority = last_access_time</span>, oldest first), plus LFU / FIFO / MRU; <strong>only leaves are evictable</strong>, reclaim goes leaf-to-root.
   <strong>③ Iron rule: lock_ref&gt;0 is never evicted</strong> — an in-flight forward is reading that KV, reclaiming it corrupts; inc/dec_lock_ref move nodes between the evictable and protected sets (Lesson 29).

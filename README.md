@@ -64,7 +64,7 @@ kernels → performance innovations → advanced → practice → design synthes
 | 13 | 设计专题·综合 / Design themes (synthesis) — RadixAttention, zero-overhead scheduling, PD disaggregation, speculative decoding, pluggability, built-for-throughput | L58–63 |
 
 > All **63 lessons** across these 13 parts are complete and committed. Each lesson is bilingual
-> (中文 / English, toggle in the page), ≥3500 CJK of prose, with **2 inline SVG figures and 2 cited
+> (中文 / English, toggle in the page), ≥3000 CJK of prose, with **2 inline SVG figures and 2 cited
 > code references per language** (plus layered diagrams/tables) and a self-test quiz (the glossary,
 > L57, is a reference table). `check_html.py` enforces this via a `MIN_FIGURES` floor (≥2 SVG figures
 > per language) and `MAX_LESSON` is 63.

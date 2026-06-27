@@ -552,7 +552,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>真实代码里，账本就是一张 <span class="mono">int32</span> 二维表，仓库就是每层一个大张量——朴素得几乎不像"高科技"，但正是这份朴素让两级寻址既快又省：</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">私有账本 + 每层 K/V 仓库</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">私有账本 + 每层 K/V 仓库</span></div>
   <pre><span class="kw">class</span> ReqToTokenPool:
     <span class="cm"># 每条请求 → 它依次拥有的 token 槽位号；只记编号，不装张量</span>
     <span class="kw">def</span> __init__(self, size, max_context_len, device, ...):
@@ -596,7 +596,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>举个具体的数：一个 <strong>32 层</strong>的模型，这个池子就持有 <strong>32 个 K 缓冲 + 32 个 V 缓冲</strong>（每层一对）。每个 KV"槽位"存的是<strong>某一个 token、在某一层</strong>的 K 和 V；而 <span class="mono">ReqToTokenPool</span> 里某请求的那一行，给出的正是它各个位置对应的<strong>槽位号列表</strong>——比如 <span class="mono">[#12, #40, #41]</span> 就表示这条请求的第 0/1/2 个 token 分别落在槽位 12、40、41，每个槽位号一次性覆盖全部 32 层。</p>
 
 <div class="card key">
-  <div class="tag">🔑 本课要点</div>
+  <div class="tag">📌 本课要点</div>
   <strong>① 两个池，两跳寻址</strong>：请求 →（ReqToTokenPool）→ token 槽位号 →（token_to_kv 池）→ 物理 K/V。账本只记编号，仓库才装张量。
   <strong>② ReqToTokenPool 是每请求的私有账本</strong>，按 <span class="mono">req_pool_idx</span> 索引；<strong>MHATokenToKVPool 是每层的共享大仓库</strong>，按槽位号索引。
   <strong>③ TokenToKVPoolAllocator 发槽 / 回收槽</strong>，按页（第 6 课）；总槽位在开机按 <span class="mono">mem_fraction_static</span>（第 8 课）钉死 = 并发上限（第 4 课）。
@@ -845,7 +845,7 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
 <p>In real code, the ledger is just an <span class="mono">int32</span> 2-D table and the warehouse is one big tensor per layer — almost too plain to look "high-tech," yet that plainness is what makes two-hop addressing both fast and thrifty:</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">private ledger + per-layer K/V warehouse</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">private ledger + per-layer K/V warehouse</span></div>
   <pre><span class="kw">class</span> ReqToTokenPool:
     <span class="cm"># each request -&gt; the token slot numbers it owns; numbers only, no tensors</span>
     <span class="kw">def</span> __init__(self, size, max_context_len, device, ...):
@@ -889,7 +889,7 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
 <p>Concretely: for a <strong>32-layer</strong> model the pool holds <strong>32 K buffers + 32 V buffers</strong> (one pair per layer). Each KV "slot" stores the K and V of <strong>one token at one layer</strong>; a request's row in <span class="mono">ReqToTokenPool</span> gives the <strong>slot-number list</strong> for its positions — e.g. <span class="mono">[#12, #40, #41]</span> means this request's tokens 0/1/2 land in slots 12, 40, 41, and each slot number covers all 32 layers at once.</p>
 
 <div class="card key">
-  <div class="tag">🔑 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <strong>① Two pools, two-hop addressing</strong>: request →(ReqToTokenPool)→ token slot ids →(token_to_kv pool)→ physical K/V. The ledger holds numbers, the warehouse holds tensors.
   <strong>② ReqToTokenPool is the per-request private ledger</strong>, indexed by <span class="mono">req_pool_idx</span>; <strong>MHATokenToKVPool is the per-layer shared warehouse</strong>, indexed by slot number.
   <strong>③ TokenToKVPoolAllocator hands out / reclaims slots</strong> by page (Lesson 6); total slots are nailed at startup by <span class="mono">mem_fraction_static</span> (Lesson 8) = the concurrency ceiling (Lesson 4).

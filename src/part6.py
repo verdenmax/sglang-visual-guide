@@ -990,7 +990,7 @@ slices weights column/row-wise across cards. With the key "<strong>Loader = stre
 lessons will read smoothly.</p>
 
 <div class="card key">
-  <div class="tag">📌 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>Two steps</strong>: <span class="mono">_initialize_model</span> builds the <strong>shell</strong>, then <span class="mono">model.load_weights</span> <strong>streams</strong> the weights in.</li>
     <li><strong>Streaming</strong>: weights are a <span class="mono">(name, tensor)</span> generator — read one, load one — so the <strong>host-memory bound is decoupled from model size</strong>.</li>
@@ -1227,7 +1227,7 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
 <p>最后值得点一句"<strong>注册</strong>"这步。写完模型文件还要把类登记到模型注册表里（按架构名，比如 config 里 <span class="mono">architectures</span> 字段写着 <span class="mono">LlamaForCausalLM</span>），运行时据此从权重目录的 <span class="mono">config.json</span> 找到该用哪个类。这一步通常只是一行映射，却是"配置驱动、自动派发"的关键：用户启动服务时只给一个模型路径，TokenizerManager 与 ModelRunner（第 24 课）顺着 config 的架构名就能找到对应文件、实例化、加载权重、开跑。于是从"社区提交一个模型文件"到"线上能服务这个模型"，中间<strong>不需要改任何调度、批处理或内核代码</strong>——这条干净的边界，才是广泛模型支持真正的工程红利。也正因如此，当你下次想给 SGLang 适配一个新模型时，思路应该是"<strong>先去 models 目录找一个最像的现有文件照着改</strong>"，而不是从零设计——绝大多数时候，你要做的只是调整层的种类与维度、改对 load_weights 的名字映射、再注册一下而已。</p>
 
 <div class="card key">
-  <div class="tag">🔑 本课要点</div>
+  <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>模型文件 = 组装</strong>：SGLang 模型就是一组嵌套的 <span class="mono">nn.Module</span>，内部全用现成的<strong>并行层</strong>搭成，作者基本不写底层算子。</li>
     <li><strong>Llama 四（五）类套娃</strong>：<span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>。</li>
@@ -1469,7 +1469,7 @@ and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffoldi
 <p>One last word on the <strong>registration</strong> step. After writing the model file you register the class in the model registry (by architecture name — e.g. config's <span class="mono">architectures</span> field says <span class="mono">LlamaForCausalLM</span>), and the runtime uses that to find which class to use from the weight directory's <span class="mono">config.json</span>. This step is usually one line of mapping, yet it's the key to "config-driven, automatic dispatch": the user starts the server with just a model path, and TokenizerManager and ModelRunner (Lesson 24) follow config's architecture name to locate the file, instantiate it, load weights, and run. So from "the community submits a model file" to "this model is served in production," <strong>no scheduling, batching, or kernel code needs to change</strong> — that clean boundary is the real engineering dividend of broad model support. That's also why, the next time you want to bring up a new model in SGLang, the mindset should be "<strong>go to the models directory, find the closest existing file, and adapt it</strong>" rather than designing from scratch — in the vast majority of cases, all you do is adjust the kinds and dims of layers, get the load_weights name mapping right, and register it.</p>
 
 <div class="card key">
-  <div class="tag">🔑 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>Model file = assembly</strong>: a SGLang model is nested <span class="mono">nn.Module</span>s built entirely from ready-made <strong>parallel layers</strong>; the author barely writes low-level ops.</li>
     <li><strong>Llama's four (five) nesting classes</strong>: <span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>.</li>
@@ -1609,7 +1609,7 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
 </div>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">捕获与分桶 padding</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">捕获与分桶 padding</span></div>
   <pre><span class="kw">class</span> BaseCudaGraphRunner(BaseRunner):
     <span class="cm"># 启动时把整条前向录成图；运行时按桶 padding 后重放</span>
     buffers: ForwardInputBuffers       <span class="cm"># 预分配的静态输入缓冲（地址固定）</span>
@@ -1672,7 +1672,7 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
 顺着这条线再往下，第 33 课会讲注意力后端如何决定"哪些能录进图"，第 43 课的投机解码会把图重放推到更复杂的形状上。带着"<strong>图 = 录一次、重放整条、用静态换启动开销</strong>"这把钥匙，你会发现后面很多看似零散的性能优化，其实都在围绕同一个主题打转：<strong>别让 GPU 闲着，也别让 CPU 拖后腿</strong>。</p>
 
 <div class="card key">
-  <div class="tag">🔑 本课要点</div>
+  <div class="tag">📌 本课要点</div>
   <strong>① 敌人是启动开销：</strong>一次解码前向要发起几百个小内核，每次发起有固定 CPU 启动费；解码内核太短，这笔费用反而主导整步、GPU 干等 CPU。
   <strong>② 解法是录一次重放整条：</strong>CUDA Graph 把整条前向的内核序列录成一张图，运行时一次提交整体重放，把几百次发起压成一次，CPU 不再逐个递内核。
   <strong>③ 代价是静态：</strong>图绑定形状与地址，故需 batch 分桶 + padding（<span class="mono">_pad_to_bucket</span>）、预分配静态缓冲、捕获区内禁止数据相关控制流——这也是<strong>解码走图、预填充走即时</strong>的根因。
@@ -1804,7 +1804,7 @@ at run time it takes the real batch, <strong>rounds it up to the nearest bucket<
 </div>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">capture &amp; bucket padding</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/model_executor/runner/base_cuda_graph_runner.py ::BaseCudaGraphRunner</span><span class="ln">capture &amp; bucket padding</span></div>
   <pre><span class="kw">class</span> BaseCudaGraphRunner(BaseRunner):
     <span class="cm"># record the whole forward at startup; pad to a bucket and replay at run time</span>
     buffers: ForwardInputBuffers       <span class="cm"># pre-allocated static input buffers (fixed addrs)</span>
@@ -1863,7 +1863,7 @@ while a graph replays, the GPU just powers through the whole graph and barely tu
 This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" tradeoff recurs later: Lesson 33's piecewise graphs let dynamic ops partly enjoy replay, and Lesson 43's speculative decoding must specially consider how to capture the more complex "draft + verify" shapes. Remember this lesson: <strong>a CUDA graph swaps "launch kernels one by one" for "replay the whole forward in one shot", trading static shapes for gone launch overhead</strong>.</p>
 
 <div class="card key">
-  <div class="tag">🔑 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <strong>① The enemy is launch overhead:</strong> one decode forward launches hundreds of tiny kernels, each launch a fixed CPU fee; decode kernels are so short the fee dominates the step and the GPU waits on the CPU.
   <strong>② The fix is record-once-replay-whole:</strong> a CUDA graph records the entire forward's kernel sequence into one graph and replays it as a single submission, collapsing hundreds of launches into one.
   <strong>③ The price is static:</strong> the graph binds shape and address, so you need batch bucketing + padding (<span class="mono">_pad_to_bucket</span>), pre-allocated static buffers, and no data-dependent control flow in the captured region — the very reason <strong>decode is graphed, prefill runs eager</strong>.
@@ -2392,7 +2392,7 @@ Part 6 closes here: Lesson 24 was the ModelRunner "decide → compute" door, Les
 and this lesson adds the last link — <strong>how the computed logits actually become the token on your screen</strong>.</p>
 
 <div class="card key">
-  <div class="tag">📌 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>Sampler</strong>: an <span class="mono">nn.Module</span> turning <strong>logits → next token id</strong>; reads <span class="mono">SamplingBatchInfo</span> (per-request params packed into tensors).</li>
     <li><strong>Pipeline</strong>: penalties → temperature (÷T; &lt;1 sharp, &gt;1 flat, =0 greedy) → softmax → top-k / top-p / min-p truncation → multinomial sample.</li>

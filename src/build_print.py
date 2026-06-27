@@ -30,7 +30,24 @@ def _intro(lang):
 
 
 PRINT_CSS = """
+html { color-scheme: light; }
 body { max-width: 820px; margin: 0 auto; padding: 1.6rem; background: #fff; }
+/* Print editions are always light: re-assert the light palette so a
+   dark-mode browser's prefers-color-scheme: dark (inlined from shell.CSS)
+   doesn't flip text to near-white on the forced-white print page. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+    --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+    --accent: #7c48e6; --accent-soft: #efe9fc; --accent-ink: #5b34b0;
+    --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+    --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+    --teal: #0d9488; --teal-soft: #d7f3ef;
+    --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  }
+  .card.spark .tag { color: #b4690e; }
+}
 .print-toc { margin: 1rem 0 2rem; }
 .print-toc li { margin: .2rem 0; }
 .lesson-print { padding-top: .5rem; }

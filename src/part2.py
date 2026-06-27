@@ -866,7 +866,7 @@ still doing real work.</p>
     <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
   </svg>
-  <div class="figcap"><b>Figure A · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
+  <div class="figcap"><b>Fig A · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
 </div>
 
 <div class="card"><div class="tag">🔢 A concrete example</div>
@@ -949,7 +949,7 @@ consecutive steps: the finished (✓) are replaced by newcomers (★), so the ba
     <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
     <text x="522" y="254" style="font-size:11px;fill:var(--muted)">just finished ✓</text>
   </svg>
-  <div class="figcap"><b>Figure B · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
+  <div class="figcap"><b>Fig B · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
 </div>
 
 <h2>Why it wins: back to "memory-bound"</h2>

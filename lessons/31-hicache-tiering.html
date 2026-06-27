@@ -470,7 +470,7 @@ HiCache 则把"赶走"变成"<strong>降级</strong>"——数据搬到便宜的
 <p>下面这段就是 <span class="mono">HiRadixCache</span> 的真身：它<strong>继承自第 29 课的 <span class="mono">RadixCache</span></strong>，<span class="mono">write_backup</span> 正是"向下写回"那一步——把 GPU 槽位拷到 host、记进 <span class="mono">host_value</span>：</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/hiradix_cache.py ::HiRadixCache</span><span class="ln">写回下沉：GPU → host</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/hiradix_cache.py ::HiRadixCache</span><span class="ln">写回下沉：GPU → host</span></div>
   <pre><span class="kw">class</span> HiRadixCache(RadixCache):          <span class="cm"># 第 29 课 RadixCache 的分层子类</span>
 
     <span class="kw">def</span> write_backup(self, node, write_back=False) -&gt; int:
@@ -510,7 +510,7 @@ HiCache 则把"赶走"变成"<strong>降级</strong>"——数据搬到便宜的
 <p>两个具体数字让账更直观。其一，<strong>host/CPU 这层通常是 GPU KV 容量的约 10×</strong>，于是能同时缓存的前缀数量也大致多出一个量级——更多热门前缀得以留存，而不是一满就被丢掉。其二，一次<strong>深层前缀命中</strong>只触发<strong>一次 host→GPU 拷贝</strong>（沿 <span class="mono">node.parent</span> 把链上“只在 host”的祖先一并捞回），就替代了对<strong>成千上万个 token</strong> 的重新前向计算——便宜的搬运换掉了昂贵的重算。</p>
 
 <div class="card key">
-  <div class="tag">🔑 本课要点</div>
+  <div class="tag">📌 本课要点</div>
   <strong>① HBM 又小又贵，朴素基数树（第 29 课）一驱逐就丢、下次得重算</strong>；而 CPU 内存大 10–100 倍、磁盘近乎无限。
   <strong>② HiCache = <span class="mono">HiRadixCache</span>（RadixCache 子类）+ <span class="mono">HiCacheController</span></strong>，把前缀缓存铺在三层：GPU HBM 热 → CPU 内存 温 → 磁盘 冷。
   <strong>③ 两个方向：驱逐时 <span class="mono">write_backup</span> 把 KV 写回下沉、命中时 <span class="mono">load_back</span> 预取上移</strong>，靠 <span class="mono">TreeNode.host_value</span> 记住每段住在哪层。
@@ -685,7 +685,7 @@ Because of these costs, HiCache is <strong>optional</strong>: turned on by a fla
 <p>Here is <span class="mono">HiRadixCache</span> in the flesh: it <strong>inherits from Lesson 29's <span class="mono">RadixCache</span></strong>, and <span class="mono">write_backup</span> is exactly the "write back down" step — copying GPU slots to host and recording them in <span class="mono">host_value</span>:</p>
 
 <div class="codefile">
-  <div class="cf-head"><span class="dot"></span><span class="path">mem_cache/hiradix_cache.py ::HiRadixCache</span><span class="ln">writeback down: GPU → host</span></div>
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/hiradix_cache.py ::HiRadixCache</span><span class="ln">writeback down: GPU → host</span></div>
   <pre><span class="kw">class</span> HiRadixCache(RadixCache):          <span class="cm"># tiering subclass of Lesson 29's RadixCache</span>
 
     <span class="kw">def</span> write_backup(self, node, write_back=False) -&gt; int:
@@ -725,7 +725,7 @@ Because of these costs, HiCache is <strong>optional</strong>: turned on by a fla
 <p>Two concrete numbers make the trade vivid. First, the <strong>host/CPU tier is often ~10× the GPU KV capacity</strong>, so it can keep roughly an order of magnitude more prefixes cached — far more hot prefixes stay resident instead of being dropped the moment HBM fills. Second, a <strong>deep prefix hit</strong> triggers just <strong>one host→GPU copy</strong> (walking <span class="mono">node.parent</span> to grab every "host-only" ancestor on the chain at once) instead of recomputing <strong>thousands of tokens</strong> — a cheap data move replaces an expensive forward.</p>
 
 <div class="card key">
-  <div class="tag">🔑 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <strong>① HBM is small and precious; the naive radix tree (Lesson 29) drops on eviction and must recompute next time</strong>; CPU RAM is 10–100× bigger and disk near-infinite.
   <strong>② HiCache = <span class="mono">HiRadixCache</span> (a RadixCache subclass) + <span class="mono">HiCacheController</span></strong>, spreading the prefix cache across three tiers: GPU HBM hot → CPU RAM warm → disk cold.
   <strong>③ Two directions: on eviction <span class="mono">write_backup</span> writes KV back down; on a hit <span class="mono">load_back</span> prefetches it up</strong>, with <span class="mono">TreeNode.host_value</span> remembering which tier each run lives in.

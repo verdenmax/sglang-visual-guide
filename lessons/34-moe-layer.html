@@ -557,7 +557,7 @@ SGLang 的 <span class="mono">FusedMoE</span> 层正是为此而生：它把<str
 理解了这三笔代价，你才算真正读懂 MoE：它不是免费的午餐，而是把"算力账"换成了"<strong>通信账 + 显存账 + 均衡账</strong>"——而 SGLang 的 <span class="mono">FusedMoE</span>、专家并行（第 46 课）、EPLB（第 47 课）正是为压低这三笔账单而生。</p>
 
 <div class="card key">
-  <div class="tag">🔑 本课要点</div>
+  <div class="tag">📌 本课要点</div>
   <strong>① MoE 层 = N 个小专家（FFN）+ 一个路由器</strong>：路由器给每个 <strong>token</strong> 对各专家打分，只选 <span class="mono">top-k</span>（如 64 选 2），仅这 k 个专家计算 → <strong>稀疏</strong>。于是<strong>参数随专家数猛涨，单 token 算力被 top-k 钉死</strong>。DeepSeek-V3 / Mixtral / Qwen-MoE 都用它。
   <strong>② 计算四步</strong>：路由 → 按专家分组 → <strong>分组 / 批量 GEMM</strong> → 散回并按路由权重加权合并。SGLang 的 <span class="mono">FusedMoE</span> 把路由 + 分组 GEMM <strong>融合进 kernel</strong>，没有逐专家的慢 Python 循环（kernel 见第 38 课）。
   <strong>③ 扩展到多卡</strong>：<strong>专家并行（EP，第 46 课）</strong>把专家摊到不同 GPU，token 经 all-to-all 分发到专家所在卡再合并；<strong>EPLB（第 47 课）</strong>均衡"热门专家"的负载。
@@ -815,7 +815,7 @@ first, <strong>routing imbalance</strong> lets hot experts drag the whole step (
 Understand these three and you truly understand MoE: it is no free lunch but a swap of the "compute bill" for a "<strong>communication + memory + balance bill</strong>" — and SGLang's <span class="mono">FusedMoE</span>, expert parallelism (Lesson 46), and EPLB (Lesson 47) exist to shrink those three bills.</p>
 
 <div class="card key">
-  <div class="tag">🔑 Key takeaways</div>
+  <div class="tag">📌 Key points</div>
   <strong>① An MoE layer = N small experts (FFNs) + one router</strong>: the router scores every <strong>token</strong> over experts and keeps only <span class="mono">top-k</span> (e.g. 2 of 64); only those k compute → <strong>sparse</strong>. So <strong>parameters soar with expert count while per-token compute is pinned by top-k</strong>. DeepSeek-V3 / Mixtral / Qwen-MoE all use it.
   <strong>② Four compute steps</strong>: route → group by expert → <strong>grouped / batched GEMM</strong> → scatter back and combine weighted by routing scores. SGLang's <span class="mono">FusedMoE</span> <strong>fuses routing + grouped GEMM into kernels</strong>, with no slow per-expert Python loop (kernels in Lesson 38).
   <strong>③ Scaling out</strong>: <strong>expert parallelism (EP, Lesson 46)</strong> spreads experts across GPUs; tokens all-to-all dispatch to the card holding their expert, then combine. <strong>EPLB (Lesson 47)</strong> balances "hot expert" load.

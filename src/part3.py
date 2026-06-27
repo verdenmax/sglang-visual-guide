@@ -309,7 +309,7 @@ with arbitrary Python logic between them.</p>
     <path d="M422 272 l9 -2 l-3 -8 z" style="fill:var(--muted)"/>
     <text x="748" y="138" text-anchor="end" style="fill:var(--faint);font-size:12px">fork → 2 parallel branches</text>
   </svg>
-  <div class="figcap"><b>Figure 1 · A DSL program is a dependency graph</b> — a <span class="mono">gen→fork→gen×2→join</span> program is a <strong>visible structure</strong> to the runtime: it can schedule the branches in parallel and reuse the shared prefix; an opaque Python loop forces the framework to <strong>run blind, one call at a time</strong>.</div>
+  <div class="figcap"><b>Fig 1 · A DSL program is a dependency graph</b> — a <span class="mono">gen→fork→gen×2→join</span> program is a <strong>visible structure</strong> to the runtime: it can schedule the branches in parallel and reuse the shared prefix; an opaque Python loop forces the framework to <strong>run blind, one call at a time</strong>.</div>
 </div>
 
 <h2>Core primitives: gen and select, plus role helpers</h2>
@@ -379,7 +379,7 @@ runtime</strong>, so you write only "<strong>what to do</strong>" and leave "<st
     <text x="583" y="246" text-anchor="middle" style="fill:var(--teal);font-size:12px">branches scheduled in parallel</text>
     <text x="583" y="264" text-anchor="middle" style="fill:var(--teal);font-size:12px">prefix KV shared automatically</text>
   </svg>
-  <div class="figcap"><b>Figure 2 · DSL vs a raw call loop</b> — on the left you write the loop and fire requests serially, and the framework cannot see how they relate; on the right the same logic written as a DSL lets <strong>the runtime do it for you</strong> — parallelize branches, compute the common prefix KV once. <span class="mono">you orchestrate → the runtime orchestrates</span>.</div>
+  <div class="figcap"><b>Fig 2 · DSL vs a raw call loop</b> — on the left you write the loop and fire requests serially, and the framework cannot see how they relate; on the right the same logic written as a DSL lets <strong>the runtime do it for you</strong> — parallelize branches, compute the common prefix KV once. <span class="mono">you orchestrate → the runtime orchestrates</span>.</div>
 </div>
 
 <p>The third benefit is the subtlest and most valuable: <strong>when you write the program structurally, the framework can see the structure and
@@ -739,7 +739,7 @@ Grasp these two modes and you hold the main axis of the SGLang front end — <st
     <text x="560" y="262" text-anchor="middle">graph / plan</text>
     <text x="560" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">parallelize · cache prefix</text>
   </svg>
-  <div class="figcap"><b>Figure · interpreter vs tracer</b> — the interpreter treats the program as "instructions to obey now," running it <strong>node by node, eagerly</strong> and calling the backend at each gen; the tracer treats it as "a blueprint to study," <strong>statically expanding it into a graph first</strong> so <strong>independent branches run in parallel</strong>, handing the runtime something to optimize.</div>
+  <div class="figcap"><b>Fig · interpreter vs tracer</b> — the interpreter treats the program as "instructions to obey now," running it <strong>node by node, eagerly</strong> and calling the backend at each gen; the tracer treats it as "a blueprint to study," <strong>statically expanding it into a graph first</strong> so <strong>independent branches run in parallel</strong>, handing the runtime something to optimize.</div>
 </div>
 
 <h2>The interpret path: how StreamExecutor drives a program</h2>
@@ -773,7 +773,7 @@ The key idea: <strong>interpreting is "produce as you go"</strong> — text and 
     <text x="620" y="246" text-anchor="middle" class="mono" style="font-size:11px">→ backend.generate</text>
     <text x="380" y="292" text-anchor="middle" style="fill:var(--muted);font-size:12px">three branches run concurrently, sharing the same prefix KV (Lesson 7)</text>
   </svg>
-  <div class="figcap"><b>Figure · executing forks in parallel</b> — while StreamExecutor runs, <span class="mono">fork</span> splits the stream into 3 <strong>parallel lanes</strong> that <strong>share the same parent prefix</strong> and each <strong>call the backend</strong> concurrently.</div>
+  <div class="figcap"><b>Fig · executing forks in parallel</b> — while StreamExecutor runs, <span class="mono">fork</span> splits the stream into 3 <strong>parallel lanes</strong> that <strong>share the same parent prefix</strong> and each <strong>call the backend</strong> concurrently.</div>
 </div>
 
 <div class="layers">

@@ -1695,7 +1695,7 @@ evolvability</strong> — a lesson distributed systems keep re-teaching.</p>
     <polygon points="95,184 90,194 100,194" style="fill:var(--teal)"/>
     <text x="400" y="228" text-anchor="middle" class="mono" style="font-size:10.5px;fill:var(--teal)">BatchStrOutput → routed back to client via front door</text>
   </svg>
-  <div class="figcap"><b>Figure 1 · The IPC message types</b> — the three processes share no memory and cooperate only by passing dataclasses: a <span class="mono">GenerateReqInput</span> becomes a <span class="mono">TokenizedGenerateReqInput</span> sent to the scheduler, which emits a <span class="mono">BatchTokenIDOutput</span> to the detokenizer, whose <span class="mono">BatchStrOutput</span> is routed back to the client via the front door.</div>
+  <div class="figcap"><b>Fig 1 · The IPC message types</b> — the three processes share no memory and cooperate only by passing dataclasses: a <span class="mono">GenerateReqInput</span> becomes a <span class="mono">TokenizedGenerateReqInput</span> sent to the scheduler, which emits a <span class="mono">BatchTokenIDOutput</span> to the detokenizer, whose <span class="mono">BatchStrOutput</span> is routed back to the client via the front door.</div>
 </div>
 
 <h2>Why message passing, not shared memory</h2>
@@ -1759,7 +1759,7 @@ leg's "output message" is exactly the next leg's "input message," and the baton 
     <rect x="190" y="276" width="380" height="32" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
     <text x="380" y="297" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">plain Python dataclasses · serialized over IPC · not HTTP</text>
   </svg>
-  <div class="figcap"><b>Figure 2 · One round-trip</b> — the request is pickle-serialized and travels right through the three processes over <span class="mono">zmq</span> sockets, then the response returns the same way, forming a loop. Note: what crosses between processes are <strong>plain Python dataclasses</strong> (serialized over IPC), <strong>not</strong> HTTP between processes — HTTP exists only at the outermost edge facing the client.</div>
+  <div class="figcap"><b>Fig 2 · One round-trip</b> — the request is pickle-serialized and travels right through the three processes over <span class="mono">zmq</span> sockets, then the response returns the same way, forming a loop. Note: what crosses between processes are <strong>plain Python dataclasses</strong> (serialized over IPC), <strong>not</strong> HTTP between processes — HTTP exists only at the outermost edge facing the client.</div>
 </div>
 
 <p>A concrete picture: the main process hands the <span class="mono">TokenizedGenerateReqInput</span> object to ZMQ, which uses <span class="mono">pickle</span> (and <span class="mono">msgpack</span> on some channels) to flatten it into bytes, sends it over an IPC socket to the scheduler subprocess, and rebuilds the same-shaped object on the other side — <strong>both ends hold the same dataclass, not an HTTP body</strong>.</p>
@@ -1982,6 +1982,7 @@ LESSON_17 = {
 而半个字符还没构成可显示的内容，自然不能算进“已交付”。等下一步 token 补齐了这个字符，反分词器会把从旧偏移量到新边界之间<strong>完整冒出来的那一段</strong>
 一次性发走，再推进游标。换句话说，<strong>偏移量只会停在完整字符的边界上</strong>，永远不会卡在一个字符的中间——这正是“绝不流出半个汉字、半个 emoji”的底层保证。
 理解了这一点，你就能体会到：流式输出顺滑的表象之下，是一套对<strong>字符边界</strong>极其小心的字节级记账。</p>
+<h2>停止条件与 SSE：生成何时结束</h2>
 <p>流式输出总要有个尽头。一条请求的生成会在三种情况下停下，反分词器/调度器据此在<strong>停止边界</strong>处把输出裁齐
 （采样与停止细节见第 28 课）：</p>
 
