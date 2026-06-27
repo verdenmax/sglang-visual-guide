@@ -150,9 +150,10 @@ LESSON_29 = {"zh": r"""
     <span class="cm"># 在 radix 树里找 params.key 的最长缓存前缀。</span>
     <span class="cm"># 若命中点落在某段存储的中间，就把该节点分裂一次以</span>
     <span class="cm"># 暴露边界；同时刷新访问时间戳（之后给驱逐用）。</span>
-    key = params.key.page_aligned(self.page_size)   <span class="cm"># 先按页对齐 key</span>
+    key = params.key
     <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
         <span class="kw">return</span> self._empty_match_result
+    key = key.page_aligned(self.page_size)   <span class="cm"># 先判禁用/空，再按页对齐</span>
     ...
     <span class="kw">return</span> MatchResult(device_indices=..., last_device_node=node)</pre>
 </div>
@@ -366,9 +367,10 @@ not planned ahead. <span class="mono">match_prefix</span> ultimately returns two
     <span class="cm"># if the match ends INSIDE a stored segment, that node is split</span>
     <span class="cm"># once to expose the boundary; access timestamps are refreshed</span>
     <span class="cm"># (used later by eviction).</span>
-    key = params.key.page_aligned(self.page_size)   <span class="cm"># page-align the key first</span>
+    key = params.key
     <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
         <span class="kw">return</span> self._empty_match_result
+    key = key.page_aligned(self.page_size)   <span class="cm"># guard first, then page-align</span>
     ...
     <span class="kw">return</span> MatchResult(device_indices=..., last_device_node=node)</pre>
 </div>
@@ -403,7 +405,7 @@ If insert also hits a "half edge" along the way, it likewise <span class="mono">
     <line x1="477" y1="90" x2="600" y2="120" style="stroke:var(--accent);stroke-width:3"/>
     <rect x="540" y="120" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
     <text x="600" y="140" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">[A B]</text>
-    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">parent · shared prefix stored once</text>
+    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">parent · prefix stored once</text>
     <line x1="585" y1="164" x2="520" y2="220" style="stroke:var(--teal);stroke-width:2"/>
     <line x1="615" y1="164" x2="700" y2="220" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
     <rect x="450" y="220" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
@@ -796,7 +798,7 @@ while each request's ledger only tracks "which numbers are mine," indifferent to
     <line x1="316" y1="105" x2="586" y2="105" style="stroke:var(--accent);stroke-width:2;stroke-dasharray:5 4"/>
     <polygon points="578,100 590,105 578,110" style="fill:var(--accent)"/>
     <text x="450" y="98" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slot id #12 → points at data (indirection)</text>
-    <text x="430" y="206" style="fill:var(--faint);font-size:12px">the same slot id #12 picks one K/V cell in every layer — allocate once, reuse across layers</text>
+    <text x="430" y="206" style="fill:var(--faint);font-size:12px">slot #12 picks one K/V cell per layer — reused across layers</text>
   </svg>
   <div class="figcap"><b>Fig 3 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
 </div>
