@@ -4,6 +4,11 @@
   <a href="https://verdenmax.github.io/sglang-visual-guide/"><b>📖&nbsp; Read the guide online&nbsp; →&nbsp; verdenmax.github.io/sglang-visual-guide</b></a>
   <br>
   <sub>A bilingual (English&nbsp;+&nbsp;中文) visual guide to the internals of SGLang, the high-performance LLM &amp; multimodal serving engine — runs in your browser, zero install.<br>点开即读这份 SGLang 内部原理图解指南 · 中英双语 · 浏览器直读 · 无需安装</sub>
+  <br><br>
+  <b>🌐 Live now:</b>
+  <a href="https://verdenmax.github.io/sglang-visual-guide/">Start reading</a> ·
+  <a href="https://verdenmax.github.io/sglang-visual-guide/print_en.html">Print / PDF (English)</a> ·
+  <a href="https://verdenmax.github.io/sglang-visual-guide/print_zh.html">打印版 / PDF（中文）</a>
 </p>
 
 [![Read online](https://img.shields.io/badge/Read_online-Live_Demo-7c48e6?logo=githubpages&logoColor=white)](https://verdenmax.github.io/sglang-visual-guide/)
