@@ -432,6 +432,12 @@ by nature. Done clumsily, the GPU spends huge stretches <strong>idle</strong>: e
 next batch, or recomputing attention over repeated prefixes again and again. The whole value of a serving engine is to
 <strong>squeeze out that waste</strong>.</p>
 
+<p>To put a number on it: just fitting the model into GPU memory is not cheap —
+<strong>a 7B model's weights alone are ~14 GB in fp16</strong>, and each request's KV cache piles on top,
+so memory gets tight fast. Yet all you write is one line,
+<span class="mono">engine.generate("The capital of France is", {"max_new_tokens": 64})</span>,
+while the engine shoulders the batching, caching and memory work behind it.</p>
+
 <p>SGLang's answer boils down to three moves: <strong>continuous batching</strong> keeps the GPU fully loaded,
 <strong>RadixAttention prefix caching</strong> computes a shared opening only once, and the
 <strong>zero-overhead overlap scheduler</strong> hides CPU scheduling cost behind GPU compute time. As a result it can
@@ -457,6 +463,38 @@ among open-source inference engines.</p>
   <span class="mono">python/sglang/srt/</span> (srt = SGLang RunTime) is the real engine, pushing each request through
   <strong>tokenize → schedule → model forward → sample → detokenize</strong>. It is fast thanks to three weapons:
   <strong>RadixAttention</strong>, the <strong>zero-overhead overlap scheduler</strong>, and <strong>continuous batching</strong>.
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 720 320" role="img" aria-label="Contrast: raw model.generate() serves one request at a time and idles the GPU, while the SGLang engine packs many requests with a scheduler, KV cache and continuous batching to keep the GPU full">
+    <line x1="360" y1="24" x2="360" y2="296" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="38" style="font-weight:700;fill:var(--muted)">Raw model: model.generate()</text>
+    <rect x="24" y="54" width="150" height="32" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="99" y="75" text-anchor="middle">one request</text>
+    <text x="24" y="116" style="fill:var(--muted);font-size:12px">GPU timeline</text>
+    <rect x="24" y="126" width="312" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="130" width="46" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="53" y="146" text-anchor="middle" class="mono" style="font-size:11px">busy</text>
+    <text x="206" y="146" text-anchor="middle" style="fill:var(--faint);font-size:12px">idle · idle · idle</text>
+    <rect x="24" y="186" width="312" height="34" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="180" y="208" text-anchor="middle" style="fill:var(--red);font-weight:700">one at a time; GPU mostly idle → costly</text>
+    <text x="384" y="38" style="font-weight:700;fill:var(--accent-ink)">SGLang Engine</text>
+    <rect x="384" y="54" width="312" height="32" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="540" y="75" text-anchor="middle" class="mono" style="font-size:12px">Scheduler · KV cache · continuous batching</text>
+    <text x="384" y="116" style="fill:var(--muted);font-size:12px">GPU timeline (packed)</text>
+    <rect x="384" y="126" width="312" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="388" y="130" width="74" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="425" y="146" text-anchor="middle" class="mono" style="font-size:11px">req1</text>
+    <rect x="464" y="130" width="74" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="501" y="146" text-anchor="middle" class="mono" style="font-size:11px">req2</text>
+    <rect x="540" y="130" width="74" height="22" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="577" y="146" text-anchor="middle" class="mono" style="font-size:11px">req3</text>
+    <rect x="616" y="130" width="76" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="654" y="146" text-anchor="middle" class="mono" style="font-size:11px">req4</text>
+    <rect x="384" y="186" width="312" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="540" y="208" text-anchor="middle" style="fill:var(--teal);font-weight:700">many requests packed; GPU stays full → cheap</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Serving engine vs raw model</b> — the raw model runs one request at a time and the GPU often idles; the SGLang engine packs many requests via a scheduler, KV cache and continuous batching so one GPU stays full.</div>
 </div>
 
 <h2>What each half owns: frontend DSL vs runtime engine</h2>
@@ -553,6 +591,32 @@ many decodes</strong>.</p>
   <div class="node"><div class="nt">Detokenize</div><div class="nd">DetokenizerManager</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 240" role="img" aria-label="Autoregressive loop: the prompt 'The capital of France is' runs one forward per step, emits a single token (Paris, .) and feeds it back to continue until the end">
+    <path d="M 542 96 C 542 26, 239 26, 239 92" style="fill:none;stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="239,100 232,86 246,86" style="fill:var(--blue)"/>
+    <text x="390" y="30" text-anchor="middle" style="fill:var(--blue);font-size:12px">each step emits 1 token, fed back</text>
+    <rect x="20" y="100" width="150" height="46" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="95" y="128" text-anchor="middle">Prompt: …France is</text>
+    <text x="180" y="129" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="196" y="100" width="86" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="239" y="128" text-anchor="middle" class="mono">forward</text>
+    <text x="292" y="129" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="308" y="100" width="64" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="340" y="128" text-anchor="middle">Paris</text>
+    <text x="384" y="129" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="398" y="100" width="86" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="441" y="128" text-anchor="middle" class="mono">forward</text>
+    <text x="494" y="129" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="510" y="100" width="64" height="46" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="542" y="128" text-anchor="middle">.</text>
+    <text x="586" y="129" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="602" y="100" width="138" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="671" y="128" text-anchor="middle">… tokenₙ (until end)</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Autoregressive: one prompt → a stream of tokens</b> — each step runs one forward and emits just 1 token ("The capital of France is" → "Paris" → "." …), then feeds it back to continue until the end.</div>
+</div>
+
 <h2>Why it is fast: three weapons against three bottlenecks</h2>
 <p>"High performance" is not a slogan; it is one strong remedy aimed at each of <strong>three concrete bottlenecks</strong>
 in inference serving. The table pairs each weapon with the waste it kills, and each item is expanded in a dedicated later
@@ -595,6 +659,21 @@ outputs = llm.generate(prompts, params)               <span class="cm"># feed a 
     print(p, o[<span class="st">"text"</span>])
 
 llm.shutdown()</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::Engine.generate</span><span class="ln">the in-process offline generate API: pass a prompt + sampling params, can stream</span></div>
+  <pre><span class="kw">class</span> Engine:
+    <span class="kw">def</span> generate(
+        self,
+        prompt=<span class="kw">None</span>,               <span class="cm"># a single prompt or a batch of prompts</span>
+        sampling_params=<span class="kw">None</span>,      <span class="cm"># temperature / top_p / max_new_tokens ...</span>
+        image_data=<span class="kw">None</span>,           <span class="cm"># optional multimodal input</span>
+        return_logprob=<span class="kw">False</span>,
+        stream=<span class="kw">False</span>,              <span class="cm"># stream tokens as they are produced</span>
+    ):
+        <span class="cm"># offline, in-process (NO HTTP). Returns a dict, or an iterator if stream=True</span>
+        ...</pre>
 </div>
 
 <p>The <span class="inline">Engine</span> source comment spells out its internals clearly: an engine is built from three
@@ -744,6 +823,46 @@ The former is a convenience layer for app authors; the latter is the source of p
   From this lesson on we mostly live in this half; it is also <strong>the thickest stack of code</strong> in the repo.</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 330" role="img" aria-label="Repo map: python/sglang split into two halves, lang/ on the left (frontend DSL: ir/interpreter/tracer) and srt/ on the right (runtime: entrypoints/managers/model_executor/layers/mem_cache)">
+    <rect x="300" y="14" width="160" height="34" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="36" text-anchor="middle" class="mono" style="font-size:13px;font-weight:700">python/sglang/</text>
+    <line x1="380" y1="48" x2="190" y2="80" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="380" y1="48" x2="570" y2="80" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="40" y="80" width="300" height="36" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="190" y="103" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">lang/ · frontend DSL (express)</text>
+    <rect x="420" y="80" width="300" height="36" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="570" y="103" text-anchor="middle" style="fill:var(--blue);font-weight:700">srt/ · runtime engine (execute)</text>
+    <rect x="40" y="130" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="54" y="151" class="mono" style="font-size:12px">ir.py</text>
+    <text x="326" y="151" text-anchor="end" style="fill:var(--muted);font-size:11px">intermediate representation</text>
+    <rect x="40" y="168" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="54" y="189" class="mono" style="font-size:12px">interpreter.py</text>
+    <text x="326" y="189" text-anchor="end" style="fill:var(--muted);font-size:11px">interpret &amp; run</text>
+    <rect x="40" y="206" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="54" y="227" class="mono" style="font-size:12px">tracer.py</text>
+    <text x="326" y="227" text-anchor="end" style="fill:var(--muted);font-size:11px">compile / trace</text>
+    <rect x="420" y="130" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="434" y="151" class="mono" style="font-size:12px">entrypoints/</text>
+    <text x="706" y="151" text-anchor="end" style="fill:var(--muted);font-size:11px">HTTP / Engine entry</text>
+    <rect x="420" y="168" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="434" y="189" class="mono" style="font-size:12px">managers/</text>
+    <text x="706" y="189" text-anchor="end" style="fill:var(--muted);font-size:11px">tokenize · Scheduler brain</text>
+    <rect x="420" y="206" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="434" y="227" class="mono" style="font-size:12px">model_executor/</text>
+    <text x="706" y="227" text-anchor="end" style="fill:var(--muted);font-size:11px">GPU model forward</text>
+    <rect x="420" y="244" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="434" y="265" class="mono" style="font-size:12px">layers/</text>
+    <text x="706" y="265" text-anchor="end" style="fill:var(--muted);font-size:11px">attention &amp; other ops</text>
+    <rect x="420" y="282" width="300" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="434" y="303" class="mono" style="font-size:12px">mem_cache/</text>
+    <text x="706" y="303" text-anchor="end" style="fill:var(--muted);font-size:11px">KV cache · RadixAttention</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Repo map</b> — <span class="mono">python/sglang/</span> splits first into two halves: <span class="mono">lang/</span> is the frontend DSL (ir / interpreter / tracer), <span class="mono">srt/</span> is the runtime engine, which in turn splits into entrypoints / managers / model_executor / layers / mem_cache and more.</div>
+</div>
+
+<p>Pin the map to concrete files and it sticks: under <span class="mono">srt/</span> sit sub-packages like <span class="mono">entrypoints</span> / <span class="mono">managers</span> / <span class="mono">model_executor</span> / <span class="mono">layers</span> / <span class="mono">mem_cache</span>, and the real <strong>heart of the engine</strong> is <span class="mono">python/sglang/srt/managers/scheduler.py</span> — almost every later lesson circles around that heart.</p>
+
 <p>Keep this dividing line: <strong>lang/ expresses, srt/ executes</strong>. You can use srt/ alone (hit the HTTP endpoint or use the
 <span class="inline">Engine</span> class) without writing any frontend; conversely, when the frontend says the parallel structure
 explicitly, it helps the backend spot batchable, cacheable opportunities — exactly the logic behind Lesson 1's "critique the same
@@ -818,6 +937,31 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
   <div class="node hl"><div class="nt">back to TokenizerManager</div><div class="nd">main process · stream out</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 230" role="img" aria-label="Three-process topology: TokenizerManager (main process) sends requests over ZMQ/IPC to Scheduler (subprocess, runs the GPU forward), which sends output tokens to DetokenizerManager (subprocess); detokenized results stream back to TokenizerManager">
+    <text x="380" y="32" text-anchor="middle" style="fill:var(--amber);font-weight:600;font-size:11px">★ Only the Scheduler holds the GPU; the two Managers are just translators</text>
+    <rect x="24" y="64" width="190" height="72" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="119" y="96" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:13px">TokenizerManager</text>
+    <text x="119" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">main process · tokenize I/O</text>
+    <rect x="285" y="64" width="190" height="72" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpWorker)</text>
+    <text x="380" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">subprocess · GPU forward</text>
+    <rect x="546" y="64" width="190" height="72" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="641" y="96" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">DetokenizerManager</text>
+    <text x="641" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">subprocess · detokenize</text>
+    <text x="249" y="84" text-anchor="middle" style="fill:var(--muted);font-size:10px">request tokens (ZMQ)</text>
+    <line x1="214" y1="100" x2="279" y2="100" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="279,95 279,105 285,100" style="fill:var(--muted)"/>
+    <text x="510" y="84" text-anchor="middle" style="fill:var(--muted);font-size:10px">output tokens (ZMQ)</text>
+    <line x1="475" y1="100" x2="540" y2="100" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="540,95 540,105 546,100" style="fill:var(--muted)"/>
+    <text x="380" y="186" text-anchor="middle" style="fill:var(--teal);font-size:11px">detokenized result streams back to the main process</text>
+    <path d="M 641 136 V 200 H 119 V 142" style="fill:none;stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="113,148 125,148 119,140" style="fill:var(--teal)"/>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Three-process topology</b> — <span class="mono">TokenizerManager</span> (main process) sends requests over ZMQ/IPC to the <span class="mono">Scheduler</span> (subprocess, which alone runs the GPU forward), then to <span class="mono">DetokenizerManager</span> (subprocess); the result streams back to the main process along the bottom path. Only the Scheduler holds the GPU.</div>
+</div>
+
 <p>Never confuse the three roles: <strong>TokenizerManager is in the main process</strong> (so are the HTTP server and the
 <span class="inline">Engine</span>); <strong>Scheduler is in a subprocess</strong>, and <strong>tensor parallelism (TP) starts one
 Scheduler process per rank</strong>, each holding its own <span class="inline">TpWorker</span> and <span class="inline">ModelRunner</span>
@@ -884,6 +1028,22 @@ methods are all in the main process, Scheduler's and ModelRunner's are all in a 
 message structs defined in io_struct. Treat this "process boundary" as your <strong>first coordinate axis</strong> while reading code,
 overlay the layer diagram above as the second, and you can <strong>pinpoint</strong> any function: which process it is in, which layer
 it belongs to, which future lesson it maps to. This locating habit pays off across the dozens of source-reading lessons ahead.</p>
+
+<p>Before you touch anything, the single page most worth reading first is the <strong>master switchboard</strong> —
+<span class="inline">ServerArgs</span> in <span class="mono">srt/server_args.py</span>. It is one central dataclass: nearly every
+<span class="mono">--xxx</span> flag you type on the command line maps to one of its fields. Read it and you have read every knob this engine exposes:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/server_args.py ::ServerArgs</span><span class="ln">the central config: each field auto-maps to a --kebab CLI flag</span></div>
+  <pre><span class="kw">@dataclasses.dataclass</span>
+<span class="kw">class</span> <span class="fn">ServerArgs</span>:
+    <span class="cm"># one central config; each field auto-maps to a --kebab-case CLI flag</span>
+    model_path: str                    <span class="cm"># --model-path: the model to serve</span>
+    host: str = <span class="st">"127.0.0.1"</span>            <span class="cm"># --host</span>
+    tp_size: int = 1                   <span class="cm"># --tp-size: tensor-parallel ranks</span>
+    mem_fraction_static: float = None  <span class="cm"># --mem-fraction-static: static-alloc fraction</span>
+    <span class="cm"># ... dozens more fields, each a knob you already understand</span></pre>
+</div>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
@@ -995,6 +1155,54 @@ Every crossing between processes is one <span class="inline">ZMQ</span> message:
   </div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 820 300" role="img" aria-label="Timeline of one generate request's journey: HTTP entry and tokenize live in the main process, batch and forward in the Scheduler subprocess on the GPU, detokenize in the Detokenizer subprocess, then stream back to the main process; each cross-process arrow is one ZMQ hop">
+    <text x="22" y="28" style="font-weight:700;fill:var(--muted)">A request's journey (left to right over time)</text>
+    <rect x="430" y="17" width="12" height="12" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="448" y="27" style="fill:var(--muted);font-size:12px">Main process</text>
+    <rect x="540" y="17" width="12" height="12" rx="3" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="558" y="27" style="fill:var(--muted);font-size:12px">Scheduler subprocess</text>
+    <rect x="700" y="17" width="12" height="12" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="718" y="27" style="fill:var(--muted);font-size:12px">Detok subprocess</text>
+    <rect x="22" y="80" width="118" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="81" y="108" text-anchor="middle" style="font-size:12px;font-weight:700">HTTP /generate</text>
+    <text x="81" y="128" text-anchor="middle" style="fill:var(--muted);font-size:11px">Main · entry</text>
+    <rect x="154" y="80" width="118" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="213" y="108" text-anchor="middle" style="font-size:12px;font-weight:700">tokenize</text>
+    <text x="213" y="128" text-anchor="middle" style="fill:var(--muted);font-size:11px">TokenizerManager</text>
+    <rect x="286" y="80" width="118" height="64" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="345" y="108" text-anchor="middle" style="font-size:12px;font-weight:700">batch</text>
+    <text x="345" y="128" text-anchor="middle" style="fill:var(--muted);font-size:11px">Scheduler</text>
+    <rect x="418" y="80" width="118" height="64" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="477" y="108" text-anchor="middle" style="font-size:12px;font-weight:700">forward</text>
+    <text x="477" y="128" text-anchor="middle" style="fill:var(--purple);font-size:11px">ModelRunner · GPU</text>
+    <rect x="550" y="80" width="118" height="64" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="609" y="108" text-anchor="middle" style="font-size:12px;font-weight:700">detokenize</text>
+    <text x="609" y="128" text-anchor="middle" style="fill:var(--muted);font-size:11px">DetokenizerManager</text>
+    <rect x="682" y="80" width="118" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="741" y="108" text-anchor="middle" style="font-size:12px;font-weight:700">stream back</text>
+    <text x="741" y="128" text-anchor="middle" style="fill:var(--muted);font-size:11px">Main · SSE</text>
+    <text x="147" y="118" text-anchor="middle" style="fill:var(--faint);font-size:16px">→</text>
+    <text x="279" y="118" text-anchor="middle" style="fill:var(--faint);font-size:16px">→</text>
+    <text x="411" y="118" text-anchor="middle" style="fill:var(--faint);font-size:16px">→</text>
+    <text x="543" y="118" text-anchor="middle" style="fill:var(--faint);font-size:16px">→</text>
+    <text x="675" y="118" text-anchor="middle" style="fill:var(--faint);font-size:16px">→</text>
+    <text x="279" y="70" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:10px">ZMQ</text>
+    <text x="543" y="70" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:10px">ZMQ</text>
+    <text x="675" y="70" text-anchor="middle" class="mono" style="fill:var(--accent-ink);font-size:10px">ZMQ</text>
+    <line x1="22" y1="200" x2="800" y2="200" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M800 200 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="22" y="222" style="fill:var(--faint);font-size:11px">t0</text>
+    <text x="345" y="222" text-anchor="middle" style="fill:var(--faint);font-size:11px">batch / forward (loops many times)</text>
+    <text x="752" y="222" style="fill:var(--faint);font-size:11px">time →</text>
+    <line x1="81" y1="196" x2="81" y2="204" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="213" y1="196" x2="213" y2="204" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="477" y1="196" x2="477" y2="204" style="stroke:var(--faint);stroke-width:1.5"/>
+    <line x1="741" y1="196" x2="741" y2="204" style="stroke:var(--faint);stroke-width:1.5"/>
+  </svg>
+  <div class="figcap"><b>Fig 1 · A request's journey</b> — left to right is the timeline of one <span class="mono">POST /generate</span>: the main process owns the HTTP entry and tokenize, the Scheduler subprocess batches and forwards on the GPU (the middle loops many times), the Detokenizer subprocess detokenizes, and it finally loops back to the main process to stream out as SSE; every cross-process arrow is one ZMQ hop.</div>
+</div>
+
 <p>Walk it through: your <span class="mono">POST /generate</span> first lands in the handler in
 <span class="mono">entrypoints/http_server.py</span>, which wraps the payload into a <span class="inline">GenerateReqInput</span> and hands it
 to <span class="inline">TokenizerManager.generate_request</span>. In the <strong>main process</strong>, TokenizerManager tokenizes the
@@ -1022,6 +1230,18 @@ Scheduler forwards token N, the Detokenizer may still be translating token N-1, 
 user; the three processes run <strong>different relay legs at the same time</strong>. It is exactly this cross-process pipeline that makes
 "a request's life" look like a straight line at the macro level yet, microscopically, the result of three parties <strong>collaborating
 in parallel</strong>. Carrying this end-to-end animation, we are ready to dive into any stage and see its internals.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/tokenizer_manager.py ::generate_request</span><span class="ln">the request's entry: tokenize → hand to the scheduler over IPC → stream back</span></div>
+  <pre><span class="kw">async def</span> <span class="fn">generate_request</span>(
+    self,
+    obj,                  <span class="cm"># the parsed GenerateReqInput (prompt, sampling params, ...)</span>
+    request=None,
+):
+    <span class="cm"># the request's entry into the engine: tokenize the prompt, dispatch it to the</span>
+    <span class="cm"># Scheduler over IPC (ZMQ), then stream tokens back as they are produced</span>
+    ...</pre>
+</div>
 
 <h2>The scheduler loop: how requests get batched and run</h2>
 <p>Across the whole path, the thing <strong>most worth seeing first</strong> is the Scheduler brain — because it is a
@@ -1084,6 +1304,11 @@ while the GPU computes — but the skeleton is the same loop; once you get the n
 token-by-token, autoregressive</strong>: compute one token, append it to the input, compute the next, and so on until the model emits a
 stop token or hits the max length. So steps 2–4 <strong>loop tens to hundreds of times</strong>, advancing one word per turn:</p>
 
+<p>Put concrete numbers on it: a <strong>128-token</strong> prompt means prefill is <strong>one</strong> forward pass that computes all 128
+tokens in parallel and fills their KV cache; after that, <strong>every single generated token is one more forward pass</strong> — so a
+200-token answer is roughly <strong>1 prefill + about 200 decode forwards</strong>, and the vast majority of loop turns are spent on
+token-by-token decode, not on that opening prefill.</p>
+
 <div class="flow">
   <div class="node hl"><div class="nt">recv/batch</div><div class="nd">recv + get_next_batch</div></div>
   <div class="arrow">→</div>
@@ -1120,6 +1345,42 @@ it is <strong>memory-bound</strong> and <strong>loops many times</strong>. The t
   <div class="lane"><div class="lane-label">Prefill</div><div class="tslot now">read whole prompt</div><div class="tslot span">one big parallel slab · compute-bound · usually once</div></div>
   <div class="lane"><div class="lane-label">Decode</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot">+1 token</div><div class="tslot now">… loop to end</div></div>
   <div class="lane"><div class="lane-label">Bottleneck</div><div class="tslot span">prefill is bound by compute (matmul)</div><div class="tslot span">decode is bound by memory bandwidth (KV moves)</div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="Prefill vs decode over time: prefill is one wide block that computes the whole prompt in parallel and is compute-bound; decode is many thin bars, each one token's single forward pass and bandwidth-bound">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">Prefill vs decode (over time)</text>
+    <text x="142" y="60" text-anchor="middle" style="fill:var(--amber);font-size:12px;font-weight:700">prefill (once)</text>
+    <text x="470" y="60" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">decode (loops many times)</text>
+    <rect x="56" y="78" width="172" height="92" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="142" y="118" text-anchor="middle" style="font-size:13px;font-weight:700">prefill</text>
+    <text x="142" y="138" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:11px">whole prompt</text>
+    <rect x="256" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="280" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="304" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="328" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="352" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="376" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="400" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="424" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="448" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="472" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="496" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="520" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="544" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="568" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="592" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="616" y="110" width="16" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="264" y="102" text-anchor="middle" class="mono" style="fill:var(--blue);font-size:10px">+1</text>
+    <text x="312" y="102" text-anchor="middle" class="mono" style="fill:var(--blue);font-size:10px">+1</text>
+    <text x="360" y="102" text-anchor="middle" class="mono" style="fill:var(--blue);font-size:10px">+1</text>
+    <line x1="40" y1="200" x2="760" y2="200" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M760 200 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="708" y="222" style="fill:var(--faint);font-size:11px">time →</text>
+    <text x="142" y="244" text-anchor="middle" style="fill:var(--amber);font-size:11px">one parallel pass over the whole prompt · compute-bound</text>
+    <text x="470" y="244" text-anchor="middle" style="fill:var(--blue);font-size:11px">one token per step, one forward each · bandwidth-bound</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Prefill vs decode (over time)</b> — prefill is <strong>one wide block</strong>: a single parallel pass over the whole prompt that fills the KV cache, hungry for compute (compute-bound); decode is the <strong>many thin bars</strong> after it: each computes only the newest token in one forward pass, bottlenecked on repeatedly moving the KV cache (bandwidth-bound). One request is "one wide block + many thin bars".</div>
 </div>
 
 <p>Their natures differ, so do their scheduling strategies: feeding too long a prompt in one shot blows up memory, hence
