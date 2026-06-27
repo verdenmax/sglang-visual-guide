@@ -400,6 +400,38 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <span class="mono">O(t)</span>，省掉了所有重复计算。</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="对比：无缓存时每个解码步都要重算全部历史 token（不断变大的三角形），有 KV 缓存时每步只算新 token 的 K/V 并复用缓存中的历史">
+    <line x1="380" y1="28" x2="380" y2="276" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="44" style="font-weight:700;fill:var(--red)">❌ 无缓存：每步重算全部历史</text>
+    <polygon points="96,70 96,210 232,210" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="94" style="fill:var(--muted);font-size:12px">步①</text>
+    <rect x="96" y="78" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="134" style="fill:var(--muted);font-size:12px">步②</text>
+    <rect x="96" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="174" style="fill:var(--muted);font-size:12px">步③</text>
+    <rect x="96" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="160" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="244" style="fill:var(--red);font-size:12px">重算量 ∝ t：每步 O(t)，累计 O(t²)</text>
+    <text x="404" y="44" style="font-weight:700;fill:var(--teal)">✅ 有 KV 缓存：只算新 token，复用历史</text>
+    <text x="404" y="94" style="fill:var(--muted);font-size:12px">步①</text>
+    <rect x="470" y="78" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="134" style="fill:var(--muted);font-size:12px">步②</text>
+    <rect x="470" y="118" width="44" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="518" y="118" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="174" style="fill:var(--muted);font-size:12px">步③</text>
+    <rect x="470" y="158" width="88" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="562" y="158" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="606" y="112" width="128" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="670" y="138" text-anchor="middle" style="fill:var(--teal);font-size:11px">缓存=只读复用</text>
+    <text x="670" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">新 token=1 行</text>
+    <text x="404" y="244" style="fill:var(--teal);font-size:12px">每步只算 1 个新 token：O(1) 计算 + 复用缓存</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 有缓存 vs 无缓存</b> — 左：无缓存，每个 decode 步都把全部历史重算一遍（不断变大的三角形，累计 O(t²)）；右：有 KV 缓存，每步只算新 token 的 K/V，历史只读复用。</div>
+</div>
+
 <p>一句话：<strong>历史 token 的 K/V 是"只读"的</strong>，算一次就能反复用。把它们缓存起来，把每步的计算从"重算整段"
 压成"只算新词对历史的注意力"——这就是 KV 缓存。给个体感：续写一段 1000 token 的回答，无缓存要做约百万量级的"整段重算"，
 有缓存则降到千量级的"增量"，<strong>差出三个数量级</strong>。所以 KV 缓存不是可选优化，而是让长文本生成<strong>从不可用到可用</strong>的分水岭。</p>
@@ -454,6 +486,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     ):</pre>
 </div>
 
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">KV 的物理存储：逐层的 K/V 缓冲，按 token 槽位索引</span></div>
+  <pre><span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="cm"># KV 的物理存储：逐层的 K 和 V 缓冲，按 token 槽位索引</span>
+    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+        <span class="cm"># size = 能容纳的最大 token 数；为每一层分配 k_buffer/v_buffer</span>
+        ...
+    <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):
+        ...   <span class="cm"># 把这个 token 的 K/V 写到槽位 `loc`</span>
+    <span class="kw">def</span> get_kv_buffer(self, layer):
+        ...   <span class="cm"># 读回 K/V 供注意力内核使用</span></pre>
+</div>
+
 <p>从这个构造函数就能读出缓存大小的"账本"：<strong>每个 token</strong> 占用的字节 ≈
 <span class="mono">2(K和V) × layer_num × head_num × head_dim × dtype 字节数</span>。注意它<strong>不随模型参数量直接走</strong>，
 而是随<strong>上下文长度</strong>线性增长——上下文越长、并发越多，缓存吃的显存越多。</p>
@@ -463,6 +508,31 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="cells"><span class="lab">每 token</span><span class="cell">2</span><span class="sep">×</span><span class="cell">32 层</span><span class="sep">×</span><span class="cell">8 头</span><span class="sep">×</span><span class="cell">128</span><span class="sep">×</span><span class="cell">2B</span><span class="sep">=</span><span class="cell hl">≈128 KB</span></div>
   <div class="cells"><span class="lab">2048 token</span><span class="cell">128 KB</span><span class="sep">×</span><span class="cell">2048</span><span class="sep">=</span><span class="cell hl">≈256 MB（一条请求！）</span></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="折线图：KV 缓存随序列长度线性增长，横轴为 token 数、纵轴为 KV 显存（MB）；示意 Llama-7B 每 token 的 KV 约 0.5 MB，2048 token 约 1 GB 每请求">
+    <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV 显存（MB）</text>
+    <text x="640" y="270" style="fill:var(--muted);font-size:12px">序列长度（token）</text>
+    <text x="90" y="250" text-anchor="end" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="90" y="150" text-anchor="end" style="fill:var(--faint);font-size:11px">512</text>
+    <text x="90" y="64" text-anchor="end" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="96" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="404" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="668" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">2048</text>
+    <line x1="96" y1="246" x2="668" y2="60" style="stroke:var(--accent);stroke-width:2.5"/>
+    <line x1="668" y1="60" x2="668" y2="246" style="stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4"/>
+    <circle cx="668" cy="60" r="5" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1.5"/>
+    <rect x="356" y="80" width="336" height="54" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-7B：每 token KV ≈ 0.5 MB</text>
+    <text x="524" y="123" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">2048 token ≈ 1 GB / 请求（示意）</text>
+    <text x="150" y="206" style="fill:var(--muted);font-size:12px">线性增长：上下文翻倍 → 显存翻倍</text>
+  </svg>
+  <div class="figcap"><b>图 2 · KV 缓存随 token 线性增长</b> — 横轴是序列长度、纵轴是 KV 显存；缓存随上下文成正比上升（数字为示意：Llama-7B 每 token 的 KV 约 0.5 MB，2048 token 约 1 GB/请求）。</div>
+</div>
+
+<p>给个更具体的数：一条 <strong>2048 token</strong> 的请求按上面账本约占 <strong>256 MB</strong> KV 缓存；<strong>100 条并发</strong>就是约 <strong>25 GB</strong>——一张 80 GB 显卡近三分之一的显存，全压在 KV 上。</p>
 
 <p>几百条并发请求，光是 KV 缓存就能吃掉几十上百 GB 显存。<strong>这就是为什么"省显存"是推理引擎的头等大事</strong>——
 后面的分页、前缀复用、量化、KV 缓存量化，全是在和这本"账"较劲。</p>
@@ -619,6 +689,38 @@ to decide "whom to attend to", then sums their <span class="mono">V</span>.</p>
   just <span class="mono">O(t)</span>, dropping all the repeated work.</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Contrast: without a cache every decode step recomputes all past tokens (an ever-growing triangle), while with a KV cache each step computes only the new token's K/V and reuses the cached history">
+    <line x1="380" y1="28" x2="380" y2="276" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="44" style="font-weight:700;fill:var(--red)">❌ No cache: recompute all history each step</text>
+    <polygon points="96,70 96,210 232,210" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="94" style="fill:var(--muted);font-size:12px">step①</text>
+    <rect x="96" y="78" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="134" style="fill:var(--muted);font-size:12px">step②</text>
+    <rect x="96" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="174" style="fill:var(--muted);font-size:12px">step③</text>
+    <rect x="96" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="160" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="244" style="fill:var(--red);font-size:12px">recompute ∝ t: O(t) per step, O(t²) total</text>
+    <text x="404" y="44" style="font-weight:700;fill:var(--teal)">✅ KV cache: compute new token, reuse history</text>
+    <text x="404" y="94" style="fill:var(--muted);font-size:12px">step①</text>
+    <rect x="470" y="78" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="134" style="fill:var(--muted);font-size:12px">step②</text>
+    <rect x="470" y="118" width="44" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="518" y="118" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="174" style="fill:var(--muted);font-size:12px">step③</text>
+    <rect x="470" y="158" width="88" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="562" y="158" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="606" y="112" width="128" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="670" y="138" text-anchor="middle" style="fill:var(--teal);font-size:11px">cache=read-only</text>
+    <text x="670" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">new token=1 row</text>
+    <text x="404" y="244" style="fill:var(--teal);font-size:12px">only 1 new token per step: O(1) compute + reuse</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · With-cache vs no-cache</b> — Left: no cache, every decode step recomputes all history (an ever-growing triangle, O(t²) total); right: with a KV cache, each step computes only the new token's K/V and reuses read-only history.</div>
+</div>
+
 <p>In one line: <strong>historical K/V are "read-only"</strong>, computed once and reused. Caching them squeezes each step
 from "recompute the whole sequence" to "just the new word's attention over history" — that is the KV cache.</p>
 
@@ -675,6 +777,19 @@ out two big buffers for K and V sized by "<strong>how many tokens × layers × K
     ):</pre>
 </div>
 
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">the physical KV store: per-layer K/V buffers indexed by token slot</span></div>
+  <pre><span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="cm"># the physical KV store: per-layer K and V buffers, indexed by token slot</span>
+    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+        <span class="cm"># size = max tokens that fit; allocate k_buffer/v_buffer for each layer</span>
+        ...
+    <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):
+        ...   <span class="cm"># write this token's K/V at slot `loc`</span>
+    <span class="kw">def</span> get_kv_buffer(self, layer):
+        ...   <span class="cm"># read K/V back for the attention kernel</span></pre>
+</div>
+
 <p>The constructor reveals the cache's "ledger": <strong>per token</strong> the bytes ≈
 <span class="mono">2(K and V) × layer_num × head_num × head_dim × dtype-bytes</span>. Note it <strong>doesn't scale directly with
 parameter count</strong> but with <strong>context length</strong> — longer context and more concurrency mean more cache HBM.</p>
@@ -684,6 +799,31 @@ parameter count</strong> but with <strong>context length</strong> — longer con
   <div class="cells"><span class="lab">per token</span><span class="cell">2</span><span class="sep">×</span><span class="cell">32 L</span><span class="sep">×</span><span class="cell">8 H</span><span class="sep">×</span><span class="cell">128</span><span class="sep">×</span><span class="cell">2B</span><span class="sep">=</span><span class="cell hl">≈128 KB</span></div>
   <div class="cells"><span class="lab">2048 tok</span><span class="cell">128 KB</span><span class="sep">×</span><span class="cell">2048</span><span class="sep">=</span><span class="cell hl">≈256 MB (one request!)</span></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Line chart: KV cache grows linearly with sequence length; x-axis is token count, y-axis is KV memory (MB); illustrative Llama-7B with about 0.5 MB of KV per token, so 2048 tokens is about 1 GB per request">
+    <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV memory (MB)</text>
+    <text x="624" y="270" style="fill:var(--muted);font-size:12px">sequence length (tokens)</text>
+    <text x="90" y="250" text-anchor="end" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="90" y="150" text-anchor="end" style="fill:var(--faint);font-size:11px">512</text>
+    <text x="90" y="64" text-anchor="end" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="96" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="404" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="668" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">2048</text>
+    <line x1="96" y1="246" x2="668" y2="60" style="stroke:var(--accent);stroke-width:2.5"/>
+    <line x1="668" y1="60" x2="668" y2="246" style="stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4"/>
+    <circle cx="668" cy="60" r="5" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1.5"/>
+    <rect x="356" y="80" width="336" height="54" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-7B: KV ≈ 0.5 MB / token</text>
+    <text x="524" y="123" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">2048 tokens ≈ 1 GB / request (illustrative)</text>
+    <text x="150" y="206" style="fill:var(--muted);font-size:12px">linear growth: double context → double memory</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · KV cache grows linearly with tokens</b> — x-axis is sequence length, y-axis is KV memory; the cache rises in proportion to context (numbers illustrative: Llama-7B, KV ≈ 0.5 MB per token, 2048 tokens ≈ 1 GB/request).</div>
+</div>
+
+<p>To make it concrete: one <strong>2048-token</strong> request takes about <strong>256 MB</strong> of KV cache by the ledger above; <strong>100 concurrent</strong> requests is roughly <strong>25 GB</strong> — nearly a third of an 80 GB GPU, all spent on KV.</p>
 
 <p>A few hundred concurrent requests and the KV cache alone eats tens to hundreds of GB. <strong>That is why "save HBM" is an
 inference engine's number-one job</strong> — paging, prefix reuse, quantization and KV-cache quantization all fight over this ledger.</p>

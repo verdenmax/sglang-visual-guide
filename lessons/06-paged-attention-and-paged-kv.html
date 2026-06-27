@@ -397,6 +397,48 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <tr><td><strong>对并发的影响</strong></td><td>显存早早耗尽，<strong>并发被压低</strong></td><td class="mono">显存装得紧，<strong>并发显著提高</strong></td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="上半区是连续分配：变长请求 A、B、C 之间夹着无法利用的碎片空洞，一条需要 6 格的长请求虽然总空闲够、却没有一段连续空间而放不下；下半区是分页：KV 切成固定大小的页，那条长请求的 6 个页散落填进任意空槽，零浪费">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">连续分配：变长请求留下无法利用的空洞</text>
+    <rect x="24" y="42" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="48" width="120" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="90" y="69" text-anchor="middle" class="mono" style="font-size:11px">req A</text>
+    <rect x="154" y="48" width="64" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="186" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">碎片</text>
+    <rect x="222" y="48" width="96" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="69" text-anchor="middle" class="mono" style="font-size:11px">req B</text>
+    <rect x="322" y="48" width="80" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="362" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">碎片</text>
+    <rect x="406" y="48" width="72" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="69" text-anchor="middle" class="mono" style="font-size:11px">req C</text>
+    <rect x="482" y="48" width="96" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="530" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">碎片</text>
+    <rect x="582" y="48" width="168" height="32" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="666" y="68" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲</text>
+    <text x="24" y="106" style="fill:var(--red);font-size:12px;font-weight:700">长请求需 6 格：总空闲够，却没有一段连续 → 放不下</text>
+    <line x1="24" y1="120" x2="756" y2="120" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="24" y="148" style="font-weight:700;fill:var(--accent-ink)">分页：KV 切成固定大小的页，填进任意空槽 → 零浪费</text>
+    <rect x="24" y="164" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="90" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="150" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="210" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="330" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="390" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="450" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="510" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="630" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">长请求的 6 个红页散落各处、全部填满——物理页无需相邻</text>
+  </svg>
+</div>
+
+<p>用一个具体口径感受这种差别：取 <span class="mono">page_size = 16</span> token/页，一条只生成 60 token 的请求只需 <span class="mono">⌈60/16⌉ = 4</span> 页（64 槽），
+末页仅浪费 4 个槽，<strong>内部碎片不到 7%</strong>；而连续预留按 2048 上限算，<strong>同一条请求浪费约 97%</strong>。把碎片率从近 50%（典型连续预留场景）压到 <strong>5% 以下</strong>，
+正是分页能把并发翻十几倍的来源。</p>
+
 <h2>分页的核心：固定页 + 页表</h2>
 <p>PagedAttention 的思路只有两件东西：<strong>固定大小的页</strong>，和<strong>一张把逻辑映射到物理的页表</strong>。
 把一条请求的 KV 序列想成一条<strong>逻辑上连续的 token 流</strong>，但底层把它切成每 <span class="mono">page_size</span> 个 token 一页，
@@ -419,6 +461,44 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="cells"><span class="lab">逻辑页 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">物理块 #2</span></div>
   <div class="cells"><span class="lab">逻辑页 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">物理块 #9</span></div>
   <div class="cells"><span class="lab">逻辑页 3</span><span class="cell">tok 48–…（生成中）</span><span class="sep">→</span><span class="cell q">满页时再领一个空闲块</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="页表把逻辑位置映射到分散的物理页：左边是一条请求逻辑上连续的 token 位置 0、1、2、3，中间是页表把逻辑页 0、1 映射到物理块号 #7、#2，右边是散落各处、互不相邻的物理页；箭头显示逻辑页 0 指向较低处的 #7、逻辑页 1 指向较高处的 #2">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">逻辑 token 位置（连续）</text>
+    <rect x="24" y="40" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="60" text-anchor="middle" class="mono" style="font-size:11px">pos 0</text>
+    <rect x="24" y="74" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="94" text-anchor="middle" class="mono" style="font-size:11px">pos 1</text>
+    <rect x="24" y="108" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="128" text-anchor="middle" class="mono" style="font-size:11px">pos 2</text>
+    <rect x="24" y="142" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="162" text-anchor="middle" class="mono" style="font-size:11px">pos 3</text>
+    <text x="24" y="196" style="font-size:11px;fill:var(--faint)">page_size = 2：pos 0–1 → 逻辑页 0，pos 2–3 → 逻辑页 1</text>
+    <text x="312" y="26" style="font-weight:700;fill:var(--accent-ink)">页表 page table</text>
+    <rect x="312" y="40" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="65" text-anchor="middle" class="mono" style="font-size:11px">逻辑页 0 → #7</text>
+    <rect x="312" y="92" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="117" text-anchor="middle" class="mono" style="font-size:11px">逻辑页 1 → #2</text>
+    <text x="600" y="26" style="font-weight:700;fill:var(--muted)">物理页（分散）</text>
+    <rect x="600" y="40" width="150" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="675" y="60" text-anchor="middle" class="mono" style="font-size:11px">phys #2</text>
+    <rect x="600" y="78" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="98" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲 #4</text>
+    <rect x="600" y="116" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="136" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲 #5</text>
+    <rect x="600" y="154" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" class="mono" style="font-size:11px">phys #7</text>
+    <rect x="600" y="192" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="212" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲 #9</text>
+    <path d="M 174 55 C 240 55, 250 60, 312 60" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 174 125 C 240 125, 250 112, 312 112" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 502 60 C 555 60, 545 169, 600 169" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <polygon points="600,169 586,162 586,176" style="fill:var(--blue)"/>
+    <path d="M 502 112 C 555 112, 545 55, 600 55" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
+    <text x="312" y="200" style="font-size:11px;fill:var(--muted)">逻辑连续 · 物理分散 · 页表牵线</text>
+  </svg>
 </div>
 
 <p>这里有个常被忽略的取舍：<strong>page_size 不是越小越好</strong>。页越小，内部浪费越少（最多浪费小半页），但页表更长、查表与算子里的间接寻址开销更大；
@@ -456,6 +536,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         <span class="cm"># 请求结束：把它占用的页号去重后整批还回空闲池</span>
         free_page_indices = torch.unique(free_index // self.page_size)
         self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">请求 → 它的 token 槽位（索引层）</span></div>
+  <pre><span class="kw">class</span> <span class="st">ReqToTokenPool</span>:
+    <span class="cm"># 把每条请求映射到承载其 KV 的 token 槽位（索引层）</span>
+    <span class="kw">def</span> __init__(self, size, max_context_len, ...):
+        <span class="cm"># req_to_token[req][pos] -&gt; 该 token 的物理 KV 槽位</span>
+        self.req_to_token = ...   <span class="cm"># 形状 [size, max_context_len]</span>
+    <span class="kw">def</span> alloc(self, need_size):
+        ...   <span class="cm"># 为一条新请求预留若干槽位</span>
+    <span class="kw">def</span> free(self, req_index):
+        ...   <span class="cm"># 请求结束后把它的槽位整批还回池中</span></pre>
 </div>
 
 <p>读懂这段就抓住了分页的精髓：<strong>显存不再按"请求"整片预留，而是按"页"零售。</strong>
@@ -603,6 +696,49 @@ down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the
   <tr><td><strong>Effect on concurrency</strong></td><td>HBM runs out early, <strong>concurrency capped</strong></td><td class="mono">HBM packs tight, <strong>concurrency rises notably</strong></td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="Top half is contiguous allocation: variable-length requests A, B, C leave unusable fragmentation holes between them; a long request needing 6 cells has enough total free space but no contiguous run, so it doesn't fit. Bottom half is paging: KV is cut into fixed-size pages, and the long request's 6 pages fill any free slot, scattered, with zero waste">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">Contiguous allocation: variable-length requests leave unusable holes</text>
+    <rect x="24" y="42" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="48" width="120" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="90" y="69" text-anchor="middle" class="mono" style="font-size:11px">req A</text>
+    <rect x="154" y="48" width="64" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="186" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">waste</text>
+    <rect x="222" y="48" width="96" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="69" text-anchor="middle" class="mono" style="font-size:11px">req B</text>
+    <rect x="322" y="48" width="80" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="362" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">waste</text>
+    <rect x="406" y="48" width="72" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="69" text-anchor="middle" class="mono" style="font-size:11px">req C</text>
+    <rect x="482" y="48" width="96" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="530" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">waste</text>
+    <rect x="582" y="48" width="168" height="32" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="666" y="68" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free</text>
+    <text x="24" y="106" style="fill:var(--red);font-size:12px;font-weight:700">Long request needs 6 cells: total free is enough, but no contiguous run → won't fit</text>
+    <line x1="24" y1="120" x2="756" y2="120" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="24" y="148" style="font-weight:700;fill:var(--accent-ink)">Paging: KV cut into fixed-size pages, fill any free slot → zero waste</text>
+    <rect x="24" y="164" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="90" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="150" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="210" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="330" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="390" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="450" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="510" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="630" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">The long request's 6 red pages scatter everywhere and all fit — physical pages need not be adjacent</text>
+  </svg>
+</div>
+
+<p>A concrete sense of the gap: take <span class="mono">page_size = 16</span> tokens/page. A request that generates only 60 tokens needs just
+<span class="mono">⌈60/16⌉ = 4</span> pages (64 slots), wasting only 4 slots on the last page — <strong>under 7% internal fragmentation</strong>; contiguous
+reservation against a 2048 cap <strong>wastes ~97% for the same request</strong>. Cutting the fragmentation rate from nearly 50% (a typical contiguous
+case) down to <strong>under 5%</strong> is exactly where paging's order-of-magnitude concurrency gain comes from.</p>
+
 <h2>The core of paging: fixed pages + a page table</h2>
 <p>PagedAttention needs just two things: <strong>fixed-size pages</strong> and <strong>a page table mapping logical to physical</strong>. Think of a request's
 KV as a <strong>logically contiguous token stream</strong>, but underneath it's sliced into pages of <span class="mono">page_size</span> tokens each, with
@@ -627,6 +763,44 @@ physically scattered, page-table-linked":</p>
   <div class="cells"><span class="lab">logical page 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">phys block #2</span></div>
   <div class="cells"><span class="lab">logical page 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">phys block #9</span></div>
   <div class="cells"><span class="lab">logical page 3</span><span class="cell">tok 48–… (generating)</span><span class="sep">→</span><span class="cell q">grab a free block when the page fills</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="The page table maps logical positions to scattered physical pages: on the left a request's logically contiguous token positions 0, 1, 2, 3; in the middle a page table mapping logical pages 0 and 1 to physical block ids #7 and #2; on the right physical pages scattered around, non-adjacent; arrows show logical page 0 pointing down to #7 and logical page 1 pointing up to #2">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">Logical token positions (contiguous)</text>
+    <rect x="24" y="40" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="60" text-anchor="middle" class="mono" style="font-size:11px">pos 0</text>
+    <rect x="24" y="74" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="94" text-anchor="middle" class="mono" style="font-size:11px">pos 1</text>
+    <rect x="24" y="108" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="128" text-anchor="middle" class="mono" style="font-size:11px">pos 2</text>
+    <rect x="24" y="142" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="162" text-anchor="middle" class="mono" style="font-size:11px">pos 3</text>
+    <text x="24" y="196" style="font-size:11px;fill:var(--faint)">page_size = 2: pos 0–1 → logical page 0, pos 2–3 → logical page 1</text>
+    <text x="312" y="26" style="font-weight:700;fill:var(--accent-ink)">page table</text>
+    <rect x="312" y="40" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="65" text-anchor="middle" class="mono" style="font-size:11px">logical page 0 → #7</text>
+    <rect x="312" y="92" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="117" text-anchor="middle" class="mono" style="font-size:11px">logical page 1 → #2</text>
+    <text x="600" y="26" style="font-weight:700;fill:var(--muted)">Physical pages (scattered)</text>
+    <rect x="600" y="40" width="150" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="675" y="60" text-anchor="middle" class="mono" style="font-size:11px">phys #2</text>
+    <rect x="600" y="78" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="98" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free #4</text>
+    <rect x="600" y="116" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="136" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free #5</text>
+    <rect x="600" y="154" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" class="mono" style="font-size:11px">phys #7</text>
+    <rect x="600" y="192" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="212" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free #9</text>
+    <path d="M 174 55 C 240 55, 250 60, 312 60" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 174 125 C 240 125, 250 112, 312 112" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 502 60 C 555 60, 545 169, 600 169" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <polygon points="600,169 586,162 586,176" style="fill:var(--blue)"/>
+    <path d="M 502 112 C 555 112, 545 55, 600 55" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
+    <text x="312" y="200" style="font-size:11px;fill:var(--muted)">logically contiguous · physically scattered · linked by the table</text>
+  </svg>
 </div>
 
 <p>One often-missed tradeoff: <strong>smaller page_size is not always better</strong>. Smaller pages waste less internally (at most a fraction of a page), but the
@@ -659,6 +833,19 @@ in-code incarnation of that "page table." Below is the allocator's skeleton: <st
         <span class="cm"># on finish: dedup the page ids it held and return them in one batch</span>
         free_page_indices = torch.unique(free_index // self.page_size)
         self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">maps each request to its token slots (the index layer)</span></div>
+  <pre><span class="kw">class</span> <span class="st">ReqToTokenPool</span>:
+    <span class="cm"># maps each request -&gt; the token slots that hold its KV (the index layer)</span>
+    <span class="kw">def</span> __init__(self, size, max_context_len, ...):
+        <span class="cm"># req_to_token[req][pos] -&gt; the physical KV slot for that token</span>
+        self.req_to_token = ...   <span class="cm"># shape [size, max_context_len]</span>
+    <span class="kw">def</span> alloc(self, need_size):
+        ...   <span class="cm"># reserve slots for a new request</span>
+    <span class="kw">def</span> free(self, req_index):
+        ...   <span class="cm"># release a finished request's slots back to the pool</span></pre>
 </div>
 
 <p>Read this and you grasp the essence of paging: <strong>HBM is no longer reserved wholesale per "request" but retailed per "page."</strong>

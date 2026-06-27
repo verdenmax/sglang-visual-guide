@@ -392,6 +392,61 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 所以静态批处理在生产环境里几乎不可接受。理解了这个痛点，你就明白连续批处理为什么是"刚需"，而不是锦上添花。</p>
 
 
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="静态批处理与连续批处理的 GPU 利用率时间线对比：静态批处理整批等最慢的请求、留下大片空转，连续批处理完成即离场、新请求立刻补满，GPU 持续满载">
+    <line x1="700" y1="34" x2="700" y2="308" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="700" y="324" text-anchor="middle" style="fill:var(--muted);font-size:11px">批结束</text>
+    <text x="8" y="26" style="font-weight:700;fill:var(--red)">静态批处理：整批等最慢的 R4 → 大量空转</text>
+    <text x="8" y="58" class="mono" style="font-size:11px;fill:var(--muted)">槽1</text>
+    <rect x="80" y="42" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="57" text-anchor="middle" class="mono" style="font-size:11px">R1 忙</text>
+    <rect x="250" y="42" width="450" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="475" y="57" text-anchor="middle" style="fill:var(--red);font-size:11px">空转</text>
+    <text x="8" y="88" class="mono" style="font-size:11px;fill:var(--muted)">槽2</text>
+    <rect x="80" y="72" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="87" text-anchor="middle" class="mono" style="font-size:11px">R2 忙</text>
+    <rect x="430" y="72" width="270" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="565" y="87" text-anchor="middle" style="fill:var(--red);font-size:11px">空转</text>
+    <text x="8" y="118" class="mono" style="font-size:11px;fill:var(--muted)">槽3</text>
+    <rect x="80" y="102" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="117" text-anchor="middle" class="mono" style="font-size:11px">R3 忙</text>
+    <rect x="170" y="102" width="530" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="435" y="117" text-anchor="middle" style="fill:var(--red);font-size:11px">空转</text>
+    <text x="8" y="148" class="mono" style="font-size:11px;fill:var(--muted)">槽4</text>
+    <rect x="80" y="132" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="147" text-anchor="middle" class="mono" style="font-size:11px">R4 忙</text>
+    <text x="8" y="184" style="font-weight:700;fill:var(--teal)">连续批处理：完成即离场，新请求立刻补满 → 持续满载</text>
+    <text x="8" y="212" class="mono" style="font-size:11px;fill:var(--muted)">槽1</text>
+    <rect x="80" y="196" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="211" text-anchor="middle" class="mono" style="font-size:11px">R1</text>
+    <rect x="250" y="196" width="230" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="365" y="211" text-anchor="middle" class="mono" style="font-size:11px">R5</text>
+    <rect x="480" y="196" width="220" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="590" y="211" text-anchor="middle" class="mono" style="font-size:11px">R7</text>
+    <text x="8" y="242" class="mono" style="font-size:11px;fill:var(--muted)">槽2</text>
+    <rect x="80" y="226" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="241" text-anchor="middle" class="mono" style="font-size:11px">R2</text>
+    <rect x="430" y="226" width="270" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="241" text-anchor="middle" class="mono" style="font-size:11px">R6</text>
+    <text x="8" y="272" class="mono" style="font-size:11px;fill:var(--muted)">槽3</text>
+    <rect x="80" y="256" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="271" text-anchor="middle" class="mono" style="font-size:11px">R3</text>
+    <rect x="170" y="256" width="270" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="305" y="271" text-anchor="middle" class="mono" style="font-size:11px">R8</text>
+    <rect x="440" y="256" width="260" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="570" y="271" text-anchor="middle" class="mono" style="font-size:11px">R9</text>
+    <text x="8" y="302" class="mono" style="font-size:11px;fill:var(--muted)">槽4</text>
+    <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
+  </svg>
+  <div class="figcap"><b>图 A · 静态 vs 连续批处理时间线</b> — 上：静态批处理里早早完成的请求只能占着槽位空转，整批被最慢的 R4 拖到底；下：连续批处理一旦有请求完成，新请求立刻补进同一槽位，时间线被填满，GPU 持续满载。</div>
+</div>
+
+<div class="card"><div class="tag">🔢 一个具体的例子</div>
+<p>设想一批 <strong>8 个槽位</strong>：其中 7 条请求各生成约 6 个 token 就结束，剩下 1 条要生成 500 个。静态批处理会让这 7 个早早完成的槽位
+<strong>空转约 494 步</strong>——绝大多数步里只有 1 / 8 的槽位在产出有效 token，等效利用率约 <strong>12%</strong>。连续批处理则在每一步把腾空的槽位
+立刻补满，把等效占用率拉到接近 <strong>100%</strong>。同一张 GPU，仅凭"组批方式"的改变，吞吐就能提升 <strong>约 4–8×</strong>。</p></div>
+
 <h2>连续批处理：每一步都重新组队</h2>
 <p>连续批处理的核心动作只有一句话：<strong>不要一次组好就不动了，而是在每一个 decode 步都把这一批重新拼一遍。</strong>
 把生成想成一个永不停歇的循环，调度器在循环的每一轮都做四件事——<strong>清退完成的、放进等待的、组成新一批、前向一步</strong>：</p>
@@ -418,6 +473,58 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="cells"><span class="lab">step t</span><span class="cell hl">R1</span><span class="cell hl">R2</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R2 吐出结束符 ✓</span></div>
   <div class="cells"><span class="lab">step t+1</span><span class="cell hl">R1</span><span class="cell">★R5</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R5 补入 R2 的空槽，立即开跑</span></div>
   <div class="cells"><span class="lab">step t+2</span><span class="cell hl">R1</span><span class="cell hl">R5</span><span class="cell hl">R3</span><span class="cell">★R6</span><span class="sep">→</span><span class="cell q">R4 完成 ✓，R6 立刻顶上</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 290" role="img" aria-label="一个 4 槽位批次在连续步上的网格：列是步、行是槽，请求随到随走——刚完成的槽位空出、新请求中途补入，运行中、新加入、刚完成用不同颜色区分">
+    <text x="160" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t</text>
+    <text x="320" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+1</text>
+    <text x="480" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+2</text>
+    <text x="640" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+3</text>
+    <text x="8" y="68" class="mono" style="font-size:11px;fill:var(--muted)">槽1</text>
+    <text x="8" y="114" class="mono" style="font-size:11px;fill:var(--muted)">槽2</text>
+    <text x="8" y="160" class="mono" style="font-size:11px;fill:var(--muted)">槽3</text>
+    <text x="8" y="206" class="mono" style="font-size:11px;fill:var(--muted)">槽4</text>
+    <rect x="90" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="90" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="90" y="136" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="160" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R3 ✓</text>
+    <rect x="90" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R4</text>
+    <rect x="250" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="250" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="250" y="136" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="320" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R5</text>
+    <rect x="250" y="182" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="320" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R4 ✓</text>
+    <rect x="410" y="44" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="480" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R1 ✓</text>
+    <rect x="410" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="410" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="410" y="182" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="480" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R6</text>
+    <rect x="570" y="44" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R7</text>
+    <rect x="570" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="570" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="570" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R6</text>
+    <rect x="90" y="244" width="16" height="12" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="112" y="254" style="font-size:11px;fill:var(--muted)">运行中</text>
+    <rect x="280" y="244" width="16" height="12" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="302" y="254" style="font-size:11px;fill:var(--muted)">新加入 ★</text>
+    <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="522" y="254" style="font-size:11px;fill:var(--muted)">刚完成 ✓</text>
+  </svg>
+  <div class="figcap"><b>图 B · 请求随到随走</b> — 列是相邻的调度步、行是 4 个批槽。蓝＝运行中，橙＝本步新加入（★），红＝本步刚完成（✓）。R3、R4、R1 先后完成腾出槽位，R5、R6、R7 中途补入——批次不靠整批排空，而是逐槽流动。</div>
 </div>
 
 <h2>为什么它能赢：回到"访存密集"</h2>
@@ -453,6 +560,22 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         self.running_batch = self.update_running_batch(self.running_batch)
         ret = self.running_batch <span class="kw">if not</span> self.running_batch.is_empty() <span class="kw">else</span> <span class="kw">None</span>
     <span class="kw">return</span> ret</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">调度器一次前向跑的批：请求随到随走</span></div>
+  <pre><span class="kw">class</span> ScheduleBatch:
+    <span class="cm"># 一次前向跑的批：请求随到随走、动态增减</span>
+    <span class="kw">def</span> init_new(reqs, ...):
+        ...   <span class="cm"># 从等待队列新建一个批</span>
+    <span class="kw">def</span> prepare_for_extend(self):
+        ...   <span class="cm"># 准备一次 PREFILL（新 prompt，并行计算）</span>
+    <span class="kw">def</span> prepare_for_decode(self):
+        ...   <span class="cm"># 准备一个 DECODE 步（每个在跑请求生成一个新 token）</span>
+    <span class="kw">def</span> filter_batch(self, ...):
+        ...   <span class="cm"># 丢掉已完成的请求，其余继续跑</span>
+    <span class="kw">def</span> merge_batch(self, other):
+        ...   <span class="cm"># 把新加入的请求并进在跑的批</span></pre>
 </div>
 
 <p>读懂这段就抓住了连续批处理的灵魂：<strong>批不是一个静态对象，而是每一步被重新计算出来的结果</strong>。
@@ -588,6 +711,62 @@ still doing real work.</p>
   <tr><td><strong>GPU utilization</strong></td><td>Idles late in the batch (padding waste)</td><td class="mono">Batch always full, <strong>stays saturated</strong></td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="GPU-utilization timeline comparing static vs continuous batching: static batching makes the whole batch wait on the slowest request leaving large idle gaps, while continuous batching backfills freed slots so the GPU stays full">
+    <line x1="700" y1="34" x2="700" y2="308" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="700" y="324" text-anchor="middle" style="fill:var(--muted);font-size:11px">batch ends</text>
+    <text x="8" y="26" style="font-weight:700;fill:var(--red)">Static batching: whole batch waits on slowest R4 → big idle gaps</text>
+    <text x="8" y="58" class="mono" style="font-size:11px;fill:var(--muted)">slot1</text>
+    <rect x="80" y="42" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="57" text-anchor="middle" class="mono" style="font-size:11px">R1 busy</text>
+    <rect x="250" y="42" width="450" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="475" y="57" text-anchor="middle" style="fill:var(--red);font-size:11px">idle</text>
+    <text x="8" y="88" class="mono" style="font-size:11px;fill:var(--muted)">slot2</text>
+    <rect x="80" y="72" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="87" text-anchor="middle" class="mono" style="font-size:11px">R2 busy</text>
+    <rect x="430" y="72" width="270" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="565" y="87" text-anchor="middle" style="fill:var(--red);font-size:11px">idle</text>
+    <text x="8" y="118" class="mono" style="font-size:11px;fill:var(--muted)">slot3</text>
+    <rect x="80" y="102" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="117" text-anchor="middle" class="mono" style="font-size:11px">R3 busy</text>
+    <rect x="170" y="102" width="530" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="435" y="117" text-anchor="middle" style="fill:var(--red);font-size:11px">idle</text>
+    <text x="8" y="148" class="mono" style="font-size:11px;fill:var(--muted)">slot4</text>
+    <rect x="80" y="132" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="147" text-anchor="middle" class="mono" style="font-size:11px">R4 busy</text>
+    <text x="8" y="184" style="font-weight:700;fill:var(--teal)">Continuous batching: finished leaves, newcomer backfills → stays full</text>
+    <text x="8" y="212" class="mono" style="font-size:11px;fill:var(--muted)">slot1</text>
+    <rect x="80" y="196" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="211" text-anchor="middle" class="mono" style="font-size:11px">R1</text>
+    <rect x="250" y="196" width="230" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="365" y="211" text-anchor="middle" class="mono" style="font-size:11px">R5</text>
+    <rect x="480" y="196" width="220" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="590" y="211" text-anchor="middle" class="mono" style="font-size:11px">R7</text>
+    <text x="8" y="242" class="mono" style="font-size:11px;fill:var(--muted)">slot2</text>
+    <rect x="80" y="226" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="241" text-anchor="middle" class="mono" style="font-size:11px">R2</text>
+    <rect x="430" y="226" width="270" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="241" text-anchor="middle" class="mono" style="font-size:11px">R6</text>
+    <text x="8" y="272" class="mono" style="font-size:11px;fill:var(--muted)">slot3</text>
+    <rect x="80" y="256" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="271" text-anchor="middle" class="mono" style="font-size:11px">R3</text>
+    <rect x="170" y="256" width="270" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="305" y="271" text-anchor="middle" class="mono" style="font-size:11px">R8</text>
+    <rect x="440" y="256" width="260" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="570" y="271" text-anchor="middle" class="mono" style="font-size:11px">R9</text>
+    <text x="8" y="302" class="mono" style="font-size:11px;fill:var(--muted)">slot4</text>
+    <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
+  </svg>
+  <div class="figcap"><b>Figure A · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
+</div>
+
+<div class="card"><div class="tag">🔢 A concrete example</div>
+<p>Picture a batch of <strong>8 slots</strong>: 7 requests each finish after about 6 tokens, while 1 needs 500. Static batching keeps those 7 early-finished slots
+<strong>idle for ~494 steps</strong> — in most steps only 1 of 8 slots produces a useful token, an effective utilization of about <strong>12%</strong>. Continuous batching
+backfills every freed slot on the spot, lifting effective occupancy toward <strong>100%</strong>. On the same GPU, purely by changing <em>how</em> it batches, throughput
+rises by <strong>~4–8×</strong>.</p></div>
+
 <h2>Continuous batching: re-form the batch every step</h2>
 <p>The core action is one sentence: <strong>don't form the batch once and freeze it — re-assemble the batch at every decode step.</strong>
 Think of generation as a never-ending loop; each round the scheduler does four things — <strong>evict the finished, admit the waiting,
@@ -611,6 +790,58 @@ consecutive steps: the finished (✓) are replaced by newcomers (★), so the ba
   <div class="cells"><span class="lab">step t</span><span class="cell hl">R1</span><span class="cell hl">R2</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R2 emits end token ✓</span></div>
   <div class="cells"><span class="lab">step t+1</span><span class="cell hl">R1</span><span class="cell">★R5</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R5 fills R2's slot, starts at once</span></div>
   <div class="cells"><span class="lab">step t+2</span><span class="cell hl">R1</span><span class="cell hl">R5</span><span class="cell hl">R3</span><span class="cell">★R6</span><span class="sep">→</span><span class="cell q">R4 finishes ✓, R6 steps in</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 290" role="img" aria-label="a grid of a 4-slot batch over consecutive steps: columns are steps, rows are slots, requests join and leave mid-stream as freed slots are backfilled, with running, newly-admitted and just-finished shown in different colors">
+    <text x="160" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t</text>
+    <text x="320" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+1</text>
+    <text x="480" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+2</text>
+    <text x="640" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+3</text>
+    <text x="8" y="68" class="mono" style="font-size:11px;fill:var(--muted)">slot1</text>
+    <text x="8" y="114" class="mono" style="font-size:11px;fill:var(--muted)">slot2</text>
+    <text x="8" y="160" class="mono" style="font-size:11px;fill:var(--muted)">slot3</text>
+    <text x="8" y="206" class="mono" style="font-size:11px;fill:var(--muted)">slot4</text>
+    <rect x="90" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="90" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="90" y="136" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="160" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R3 ✓</text>
+    <rect x="90" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R4</text>
+    <rect x="250" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="250" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="250" y="136" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="320" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R5</text>
+    <rect x="250" y="182" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="320" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R4 ✓</text>
+    <rect x="410" y="44" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="480" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R1 ✓</text>
+    <rect x="410" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="410" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="410" y="182" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="480" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R6</text>
+    <rect x="570" y="44" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R7</text>
+    <rect x="570" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="570" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="570" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R6</text>
+    <rect x="90" y="244" width="16" height="12" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="112" y="254" style="font-size:11px;fill:var(--muted)">running</text>
+    <rect x="280" y="244" width="16" height="12" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="302" y="254" style="font-size:11px;fill:var(--muted)">newly admitted ★</text>
+    <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="522" y="254" style="font-size:11px;fill:var(--muted)">just finished ✓</text>
+  </svg>
+  <div class="figcap"><b>Figure B · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
 </div>
 
 <h2>Why it wins: back to "memory-bound"</h2>
@@ -651,6 +882,22 @@ batch afresh each step" is exactly how continuous batching lands in code.</p>
         self.running_batch = self.update_running_batch(self.running_batch)
         ret = self.running_batch <span class="kw">if not</span> self.running_batch.is_empty() <span class="kw">else</span> <span class="kw">None</span>
     <span class="kw">return</span> ret</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">the batch the scheduler runs in one forward; requests join and leave</span></div>
+  <pre><span class="kw">class</span> ScheduleBatch:
+    <span class="cm"># the batch run in one forward; requests join and leave it over time</span>
+    <span class="kw">def</span> init_new(reqs, ...):
+        ...   <span class="cm"># build a fresh batch from waiting requests</span>
+    <span class="kw">def</span> prepare_for_extend(self):
+        ...   <span class="cm"># set up a PREFILL pass (new prompts, computed in parallel)</span>
+    <span class="kw">def</span> prepare_for_decode(self):
+        ...   <span class="cm"># set up a DECODE step (one new token per running request)</span>
+    <span class="kw">def</span> filter_batch(self, ...):
+        ...   <span class="cm"># drop finished requests, keep the rest running</span>
+    <span class="kw">def</span> merge_batch(self, other):
+        ...   <span class="cm"># fold newly-admitted requests into the running batch</span></pre>
 </div>
 
 <p>Read this and you grasp the soul of continuous batching: <strong>the batch is not a static object but a result recomputed every step</strong>.

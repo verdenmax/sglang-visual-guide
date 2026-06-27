@@ -391,6 +391,69 @@ ITL 怕的是<strong>批太大</strong>导致每一步算得太久。一个把 T
 只有那些<strong>既产出了 token、又没违反延迟承诺</strong>的请求，才算"真正交付"。一个常见的认知误区是只盯着 throughput 这一个数字去优化，
 结果把批拉得过大、TTFT/ITL 双双爆表，<strong>跑分很好看、用户却在抱怨卡顿</strong>——这正是 goodput 要替你纠偏的地方。</p>
 
+<p>把 TTFT 和 ITL/TPOT 放回<strong>一条请求的时间轴</strong>上，它俩的分工就一目了然：TTFT 是开头那一段的"等待"，TPOT 是后面每个字之间的"节奏"。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 280" role="img" aria-label="一条请求的时间轴：先是一个宽的 PREFILL 块，之后是许多细的 DECODE 刻度；TTFT 是从请求到达到吐出第一个 token 的时间（预填充结束），TPOT 是相邻两个解码 token 之间的间隔">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">TTFT vs TPOT（一条请求的时间轴）</text>
+    <line x1="72" y1="60" x2="228" y2="60" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="72" y1="54" x2="72" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="228" y1="54" x2="228" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <text x="150" y="48" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">TTFT = 首 token 延迟</text>
+    <rect x="72" y="84" width="156" height="80" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="150" y="120" text-anchor="middle" style="font-size:13px;font-weight:700">PREFILL</text>
+    <text x="150" y="140" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:11px">并行算整段提示</text>
+    <text x="468" y="96" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">DECODE · 逐 token（循环很多次）</text>
+    <rect x="240" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="300" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="330" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="360" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="390" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="420" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="450" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="480" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="510" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="540" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="600" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="630" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="660" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="690" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="72" y1="76" x2="72" y2="200" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="228" y1="76" x2="228" y2="200" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="252" y1="182" x2="270" y2="182" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="252" y1="176" x2="252" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="270" y1="176" x2="270" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <text x="261" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px;font-weight:700">TPOT</text>
+    <text x="430" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px">= 相邻两个解码 token 的间隔</text>
+    <line x1="40" y1="226" x2="720" y2="226" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M720 226 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="668" y="248" style="fill:var(--faint);font-size:11px">时间 →</text>
+    <text x="72" y="248" text-anchor="middle" style="fill:var(--faint);font-size:11px">请求到达</text>
+    <text x="228" y="266" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">首 token（预填充结束）</text>
+  </svg>
+  <div class="figcap"><b>图 1 · TTFT vs TPOT（一条请求的时间轴）</b> — 一条请求 = <strong>一个宽 PREFILL 块</strong> + 后面<strong>许多细 DECODE 刻度</strong>。<strong>TTFT</strong> 是从请求到达到吐出<strong>第一个</strong> token（预填充结束）的时间；<strong>TPOT</strong> 是<strong>相邻两个</strong>解码 token 之间的间隔。前者决定"等多久才开口"，后者决定"开口后吐字多快"。</div>
+</div>
+
+<p>举个具体的数字感受一下：一个配置良好的 7B 服务，单条请求的 <strong>TTFT≈80&nbsp;ms</strong>（按下回车到第一个字冒出来），<strong>TPOT≈15&nbsp;ms</strong>（之后每个字约 15 毫秒、约合 65&nbsp;token/s 的阅读速度）；而整机在大批并发下的<strong>总吞吐可达数千 token/s</strong>。注意这两组数字会随批大小一起漂移：把并发拉大，总吞吐升到几千，但单条的 TTFT/TPOT 也会跟着变大——这正是下一节那条曲线要刻画的取舍。</p>
+
+<p>这些数字怎么量出来？SGLang 自带的压测脚本会把一次跑测的结果汇总成一个数据类——<strong>吞吐</strong>三件套加上 <strong>TTFT/TPOT 的均值与分位数</strong>，p99 尤其重要，因为它代表<strong>负载下最慢那批用户</strong>的真实体验：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::BenchmarkMetrics</span><span class="ln">压测汇总：吞吐 + TTFT/TPOT 的分位数</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="fn">BenchmarkMetrics</span>:
+    request_throughput: <span class="kw">float</span>   <span class="cm"># requests / second</span>
+    input_throughput: <span class="kw">float</span>     <span class="cm"># input tokens / second</span>
+    output_throughput: <span class="kw">float</span>    <span class="cm"># output tokens / second (decode speed)</span>
+    mean_ttft_ms: <span class="kw">float</span>         <span class="cm"># Time To First Token = prefill latency</span>
+    p99_ttft_ms: <span class="kw">float</span>          <span class="cm"># the tail users feel under load</span>
+    mean_tpot_ms: <span class="kw">float</span>         <span class="cm"># Time Per Output Token = inter-token latency</span>
+    p99_tpot_ms: <span class="kw">float</span>
+    <span class="cm"># ... also median / p90 / p95 variants</span></pre>
+</div>
+
 <h2>核心张力：批大小这一个旋钮，两头不可兼得</h2>
 <p>所有的纠结都收敛到<strong>一个旋钮——批大小（同时在跑的请求数）</strong>上。把它从小往大拧，工作点就沿着曲线滑动，
 <strong>吞吐和延迟此消彼长</strong>，请看这条"操作点"的滑动：</p>
@@ -414,6 +477,31 @@ decode 步要为<strong>更多</strong>请求一起算，<strong>单步耗时变
 再加请求，吞吐几乎不再涨（GPU 已经满了），延迟却开始<strong>陡峭飙升</strong>（每条都要排更久）。聪明的工作点，恰恰就落在这个<strong>"拐点"附近</strong>——
 在它之前你在浪费 GPU，在它之后你在白白牺牲延迟。SGLang 的调度器和这些旋钮，本质上就是在帮你<strong>稳稳地停在拐点上、并随负载漂移而实时微调</strong>。
 理解了这一点，你就明白为什么"把并发开到最大"几乎总是错的——那只会把你推到曲线最右端，吞吐没多换来多少，延迟却已崩了。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="吞吐与延迟随批大小/并发变化的权衡曲线：吞吐先近似线性上涨、GPU 饱和后趋于平台；单请求延迟一路上升、过拐点后陡升；最佳工作点落在吞吐已高而延迟仍可接受的甜点区附近">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">吞吐 vs 延迟的权衡（横轴 = 批大小 / 并发）</text>
+    <text x="100" y="52" style="fill:var(--accent-ink);font-size:12px;font-weight:700">吞吐 tokens/s</text>
+    <text x="660" y="52" text-anchor="end" style="fill:var(--red);font-size:12px;font-weight:700">延迟 ms</text>
+    <rect x="396" y="56" width="70" height="192" rx="4" style="fill:var(--accent-soft)"/>
+    <line x1="431" y1="56" x2="431" y2="248" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="431" y="72" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">甜点区 / knee</text>
+    <line x1="92" y1="56" x2="92" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="672" y1="56" x2="672" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="92" y1="248" x2="700" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M700 248 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <path d="M92 236 C 180 200, 250 150, 320 122 C 400 100, 520 94, 672 90" style="fill:none;stroke:var(--accent);stroke-width:2.5"/>
+    <path d="M92 242 C 220 238, 360 224, 431 205 C 520 180, 600 120, 672 72" style="fill:none;stroke:var(--red);stroke-width:2.5"/>
+    <circle cx="431" cy="98" r="4.5" style="fill:var(--accent)"/>
+    <text x="168" y="150" style="fill:var(--accent);font-size:11px">近似线性上涨</text>
+    <text x="556" y="112" style="fill:var(--accent);font-size:11px">趋于平台</text>
+    <text x="560" y="158" style="fill:var(--red);font-size:11px">延迟陡升</text>
+    <text x="206" y="236" style="fill:var(--red);font-size:11px">延迟温和</text>
+    <text x="431" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">吞吐已高、延迟仍可接受</text>
+    <text x="384" y="304" text-anchor="middle" style="fill:var(--faint);font-size:11px">批大小 / 并发 →</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 吞吐–延迟权衡曲线</b> — 横轴是批大小/并发：<strong>吞吐</strong>（紫线）先近似线性上涨、GPU 饱和后趋于<strong>平台</strong>；<strong>单请求延迟</strong>（红线）一路上升、过拐点后<strong>陡升</strong>。最佳工作点落在<strong>甜点区（knee）</strong>——吞吐已经很高、延迟却还在 SLA 之内；拐点左侧在浪费 GPU，右侧在白白牺牲延迟。</div>
+</div>
 
 <h2>负载不同，平衡手段也不同</h2>
 <p>真实流量并不只有一种形状。<strong>prefill-heavy</strong>（长 prompt、短输出，如文档问答）和 <strong>decode-heavy</strong>（短 prompt、长输出，如长文生成）
@@ -588,6 +676,69 @@ poor ITL and throughput; one with sky-high throughput (gather, then send) may ha
 because it forces you to watch both ends: however high throughput is, if half the requests violate the latency SLA, that
 throughput is <strong>worthless to users</strong>. What you truly maximize is <strong>throughput under the SLA</strong>.</p>
 
+<p>Put TTFT and ITL/TPOT back on <strong>one request's timeline</strong> and their split is obvious: TTFT is the opening "wait", TPOT is the "rhythm" of every character after it.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 280" role="img" aria-label="One request's timeline: a wide PREFILL block then many thin DECODE ticks; TTFT is the time from request arrival to the first token emitted (end of prefill), TPOT is the gap between consecutive decode tokens">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">TTFT vs TPOT (one request's timeline)</text>
+    <line x1="72" y1="60" x2="228" y2="60" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="72" y1="54" x2="72" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="228" y1="54" x2="228" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <text x="150" y="48" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">TTFT = time to first token</text>
+    <rect x="72" y="84" width="156" height="80" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="150" y="120" text-anchor="middle" style="font-size:13px;font-weight:700">PREFILL</text>
+    <text x="150" y="140" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:11px">whole prompt in parallel</text>
+    <text x="468" y="96" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">DECODE · per token (loops many times)</text>
+    <rect x="240" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="300" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="330" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="360" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="390" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="420" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="450" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="480" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="510" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="540" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="600" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="630" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="660" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="690" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="72" y1="76" x2="72" y2="200" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="228" y1="76" x2="228" y2="200" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="252" y1="182" x2="270" y2="182" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="252" y1="176" x2="252" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="270" y1="176" x2="270" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <text x="261" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px;font-weight:700">TPOT</text>
+    <text x="430" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px">= gap between consecutive decode tokens</text>
+    <line x1="40" y1="226" x2="720" y2="226" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M720 226 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="668" y="248" style="fill:var(--faint);font-size:11px">time →</text>
+    <text x="72" y="248" text-anchor="middle" style="fill:var(--faint);font-size:11px">request arrives</text>
+    <text x="228" y="266" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">first token (prefill ends)</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · TTFT vs TPOT (one request's timeline)</b> — one request = <strong>one wide PREFILL block</strong> + many <strong>thin DECODE ticks</strong>. <strong>TTFT</strong> is the time from arrival to the <strong>first</strong> token emitted (end of prefill); <strong>TPOT</strong> is the gap between <strong>consecutive</strong> decode tokens. The first decides "how long until it speaks", the second "how fast it types after".</div>
+</div>
+
+<p>Some concrete numbers: on a well-tuned 7B service one request sees <strong>TTFT≈80&nbsp;ms</strong> (enter to first token) and <strong>TPOT≈15&nbsp;ms</strong> (~15 ms per token after, ~65&nbsp;tokens/s reading speed), while the whole box under heavy concurrency reaches <strong>several thousand tokens/s total throughput</strong>. Both per-request numbers drift with batch size: crank concurrency and total throughput climbs into the thousands, but each request's TTFT/TPOT grows too — exactly the trade-off the next section's curve captures.</p>
+
+<p>How are these measured? SGLang's bundled benchmark script rolls one run up into a dataclass — the three <strong>throughput</strong> figures plus the <strong>mean and percentiles of TTFT/TPOT</strong>; p99 matters most, since it is the real experience of the <strong>slowest users under load</strong>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::BenchmarkMetrics</span><span class="ln">the benchmark summary: throughput + TTFT/TPOT percentiles</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="fn">BenchmarkMetrics</span>:
+    request_throughput: <span class="kw">float</span>   <span class="cm"># requests / second</span>
+    input_throughput: <span class="kw">float</span>     <span class="cm"># input tokens / second</span>
+    output_throughput: <span class="kw">float</span>    <span class="cm"># output tokens / second (decode speed)</span>
+    mean_ttft_ms: <span class="kw">float</span>         <span class="cm"># Time To First Token = prefill latency</span>
+    p99_ttft_ms: <span class="kw">float</span>          <span class="cm"># the tail users feel under load</span>
+    mean_tpot_ms: <span class="kw">float</span>         <span class="cm"># Time Per Output Token = inter-token latency</span>
+    p99_tpot_ms: <span class="kw">float</span>
+    <span class="cm"># ... also median / p90 / p95 variants</span></pre>
+</div>
+
 <h2>The core tension: one knob, batch size, can't win both ends</h2>
 <p>All the agonizing converges onto <strong>one knob — batch size (requests running concurrently)</strong>. Turn it from small
 to large and the operating point slides along the curve, <strong>throughput and latency trading off</strong>:</p>
@@ -607,6 +758,31 @@ Because one decode step now computes for <strong>more</strong> requests, so the 
 and a new request waits behind <strong>more work</strong> before its turn (<strong>TTFT lengthens</strong>). That's the balance —
 <strong>the same move that feeds throughput slows each request</strong>. So there is no universal "optimal batch size",
 <strong>only the optimal operating point for your SLA</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="Throughput and latency vs batch size/concurrency trade-off curve: throughput rises near-linearly then plateaus once the GPU saturates; per-request latency keeps climbing and spikes after the knee; the best operating point sits near the sweet spot where throughput is already high but latency is still acceptable">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Throughput vs latency (x = batch size / concurrency)</text>
+    <text x="100" y="52" style="fill:var(--accent-ink);font-size:12px;font-weight:700">throughput tokens/s</text>
+    <text x="660" y="52" text-anchor="end" style="fill:var(--red);font-size:12px;font-weight:700">latency ms</text>
+    <rect x="396" y="56" width="70" height="192" rx="4" style="fill:var(--accent-soft)"/>
+    <line x1="431" y1="56" x2="431" y2="248" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="431" y="72" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">sweet spot / knee</text>
+    <line x1="92" y1="56" x2="92" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="672" y1="56" x2="672" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="92" y1="248" x2="700" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M700 248 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <path d="M92 236 C 180 200, 250 150, 320 122 C 400 100, 520 94, 672 90" style="fill:none;stroke:var(--accent);stroke-width:2.5"/>
+    <path d="M92 242 C 220 238, 360 224, 431 205 C 520 180, 600 120, 672 72" style="fill:none;stroke:var(--red);stroke-width:2.5"/>
+    <circle cx="431" cy="98" r="4.5" style="fill:var(--accent)"/>
+    <text x="168" y="150" style="fill:var(--accent);font-size:11px">near-linear rise</text>
+    <text x="560" y="112" style="fill:var(--accent);font-size:11px">plateaus</text>
+    <text x="566" y="158" style="fill:var(--red);font-size:11px">latency spikes</text>
+    <text x="204" y="236" style="fill:var(--red);font-size:11px">gentle</text>
+    <text x="431" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">high tput, latency still OK</text>
+    <text x="384" y="304" text-anchor="middle" style="fill:var(--faint);font-size:11px">batch size / concurrency →</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · The throughput-latency trade-off curve</b> — x is batch size/concurrency: <strong>throughput</strong> (purple) rises near-linearly then <strong>plateaus</strong> once the GPU saturates; <strong>per-request latency</strong> (red) keeps climbing and <strong>spikes</strong> past the knee. The best operating point sits at the <strong>sweet spot (knee)</strong> — throughput already high, latency still within the SLA; left of the knee you waste GPU, right of it you waste latency.</div>
+</div>
 
 <h2>Different loads, different balancing tools</h2>
 <p>Real traffic isn't one shape. <strong>Prefill-heavy</strong> (long prompt, short output, e.g. doc QA) and <strong>decode-heavy</strong>

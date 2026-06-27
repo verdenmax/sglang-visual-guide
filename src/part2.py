@@ -69,6 +69,38 @@ LESSON_04 = {
   <span class="mono">O(t)</span>，省掉了所有重复计算。</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="对比：无缓存时每个解码步都要重算全部历史 token（不断变大的三角形），有 KV 缓存时每步只算新 token 的 K/V 并复用缓存中的历史">
+    <line x1="380" y1="28" x2="380" y2="276" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="44" style="font-weight:700;fill:var(--red)">❌ 无缓存：每步重算全部历史</text>
+    <polygon points="96,70 96,210 232,210" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="94" style="fill:var(--muted);font-size:12px">步①</text>
+    <rect x="96" y="78" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="134" style="fill:var(--muted);font-size:12px">步②</text>
+    <rect x="96" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="174" style="fill:var(--muted);font-size:12px">步③</text>
+    <rect x="96" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="160" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="244" style="fill:var(--red);font-size:12px">重算量 ∝ t：每步 O(t)，累计 O(t²)</text>
+    <text x="404" y="44" style="font-weight:700;fill:var(--teal)">✅ 有 KV 缓存：只算新 token，复用历史</text>
+    <text x="404" y="94" style="fill:var(--muted);font-size:12px">步①</text>
+    <rect x="470" y="78" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="134" style="fill:var(--muted);font-size:12px">步②</text>
+    <rect x="470" y="118" width="44" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="518" y="118" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="174" style="fill:var(--muted);font-size:12px">步③</text>
+    <rect x="470" y="158" width="88" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="562" y="158" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="606" y="112" width="128" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="670" y="138" text-anchor="middle" style="fill:var(--teal);font-size:11px">缓存=只读复用</text>
+    <text x="670" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">新 token=1 行</text>
+    <text x="404" y="244" style="fill:var(--teal);font-size:12px">每步只算 1 个新 token：O(1) 计算 + 复用缓存</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 有缓存 vs 无缓存</b> — 左：无缓存，每个 decode 步都把全部历史重算一遍（不断变大的三角形，累计 O(t²)）；右：有 KV 缓存，每步只算新 token 的 K/V，历史只读复用。</div>
+</div>
+
 <p>一句话：<strong>历史 token 的 K/V 是"只读"的</strong>，算一次就能反复用。把它们缓存起来，把每步的计算从"重算整段"
 压成"只算新词对历史的注意力"——这就是 KV 缓存。给个体感：续写一段 1000 token 的回答，无缓存要做约百万量级的"整段重算"，
 有缓存则降到千量级的"增量"，<strong>差出三个数量级</strong>。所以 KV 缓存不是可选优化，而是让长文本生成<strong>从不可用到可用</strong>的分水岭。</p>
@@ -123,6 +155,19 @@ LESSON_04 = {
     ):</pre>
 </div>
 
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">KV 的物理存储：逐层的 K/V 缓冲，按 token 槽位索引</span></div>
+  <pre><span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="cm"># KV 的物理存储：逐层的 K 和 V 缓冲，按 token 槽位索引</span>
+    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+        <span class="cm"># size = 能容纳的最大 token 数；为每一层分配 k_buffer/v_buffer</span>
+        ...
+    <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):
+        ...   <span class="cm"># 把这个 token 的 K/V 写到槽位 `loc`</span>
+    <span class="kw">def</span> get_kv_buffer(self, layer):
+        ...   <span class="cm"># 读回 K/V 供注意力内核使用</span></pre>
+</div>
+
 <p>从这个构造函数就能读出缓存大小的"账本"：<strong>每个 token</strong> 占用的字节 ≈
 <span class="mono">2(K和V) × layer_num × head_num × head_dim × dtype 字节数</span>。注意它<strong>不随模型参数量直接走</strong>，
 而是随<strong>上下文长度</strong>线性增长——上下文越长、并发越多，缓存吃的显存越多。</p>
@@ -132,6 +177,31 @@ LESSON_04 = {
   <div class="cells"><span class="lab">每 token</span><span class="cell">2</span><span class="sep">×</span><span class="cell">32 层</span><span class="sep">×</span><span class="cell">8 头</span><span class="sep">×</span><span class="cell">128</span><span class="sep">×</span><span class="cell">2B</span><span class="sep">=</span><span class="cell hl">≈128 KB</span></div>
   <div class="cells"><span class="lab">2048 token</span><span class="cell">128 KB</span><span class="sep">×</span><span class="cell">2048</span><span class="sep">=</span><span class="cell hl">≈256 MB（一条请求！）</span></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="折线图：KV 缓存随序列长度线性增长，横轴为 token 数、纵轴为 KV 显存（MB）；示意 Llama-7B 每 token 的 KV 约 0.5 MB，2048 token 约 1 GB 每请求">
+    <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV 显存（MB）</text>
+    <text x="640" y="270" style="fill:var(--muted);font-size:12px">序列长度（token）</text>
+    <text x="90" y="250" text-anchor="end" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="90" y="150" text-anchor="end" style="fill:var(--faint);font-size:11px">512</text>
+    <text x="90" y="64" text-anchor="end" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="96" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="404" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="668" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">2048</text>
+    <line x1="96" y1="246" x2="668" y2="60" style="stroke:var(--accent);stroke-width:2.5"/>
+    <line x1="668" y1="60" x2="668" y2="246" style="stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4"/>
+    <circle cx="668" cy="60" r="5" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1.5"/>
+    <rect x="356" y="80" width="336" height="54" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-7B：每 token KV ≈ 0.5 MB</text>
+    <text x="524" y="123" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">2048 token ≈ 1 GB / 请求（示意）</text>
+    <text x="150" y="206" style="fill:var(--muted);font-size:12px">线性增长：上下文翻倍 → 显存翻倍</text>
+  </svg>
+  <div class="figcap"><b>图 2 · KV 缓存随 token 线性增长</b> — 横轴是序列长度、纵轴是 KV 显存；缓存随上下文成正比上升（数字为示意：Llama-7B 每 token 的 KV 约 0.5 MB，2048 token 约 1 GB/请求）。</div>
+</div>
+
+<p>给个更具体的数：一条 <strong>2048 token</strong> 的请求按上面账本约占 <strong>256 MB</strong> KV 缓存；<strong>100 条并发</strong>就是约 <strong>25 GB</strong>——一张 80 GB 显卡近三分之一的显存，全压在 KV 上。</p>
 
 <p>几百条并发请求，光是 KV 缓存就能吃掉几十上百 GB 显存。<strong>这就是为什么"省显存"是推理引擎的头等大事</strong>——
 后面的分页、前缀复用、量化、KV 缓存量化，全是在和这本"账"较劲。</p>
@@ -240,6 +310,38 @@ to decide "whom to attend to", then sums their <span class="mono">V</span>.</p>
   just <span class="mono">O(t)</span>, dropping all the repeated work.</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Contrast: without a cache every decode step recomputes all past tokens (an ever-growing triangle), while with a KV cache each step computes only the new token's K/V and reuses the cached history">
+    <line x1="380" y1="28" x2="380" y2="276" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="30" y="44" style="font-weight:700;fill:var(--red)">❌ No cache: recompute all history each step</text>
+    <polygon points="96,70 96,210 232,210" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="94" style="fill:var(--muted);font-size:12px">step①</text>
+    <rect x="96" y="78" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="134" style="fill:var(--muted);font-size:12px">step②</text>
+    <rect x="96" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="118" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="174" style="fill:var(--muted);font-size:12px">step③</text>
+    <rect x="96" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="128" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="160" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="30" y="244" style="fill:var(--red);font-size:12px">recompute ∝ t: O(t) per step, O(t²) total</text>
+    <text x="404" y="44" style="font-weight:700;fill:var(--teal)">✅ KV cache: compute new token, reuse history</text>
+    <text x="404" y="94" style="fill:var(--muted);font-size:12px">step①</text>
+    <rect x="470" y="78" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="134" style="fill:var(--muted);font-size:12px">step②</text>
+    <rect x="470" y="118" width="44" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="518" y="118" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="404" y="174" style="fill:var(--muted);font-size:12px">step③</text>
+    <rect x="470" y="158" width="88" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="562" y="158" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <rect x="606" y="112" width="128" height="64" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="670" y="138" text-anchor="middle" style="fill:var(--teal);font-size:11px">cache=read-only</text>
+    <text x="670" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">new token=1 row</text>
+    <text x="404" y="244" style="fill:var(--teal);font-size:12px">only 1 new token per step: O(1) compute + reuse</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · With-cache vs no-cache</b> — Left: no cache, every decode step recomputes all history (an ever-growing triangle, O(t²) total); right: with a KV cache, each step computes only the new token's K/V and reuses read-only history.</div>
+</div>
+
 <p>In one line: <strong>historical K/V are "read-only"</strong>, computed once and reused. Caching them squeezes each step
 from "recompute the whole sequence" to "just the new word's attention over history" — that is the KV cache.</p>
 
@@ -296,6 +398,19 @@ out two big buffers for K and V sized by "<strong>how many tokens × layers × K
     ):</pre>
 </div>
 
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">the physical KV store: per-layer K/V buffers indexed by token slot</span></div>
+  <pre><span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="cm"># the physical KV store: per-layer K and V buffers, indexed by token slot</span>
+    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+        <span class="cm"># size = max tokens that fit; allocate k_buffer/v_buffer for each layer</span>
+        ...
+    <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):
+        ...   <span class="cm"># write this token's K/V at slot `loc`</span>
+    <span class="kw">def</span> get_kv_buffer(self, layer):
+        ...   <span class="cm"># read K/V back for the attention kernel</span></pre>
+</div>
+
 <p>The constructor reveals the cache's "ledger": <strong>per token</strong> the bytes ≈
 <span class="mono">2(K and V) × layer_num × head_num × head_dim × dtype-bytes</span>. Note it <strong>doesn't scale directly with
 parameter count</strong> but with <strong>context length</strong> — longer context and more concurrency mean more cache HBM.</p>
@@ -305,6 +420,31 @@ parameter count</strong> but with <strong>context length</strong> — longer con
   <div class="cells"><span class="lab">per token</span><span class="cell">2</span><span class="sep">×</span><span class="cell">32 L</span><span class="sep">×</span><span class="cell">8 H</span><span class="sep">×</span><span class="cell">128</span><span class="sep">×</span><span class="cell">2B</span><span class="sep">=</span><span class="cell hl">≈128 KB</span></div>
   <div class="cells"><span class="lab">2048 tok</span><span class="cell">128 KB</span><span class="sep">×</span><span class="cell">2048</span><span class="sep">=</span><span class="cell hl">≈256 MB (one request!)</span></div>
 </div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Line chart: KV cache grows linearly with sequence length; x-axis is token count, y-axis is KV memory (MB); illustrative Llama-7B with about 0.5 MB of KV per token, so 2048 tokens is about 1 GB per request">
+    <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
+    <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV memory (MB)</text>
+    <text x="624" y="270" style="fill:var(--muted);font-size:12px">sequence length (tokens)</text>
+    <text x="90" y="250" text-anchor="end" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="90" y="150" text-anchor="end" style="fill:var(--faint);font-size:11px">512</text>
+    <text x="90" y="64" text-anchor="end" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="96" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">0</text>
+    <text x="404" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">1024</text>
+    <text x="668" y="262" text-anchor="middle" style="fill:var(--faint);font-size:11px">2048</text>
+    <line x1="96" y1="246" x2="668" y2="60" style="stroke:var(--accent);stroke-width:2.5"/>
+    <line x1="668" y1="60" x2="668" y2="246" style="stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4"/>
+    <circle cx="668" cy="60" r="5" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1.5"/>
+    <rect x="356" y="80" width="336" height="54" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="524" y="103" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">Llama-7B: KV ≈ 0.5 MB / token</text>
+    <text x="524" y="123" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">2048 tokens ≈ 1 GB / request (illustrative)</text>
+    <text x="150" y="206" style="fill:var(--muted);font-size:12px">linear growth: double context → double memory</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · KV cache grows linearly with tokens</b> — x-axis is sequence length, y-axis is KV memory; the cache rises in proportion to context (numbers illustrative: Llama-7B, KV ≈ 0.5 MB per token, 2048 tokens ≈ 1 GB/request).</div>
+</div>
+
+<p>To make it concrete: one <strong>2048-token</strong> request takes about <strong>256 MB</strong> of KV cache by the ledger above; <strong>100 concurrent</strong> requests is roughly <strong>25 GB</strong> — nearly a third of an 80 GB GPU, all spent on KV.</p>
 
 <p>A few hundred concurrent requests and the KV cache alone eats tens to hundreds of GB. <strong>That is why "save HBM" is an
 inference engine's number-one job</strong> — paging, prefix reuse, quantization and KV-cache quantization all fight over this ledger.</p>
@@ -408,6 +548,61 @@ LESSON_05 = {
 所以静态批处理在生产环境里几乎不可接受。理解了这个痛点，你就明白连续批处理为什么是"刚需"，而不是锦上添花。</p>
 
 
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="静态批处理与连续批处理的 GPU 利用率时间线对比：静态批处理整批等最慢的请求、留下大片空转，连续批处理完成即离场、新请求立刻补满，GPU 持续满载">
+    <line x1="700" y1="34" x2="700" y2="308" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="700" y="324" text-anchor="middle" style="fill:var(--muted);font-size:11px">批结束</text>
+    <text x="8" y="26" style="font-weight:700;fill:var(--red)">静态批处理：整批等最慢的 R4 → 大量空转</text>
+    <text x="8" y="58" class="mono" style="font-size:11px;fill:var(--muted)">槽1</text>
+    <rect x="80" y="42" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="57" text-anchor="middle" class="mono" style="font-size:11px">R1 忙</text>
+    <rect x="250" y="42" width="450" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="475" y="57" text-anchor="middle" style="fill:var(--red);font-size:11px">空转</text>
+    <text x="8" y="88" class="mono" style="font-size:11px;fill:var(--muted)">槽2</text>
+    <rect x="80" y="72" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="87" text-anchor="middle" class="mono" style="font-size:11px">R2 忙</text>
+    <rect x="430" y="72" width="270" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="565" y="87" text-anchor="middle" style="fill:var(--red);font-size:11px">空转</text>
+    <text x="8" y="118" class="mono" style="font-size:11px;fill:var(--muted)">槽3</text>
+    <rect x="80" y="102" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="117" text-anchor="middle" class="mono" style="font-size:11px">R3 忙</text>
+    <rect x="170" y="102" width="530" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="435" y="117" text-anchor="middle" style="fill:var(--red);font-size:11px">空转</text>
+    <text x="8" y="148" class="mono" style="font-size:11px;fill:var(--muted)">槽4</text>
+    <rect x="80" y="132" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="147" text-anchor="middle" class="mono" style="font-size:11px">R4 忙</text>
+    <text x="8" y="184" style="font-weight:700;fill:var(--teal)">连续批处理：完成即离场，新请求立刻补满 → 持续满载</text>
+    <text x="8" y="212" class="mono" style="font-size:11px;fill:var(--muted)">槽1</text>
+    <rect x="80" y="196" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="211" text-anchor="middle" class="mono" style="font-size:11px">R1</text>
+    <rect x="250" y="196" width="230" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="365" y="211" text-anchor="middle" class="mono" style="font-size:11px">R5</text>
+    <rect x="480" y="196" width="220" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="590" y="211" text-anchor="middle" class="mono" style="font-size:11px">R7</text>
+    <text x="8" y="242" class="mono" style="font-size:11px;fill:var(--muted)">槽2</text>
+    <rect x="80" y="226" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="241" text-anchor="middle" class="mono" style="font-size:11px">R2</text>
+    <rect x="430" y="226" width="270" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="241" text-anchor="middle" class="mono" style="font-size:11px">R6</text>
+    <text x="8" y="272" class="mono" style="font-size:11px;fill:var(--muted)">槽3</text>
+    <rect x="80" y="256" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="271" text-anchor="middle" class="mono" style="font-size:11px">R3</text>
+    <rect x="170" y="256" width="270" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="305" y="271" text-anchor="middle" class="mono" style="font-size:11px">R8</text>
+    <rect x="440" y="256" width="260" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="570" y="271" text-anchor="middle" class="mono" style="font-size:11px">R9</text>
+    <text x="8" y="302" class="mono" style="font-size:11px;fill:var(--muted)">槽4</text>
+    <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
+  </svg>
+  <div class="figcap"><b>图 A · 静态 vs 连续批处理时间线</b> — 上：静态批处理里早早完成的请求只能占着槽位空转，整批被最慢的 R4 拖到底；下：连续批处理一旦有请求完成，新请求立刻补进同一槽位，时间线被填满，GPU 持续满载。</div>
+</div>
+
+<div class="card"><div class="tag">🔢 一个具体的例子</div>
+<p>设想一批 <strong>8 个槽位</strong>：其中 7 条请求各生成约 6 个 token 就结束，剩下 1 条要生成 500 个。静态批处理会让这 7 个早早完成的槽位
+<strong>空转约 494 步</strong>——绝大多数步里只有 1 / 8 的槽位在产出有效 token，等效利用率约 <strong>12%</strong>。连续批处理则在每一步把腾空的槽位
+立刻补满，把等效占用率拉到接近 <strong>100%</strong>。同一张 GPU，仅凭"组批方式"的改变，吞吐就能提升 <strong>约 4–8×</strong>。</p></div>
+
 <h2>连续批处理：每一步都重新组队</h2>
 <p>连续批处理的核心动作只有一句话：<strong>不要一次组好就不动了，而是在每一个 decode 步都把这一批重新拼一遍。</strong>
 把生成想成一个永不停歇的循环，调度器在循环的每一轮都做四件事——<strong>清退完成的、放进等待的、组成新一批、前向一步</strong>：</p>
@@ -434,6 +629,58 @@ LESSON_05 = {
   <div class="cells"><span class="lab">step t</span><span class="cell hl">R1</span><span class="cell hl">R2</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R2 吐出结束符 ✓</span></div>
   <div class="cells"><span class="lab">step t+1</span><span class="cell hl">R1</span><span class="cell">★R5</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R5 补入 R2 的空槽，立即开跑</span></div>
   <div class="cells"><span class="lab">step t+2</span><span class="cell hl">R1</span><span class="cell hl">R5</span><span class="cell hl">R3</span><span class="cell">★R6</span><span class="sep">→</span><span class="cell q">R4 完成 ✓，R6 立刻顶上</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 290" role="img" aria-label="一个 4 槽位批次在连续步上的网格：列是步、行是槽，请求随到随走——刚完成的槽位空出、新请求中途补入，运行中、新加入、刚完成用不同颜色区分">
+    <text x="160" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t</text>
+    <text x="320" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+1</text>
+    <text x="480" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+2</text>
+    <text x="640" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+3</text>
+    <text x="8" y="68" class="mono" style="font-size:11px;fill:var(--muted)">槽1</text>
+    <text x="8" y="114" class="mono" style="font-size:11px;fill:var(--muted)">槽2</text>
+    <text x="8" y="160" class="mono" style="font-size:11px;fill:var(--muted)">槽3</text>
+    <text x="8" y="206" class="mono" style="font-size:11px;fill:var(--muted)">槽4</text>
+    <rect x="90" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="90" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="90" y="136" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="160" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R3 ✓</text>
+    <rect x="90" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R4</text>
+    <rect x="250" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="250" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="250" y="136" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="320" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R5</text>
+    <rect x="250" y="182" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="320" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R4 ✓</text>
+    <rect x="410" y="44" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="480" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R1 ✓</text>
+    <rect x="410" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="410" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="410" y="182" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="480" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R6</text>
+    <rect x="570" y="44" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R7</text>
+    <rect x="570" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="570" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="570" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R6</text>
+    <rect x="90" y="244" width="16" height="12" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="112" y="254" style="font-size:11px;fill:var(--muted)">运行中</text>
+    <rect x="280" y="244" width="16" height="12" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="302" y="254" style="font-size:11px;fill:var(--muted)">新加入 ★</text>
+    <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="522" y="254" style="font-size:11px;fill:var(--muted)">刚完成 ✓</text>
+  </svg>
+  <div class="figcap"><b>图 B · 请求随到随走</b> — 列是相邻的调度步、行是 4 个批槽。蓝＝运行中，橙＝本步新加入（★），红＝本步刚完成（✓）。R3、R4、R1 先后完成腾出槽位，R5、R6、R7 中途补入——批次不靠整批排空，而是逐槽流动。</div>
 </div>
 
 <h2>为什么它能赢：回到"访存密集"</h2>
@@ -469,6 +716,22 @@ LESSON_05 = {
         self.running_batch = self.update_running_batch(self.running_batch)
         ret = self.running_batch <span class="kw">if not</span> self.running_batch.is_empty() <span class="kw">else</span> <span class="kw">None</span>
     <span class="kw">return</span> ret</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">调度器一次前向跑的批：请求随到随走</span></div>
+  <pre><span class="kw">class</span> ScheduleBatch:
+    <span class="cm"># 一次前向跑的批：请求随到随走、动态增减</span>
+    <span class="kw">def</span> init_new(reqs, ...):
+        ...   <span class="cm"># 从等待队列新建一个批</span>
+    <span class="kw">def</span> prepare_for_extend(self):
+        ...   <span class="cm"># 准备一次 PREFILL（新 prompt，并行计算）</span>
+    <span class="kw">def</span> prepare_for_decode(self):
+        ...   <span class="cm"># 准备一个 DECODE 步（每个在跑请求生成一个新 token）</span>
+    <span class="kw">def</span> filter_batch(self, ...):
+        ...   <span class="cm"># 丢掉已完成的请求，其余继续跑</span>
+    <span class="kw">def</span> merge_batch(self, other):
+        ...   <span class="cm"># 把新加入的请求并进在跑的批</span></pre>
 </div>
 
 <p>读懂这段就抓住了连续批处理的灵魂：<strong>批不是一个静态对象，而是每一步被重新计算出来的结果</strong>。
@@ -556,6 +819,62 @@ still doing real work.</p>
   <tr><td><strong>GPU utilization</strong></td><td>Idles late in the batch (padding waste)</td><td class="mono">Batch always full, <strong>stays saturated</strong></td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="GPU-utilization timeline comparing static vs continuous batching: static batching makes the whole batch wait on the slowest request leaving large idle gaps, while continuous batching backfills freed slots so the GPU stays full">
+    <line x1="700" y1="34" x2="700" y2="308" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="700" y="324" text-anchor="middle" style="fill:var(--muted);font-size:11px">batch ends</text>
+    <text x="8" y="26" style="font-weight:700;fill:var(--red)">Static batching: whole batch waits on slowest R4 → big idle gaps</text>
+    <text x="8" y="58" class="mono" style="font-size:11px;fill:var(--muted)">slot1</text>
+    <rect x="80" y="42" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="57" text-anchor="middle" class="mono" style="font-size:11px">R1 busy</text>
+    <rect x="250" y="42" width="450" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="475" y="57" text-anchor="middle" style="fill:var(--red);font-size:11px">idle</text>
+    <text x="8" y="88" class="mono" style="font-size:11px;fill:var(--muted)">slot2</text>
+    <rect x="80" y="72" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="87" text-anchor="middle" class="mono" style="font-size:11px">R2 busy</text>
+    <rect x="430" y="72" width="270" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="565" y="87" text-anchor="middle" style="fill:var(--red);font-size:11px">idle</text>
+    <text x="8" y="118" class="mono" style="font-size:11px;fill:var(--muted)">slot3</text>
+    <rect x="80" y="102" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="117" text-anchor="middle" class="mono" style="font-size:11px">R3 busy</text>
+    <rect x="170" y="102" width="530" height="22" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="435" y="117" text-anchor="middle" style="fill:var(--red);font-size:11px">idle</text>
+    <text x="8" y="148" class="mono" style="font-size:11px;fill:var(--muted)">slot4</text>
+    <rect x="80" y="132" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="147" text-anchor="middle" class="mono" style="font-size:11px">R4 busy</text>
+    <text x="8" y="184" style="font-weight:700;fill:var(--teal)">Continuous batching: finished leaves, newcomer backfills → stays full</text>
+    <text x="8" y="212" class="mono" style="font-size:11px;fill:var(--muted)">slot1</text>
+    <rect x="80" y="196" width="170" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="165" y="211" text-anchor="middle" class="mono" style="font-size:11px">R1</text>
+    <rect x="250" y="196" width="230" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="365" y="211" text-anchor="middle" class="mono" style="font-size:11px">R5</text>
+    <rect x="480" y="196" width="220" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="590" y="211" text-anchor="middle" class="mono" style="font-size:11px">R7</text>
+    <text x="8" y="242" class="mono" style="font-size:11px;fill:var(--muted)">slot2</text>
+    <rect x="80" y="226" width="350" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="255" y="241" text-anchor="middle" class="mono" style="font-size:11px">R2</text>
+    <rect x="430" y="226" width="270" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="565" y="241" text-anchor="middle" class="mono" style="font-size:11px">R6</text>
+    <text x="8" y="272" class="mono" style="font-size:11px;fill:var(--muted)">slot3</text>
+    <rect x="80" y="256" width="90" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="125" y="271" text-anchor="middle" class="mono" style="font-size:11px">R3</text>
+    <rect x="170" y="256" width="270" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="305" y="271" text-anchor="middle" class="mono" style="font-size:11px">R8</text>
+    <rect x="440" y="256" width="260" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="570" y="271" text-anchor="middle" class="mono" style="font-size:11px">R9</text>
+    <text x="8" y="302" class="mono" style="font-size:11px;fill:var(--muted)">slot4</text>
+    <rect x="80" y="286" width="620" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="390" y="301" text-anchor="middle" class="mono" style="font-size:11px">R4</text>
+  </svg>
+  <div class="figcap"><b>Figure A · static vs continuous batching timeline</b> — Top: in static batching, requests that finish early just hold their slots idle while the whole batch is dragged to the end by the slowest R4. Bottom: in continuous batching, the moment a request finishes a new one backfills the same slot, the timeline fills up, and the GPU stays saturated.</div>
+</div>
+
+<div class="card"><div class="tag">🔢 A concrete example</div>
+<p>Picture a batch of <strong>8 slots</strong>: 7 requests each finish after about 6 tokens, while 1 needs 500. Static batching keeps those 7 early-finished slots
+<strong>idle for ~494 steps</strong> — in most steps only 1 of 8 slots produces a useful token, an effective utilization of about <strong>12%</strong>. Continuous batching
+backfills every freed slot on the spot, lifting effective occupancy toward <strong>100%</strong>. On the same GPU, purely by changing <em>how</em> it batches, throughput
+rises by <strong>~4–8×</strong>.</p></div>
+
 <h2>Continuous batching: re-form the batch every step</h2>
 <p>The core action is one sentence: <strong>don't form the batch once and freeze it — re-assemble the batch at every decode step.</strong>
 Think of generation as a never-ending loop; each round the scheduler does four things — <strong>evict the finished, admit the waiting,
@@ -579,6 +898,58 @@ consecutive steps: the finished (✓) are replaced by newcomers (★), so the ba
   <div class="cells"><span class="lab">step t</span><span class="cell hl">R1</span><span class="cell hl">R2</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R2 emits end token ✓</span></div>
   <div class="cells"><span class="lab">step t+1</span><span class="cell hl">R1</span><span class="cell">★R5</span><span class="cell hl">R3</span><span class="cell hl">R4</span><span class="sep">→</span><span class="cell q">R5 fills R2's slot, starts at once</span></div>
   <div class="cells"><span class="lab">step t+2</span><span class="cell hl">R1</span><span class="cell hl">R5</span><span class="cell hl">R3</span><span class="cell">★R6</span><span class="sep">→</span><span class="cell q">R4 finishes ✓, R6 steps in</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 290" role="img" aria-label="a grid of a 4-slot batch over consecutive steps: columns are steps, rows are slots, requests join and leave mid-stream as freed slots are backfilled, with running, newly-admitted and just-finished shown in different colors">
+    <text x="160" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t</text>
+    <text x="320" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+1</text>
+    <text x="480" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+2</text>
+    <text x="640" y="30" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:12px">step t+3</text>
+    <text x="8" y="68" class="mono" style="font-size:11px;fill:var(--muted)">slot1</text>
+    <text x="8" y="114" class="mono" style="font-size:11px;fill:var(--muted)">slot2</text>
+    <text x="8" y="160" class="mono" style="font-size:11px;fill:var(--muted)">slot3</text>
+    <text x="8" y="206" class="mono" style="font-size:11px;fill:var(--muted)">slot4</text>
+    <rect x="90" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="90" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="90" y="136" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="160" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R3 ✓</text>
+    <rect x="90" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="160" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R4</text>
+    <rect x="250" y="44" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R1</text>
+    <rect x="250" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="250" y="136" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="320" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R5</text>
+    <rect x="250" y="182" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="320" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R4 ✓</text>
+    <rect x="410" y="44" width="140" height="38" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="480" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--red)">R1 ✓</text>
+    <rect x="410" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="410" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="480" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="410" y="182" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="480" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R6</text>
+    <rect x="570" y="44" width="140" height="38" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="68" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">★R7</text>
+    <rect x="570" y="90" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="114" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R2</text>
+    <rect x="570" y="136" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="160" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R5</text>
+    <rect x="570" y="182" width="140" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="640" y="206" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">R6</text>
+    <rect x="90" y="244" width="16" height="12" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="112" y="254" style="font-size:11px;fill:var(--muted)">running</text>
+    <rect x="280" y="244" width="16" height="12" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="302" y="254" style="font-size:11px;fill:var(--muted)">newly admitted ★</text>
+    <rect x="500" y="244" width="16" height="12" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="522" y="254" style="font-size:11px;fill:var(--muted)">just finished ✓</text>
+  </svg>
+  <div class="figcap"><b>Figure B · requests join and leave per step</b> — Columns are consecutive schedule steps; rows are the 4 batch slots. Blue = running, amber = admitted this step (★), red = finished this step (✓). R3, R4, R1 finish in turn and free their slots while R5, R6, R7 backfill mid-stream — the batch flows slot-by-slot instead of draining as a whole.</div>
 </div>
 
 <h2>Why it wins: back to "memory-bound"</h2>
@@ -619,6 +990,22 @@ batch afresh each step" is exactly how continuous batching lands in code.</p>
         self.running_batch = self.update_running_batch(self.running_batch)
         ret = self.running_batch <span class="kw">if not</span> self.running_batch.is_empty() <span class="kw">else</span> <span class="kw">None</span>
     <span class="kw">return</span> ret</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">the batch the scheduler runs in one forward; requests join and leave</span></div>
+  <pre><span class="kw">class</span> ScheduleBatch:
+    <span class="cm"># the batch run in one forward; requests join and leave it over time</span>
+    <span class="kw">def</span> init_new(reqs, ...):
+        ...   <span class="cm"># build a fresh batch from waiting requests</span>
+    <span class="kw">def</span> prepare_for_extend(self):
+        ...   <span class="cm"># set up a PREFILL pass (new prompts, computed in parallel)</span>
+    <span class="kw">def</span> prepare_for_decode(self):
+        ...   <span class="cm"># set up a DECODE step (one new token per running request)</span>
+    <span class="kw">def</span> filter_batch(self, ...):
+        ...   <span class="cm"># drop finished requests, keep the rest running</span>
+    <span class="kw">def</span> merge_batch(self, other):
+        ...   <span class="cm"># fold newly-admitted requests into the running batch</span></pre>
 </div>
 
 <p>Read this and you grasp the soul of continuous batching: <strong>the batch is not a static object but a result recomputed every step</strong>.
@@ -719,6 +1106,48 @@ LESSON_06 = {
   <tr><td><strong>对并发的影响</strong></td><td>显存早早耗尽，<strong>并发被压低</strong></td><td class="mono">显存装得紧，<strong>并发显著提高</strong></td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="上半区是连续分配：变长请求 A、B、C 之间夹着无法利用的碎片空洞，一条需要 6 格的长请求虽然总空闲够、却没有一段连续空间而放不下；下半区是分页：KV 切成固定大小的页，那条长请求的 6 个页散落填进任意空槽，零浪费">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">连续分配：变长请求留下无法利用的空洞</text>
+    <rect x="24" y="42" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="48" width="120" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="90" y="69" text-anchor="middle" class="mono" style="font-size:11px">req A</text>
+    <rect x="154" y="48" width="64" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="186" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">碎片</text>
+    <rect x="222" y="48" width="96" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="69" text-anchor="middle" class="mono" style="font-size:11px">req B</text>
+    <rect x="322" y="48" width="80" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="362" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">碎片</text>
+    <rect x="406" y="48" width="72" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="69" text-anchor="middle" class="mono" style="font-size:11px">req C</text>
+    <rect x="482" y="48" width="96" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="530" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">碎片</text>
+    <rect x="582" y="48" width="168" height="32" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="666" y="68" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲</text>
+    <text x="24" y="106" style="fill:var(--red);font-size:12px;font-weight:700">长请求需 6 格：总空闲够，却没有一段连续 → 放不下</text>
+    <line x1="24" y1="120" x2="756" y2="120" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="24" y="148" style="font-weight:700;fill:var(--accent-ink)">分页：KV 切成固定大小的页，填进任意空槽 → 零浪费</text>
+    <rect x="24" y="164" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="90" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="150" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="210" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="330" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="390" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="450" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="510" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="630" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">长请求的 6 个红页散落各处、全部填满——物理页无需相邻</text>
+  </svg>
+</div>
+
+<p>用一个具体口径感受这种差别：取 <span class="mono">page_size = 16</span> token/页，一条只生成 60 token 的请求只需 <span class="mono">⌈60/16⌉ = 4</span> 页（64 槽），
+末页仅浪费 4 个槽，<strong>内部碎片不到 7%</strong>；而连续预留按 2048 上限算，<strong>同一条请求浪费约 97%</strong>。把碎片率从近 50%（典型连续预留场景）压到 <strong>5% 以下</strong>，
+正是分页能把并发翻十几倍的来源。</p>
+
 <h2>分页的核心：固定页 + 页表</h2>
 <p>PagedAttention 的思路只有两件东西：<strong>固定大小的页</strong>，和<strong>一张把逻辑映射到物理的页表</strong>。
 把一条请求的 KV 序列想成一条<strong>逻辑上连续的 token 流</strong>，但底层把它切成每 <span class="mono">page_size</span> 个 token 一页，
@@ -741,6 +1170,44 @@ LESSON_06 = {
   <div class="cells"><span class="lab">逻辑页 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">物理块 #2</span></div>
   <div class="cells"><span class="lab">逻辑页 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">物理块 #9</span></div>
   <div class="cells"><span class="lab">逻辑页 3</span><span class="cell">tok 48–…（生成中）</span><span class="sep">→</span><span class="cell q">满页时再领一个空闲块</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="页表把逻辑位置映射到分散的物理页：左边是一条请求逻辑上连续的 token 位置 0、1、2、3，中间是页表把逻辑页 0、1 映射到物理块号 #7、#2，右边是散落各处、互不相邻的物理页；箭头显示逻辑页 0 指向较低处的 #7、逻辑页 1 指向较高处的 #2">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">逻辑 token 位置（连续）</text>
+    <rect x="24" y="40" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="60" text-anchor="middle" class="mono" style="font-size:11px">pos 0</text>
+    <rect x="24" y="74" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="94" text-anchor="middle" class="mono" style="font-size:11px">pos 1</text>
+    <rect x="24" y="108" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="128" text-anchor="middle" class="mono" style="font-size:11px">pos 2</text>
+    <rect x="24" y="142" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="162" text-anchor="middle" class="mono" style="font-size:11px">pos 3</text>
+    <text x="24" y="196" style="font-size:11px;fill:var(--faint)">page_size = 2：pos 0–1 → 逻辑页 0，pos 2–3 → 逻辑页 1</text>
+    <text x="312" y="26" style="font-weight:700;fill:var(--accent-ink)">页表 page table</text>
+    <rect x="312" y="40" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="65" text-anchor="middle" class="mono" style="font-size:11px">逻辑页 0 → #7</text>
+    <rect x="312" y="92" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="117" text-anchor="middle" class="mono" style="font-size:11px">逻辑页 1 → #2</text>
+    <text x="600" y="26" style="font-weight:700;fill:var(--muted)">物理页（分散）</text>
+    <rect x="600" y="40" width="150" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="675" y="60" text-anchor="middle" class="mono" style="font-size:11px">phys #2</text>
+    <rect x="600" y="78" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="98" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲 #4</text>
+    <rect x="600" y="116" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="136" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲 #5</text>
+    <rect x="600" y="154" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" class="mono" style="font-size:11px">phys #7</text>
+    <rect x="600" y="192" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="212" text-anchor="middle" style="font-size:10px;fill:var(--faint)">空闲 #9</text>
+    <path d="M 174 55 C 240 55, 250 60, 312 60" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 174 125 C 240 125, 250 112, 312 112" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 502 60 C 555 60, 545 169, 600 169" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <polygon points="600,169 586,162 586,176" style="fill:var(--blue)"/>
+    <path d="M 502 112 C 555 112, 545 55, 600 55" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
+    <text x="312" y="200" style="font-size:11px;fill:var(--muted)">逻辑连续 · 物理分散 · 页表牵线</text>
+  </svg>
 </div>
 
 <p>这里有个常被忽略的取舍：<strong>page_size 不是越小越好</strong>。页越小，内部浪费越少（最多浪费小半页），但页表更长、查表与算子里的间接寻址开销更大；
@@ -778,6 +1245,19 @@ LESSON_06 = {
         <span class="cm"># 请求结束：把它占用的页号去重后整批还回空闲池</span>
         free_page_indices = torch.unique(free_index // self.page_size)
         self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">请求 → 它的 token 槽位（索引层）</span></div>
+  <pre><span class="kw">class</span> <span class="st">ReqToTokenPool</span>:
+    <span class="cm"># 把每条请求映射到承载其 KV 的 token 槽位（索引层）</span>
+    <span class="kw">def</span> __init__(self, size, max_context_len, ...):
+        <span class="cm"># req_to_token[req][pos] -&gt; 该 token 的物理 KV 槽位</span>
+        self.req_to_token = ...   <span class="cm"># 形状 [size, max_context_len]</span>
+    <span class="kw">def</span> alloc(self, need_size):
+        ...   <span class="cm"># 为一条新请求预留若干槽位</span>
+    <span class="kw">def</span> free(self, req_index):
+        ...   <span class="cm"># 请求结束后把它的槽位整批还回池中</span></pre>
 </div>
 
 <p>读懂这段就抓住了分页的精髓：<strong>显存不再按"请求"整片预留，而是按"页"零售。</strong>
@@ -877,6 +1357,49 @@ down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the
   <tr><td><strong>Effect on concurrency</strong></td><td>HBM runs out early, <strong>concurrency capped</strong></td><td class="mono">HBM packs tight, <strong>concurrency rises notably</strong></td></tr>
 </table>
 
+<div class="fig">
+  <svg viewBox="0 0 780 250" role="img" aria-label="Top half is contiguous allocation: variable-length requests A, B, C leave unusable fragmentation holes between them; a long request needing 6 cells has enough total free space but no contiguous run, so it doesn't fit. Bottom half is paging: KV is cut into fixed-size pages, and the long request's 6 pages fill any free slot, scattered, with zero waste">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">Contiguous allocation: variable-length requests leave unusable holes</text>
+    <rect x="24" y="42" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="48" width="120" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="90" y="69" text-anchor="middle" class="mono" style="font-size:11px">req A</text>
+    <rect x="154" y="48" width="64" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="186" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">waste</text>
+    <rect x="222" y="48" width="96" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="270" y="69" text-anchor="middle" class="mono" style="font-size:11px">req B</text>
+    <rect x="322" y="48" width="80" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="362" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">waste</text>
+    <rect x="406" y="48" width="72" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="442" y="69" text-anchor="middle" class="mono" style="font-size:11px">req C</text>
+    <rect x="482" y="48" width="96" height="32" rx="4" style="fill:var(--faint);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="530" y="68" text-anchor="middle" style="font-size:10px;fill:var(--muted)">waste</text>
+    <rect x="582" y="48" width="168" height="32" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="666" y="68" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free</text>
+    <text x="24" y="106" style="fill:var(--red);font-size:12px;font-weight:700">Long request needs 6 cells: total free is enough, but no contiguous run → won't fit</text>
+    <line x1="24" y1="120" x2="756" y2="120" style="stroke:var(--line);stroke-width:1;stroke-dasharray:5 5"/>
+    <text x="24" y="148" style="font-weight:700;fill:var(--accent-ink)">Paging: KV cut into fixed-size pages, fill any free slot → zero waste</text>
+    <rect x="24" y="164" width="732" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="30" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="90" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="150" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="210" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="170" width="58" height="32" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="330" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="390" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="450" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="510" y="170" width="58" height="32" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="630" y="170" width="58" height="32" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="690" y="170" width="58" height="32" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="24" y="228" style="fill:var(--teal);font-size:12px;font-weight:700">The long request's 6 red pages scatter everywhere and all fit — physical pages need not be adjacent</text>
+  </svg>
+</div>
+
+<p>A concrete sense of the gap: take <span class="mono">page_size = 16</span> tokens/page. A request that generates only 60 tokens needs just
+<span class="mono">⌈60/16⌉ = 4</span> pages (64 slots), wasting only 4 slots on the last page — <strong>under 7% internal fragmentation</strong>; contiguous
+reservation against a 2048 cap <strong>wastes ~97% for the same request</strong>. Cutting the fragmentation rate from nearly 50% (a typical contiguous
+case) down to <strong>under 5%</strong> is exactly where paging's order-of-magnitude concurrency gain comes from.</p>
+
 <h2>The core of paging: fixed pages + a page table</h2>
 <p>PagedAttention needs just two things: <strong>fixed-size pages</strong> and <strong>a page table mapping logical to physical</strong>. Think of a request's
 KV as a <strong>logically contiguous token stream</strong>, but underneath it's sliced into pages of <span class="mono">page_size</span> tokens each, with
@@ -901,6 +1424,44 @@ physically scattered, page-table-linked":</p>
   <div class="cells"><span class="lab">logical page 1</span><span class="cell hl">tok 16–31</span><span class="sep">→</span><span class="cell q">phys block #2</span></div>
   <div class="cells"><span class="lab">logical page 2</span><span class="cell hl">tok 32–47</span><span class="sep">→</span><span class="cell q">phys block #9</span></div>
   <div class="cells"><span class="lab">logical page 3</span><span class="cell">tok 48–… (generating)</span><span class="sep">→</span><span class="cell q">grab a free block when the page fills</span></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 280" role="img" aria-label="The page table maps logical positions to scattered physical pages: on the left a request's logically contiguous token positions 0, 1, 2, 3; in the middle a page table mapping logical pages 0 and 1 to physical block ids #7 and #2; on the right physical pages scattered around, non-adjacent; arrows show logical page 0 pointing down to #7 and logical page 1 pointing up to #2">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">Logical token positions (contiguous)</text>
+    <rect x="24" y="40" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="60" text-anchor="middle" class="mono" style="font-size:11px">pos 0</text>
+    <rect x="24" y="74" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="94" text-anchor="middle" class="mono" style="font-size:11px">pos 1</text>
+    <rect x="24" y="108" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="128" text-anchor="middle" class="mono" style="font-size:11px">pos 2</text>
+    <rect x="24" y="142" width="150" height="30" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="99" y="162" text-anchor="middle" class="mono" style="font-size:11px">pos 3</text>
+    <text x="24" y="196" style="font-size:11px;fill:var(--faint)">page_size = 2: pos 0–1 → logical page 0, pos 2–3 → logical page 1</text>
+    <text x="312" y="26" style="font-weight:700;fill:var(--accent-ink)">page table</text>
+    <rect x="312" y="40" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="65" text-anchor="middle" class="mono" style="font-size:11px">logical page 0 → #7</text>
+    <rect x="312" y="92" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="407" y="117" text-anchor="middle" class="mono" style="font-size:11px">logical page 1 → #2</text>
+    <text x="600" y="26" style="font-weight:700;fill:var(--muted)">Physical pages (scattered)</text>
+    <rect x="600" y="40" width="150" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="675" y="60" text-anchor="middle" class="mono" style="font-size:11px">phys #2</text>
+    <rect x="600" y="78" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="98" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free #4</text>
+    <rect x="600" y="116" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="136" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free #5</text>
+    <rect x="600" y="154" width="150" height="30" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="675" y="174" text-anchor="middle" class="mono" style="font-size:11px">phys #7</text>
+    <rect x="600" y="192" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
+    <text x="675" y="212" text-anchor="middle" style="font-size:10px;fill:var(--faint)">free #9</text>
+    <path d="M 174 55 C 240 55, 250 60, 312 60" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 174 125 C 240 125, 250 112, 312 112" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 502 60 C 555 60, 545 169, 600 169" style="fill:none;stroke:var(--blue);stroke-width:1.5"/>
+    <polygon points="600,169 586,162 586,176" style="fill:var(--blue)"/>
+    <path d="M 502 112 C 555 112, 545 55, 600 55" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
+    <text x="312" y="200" style="font-size:11px;fill:var(--muted)">logically contiguous · physically scattered · linked by the table</text>
+  </svg>
 </div>
 
 <p>One often-missed tradeoff: <strong>smaller page_size is not always better</strong>. Smaller pages waste less internally (at most a fraction of a page), but the
@@ -933,6 +1494,19 @@ in-code incarnation of that "page table." Below is the allocator's skeleton: <st
         <span class="cm"># on finish: dedup the page ids it held and return them in one batch</span>
         free_page_indices = torch.unique(free_index // self.page_size)
         self.free_pages = torch.cat((free_page_indices, self.free_pages))</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::ReqToTokenPool</span><span class="ln">maps each request to its token slots (the index layer)</span></div>
+  <pre><span class="kw">class</span> <span class="st">ReqToTokenPool</span>:
+    <span class="cm"># maps each request -&gt; the token slots that hold its KV (the index layer)</span>
+    <span class="kw">def</span> __init__(self, size, max_context_len, ...):
+        <span class="cm"># req_to_token[req][pos] -&gt; the physical KV slot for that token</span>
+        self.req_to_token = ...   <span class="cm"># shape [size, max_context_len]</span>
+    <span class="kw">def</span> alloc(self, need_size):
+        ...   <span class="cm"># reserve slots for a new request</span>
+    <span class="kw">def</span> free(self, req_index):
+        ...   <span class="cm"># release a finished request's slots back to the pool</span></pre>
 </div>
 
 <p>Read this and you grasp the essence of paging: <strong>HBM is no longer reserved wholesale per "request" but retailed per "page."</strong>
@@ -1021,6 +1595,24 @@ LESSON_07 = {
 而 RadixAttention 只在<strong>第一条请求</strong>到来时算一次，后面 999 条全是<strong>查树命中、直接复用</strong>。省下的算力不是百分之几，而是<strong>成百上千倍</strong>地压缩了重复 prefill——
 这就是为什么命中率高的真实流量里，RadixAttention 几乎是"免费提速"。</p>
 
+<div class="fig">
+  <svg viewBox="0 0 760 250" role="img" aria-label="命中缓存省下的计算：请求 1 首次计算 500 token 前缀，请求 2 复用缓存前缀、只计算 20 个新 token">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">命中缓存省下的计算</text>
+    <text x="24" y="78" style="fill:var(--ink);font-size:13px">请求 1（首次）</text>
+    <rect x="170" y="60" width="300" height="36" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="83" text-anchor="middle" class="mono" style="font-size:12px">前缀 500 token · 首次 prefill 计算</text>
+    <text x="24" y="158" style="fill:var(--ink);font-size:13px">请求 2（命中）</text>
+    <rect x="170" y="140" width="300" height="36" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="320" y="163" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">复用缓存前缀 500 token · 0 计算</text>
+    <rect x="478" y="140" width="60" height="36" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="508" y="163" text-anchor="middle" class="mono" style="font-size:11px">+20</text>
+    <text x="548" y="163" style="fill:var(--amber);font-size:12px">新 token 才需计算</text>
+    <rect x="170" y="200" width="368" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="354" y="221" text-anchor="middle" style="fill:var(--teal);font-weight:700">命中缓存：省下 500 token 的 prefill，只算 20 token</text>
+  </svg>
+  <div class="figcap"><b>图 · 命中缓存省下的计算</b> — 请求 2 复用请求 1 的前缀 KV（虚线＝复用、零重算），只为它新增的 20 个 token 付出计算。例：一条 520 token 的请求只算 20，约 <b>96%</b> 的 prefill 被省掉。</div>
+</div>
+
 <h2>RadixAttention：把 KV 存进基数树</h2>
 <p>核心数据结构是一棵<strong>基数树（radix tree）</strong>，也叫<strong>压缩前缀树</strong>：键是 <strong>token id 序列</strong>，
 每条<strong>边</strong>上挂着一段连续的 token 串（一个"token run"）以及对应的<strong>KV 物理块</strong>。一条新请求来了，它要做的事只有一个动词——<strong>沿树往下匹配</strong>：</p>
@@ -1030,6 +1622,28 @@ LESSON_07 = {
   <div class="step"><div class="num">2</div><div class="sc"><h4>复用命中的前缀 KV</h4><p>匹配到的那段前缀，其 KV <strong>直接复用、零重算</strong>——注意力算子顺着节点拿到物理块索引，就像它本就属于这条请求。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>插入发散后缀为新分支</h4><p>从发散点往后是这条请求<strong>独有</strong>的内容，把它<strong>作为一条新分支插入</strong>树中，并为它新算、新分配 KV 块。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>必要时在发散点分裂边</h4><p>若匹配恰好停在某条边的<strong>中间</strong>，就在该处<strong>把这条边一分为二</strong>（split）：前半段成为共享父节点，后半段与新后缀各成一支。</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="基数树：根节点连到共享的系统提示前缀节点，再分叉成两个不同用户问题的子节点；共享前缀用强调色表示只存一份">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">基数树：共享前缀只存一份</text>
+    <rect x="330" y="48" width="100" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="70" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <line x1="380" y1="82" x2="380" y2="116" style="stroke:var(--accent);stroke-width:2"/>
+    <rect x="250" y="116" width="260" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="380" y="138" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">前缀："你是一个助手"</text>
+    <text x="380" y="153" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">已缓存 · 跨请求复用</text>
+    <text x="524" y="138" style="fill:var(--accent);font-size:12px">← 共享前缀只存一份</text>
+    <line x1="330" y1="160" x2="200" y2="216" style="stroke:var(--teal);stroke-width:2"/>
+    <line x1="430" y1="160" x2="560" y2="216" style="stroke:var(--blue);stroke-width:2"/>
+    <rect x="80" y="216" width="240" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="200" y="238" text-anchor="middle" style="fill:var(--ink)">问题 A：总结这篇财报</text>
+    <text x="200" y="253" text-anchor="middle" style="fill:var(--teal);font-size:11px">发散后缀 · 各算各的</text>
+    <rect x="440" y="216" width="240" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="560" y="238" text-anchor="middle" style="fill:var(--ink)">问题 B：翻成法语</text>
+    <text x="560" y="253" text-anchor="middle" style="fill:var(--blue);font-size:11px">发散后缀 · 各算各的</text>
+  </svg>
+  <div class="figcap"><b>图 · 基数树（共享前缀）</b> — 两条请求共用同一段 system prompt 前缀（强调色，只存一份、只算一次），在真正不同的用户问题处分叉成两支。例：共享 12 个 token，命中后第二条请求只需为它独有的后缀新建一支分支。</div>
 </div>
 
 <p>"<strong>分裂边</strong>"是基数树的精髓所在。设树里已存着 <span class="mono">"You are a helpful assistant. Translate"</span> 这一长串，
@@ -1096,6 +1710,18 @@ match_prefix 一路命中到历史末尾，<strong>引擎只需为最新一轮�
         last_device_node=last_node, last_host_node=last_node,
         best_match_node=last_node,
     )</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::TreeNode</span><span class="ln">基数树的节点：children/key/value + 引用计数与访问时间</span></div>
+  <pre><span class="kw">class</span> TreeNode:
+    <span class="kw">def</span> __init__(self):
+        self.children = defaultdict(TreeNode)  <span class="cm"># 基数树的边</span>
+        self.parent = <span class="kw">None</span>
+        self.key = <span class="kw">None</span>        <span class="cm"># 这条入边上的 token id 区间</span>
+        self.value = <span class="kw">None</span>      <span class="cm"># 该区间对应的 KV 缓存槽</span>
+        self.lock_ref = 0      <span class="cm"># &gt; 0 表示在用 -&gt; 不会被驱逐</span>
+        self.last_access_time = ...   <span class="cm"># 用于 LRU 驱逐</span></pre>
 </div>
 
 <p>读懂这段就抓住了 RadixAttention 的灵魂：<strong>一次 match_prefix，就把"这条请求能白拿多少 KV"算清楚了</strong>。
@@ -1165,6 +1791,24 @@ These openings run hundreds-to-thousands of tokens; <strong>recomputing their KV
 <strong>two tree paths pointing at the same physical pages</strong> — trivially cheap. And it saves more than memory: <strong>the prefill compute for that shared prefix is gone too</strong>.
 The higher the hit rate, the bigger the win — that's where RadixAttention's value comes from.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 760 250" role="img" aria-label="Compute saved by a cache hit: request 1 first computes a 500-token prefix, request 2 reuses the cached prefix and computes only 20 new tokens">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">Compute saved by a cache hit</text>
+    <text x="24" y="78" style="fill:var(--ink);font-size:13px">Request 1 (first time)</text>
+    <rect x="170" y="60" width="300" height="36" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="83" text-anchor="middle" class="mono" style="font-size:12px">prefix 500 tok · first prefill compute</text>
+    <text x="24" y="158" style="fill:var(--ink);font-size:13px">Request 2 (hit)</text>
+    <rect x="170" y="140" width="300" height="36" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="320" y="163" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">reuse cached prefix 500 tok · 0 compute</text>
+    <rect x="478" y="140" width="60" height="36" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="508" y="163" text-anchor="middle" class="mono" style="font-size:11px">+20</text>
+    <text x="548" y="163" style="fill:var(--amber);font-size:12px">new tokens to compute</text>
+    <rect x="170" y="200" width="368" height="32" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="354" y="221" text-anchor="middle" style="fill:var(--teal);font-weight:700">Cache hit: save 500 tokens of prefill, compute only 20</text>
+  </svg>
+  <div class="figcap"><b>Fig · Compute saved by a cache hit</b> — request 2 reuses request 1's prefix KV (dashed = reused, zero recompute) and pays compute only for its 20 new tokens. e.g. a 520-token request computes only 20 — about <b>96%</b> of prefill is skipped.</div>
+</div>
+
 <h2>RadixAttention: store KV in a radix tree</h2>
 <p>The core structure is a <strong>radix tree</strong> (a.k.a. <strong>compressed prefix trie</strong>): the key is the <strong>token-id sequence</strong>,
 and each <strong>edge</strong> carries a run of consecutive tokens plus the corresponding <strong>KV blocks</strong>. A new request does just one verb — <strong>match down the tree</strong>:</p>
@@ -1174,6 +1818,28 @@ and each <strong>edge</strong> carries a run of consecutive tokens plus the corr
   <div class="step"><div class="num">2</div><div class="sc"><h4>Reuse the matched prefix KV</h4><p>The matched prefix's KV is <strong>reused with zero recompute</strong> — the attention kernel follows the nodes to the physical block indices, as if it always belonged to this request.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Insert the divergent suffix as a new branch</h4><p>Everything past the divergence point is <strong>unique</strong> to this request; <strong>insert it as a new branch</strong> and compute/allocate fresh KV blocks for it.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Split an edge at the divergence if needed</h4><p>If the match ends in the <strong>middle</strong> of an edge, <strong>split that edge in two</strong>: the front becomes a shared parent, the back and the new suffix each form a branch.</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Radix tree: a root connects to a shared system-prompt prefix node, which forks into two children for two different user questions; the shared prefix uses the accent color to show it is stored once">
+    <text x="24" y="32" style="font-weight:700;fill:var(--muted)">Radix tree: a shared prefix is stored once</text>
+    <rect x="330" y="48" width="100" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="380" y="70" text-anchor="middle" class="mono" style="font-size:12px">root</text>
+    <line x1="380" y1="82" x2="380" y2="116" style="stroke:var(--accent);stroke-width:2"/>
+    <rect x="250" y="116" width="260" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="380" y="138" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">prefix: "You are a helper"</text>
+    <text x="380" y="153" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">cached · reused across requests</text>
+    <text x="524" y="138" style="fill:var(--accent);font-size:12px">← shared prefix stored once</text>
+    <line x1="330" y1="160" x2="200" y2="216" style="stroke:var(--teal);stroke-width:2"/>
+    <line x1="430" y1="160" x2="560" y2="216" style="stroke:var(--blue);stroke-width:2"/>
+    <rect x="80" y="216" width="240" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="200" y="238" text-anchor="middle" style="fill:var(--ink)">Question A: summarize report</text>
+    <text x="200" y="253" text-anchor="middle" style="fill:var(--teal);font-size:11px">divergent suffix · computed apart</text>
+    <rect x="440" y="216" width="240" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="560" y="238" text-anchor="middle" style="fill:var(--ink)">Question B: translate to French</text>
+    <text x="560" y="253" text-anchor="middle" style="fill:var(--blue);font-size:11px">divergent suffix · computed apart</text>
+  </svg>
+  <div class="figcap"><b>Fig · Radix tree (shared prefix)</b> — two requests share one system-prompt prefix (accent = stored once, computed once) and fork only where the user questions truly differ. e.g. 12 shared tokens; after a hit the second request only builds a branch for its unique suffix.</div>
 </div>
 
 <p><strong>Splitting an edge</strong> is the essence of a radix tree. Suppose the tree already holds <span class="mono">"You are a helpful assistant. Translate"</span>,
@@ -1238,6 +1904,18 @@ But one <strong>iron rule</strong> applies — <strong>reference counting</stron
         last_device_node=last_node, last_host_node=last_node,
         best_match_node=last_node,
     )</pre>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::TreeNode</span><span class="ln">a radix-tree node: children/key/value + lock-ref and access time</span></div>
+  <pre><span class="kw">class</span> TreeNode:
+    <span class="kw">def</span> __init__(self):
+        self.children = defaultdict(TreeNode)  <span class="cm"># the radix-tree edges</span>
+        self.parent = <span class="kw">None</span>
+        self.key = <span class="kw">None</span>        <span class="cm"># the token-id span on the edge into this node</span>
+        self.value = <span class="kw">None</span>      <span class="cm"># the KV cache slots for that span</span>
+        self.lock_ref = 0      <span class="cm"># &gt; 0 means in use -&gt; protected from eviction</span>
+        self.last_access_time = ...   <span class="cm"># for LRU eviction</span></pre>
 </div>
 
 <p>Read this and you've got RadixAttention's soul: <strong>one match_prefix computes exactly how much KV this request gets for free</strong>.
@@ -1313,6 +1991,69 @@ ITL 怕的是<strong>批太大</strong>导致每一步算得太久。一个把 T
 只有那些<strong>既产出了 token、又没违反延迟承诺</strong>的请求，才算"真正交付"。一个常见的认知误区是只盯着 throughput 这一个数字去优化，
 结果把批拉得过大、TTFT/ITL 双双爆表，<strong>跑分很好看、用户却在抱怨卡顿</strong>——这正是 goodput 要替你纠偏的地方。</p>
 
+<p>把 TTFT 和 ITL/TPOT 放回<strong>一条请求的时间轴</strong>上，它俩的分工就一目了然：TTFT 是开头那一段的"等待"，TPOT 是后面每个字之间的"节奏"。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 280" role="img" aria-label="一条请求的时间轴：先是一个宽的 PREFILL 块，之后是许多细的 DECODE 刻度；TTFT 是从请求到达到吐出第一个 token 的时间（预填充结束），TPOT 是相邻两个解码 token 之间的间隔">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">TTFT vs TPOT（一条请求的时间轴）</text>
+    <line x1="72" y1="60" x2="228" y2="60" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="72" y1="54" x2="72" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="228" y1="54" x2="228" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <text x="150" y="48" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">TTFT = 首 token 延迟</text>
+    <rect x="72" y="84" width="156" height="80" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="150" y="120" text-anchor="middle" style="font-size:13px;font-weight:700">PREFILL</text>
+    <text x="150" y="140" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:11px">并行算整段提示</text>
+    <text x="468" y="96" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">DECODE · 逐 token（循环很多次）</text>
+    <rect x="240" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="300" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="330" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="360" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="390" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="420" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="450" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="480" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="510" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="540" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="600" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="630" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="660" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="690" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="72" y1="76" x2="72" y2="200" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="228" y1="76" x2="228" y2="200" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="252" y1="182" x2="270" y2="182" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="252" y1="176" x2="252" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="270" y1="176" x2="270" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <text x="261" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px;font-weight:700">TPOT</text>
+    <text x="430" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px">= 相邻两个解码 token 的间隔</text>
+    <line x1="40" y1="226" x2="720" y2="226" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M720 226 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="668" y="248" style="fill:var(--faint);font-size:11px">时间 →</text>
+    <text x="72" y="248" text-anchor="middle" style="fill:var(--faint);font-size:11px">请求到达</text>
+    <text x="228" y="266" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">首 token（预填充结束）</text>
+  </svg>
+  <div class="figcap"><b>图 1 · TTFT vs TPOT（一条请求的时间轴）</b> — 一条请求 = <strong>一个宽 PREFILL 块</strong> + 后面<strong>许多细 DECODE 刻度</strong>。<strong>TTFT</strong> 是从请求到达到吐出<strong>第一个</strong> token（预填充结束）的时间；<strong>TPOT</strong> 是<strong>相邻两个</strong>解码 token 之间的间隔。前者决定"等多久才开口"，后者决定"开口后吐字多快"。</div>
+</div>
+
+<p>举个具体的数字感受一下：一个配置良好的 7B 服务，单条请求的 <strong>TTFT≈80&nbsp;ms</strong>（按下回车到第一个字冒出来），<strong>TPOT≈15&nbsp;ms</strong>（之后每个字约 15 毫秒、约合 65&nbsp;token/s 的阅读速度）；而整机在大批并发下的<strong>总吞吐可达数千 token/s</strong>。注意这两组数字会随批大小一起漂移：把并发拉大，总吞吐升到几千，但单条的 TTFT/TPOT 也会跟着变大——这正是下一节那条曲线要刻画的取舍。</p>
+
+<p>这些数字怎么量出来？SGLang 自带的压测脚本会把一次跑测的结果汇总成一个数据类——<strong>吞吐</strong>三件套加上 <strong>TTFT/TPOT 的均值与分位数</strong>，p99 尤其重要，因为它代表<strong>负载下最慢那批用户</strong>的真实体验：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::BenchmarkMetrics</span><span class="ln">压测汇总：吞吐 + TTFT/TPOT 的分位数</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="fn">BenchmarkMetrics</span>:
+    request_throughput: <span class="kw">float</span>   <span class="cm"># requests / second</span>
+    input_throughput: <span class="kw">float</span>     <span class="cm"># input tokens / second</span>
+    output_throughput: <span class="kw">float</span>    <span class="cm"># output tokens / second (decode speed)</span>
+    mean_ttft_ms: <span class="kw">float</span>         <span class="cm"># Time To First Token = prefill latency</span>
+    p99_ttft_ms: <span class="kw">float</span>          <span class="cm"># the tail users feel under load</span>
+    mean_tpot_ms: <span class="kw">float</span>         <span class="cm"># Time Per Output Token = inter-token latency</span>
+    p99_tpot_ms: <span class="kw">float</span>
+    <span class="cm"># ... also median / p90 / p95 variants</span></pre>
+</div>
+
 <h2>核心张力：批大小这一个旋钮，两头不可兼得</h2>
 <p>所有的纠结都收敛到<strong>一个旋钮——批大小（同时在跑的请求数）</strong>上。把它从小往大拧，工作点就沿着曲线滑动，
 <strong>吞吐和延迟此消彼长</strong>，请看这条"操作点"的滑动：</p>
@@ -1336,6 +2077,31 @@ decode 步要为<strong>更多</strong>请求一起算，<strong>单步耗时变
 再加请求，吞吐几乎不再涨（GPU 已经满了），延迟却开始<strong>陡峭飙升</strong>（每条都要排更久）。聪明的工作点，恰恰就落在这个<strong>"拐点"附近</strong>——
 在它之前你在浪费 GPU，在它之后你在白白牺牲延迟。SGLang 的调度器和这些旋钮，本质上就是在帮你<strong>稳稳地停在拐点上、并随负载漂移而实时微调</strong>。
 理解了这一点，你就明白为什么"把并发开到最大"几乎总是错的——那只会把你推到曲线最右端，吞吐没多换来多少，延迟却已崩了。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="吞吐与延迟随批大小/并发变化的权衡曲线：吞吐先近似线性上涨、GPU 饱和后趋于平台；单请求延迟一路上升、过拐点后陡升；最佳工作点落在吞吐已高而延迟仍可接受的甜点区附近">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">吞吐 vs 延迟的权衡（横轴 = 批大小 / 并发）</text>
+    <text x="100" y="52" style="fill:var(--accent-ink);font-size:12px;font-weight:700">吞吐 tokens/s</text>
+    <text x="660" y="52" text-anchor="end" style="fill:var(--red);font-size:12px;font-weight:700">延迟 ms</text>
+    <rect x="396" y="56" width="70" height="192" rx="4" style="fill:var(--accent-soft)"/>
+    <line x1="431" y1="56" x2="431" y2="248" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="431" y="72" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">甜点区 / knee</text>
+    <line x1="92" y1="56" x2="92" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="672" y1="56" x2="672" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="92" y1="248" x2="700" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M700 248 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <path d="M92 236 C 180 200, 250 150, 320 122 C 400 100, 520 94, 672 90" style="fill:none;stroke:var(--accent);stroke-width:2.5"/>
+    <path d="M92 242 C 220 238, 360 224, 431 205 C 520 180, 600 120, 672 72" style="fill:none;stroke:var(--red);stroke-width:2.5"/>
+    <circle cx="431" cy="98" r="4.5" style="fill:var(--accent)"/>
+    <text x="168" y="150" style="fill:var(--accent);font-size:11px">近似线性上涨</text>
+    <text x="556" y="112" style="fill:var(--accent);font-size:11px">趋于平台</text>
+    <text x="560" y="158" style="fill:var(--red);font-size:11px">延迟陡升</text>
+    <text x="206" y="236" style="fill:var(--red);font-size:11px">延迟温和</text>
+    <text x="431" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">吞吐已高、延迟仍可接受</text>
+    <text x="384" y="304" text-anchor="middle" style="fill:var(--faint);font-size:11px">批大小 / 并发 →</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 吞吐–延迟权衡曲线</b> — 横轴是批大小/并发：<strong>吞吐</strong>（紫线）先近似线性上涨、GPU 饱和后趋于<strong>平台</strong>；<strong>单请求延迟</strong>（红线）一路上升、过拐点后<strong>陡升</strong>。最佳工作点落在<strong>甜点区（knee）</strong>——吞吐已经很高、延迟却还在 SLA 之内；拐点左侧在浪费 GPU，右侧在白白牺牲延迟。</div>
+</div>
 
 <h2>负载不同，平衡手段也不同</h2>
 <p>真实流量并不只有一种形状。<strong>prefill-heavy</strong>（长 prompt、短输出，如文档问答）和 <strong>decode-heavy</strong>（短 prompt、长输出，如长文生成）
@@ -1462,6 +2228,69 @@ poor ITL and throughput; one with sky-high throughput (gather, then send) may ha
 because it forces you to watch both ends: however high throughput is, if half the requests violate the latency SLA, that
 throughput is <strong>worthless to users</strong>. What you truly maximize is <strong>throughput under the SLA</strong>.</p>
 
+<p>Put TTFT and ITL/TPOT back on <strong>one request's timeline</strong> and their split is obvious: TTFT is the opening "wait", TPOT is the "rhythm" of every character after it.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 280" role="img" aria-label="One request's timeline: a wide PREFILL block then many thin DECODE ticks; TTFT is the time from request arrival to the first token emitted (end of prefill), TPOT is the gap between consecutive decode tokens">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">TTFT vs TPOT (one request's timeline)</text>
+    <line x1="72" y1="60" x2="228" y2="60" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="72" y1="54" x2="72" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <line x1="228" y1="54" x2="228" y2="66" style="stroke:var(--accent);stroke-width:1.5"/>
+    <text x="150" y="48" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">TTFT = time to first token</text>
+    <rect x="72" y="84" width="156" height="80" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="150" y="120" text-anchor="middle" style="font-size:13px;font-weight:700">PREFILL</text>
+    <text x="150" y="140" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:11px">whole prompt in parallel</text>
+    <text x="468" y="96" text-anchor="middle" style="fill:var(--blue);font-size:12px;font-weight:700">DECODE · per token (loops many times)</text>
+    <rect x="240" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="270" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="300" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="330" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="360" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="390" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="420" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="450" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="480" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="510" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="540" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="600" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="630" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="660" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="690" y="104" width="12" height="60" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <line x1="72" y1="76" x2="72" y2="200" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="228" y1="76" x2="228" y2="200" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="252" y1="182" x2="270" y2="182" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="252" y1="176" x2="252" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <line x1="270" y1="176" x2="270" y2="188" style="stroke:var(--red);stroke-width:1.5"/>
+    <text x="261" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px;font-weight:700">TPOT</text>
+    <text x="430" y="204" text-anchor="middle" style="fill:var(--red);font-size:11px">= gap between consecutive decode tokens</text>
+    <line x1="40" y1="226" x2="720" y2="226" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M720 226 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="668" y="248" style="fill:var(--faint);font-size:11px">time →</text>
+    <text x="72" y="248" text-anchor="middle" style="fill:var(--faint);font-size:11px">request arrives</text>
+    <text x="228" y="266" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">first token (prefill ends)</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · TTFT vs TPOT (one request's timeline)</b> — one request = <strong>one wide PREFILL block</strong> + many <strong>thin DECODE ticks</strong>. <strong>TTFT</strong> is the time from arrival to the <strong>first</strong> token emitted (end of prefill); <strong>TPOT</strong> is the gap between <strong>consecutive</strong> decode tokens. The first decides "how long until it speaks", the second "how fast it types after".</div>
+</div>
+
+<p>Some concrete numbers: on a well-tuned 7B service one request sees <strong>TTFT≈80&nbsp;ms</strong> (enter to first token) and <strong>TPOT≈15&nbsp;ms</strong> (~15 ms per token after, ~65&nbsp;tokens/s reading speed), while the whole box under heavy concurrency reaches <strong>several thousand tokens/s total throughput</strong>. Both per-request numbers drift with batch size: crank concurrency and total throughput climbs into the thousands, but each request's TTFT/TPOT grows too — exactly the trade-off the next section's curve captures.</p>
+
+<p>How are these measured? SGLang's bundled benchmark script rolls one run up into a dataclass — the three <strong>throughput</strong> figures plus the <strong>mean and percentiles of TTFT/TPOT</strong>; p99 matters most, since it is the real experience of the <strong>slowest users under load</strong>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::BenchmarkMetrics</span><span class="ln">the benchmark summary: throughput + TTFT/TPOT percentiles</span></div>
+  <pre><span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="fn">BenchmarkMetrics</span>:
+    request_throughput: <span class="kw">float</span>   <span class="cm"># requests / second</span>
+    input_throughput: <span class="kw">float</span>     <span class="cm"># input tokens / second</span>
+    output_throughput: <span class="kw">float</span>    <span class="cm"># output tokens / second (decode speed)</span>
+    mean_ttft_ms: <span class="kw">float</span>         <span class="cm"># Time To First Token = prefill latency</span>
+    p99_ttft_ms: <span class="kw">float</span>          <span class="cm"># the tail users feel under load</span>
+    mean_tpot_ms: <span class="kw">float</span>         <span class="cm"># Time Per Output Token = inter-token latency</span>
+    p99_tpot_ms: <span class="kw">float</span>
+    <span class="cm"># ... also median / p90 / p95 variants</span></pre>
+</div>
+
 <h2>The core tension: one knob, batch size, can't win both ends</h2>
 <p>All the agonizing converges onto <strong>one knob — batch size (requests running concurrently)</strong>. Turn it from small
 to large and the operating point slides along the curve, <strong>throughput and latency trading off</strong>:</p>
@@ -1481,6 +2310,31 @@ Because one decode step now computes for <strong>more</strong> requests, so the 
 and a new request waits behind <strong>more work</strong> before its turn (<strong>TTFT lengthens</strong>). That's the balance —
 <strong>the same move that feeds throughput slows each request</strong>. So there is no universal "optimal batch size",
 <strong>only the optimal operating point for your SLA</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 320" role="img" aria-label="Throughput and latency vs batch size/concurrency trade-off curve: throughput rises near-linearly then plateaus once the GPU saturates; per-request latency keeps climbing and spikes after the knee; the best operating point sits near the sweet spot where throughput is already high but latency is still acceptable">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Throughput vs latency (x = batch size / concurrency)</text>
+    <text x="100" y="52" style="fill:var(--accent-ink);font-size:12px;font-weight:700">throughput tokens/s</text>
+    <text x="660" y="52" text-anchor="end" style="fill:var(--red);font-size:12px;font-weight:700">latency ms</text>
+    <rect x="396" y="56" width="70" height="192" rx="4" style="fill:var(--accent-soft)"/>
+    <line x1="431" y1="56" x2="431" y2="248" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="431" y="72" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px;font-weight:700">sweet spot / knee</text>
+    <line x1="92" y1="56" x2="92" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="672" y1="56" x2="672" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="92" y1="248" x2="700" y2="248" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M700 248 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <path d="M92 236 C 180 200, 250 150, 320 122 C 400 100, 520 94, 672 90" style="fill:none;stroke:var(--accent);stroke-width:2.5"/>
+    <path d="M92 242 C 220 238, 360 224, 431 205 C 520 180, 600 120, 672 72" style="fill:none;stroke:var(--red);stroke-width:2.5"/>
+    <circle cx="431" cy="98" r="4.5" style="fill:var(--accent)"/>
+    <text x="168" y="150" style="fill:var(--accent);font-size:11px">near-linear rise</text>
+    <text x="560" y="112" style="fill:var(--accent);font-size:11px">plateaus</text>
+    <text x="566" y="158" style="fill:var(--red);font-size:11px">latency spikes</text>
+    <text x="204" y="236" style="fill:var(--red);font-size:11px">gentle</text>
+    <text x="431" y="278" text-anchor="middle" style="fill:var(--muted);font-size:11px">high tput, latency still OK</text>
+    <text x="384" y="304" text-anchor="middle" style="fill:var(--faint);font-size:11px">batch size / concurrency →</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · The throughput-latency trade-off curve</b> — x is batch size/concurrency: <strong>throughput</strong> (purple) rises near-linearly then <strong>plateaus</strong> once the GPU saturates; <strong>per-request latency</strong> (red) keeps climbing and <strong>spikes</strong> past the knee. The best operating point sits at the <strong>sweet spot (knee)</strong> — throughput already high, latency still within the SLA; left of the knee you waste GPU, right of it you waste latency.</div>
+</div>
 
 <h2>Different loads, different balancing tools</h2>
 <p>Real traffic isn't one shape. <strong>Prefill-heavy</strong> (long prompt, short output, e.g. doc QA) and <strong>decode-heavy</strong>
