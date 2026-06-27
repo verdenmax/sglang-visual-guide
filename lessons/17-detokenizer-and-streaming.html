@@ -411,7 +411,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <div class="fig">
-  <svg viewBox="0 0 760 320" role="img" aria-label="增量反分词：token id 逐个到达，只把新增的那一小段解码成文本增量，用 read_offset 记住上次解码到哪、从那里续上">
+  <svg viewBox="0 0 760 320" role="img" aria-label="增量反分词：token id 逐个到达，只把新增的那一小段解码成文本增量，用 sent_offset 记住上次解码到哪、从那里续上">
     <text x="24" y="34" style="font-weight:700;fill:var(--accent-ink)">增量反分词：只解码“新增的那一小段”</text>
     <rect x="24" y="52" width="330" height="214" rx="12" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="44" y="80" style="font-weight:700;fill:var(--muted)">第 1 步 · 到达 token id</text>
@@ -423,23 +423,23 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <text x="44" y="158" style="fill:var(--muted);font-size:12px">文本增量（只发新增）</text>
     <rect x="44" y="168" width="160" height="36" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="124" y="191" text-anchor="middle" class="mono" style="font-size:13px">“SG”+“Lang”</text>
-    <text x="44" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">read_offset: 0 → 6</text>
+    <text x="44" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">sent_offset: 0 → 6</text>
     <rect x="378" y="52" width="358" height="214" rx="12" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="398" y="80" style="font-weight:700;fill:var(--muted)">第 2 步 · 又到达一个 token</text>
     <rect x="398" y="94" width="72" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="434" y="116" text-anchor="middle" class="mono" style="font-size:12px">332</text>
-    <text x="484" y="116" style="fill:var(--faint);font-size:13px">从 read_offset=6 续上↓</text>
+    <text x="484" y="116" style="fill:var(--faint);font-size:13px">从 sent_offset=6 续上↓</text>
     <text x="398" y="158" style="fill:var(--muted);font-size:12px">文本增量（只发新增）</text>
     <rect x="398" y="168" width="96" height="36" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="446" y="191" text-anchor="middle" class="mono" style="font-size:14px">“很”</text>
-    <text x="398" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">read_offset: 6 → 7</text>
+    <text x="398" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">sent_offset: 6 → 7</text>
     <rect x="24" y="280" width="712" height="32" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
-    <text x="380" y="301" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">绝不每步重解码整段：只把 output_str[read_offset:] 这一小段发出去</text>
+    <text x="380" y="301" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">绝不每步重解码整段：只把 output_str[sent_offset:] 这一小段发出去</text>
   </svg>
-  <div class="figcap"><b>图 1 · 增量反分词</b> — token id 一个个到达：<span class="mono">[12, 8801]</span> 解码出 “SG”+“Lang”，下一个 <span class="mono">[332]</span> 解码出 “很”。靠 <span class="mono">read_offset</span> 记住“上次解码到哪”，每步只解码<strong>新增的那一小段</strong>，而不是把整段已生成文本重新解码一遍。微妙之处：有的 token 要和后面的字节<strong>拼起来才构成一个完整字符</strong>，增量反分词会自动等齐再吐。</div>
+  <div class="figcap"><b>图 1 · 增量反分词</b> — token id 一个个到达：<span class="mono">[12, 8801]</span> 解码出 “SG”+“Lang”，下一个 <span class="mono">[332]</span> 解码出 “很”。靠 <span class="mono">sent_offset</span> 记住“上次解码到哪”，每步只解码<strong>新增的那一小段</strong>，而不是把整段已生成文本重新解码一遍。微妙之处：有的 token 要和后面的字节<strong>拼起来才构成一个完整字符</strong>，增量反分词会自动等齐再吐。</div>
 </div>
 
-<p>举一个落到字符上的具体例子：某一步 <span class="mono">read_offset = 6</span>，本步把序列解码出 <span class="mono">output_str = "SGLang很"</span>（长度 7），于是只取 <span class="mono">output_str[6:] = "很"</span> 发出去，再把 <span class="mono">read_offset</span> 推进到 7。对应到客户端，这一步就是一条 SSE 帧：<span class="mono">data: {"text": "很"}</span>。</p>
+<p>举一个落到字符上的具体例子：某一步 <span class="mono">sent_offset = 6</span>，本步把序列解码出 <span class="mono">output_str = "SGLang很"</span>（长度 7），于是只取 <span class="mono">output_str[6:] = "很"</span> 发出去，再把 <span class="mono">sent_offset</span> 推进到 7。对应到客户端，这一步就是一条 SSE 帧：<span class="mono">data: {"text": "很"}</span>。</p>
 
 <p>把这套记账想象成一支<strong>不断右移的游标</strong>：游标左边是“已经交付、不再触碰”的历史，游标右边是“刚长出来、待交付”的新文本。
 每一步，反分词器先把游标右边的新文本切下来发走，再把游标推到文本末尾。于是无论生成多长，<strong>已发送的部分永远不会被重新计算或重新传输</strong>，
@@ -693,7 +693,7 @@ traffic is linear.</p>
 </div>
 
 <div class="fig">
-  <svg viewBox="0 0 760 320" role="img" aria-label="Incremental detokenize: token ids arrive one by one; only the small new slice is decoded into a text delta, using read_offset to remember where decoding left off and resume from there">
+  <svg viewBox="0 0 760 320" role="img" aria-label="Incremental detokenize: token ids arrive one by one; only the small new slice is decoded into a text delta, using sent_offset to remember where decoding left off and resume from there">
     <text x="24" y="34" style="font-weight:700;fill:var(--accent-ink)">Incremental detokenize: decode only the new piece</text>
     <rect x="24" y="52" width="330" height="214" rx="12" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="44" y="80" style="font-weight:700;fill:var(--muted)">Step 1 · token ids arrive</text>
@@ -705,23 +705,23 @@ traffic is linear.</p>
     <text x="44" y="158" style="fill:var(--muted);font-size:12px">text delta (emit only the new)</text>
     <rect x="44" y="168" width="160" height="36" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="124" y="191" text-anchor="middle" class="mono" style="font-size:13px">"SG"+"Lang"</text>
-    <text x="44" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">read_offset: 0 → 6</text>
+    <text x="44" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">sent_offset: 0 → 6</text>
     <rect x="378" y="52" width="358" height="214" rx="12" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="398" y="80" style="font-weight:700;fill:var(--muted)">Step 2 · one more token arrives</text>
     <rect x="398" y="94" width="72" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="434" y="116" text-anchor="middle" class="mono" style="font-size:12px">332</text>
-    <text x="484" y="116" style="fill:var(--faint);font-size:13px">resume from read_offset=6↓</text>
+    <text x="484" y="116" style="fill:var(--faint);font-size:13px">resume from sent_offset=6↓</text>
     <text x="398" y="158" style="fill:var(--muted);font-size:12px">text delta (emit only the new)</text>
     <rect x="398" y="168" width="96" height="36" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="446" y="191" text-anchor="middle" class="mono" style="font-size:14px">"很"</text>
-    <text x="398" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">read_offset: 6 → 7</text>
+    <text x="398" y="238" class="mono" style="font-size:12px;fill:var(--accent-ink)">sent_offset: 6 → 7</text>
     <rect x="24" y="280" width="712" height="32" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
-    <text x="380" y="301" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">never re-decode the whole sequence: emit just output_str[read_offset:]</text>
+    <text x="380" y="301" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">never re-decode the whole sequence: emit just output_str[sent_offset:]</text>
   </svg>
-  <div class="figcap"><b>Fig 1 · Incremental detokenize</b> — token ids arrive one by one: <span class="mono">[12, 8801]</span> decode into "SG"+"Lang", and the next <span class="mono">[332]</span> decodes into "很". A <span class="mono">read_offset</span> remembers "where decoding left off", so each step decodes <strong>only the small new piece</strong> instead of re-decoding the whole generated sequence. Subtlety: some tokens only complete a character when <strong>combined</strong> with later bytes — incremental detokenize waits until it is whole before emitting.</div>
+  <div class="figcap"><b>Fig 1 · Incremental detokenize</b> — token ids arrive one by one: <span class="mono">[12, 8801]</span> decode into "SG"+"Lang", and the next <span class="mono">[332]</span> decodes into "很". A <span class="mono">sent_offset</span> remembers "where decoding left off", so each step decodes <strong>only the small new piece</strong> instead of re-decoding the whole generated sequence. Subtlety: some tokens only complete a character when <strong>combined</strong> with later bytes — incremental detokenize waits until it is whole before emitting.</div>
 </div>
 
-<p>A concrete, character-level example: at some step <span class="mono">read_offset = 6</span>, the step decodes <span class="mono">output_str = "SGLang很"</span> (length 7), so it takes only <span class="mono">output_str[6:] = "很"</span> to emit and advances <span class="mono">read_offset</span> to 7. On the client side, that step is exactly one SSE frame: <span class="mono">data: {"text": "很"}</span>.</p>
+<p>A concrete, character-level example: at some step <span class="mono">sent_offset = 6</span>, the step decodes <span class="mono">output_str = "SGLang很"</span> (length 7), so it takes only <span class="mono">output_str[6:] = "很"</span> to emit and advances <span class="mono">sent_offset</span> to 7. On the client side, that step is exactly one SSE frame: <span class="mono">data: {"text": "很"}</span>.</p>
 
 <p>To make the difference between "resend everything" and "send only the new" obvious, compare them side by side:</p>
 

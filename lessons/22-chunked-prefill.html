@@ -399,6 +399,44 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
   <div class="col"><h4>✅ 分块 prefill（平滑）</h4><p>32k 被切成<strong>固定大小的 chunk</strong>，分摊到好几拍。每拍只算一个 chunk + <strong>混入大家的 decode</strong>，没有哪一拍巨大。所有人的 token <strong>持续流动</strong>，延迟平稳。多花几拍，换来<strong>全局顺滑</strong>与更好的达标吞吐。</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="长 prefill 切块并与 decode 交错：不分块时一个巨大的 32k prefill 独占一拍、其余请求的 decode 全部 stall；分块后长 prefill 被切成固定大小的小块，块与块之间插入正在进行的 decode，时间线重新变平滑">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">长 prefill 切块、与 decode 交错</text>
+    <text x="20" y="86" style="fill:var(--red);font-size:12px;font-weight:700">❌ 不分块</text>
+    <rect x="110" y="60" width="280" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="250" y="87" text-anchor="middle" style="font-size:12px;font-weight:700">32k prefill · 独占一拍</text>
+    <rect x="400" y="60" width="350" height="44" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 3"/>
+    <text x="575" y="87" text-anchor="middle" style="fill:var(--red);font-size:12px;font-weight:700">其余请求 decode 全部 stall</text>
+    <text x="20" y="192" style="fill:var(--teal);font-size:12px;font-weight:700">✅ 分块</text>
+    <rect x="110" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="142" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#1</text>
+    <rect x="182" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="196" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="210" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="228" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="260" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#2</text>
+    <rect x="300" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="314" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="328" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="346" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="378" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#3</text>
+    <rect x="418" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="432" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="446" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="464" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="496" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#N</text>
+    <rect x="536" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="550" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="564" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <text x="600" y="193" style="fill:var(--teal);font-size:11px;font-weight:700">→ 末块转 decode</text>
+    <line x1="40" y1="252" x2="760" y2="252" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M760 252 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="705" y="274" style="fill:var(--faint);font-size:11px">时间 →</text>
+    <text x="120" y="240" class="mono" style="fill:var(--muted);font-size:10px">每个 chunk 之间，正在进行的 decode（蓝条）照常推进</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 长 prefill 切块、与 decode 交错</b> — 不分块时一个 32k 的 prefill 独占一拍，其余请求的 decode <strong>全部 stall</strong>（红色虚线区）；分块后它被切成固定大小的小块，块与块之间插入正在进行的 decode（蓝条），时间线重新变得平滑。</div>
+</div>
+
 <h2>怎么切：把 32k 拆成多拍小块</h2>
 <p>
 分块的机制朴素而有效：<span class="inline">PrefillAdder</span> 每拍都带着一个固定的 chunk token 预算（<span class="mono">rem_chunk_tokens</span>，源自 <span class="mono">chunked_prefill_size</span>）。
@@ -447,6 +485,23 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
   </div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 280" role="img" aria-label="切块前后其他请求的逐 token 延迟对比：切块前出现一个尖锐的延迟尖峰，因为一个大 prefill 把这一拍撑爆；切块后每拍 prefill 有界，曲线平稳、尖峰被削平">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">TTFT/ITL 抖动：切块前后</text>
+    <text x="20" y="58" style="fill:var(--red);font-size:12px;font-weight:700">❌ 切块前</text>
+    <line x1="90" y1="130" x2="730" y2="130" style="stroke:var(--line);stroke-width:1.2"/>
+    <polyline points="90,118 150,120 210,116 270,119 320,114 350,56 372,58 400,116 470,119 540,115 610,118 680,116 730,117" style="fill:none;stroke:var(--red);stroke-width:2"/>
+    <text x="361" y="44" text-anchor="middle" style="fill:var(--red);font-size:11px;font-weight:700">大 prefill → 延迟尖峰</text>
+    <text x="96" y="122" class="mono" style="fill:var(--muted);font-size:10px">ITL ↑</text>
+    <text x="20" y="190" style="fill:var(--teal);font-size:12px;font-weight:700">✅ 切块后</text>
+    <line x1="90" y1="250" x2="730" y2="250" style="stroke:var(--line);stroke-width:1.2"/>
+    <polyline points="90,232 150,230 210,233 270,229 330,231 390,230 450,232 510,229 570,231 630,230 690,232 730,231" style="fill:none;stroke:var(--teal);stroke-width:2"/>
+    <text x="400" y="212" text-anchor="middle" style="fill:var(--teal);font-size:11px;font-weight:700">分块把尖峰削平 · 平稳</text>
+    <text x="96" y="242" class="mono" style="fill:var(--muted);font-size:10px">ITL ↑</text>
+  </svg>
+  <div class="figcap"><b>图 2 · TTFT/ITL 抖动：切块前后</b> — 切块前其他请求的逐 token 延迟出现<strong>尖峰</strong>（一个大 prefill 把这一拍撑爆，第 8 课的 ITL/TTFT 飙升）；切块后每拍 prefill 有界，尖峰被<strong>削平</strong>，延迟曲线保持平稳。</div>
+</div>
+
 <h2>取舍：chunk 大小是那把旋钮</h2>
 <p>
 分块不是免费的：它把一个 prefill 拆成多拍，<strong>总步数变多</strong>，那头鲸鱼自己的 TTFT 也被摊到好几拍、<strong>首字略慢</strong>。
@@ -493,6 +548,20 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
     self.can_run_list.append(req)
     self.new_chunked_req = req                    <span class="cm"># 记住它，下一拍接着切下一块</span></pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_new_batch_prefill</span><span class="ln">在 token 预算内组 prefill 批：长 prompt 分块、不挤占 decode</span></div>
+<pre><span class="kw">def</span> get_new_batch_prefill(self):
+    <span class="cm"># build the next PREFILL batch within a token budget. A long prompt is</span>
+    <span class="cm"># admitted in CHUNKS (chunked_prefill_size) so it doesn't monopolize one</span>
+    <span class="cm"># step and stall ongoing decode; the rest of its prefill resumes later.</span>
+    ...
+    <span class="kw">return</span> new_batch   <span class="cm"># Optional[ScheduleBatch]</span></pre>
+</div>
+
+<p>
+一个具体例子：默认 <span class="mono">--chunked-prefill-size 4096</span> 时，一个 32768 token 的长 prompt 会被切成 <strong>8 块</strong>（32768 ÷ 4096 = 8 拍），每拍只算 4096 个 prefill token，再混入其余请求的 decode；若把旋钮拧到 <span class="mono">--chunked-prefill-size 2048</span>，同一个 prompt 就切成 <strong>16 块</strong>——更顺滑，但多花一倍步数、长请求首字更慢。
+</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
@@ -594,6 +663,44 @@ congestion along the time axis. Chunked prefill exists precisely to flatten this
   <div class="col"><h4>✅ Chunked prefill (smooth)</h4><p>The 32k is cut into <strong>fixed-size chunks</strong> over several steps. Each step computes one chunk + is <strong>mixed with everyone's decode</strong>; no step is huge. Everyone's tokens <strong>keep flowing</strong>, latency steady. A few extra steps buy <strong>global smoothness</strong> and better goodput-under-SLA.</p></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Chunk a long prefill and interleave with decode: without chunking one huge 32k prefill hogs a step and every other request's decode stalls; with chunking the long prefill is split into fixed-size chunks, with ongoing decode slipped between chunks, and the timeline turns smooth again">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">Chunk a long prefill, interleave with decode</text>
+    <text x="20" y="86" style="fill:var(--red);font-size:12px;font-weight:700">❌ no chunking</text>
+    <rect x="110" y="60" width="280" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="250" y="87" text-anchor="middle" style="font-size:12px;font-weight:700">32k prefill · hogs a step</text>
+    <rect x="400" y="60" width="350" height="44" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5;stroke-dasharray:5 3"/>
+    <text x="575" y="87" text-anchor="middle" style="fill:var(--red);font-size:12px;font-weight:700">every other decode stalls</text>
+    <text x="20" y="192" style="fill:var(--teal);font-size:12px;font-weight:700">✅ chunked</text>
+    <rect x="110" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="142" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#1</text>
+    <rect x="182" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="196" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="210" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="228" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="260" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#2</text>
+    <rect x="300" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="314" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="328" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="346" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="378" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#3</text>
+    <rect x="418" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="432" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="446" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="464" y="166" width="64" height="44" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="496" y="193" text-anchor="middle" class="mono" style="font-size:11px;font-weight:700">chunk#N</text>
+    <rect x="536" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="550" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <rect x="564" y="174" width="10" height="28" rx="2" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.2"/>
+    <text x="600" y="193" style="fill:var(--teal);font-size:11px;font-weight:700">→ last chunk enters decode</text>
+    <line x1="40" y1="252" x2="760" y2="252" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M760 252 l-9 -4 v8 z" style="fill:var(--faint)"/>
+    <text x="700" y="274" style="fill:var(--faint);font-size:11px">time →</text>
+    <text x="120" y="240" class="mono" style="fill:var(--muted);font-size:10px">between chunks, ongoing decode (blue bars) keeps advancing</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Chunk a long prefill, interleave with decode</b> — without chunking one 32k prefill hogs a step and every other request's decode <strong>stalls</strong> (red dashed region); with chunking it is split into fixed-size chunks, with ongoing decode (blue bars) slipped between them, and the timeline turns smooth again.</div>
+</div>
+
 <h2>How to cut: split 32k into multi-step chunks</h2>
 <p>
 The mechanism is plain and effective: each step, <span class="inline">PrefillAdder</span> carries a fixed chunk-token budget (<span class="mono">rem_chunk_tokens</span>, derived from <span class="mono">chunked_prefill_size</span>).
@@ -631,6 +738,23 @@ the rest are each request's <strong>decode</strong>. The chunk's size (the highl
   <div class="cells">
     <span class="lab">next step</span><span class="cell hl">chunk#k+1</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="cell">keep decoding</span><span class="sep"></span><span class="q">steady rhythm</span>
   </div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 280" role="img" aria-label="Other requests' inter-token latency before vs after chunking: before chunking a sharp latency spike appears because one big prefill blows up the step; after chunking each step's prefill is bounded, the curve stays smooth and the spike is capped">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">TTFT/ITL jitter: before vs after chunking</text>
+    <text x="20" y="58" style="fill:var(--red);font-size:12px;font-weight:700">❌ before chunking</text>
+    <line x1="90" y1="130" x2="730" y2="130" style="stroke:var(--line);stroke-width:1.2"/>
+    <polyline points="90,118 150,120 210,116 270,119 320,114 350,56 372,58 400,116 470,119 540,115 610,118 680,116 730,117" style="fill:none;stroke:var(--red);stroke-width:2"/>
+    <text x="361" y="44" text-anchor="middle" style="fill:var(--red);font-size:11px;font-weight:700">big prefill → latency spike</text>
+    <text x="96" y="122" class="mono" style="fill:var(--muted);font-size:10px">ITL ↑</text>
+    <text x="20" y="190" style="fill:var(--teal);font-size:12px;font-weight:700">✅ after chunking</text>
+    <line x1="90" y1="250" x2="730" y2="250" style="stroke:var(--line);stroke-width:1.2"/>
+    <polyline points="90,232 150,230 210,233 270,229 330,231 390,230 450,232 510,229 570,231 630,230 690,232 730,231" style="fill:none;stroke:var(--teal);stroke-width:2"/>
+    <text x="400" y="212" text-anchor="middle" style="fill:var(--teal);font-size:11px;font-weight:700">chunking caps the spike · smooth</text>
+    <text x="96" y="242" class="mono" style="fill:var(--muted);font-size:10px">ITL ↑</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · TTFT/ITL jitter: before vs after chunking</b> — before chunking other requests' inter-token latency <strong>spikes</strong> (one big prefill blows up the step, the ITL/TTFT spike of Lesson 8); after chunking each step's prefill is bounded, the spike is <strong>capped</strong>, and the curve stays smooth.</div>
 </div>
 
 <h2>The trade-off: chunk size is the knob</h2>
@@ -673,6 +797,20 @@ commit only that slice, and record the request as <span class="mono">new_chunked
     self.can_run_list.append(req)
     self.new_chunked_req = req                    <span class="cm"># remember it; slice the next chunk next step</span></pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.get_new_batch_prefill</span><span class="ln">build a prefill batch within a token budget: chunk long prompts, don't starve decode</span></div>
+<pre><span class="kw">def</span> get_new_batch_prefill(self):
+    <span class="cm"># build the next PREFILL batch within a token budget. A long prompt is</span>
+    <span class="cm"># admitted in CHUNKS (chunked_prefill_size) so it doesn't monopolize one</span>
+    <span class="cm"># step and stall ongoing decode; the rest of its prefill resumes later.</span>
+    ...
+    <span class="kw">return</span> new_batch   <span class="cm"># Optional[ScheduleBatch]</span></pre>
+</div>
+
+<p>
+A concrete example: with the default <span class="mono">--chunked-prefill-size 4096</span>, a 32768-token prompt is cut into <strong>8 chunks</strong> (32768 ÷ 4096 = 8 steps), each step computing only 4096 prefill tokens mixed with other requests' decode; turn the knob to <span class="mono">--chunked-prefill-size 2048</span> and the same prompt becomes <strong>16 chunks</strong>—smoother, but twice the steps and a slower whale first byte.
+</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>

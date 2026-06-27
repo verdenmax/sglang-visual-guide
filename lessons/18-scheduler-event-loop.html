@@ -516,6 +516,106 @@ DetokenizerManager 在第三个进程把 token 拼回文字。本课讲的事件
 换句话说，<strong>后面六课都是在本课这张五步图上做注解</strong>。只要你脑子里随时能默画出"收 → 入队 → 组批 → 前向 → 收尾 → 回环"这条闭环，
 无论读到哪一课，都能立刻定位它在<strong>整个 step</strong> 里的位置，不会迷路。这，就是把调度器当作"心脏"来理解的全部价值。</p>
 
+<h2>把心跳画成一只转轮：四步周而复始</h2>
+<p>文字读到这里，不妨把这条闭环<strong>画成一只转轮</strong>：四个动作首尾相接，转轮永远向同一个方向旋转，每转满一圈就是一个 step。
+注意中心那枚 <span class="inline">while True</span>——它才是让轮子<strong>永不停转</strong>的发动机。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="调度事件循环画成一只转轮：① 收请求 recv_requests → ② 组批 get_next_batch → ③ 前向 run_batch（GPU）→ ④ 出结果 process_result，再回到 ①，周而复始">
+    <circle cx="400" cy="180" r="120" style="fill:none;stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 496 56 C 590 56, 612 96, 610 152" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 610 160 l -5 -10 l 10 0 z" style="fill:var(--muted)"/>
+    <path d="M 610 204 C 610 270, 580 310, 502 310" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 494 310 l 10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <path d="M 298 310 C 200 310, 158 270, 160 204" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 160 196 l -5 10 l 10 0 z" style="fill:var(--muted)"/>
+    <path d="M 160 154 C 160 96, 190 56, 303 56" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 311 56 l -10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <circle cx="400" cy="180" r="48" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="400" y="176" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--muted)">while True</text>
+    <text x="400" y="195" text-anchor="middle" style="font-size:11px;fill:var(--faint)">step + 1</text>
+    <rect x="305" y="34" width="190" height="46" rx="9" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="400" y="53" text-anchor="middle" style="font-size:13px">① 收请求</text>
+    <text x="400" y="71" text-anchor="middle" class="mono" style="font-size:11px">recv_requests</text>
+    <rect x="520" y="156" width="180" height="48" rx="9" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="610" y="176" text-anchor="middle" style="font-size:13px">② 组批</text>
+    <text x="610" y="194" text-anchor="middle" class="mono" style="font-size:11px">get_next_batch</text>
+    <rect x="300" y="288" width="200" height="46" rx="9" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="400" y="307" text-anchor="middle" style="font-size:13px">③ 前向（GPU）</text>
+    <text x="400" y="325" text-anchor="middle" class="mono" style="font-size:11px">run_batch</text>
+    <rect x="70" y="156" width="180" height="48" rx="9" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="160" y="176" text-anchor="middle" style="font-size:13px">④ 出结果</text>
+    <text x="160" y="194" text-anchor="middle" class="mono" style="font-size:11px">process_result</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 调度事件循环（环形）</b> — 四个动作首尾相接成一只转轮：① <span class="mono">recv_requests</span> 收请求 → ② <span class="mono">get_next_batch</span> 组批 → ③ <span class="mono">run_batch</span> 上 GPU 前向 → ④ <span class="mono">process_result</span> 出结果，再回到 ①；中心的 <span class="mono">while True</span> 让它每个 step 转一圈、永不停转。</div>
+</div>
+
+<h2>批是流动的：等待队列 → 运行批 → 完成离场</h2>
+<p>转轮只画了<strong>动作</strong>，没画<strong>请求</strong>。再看一张：等待的请求排在左边队列里，被准入的进入<strong>中间的运行批</strong>（每个 step 前向一次），
+命中停止条件的从右边离场并释放 KV——而运行批的<strong>成员每一圈都在变</strong>，这正是连续批处理的现场。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="请求的流动：左边等待队列中的请求被准入中间的运行批，运行批每个 step 前向一次且成员不断变化，命中停止条件的请求从右边离场并释放 KV">
+    <text x="100" y="40" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:13px">等待队列</text>
+    <rect x="40" y="56" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="76" text-anchor="middle" class="mono" style="font-size:11px">req6</text>
+    <rect x="40" y="92" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="112" text-anchor="middle" class="mono" style="font-size:11px">req7</text>
+    <rect x="40" y="128" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="148" text-anchor="middle" class="mono" style="font-size:11px">req8</text>
+    <rect x="40" y="164" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="184" text-anchor="middle" class="mono" style="font-size:11px">req9</text>
+    <line x1="164" y1="120" x2="296" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 304 120 l -10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <text x="232" y="110" text-anchor="middle" style="font-size:11px;fill:var(--muted)">准入 admit</text>
+    <rect x="300" y="70" width="170" height="150" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="385" y="60" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink);font-size:13px">运行批 running</text>
+    <rect x="315" y="84" width="140" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="385" y="105" text-anchor="middle" class="mono" style="font-size:11px">req0</text>
+    <rect x="315" y="122" width="140" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="385" y="143" text-anchor="middle" class="mono" style="font-size:11px">req1</text>
+    <rect x="315" y="160" width="140" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="385" y="181" text-anchor="middle" class="mono" style="font-size:11px">req5</text>
+    <text x="385" y="212" text-anchor="middle" style="font-size:11px;fill:var(--muted)">成员每个 step 都在变</text>
+    <path d="M 330 70 C 330 28, 440 28, 440 70" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <path d="M 440 78 l -5 -10 l 10 0 z" style="fill:var(--amber)"/>
+    <text x="385" y="22" text-anchor="middle" style="font-size:11px;fill:var(--amber)">每个 step 前向一次</text>
+    <line x1="472" y1="140" x2="596" y2="140" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 604 140 l -10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <text x="536" y="130" text-anchor="middle" style="font-size:11px;fill:var(--muted)">命中停止 → 离场</text>
+    <rect x="600" y="84" width="130" height="120" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="72" text-anchor="middle" style="font-weight:700;fill:var(--teal);font-size:13px">完成 finished</text>
+    <rect x="614" y="98" width="102" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="118" text-anchor="middle" class="mono" style="font-size:11px">req3 ✓</text>
+    <rect x="614" y="134" width="102" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="154" text-anchor="middle" class="mono" style="font-size:11px">req4 ✓</text>
+    <text x="665" y="190" text-anchor="middle" style="font-size:11px;fill:var(--muted)">释放 KV 槽位</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 队列 → 运行批 → 完成</b> — 等待请求排在左侧队列，被<strong>准入</strong>后进入中间的运行批（每个 step 前向一次、成员不断变化），命中停止条件的请求从右侧<strong>离场</strong>并释放各自的 KV 槽位；批的组成因此每一圈都在变，这就是连续批处理的物理现场。</div>
+</div>
+
+<h2>run_batch：把一批交给 worker 做一次前向</h2>
+<p>第 4 步 <span class="inline">run_batch</span> 本身其实<strong>极薄</strong>——它把整批交给 TpWorker 做<strong>一次</strong>前向，拿回 logits 与采样好的 token，
+顺手把 <span class="mono">forward_ct</span> 加一。这个计数器正是<strong>引擎到此跳了多少次心跳</strong>的累加表。</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.run_batch</span><span class="ln">把一个批交给模型 worker 做一次前向，拿回下一个 token</span></div>
+  <pre><span class="kw">def</span> run_batch(self, batch):
+    self.forward_ct += 1
+    <span class="cm"># hand the batch to the model worker for ONE forward (prefill or decode);</span>
+    <span class="cm"># get back the next-token logits and sampled ids</span>
+    logits_output, next_token_ids = self.tp_worker.forward_batch_generation(batch)
+    <span class="kw">return</span> logits_output, next_token_ids</pre>
+</div>
+
+<p><strong>一个具体例子（数 step）：</strong>假设服务器刚启动、<span class="mono">forward_ct = 0</span>。第 1 个 step 组出一个含 3 条请求的 <strong>prefill 批</strong>，
+<span class="inline">run_batch</span> 跑完后 <span class="mono">forward_ct = 1</span>；接下来若干 step 都在做 <strong>decode 批</strong>（每条各推进 1 个 token），
+跑到第 100 个 step 时 <span class="mono">forward_ct = 100</span>——也就是这颗心脏到此刻已经跳了整整 100 下。</p>
+
+<p><strong>再看一个例子（批大小在变）：</strong>第 1 个 step 运行批 = {req0, req1, req5}，<strong>batch size = 3</strong>；
+若 req1 在这一步命中 EOS 而完成离场、同时 req6 从等待队列被准入，那么<strong>下一个 step</strong> 的运行批就变成 {req0, req5, req6}——
+人数仍是 3，但<strong>成员换了</strong>。这正是图 2 想说的：批的<strong>大小可能不变，但组成每圈都在重排</strong>。</p>
+
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
@@ -726,6 +826,111 @@ every request emits exactly one token. If the Python accounting in steps 3 and 5
 CPU to form the batch, and no card, however strong, stays fed. So SGLang polishes this loop as <strong>the hottest of hot paths</strong> —
 the entire reason Lesson 21's overlap scheduler exists, and the yardstick to carry through all of Part 5:
 <strong>every design ultimately serves one goal — keep this heart beating fast and full.</strong></p>
+
+<h2>Draw the heartbeat as a wheel: four steps, spinning forever</h2>
+<p>Having read the prose, picture the closed loop as a <strong>wheel</strong>: four actions joined head-to-tail, always turning the same
+direction, and one full revolution is one step. Note the <span class="inline">while True</span> at the hub — it is the engine that keeps
+the wheel <strong>spinning forever</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 340" role="img" aria-label="the scheduler event loop drawn as a wheel: ① recv_requests → ② get_next_batch → ③ run_batch (GPU) → ④ process_result, then back to ①, spinning forever">
+    <circle cx="400" cy="180" r="120" style="fill:none;stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <path d="M 496 56 C 590 56, 612 96, 610 152" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 610 160 l -5 -10 l 10 0 z" style="fill:var(--muted)"/>
+    <path d="M 610 204 C 610 270, 580 310, 502 310" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 494 310 l 10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <path d="M 298 310 C 200 310, 158 270, 160 204" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 160 196 l -5 10 l 10 0 z" style="fill:var(--muted)"/>
+    <path d="M 160 154 C 160 96, 190 56, 303 56" style="fill:none;stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 311 56 l -10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <circle cx="400" cy="180" r="48" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="400" y="176" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--muted)">while True</text>
+    <text x="400" y="195" text-anchor="middle" style="font-size:11px;fill:var(--faint)">step + 1</text>
+    <rect x="305" y="34" width="190" height="46" rx="9" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="400" y="53" text-anchor="middle" style="font-size:13px">① receive</text>
+    <text x="400" y="71" text-anchor="middle" class="mono" style="font-size:11px">recv_requests</text>
+    <rect x="520" y="156" width="180" height="48" rx="9" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="610" y="176" text-anchor="middle" style="font-size:13px">② form batch</text>
+    <text x="610" y="194" text-anchor="middle" class="mono" style="font-size:11px">get_next_batch</text>
+    <rect x="300" y="288" width="200" height="46" rx="9" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="400" y="307" text-anchor="middle" style="font-size:13px">③ forward (GPU)</text>
+    <text x="400" y="325" text-anchor="middle" class="mono" style="font-size:11px">run_batch</text>
+    <rect x="70" y="156" width="180" height="48" rx="9" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="160" y="176" text-anchor="middle" style="font-size:13px">④ emit result</text>
+    <text x="160" y="194" text-anchor="middle" class="mono" style="font-size:11px">process_result</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · The scheduler event loop (a wheel)</b> — four actions joined head-to-tail into a wheel: ① <span class="mono">recv_requests</span> receive → ② <span class="mono">get_next_batch</span> form batch → ③ <span class="mono">run_batch</span> forward on the GPU → ④ <span class="mono">process_result</span> emit result, then back to ①; the <span class="mono">while True</span> at the hub makes it turn once per step, spinning forever.</div>
+</div>
+
+<h2>The batch is fluid: waiting queue → running batch → finished</h2>
+<p>The wheel drew the <strong>actions</strong>, not the <strong>requests</strong>. Here is the other view: waiting requests sit in a queue on the
+left, admitted ones enter the <strong>running batch</strong> in the center (forwarded once each step), and requests that hit a stop condition
+exit on the right and free their KV — while the running batch's <strong>members change every revolution</strong>, which is continuous batching in the flesh.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="request flow: requests in the left waiting queue are admitted into the center running batch, which is forwarded once per step with changing membership, and requests that hit a stop condition exit on the right and free their KV">
+    <text x="100" y="40" text-anchor="middle" style="font-weight:700;fill:var(--muted);font-size:13px">waiting queue</text>
+    <rect x="40" y="56" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="76" text-anchor="middle" class="mono" style="font-size:11px">req6</text>
+    <rect x="40" y="92" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="112" text-anchor="middle" class="mono" style="font-size:11px">req7</text>
+    <rect x="40" y="128" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="148" text-anchor="middle" class="mono" style="font-size:11px">req8</text>
+    <rect x="40" y="164" width="120" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="100" y="184" text-anchor="middle" class="mono" style="font-size:11px">req9</text>
+    <line x1="164" y1="120" x2="296" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 304 120 l -10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <text x="232" y="110" text-anchor="middle" style="font-size:11px;fill:var(--muted)">admit</text>
+    <rect x="300" y="70" width="170" height="150" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="385" y="60" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink);font-size:13px">running batch</text>
+    <rect x="315" y="84" width="140" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="385" y="105" text-anchor="middle" class="mono" style="font-size:11px">req0</text>
+    <rect x="315" y="122" width="140" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="385" y="143" text-anchor="middle" class="mono" style="font-size:11px">req1</text>
+    <rect x="315" y="160" width="140" height="32" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="385" y="181" text-anchor="middle" class="mono" style="font-size:11px">req5</text>
+    <text x="385" y="212" text-anchor="middle" style="font-size:11px;fill:var(--muted)">members change each step</text>
+    <path d="M 330 70 C 330 28, 440 28, 440 70" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <path d="M 440 78 l -5 -10 l 10 0 z" style="fill:var(--amber)"/>
+    <text x="385" y="22" text-anchor="middle" style="font-size:11px;fill:var(--amber)">one forward per step</text>
+    <line x1="472" y1="140" x2="596" y2="140" style="stroke:var(--muted);stroke-width:1.5"/>
+    <path d="M 604 140 l -10 -5 l 0 10 z" style="fill:var(--muted)"/>
+    <text x="536" y="130" text-anchor="middle" style="font-size:11px;fill:var(--muted)">stop hit → exit</text>
+    <rect x="600" y="84" width="130" height="120" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="72" text-anchor="middle" style="font-weight:700;fill:var(--teal);font-size:13px">finished</text>
+    <rect x="614" y="98" width="102" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="118" text-anchor="middle" class="mono" style="font-size:11px">req3 ✓</text>
+    <rect x="614" y="134" width="102" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="665" y="154" text-anchor="middle" class="mono" style="font-size:11px">req4 ✓</text>
+    <text x="665" y="190" text-anchor="middle" style="font-size:11px;fill:var(--muted)">free KV slots</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · queue → running batch → finished</b> — waiting requests sit in the left queue; once <strong>admitted</strong> they enter the center running batch (forwarded once per step, membership ever-changing); requests that hit a stop condition <strong>exit</strong> on the right and free their KV slots; the batch composition therefore changes every revolution — continuous batching, physically.</div>
+</div>
+
+<h2>run_batch: hand one batch to the worker for a single forward</h2>
+<p>Step 4, <span class="inline">run_batch</span>, is itself <strong>very thin</strong> — it hands the whole batch to the TpWorker for
+<strong>one</strong> forward, gets back logits and the sampled tokens, and bumps <span class="mono">forward_ct</span> by one. That counter is
+the running tally of <strong>how many heartbeats the engine has taken so far</strong>.</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/scheduler.py ::Scheduler.run_batch</span><span class="ln">hand a batch to the model worker for one forward, get the next tokens</span></div>
+  <pre><span class="kw">def</span> run_batch(self, batch):
+    self.forward_ct += 1
+    <span class="cm"># hand the batch to the model worker for ONE forward (prefill or decode);</span>
+    <span class="cm"># get back the next-token logits and sampled ids</span>
+    logits_output, next_token_ids = self.tp_worker.forward_batch_generation(batch)
+    <span class="kw">return</span> logits_output, next_token_ids</pre>
+</div>
+
+<p><strong>A concrete example (counting steps):</strong> say the server just started with <span class="mono">forward_ct = 0</span>. Step 1 forms a
+<strong>prefill batch</strong> of 3 requests, and after <span class="inline">run_batch</span> returns, <span class="mono">forward_ct = 1</span>; the
+next several steps run <strong>decode batches</strong> (each advancing every request by 1 token), and by step 100 <span class="mono">forward_ct = 100</span>
+— the heart has beaten exactly 100 times by now.</p>
+
+<p><strong>Another example (batch size shifts):</strong> step 1's running batch = {req0, req1, req5}, <strong>batch size = 3</strong>; if req1 hits EOS
+this step and leaves while req6 is admitted from the waiting queue, then the <strong>next step's</strong> running batch becomes {req0, req5, req6}
+— still 3 members, but the <strong>membership changed</strong>. That is exactly Fig 2's point: the batch <strong>size may hold steady, yet its
+composition is reshuffled every revolution</strong>.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>

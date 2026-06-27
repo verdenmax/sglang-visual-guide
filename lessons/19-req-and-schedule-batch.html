@@ -397,6 +397,64 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed（完成与释放）</h4><p>命中 EOS、到达 max_new_tokens 或被 abort，状态转 <strong>finished</strong>；<code>filter_batch()</code> 把它当场清出当前批，KV 槽归还内存池（第 30 课），结果发往反分词器（第 17 课）。</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="一个 Req 的状态流转：等待队列 → 运行中（先 prefill 吃整段 prompt，再逐步 decode 每拍 +1）→ 完成；其间这条 Req 始终携带 origin_input_ids 与不断增长的 output_ids">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">一个 Req 的一生（状态机）</text>
+    <rect x="28" y="64" width="150" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="103" y="92" text-anchor="middle" style="fill:var(--blue);font-weight:700">等待队列</text>
+    <text x="103" y="112" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">waiting</text>
+    <line x1="178" y1="96" x2="244" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M244 96 l-11 -5 v10 z" style="fill:var(--line)"/>
+    <rect x="250" y="52" width="266" height="92" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="383" y="46" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">运行中 running</text>
+    <rect x="266" y="82" width="106" height="46" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="319" y="102" text-anchor="middle" style="fill:var(--amber);font-weight:700;font-size:12px">prefill</text>
+    <text x="319" y="119" text-anchor="middle" style="font-size:10px;fill:var(--amber)">整段 prompt</text>
+    <rect x="392" y="82" width="108" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="446" y="102" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">decode ×N</text>
+    <text x="446" y="119" text-anchor="middle" style="font-size:10px;fill:var(--teal)">逐步 +1</text>
+    <path d="M384 80 q22 -18 44 0" style="fill:none;stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M428 80 l-10 -1 l4 9 z" style="fill:var(--teal)"/>
+    <line x1="516" y1="96" x2="582" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M582 96 l-11 -5 v10 z" style="fill:var(--line)"/>
+    <rect x="588" y="64" width="150" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="663" y="90" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">完成 finished</text>
+    <text x="663" y="110" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink)">stop / length</text>
+    <text x="28" y="186" style="fill:var(--muted);font-size:12px">这条 Req 一路随身携带的内容条：</text>
+    <text x="28" y="218" class="mono" style="font-size:11px;fill:var(--muted)">origin_input_ids</text>
+    <rect x="150" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="180" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="210" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="240" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="300" y="218" class="mono" style="font-size:11px;fill:var(--teal)">output_ids</text>
+    <rect x="378" y="202" width="28" height="24" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="408" y="202" width="28" height="24" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="438" y="202" width="28" height="24" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="468" y="202" width="28" height="24" rx="4" style="fill:none;stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="502" y1="214" x2="540" y2="214" style="stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M540 214 l-10 -5 v10 z" style="fill:var(--teal)"/>
+    <text x="548" y="218" class="mono" style="font-size:11px;fill:var(--teal)">+1 每拍</text>
+  </svg>
+  <div class="figcap"><b>图 19A · 一个 Req 的状态流转</b> — waiting 排队 → running 先 prefill 吃整段 prompt、再逐步 decode 每拍 +1 → finished（命中 stop 或达到 length）；其间这条 Req 始终携带 origin_input_ids 与不断增长的 output_ids。</div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::Req</span><span class="ln">调度器里一个请求的完整运行态</span></div>
+<pre><span class="kw">class</span> Req:
+    <span class="cm"># one request's full running state inside the scheduler</span>
+    <span class="kw">def</span> __init__(self, rid, origin_input_ids, sampling_params, ...):
+        self.rid = rid
+        self.origin_input_ids = origin_input_ids  <span class="cm"># the prompt token ids</span>
+        self.output_ids = []                       <span class="cm"># tokens generated so far</span>
+        self.sampling_params = sampling_params
+        self.finished_reason = <span class="kw">None</span>                <span class="cm"># set when the request stops</span>
+        <span class="cm"># ... prefix-cache node, KV indices, etc.</span></pre>
+</div>
+
+<p>
+举个具体例子：当生成命中 EOS，<code>finished_reason</code> 取 <code>FINISH_MATCHED_TOKEN</code>（即 <strong>stop</strong>）；当达到 <code>max_new_tokens=256</code> 上限，则取 <code>FINISH_LENGTH</code>（即 <strong>length</strong>）。再如某一拍 <code>ScheduleBatch</code> 里 <code>len(reqs)=8</code>，就是这 8 条请求被打成一批、一起前向。
+</p>
+
 <p>
 这条生命线里藏着一个常被忽略的事实：<strong>一条请求只 extend 一次，却 decode 很多很多次</strong>。一段几百 token 的 prompt，预填充时被一拍吃完；
 而生成阶段每拍只产一个 token，要生成几百 token 就意味着这条请求要在<strong>几百个连续的 decode 批</strong>里反复露面。正因如此，decode 才是引擎的主战场，
@@ -433,6 +491,41 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     因此张量是规整的<strong>每请求 1 token</strong>，只需为每条请求<strong>再要一个 KV 槽</strong>放新 token。它<strong>反复出现</strong>——一条请求一生中绝大多数拍
     都在 decode 批里度过。这正是吞吐的主战场：批越满，GPU 越划算（连续批处理，第 5 课）。</p>
   </div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="ScheduleBatch 把多条不同长度的 Req 打成一批，交给模型一次前向；这一批共享 input_ids、positions、out_cache_loc 等张量">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">ScheduleBatch 把多条不同长度的 Req 打成一批，一次前向</text>
+    <rect x="24" y="48" width="420" height="150" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="36" y="70" class="mono" style="font-size:12px;fill:var(--accent-ink)">ScheduleBatch · reqs: List[Req]</text>
+    <text x="40" y="98" class="mono" style="font-size:11px;fill:var(--blue)">Req A</text>
+    <rect x="104" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="136" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="168" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="200" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="40" y="134" class="mono" style="font-size:11px;fill:var(--amber)">Req B</text>
+    <rect x="104" y="120" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="136" y="120" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="40" y="170" class="mono" style="font-size:11px;fill:var(--teal)">Req C</text>
+    <rect x="104" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="136" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="168" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="200" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="232" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="444" y1="123" x2="518" y2="123" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M518 123 l-11 -5 v10 z" style="fill:var(--line)"/>
+    <rect x="524" y="92" width="208" height="62" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="628" y="118" text-anchor="middle" style="font-weight:700">模型一次前向</text>
+    <text x="628" y="138" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">single forward</text>
+    <text x="24" y="240" style="fill:var(--muted);font-size:12px">这一批共享的张量 (shared tensors)：</text>
+    <rect x="24" y="252" width="150" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">input_ids</text>
+    <rect x="190" y="252" width="150" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="265" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">positions</text>
+    <rect x="356" y="252" width="180" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="446" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">out_cache_loc</text>
+  </svg>
+  <div class="figcap"><b>图 19B · ScheduleBatch 打包多个 Req</b> — 几条长度不一的 Req（A/B/C）被装进同一个 ScheduleBatch，由模型一次前向算完；批里那几样张量 input_ids、positions、out_cache_loc 是这一拍全员共享、用完即弃的。</div>
 </div>
 
 <p>
@@ -637,6 +730,64 @@ and its KV slots are freed. Here is its whole life.
   <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed</h4><p>On EOS, max_new_tokens, or abort it turns <strong>finished</strong>; <code>filter_batch()</code> drops it from the current batch on the spot, KV slots return to the pool (Lesson 30), and results flow to the detokenizer (Lesson 17).</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="A Req's lifecycle: waiting queue → running (prefill eats the whole prompt, then decode adds +1 per beat) → finished; throughout, the Req carries origin_input_ids and a growing output_ids">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">A Req's whole life (state machine)</text>
+    <rect x="28" y="64" width="150" height="64" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="103" y="92" text-anchor="middle" style="fill:var(--blue);font-weight:700">waiting queue</text>
+    <text x="103" y="112" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">waiting</text>
+    <line x1="178" y1="96" x2="244" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M244 96 l-11 -5 v10 z" style="fill:var(--line)"/>
+    <rect x="250" y="52" width="266" height="92" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="383" y="46" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">running</text>
+    <rect x="266" y="82" width="106" height="46" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="319" y="102" text-anchor="middle" style="fill:var(--amber);font-weight:700;font-size:12px">prefill</text>
+    <text x="319" y="119" text-anchor="middle" style="font-size:10px;fill:var(--amber)">whole prompt</text>
+    <rect x="392" y="82" width="108" height="46" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="446" y="102" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">decode ×N</text>
+    <text x="446" y="119" text-anchor="middle" style="font-size:10px;fill:var(--teal)">step +1</text>
+    <path d="M384 80 q22 -18 44 0" style="fill:none;stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M428 80 l-10 -1 l4 9 z" style="fill:var(--teal)"/>
+    <line x1="516" y1="96" x2="582" y2="96" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M582 96 l-11 -5 v10 z" style="fill:var(--line)"/>
+    <rect x="588" y="64" width="150" height="64" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="663" y="90" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">finished</text>
+    <text x="663" y="110" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink)">stop / length</text>
+    <text x="28" y="186" style="fill:var(--muted);font-size:12px">This Req carries its content strip all the way:</text>
+    <text x="28" y="218" class="mono" style="font-size:11px;fill:var(--muted)">origin_input_ids</text>
+    <rect x="150" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="180" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="210" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="240" y="202" width="28" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="300" y="218" class="mono" style="font-size:11px;fill:var(--teal)">output_ids</text>
+    <rect x="378" y="202" width="28" height="24" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="408" y="202" width="28" height="24" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="438" y="202" width="28" height="24" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="468" y="202" width="28" height="24" rx="4" style="fill:none;stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="502" y1="214" x2="540" y2="214" style="stroke:var(--teal);stroke-width:1.5"/>
+    <path d="M540 214 l-10 -5 v10 z" style="fill:var(--teal)"/>
+    <text x="548" y="218" class="mono" style="font-size:11px;fill:var(--teal)">+1 / beat</text>
+  </svg>
+  <div class="figcap"><b>Fig 19A · A Req's lifecycle</b> — waiting in queue → running, first prefill eats the whole prompt, then decode adds +1 each beat → finished (hits stop, or reaches length); throughout, the Req keeps carrying origin_input_ids and a growing output_ids.</div>
+</div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::Req</span><span class="ln">one request's full running state inside the scheduler</span></div>
+<pre><span class="kw">class</span> Req:
+    <span class="cm"># one request's full running state inside the scheduler</span>
+    <span class="kw">def</span> __init__(self, rid, origin_input_ids, sampling_params, ...):
+        self.rid = rid
+        self.origin_input_ids = origin_input_ids  <span class="cm"># the prompt token ids</span>
+        self.output_ids = []                       <span class="cm"># tokens generated so far</span>
+        self.sampling_params = sampling_params
+        self.finished_reason = <span class="kw">None</span>                <span class="cm"># set when the request stops</span>
+        <span class="cm"># ... prefix-cache node, KV indices, etc.</span></pre>
+</div>
+
+<p>
+As a concrete example: when generation hits EOS, <code>finished_reason</code> becomes <code>FINISH_MATCHED_TOKEN</code> (i.e. <strong>stop</strong>); when it reaches <code>max_new_tokens=256</code>, it becomes <code>FINISH_LENGTH</code> (i.e. <strong>length</strong>). Likewise, if one beat's <code>ScheduleBatch</code> has <code>len(reqs)=8</code>, then those 8 requests are packed into one batch and forwarded together.
+</p>
+
 <h2>2. ScheduleBatch: the cluster forwarded together this step, carrying a mode</h2>
 <p>
 If Req is "a person," <span class="inline">ScheduleBatch</span> is "<strong>this flight's manifest</strong>"—docstring: <em>"Store all information of a
@@ -660,6 +811,41 @@ other fields are tensors <strong>laid out temporarily</strong> for the forward p
     request for the new token. It <strong>recurs constantly</strong>—a request spends the vast majority of its beats in decode batches. This is throughput's
     main stage: the fuller the batch, the better the GPU pays off (continuous batching, Lesson 5).</p>
   </div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 760 300" role="img" aria-label="ScheduleBatch packs several Reqs of different lengths into one batch handed to the model for a single forward; the batch shares tensors input_ids, positions, out_cache_loc">
+    <text x="24" y="34" style="font-weight:700;fill:var(--muted)">ScheduleBatch packs several different-length Reqs into one forward</text>
+    <rect x="24" y="48" width="420" height="150" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="36" y="70" class="mono" style="font-size:12px;fill:var(--accent-ink)">ScheduleBatch · reqs: List[Req]</text>
+    <text x="40" y="98" class="mono" style="font-size:11px;fill:var(--blue)">Req A</text>
+    <rect x="104" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="136" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="168" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="200" y="84" width="28" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="40" y="134" class="mono" style="font-size:11px;fill:var(--amber)">Req B</text>
+    <rect x="104" y="120" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="136" y="120" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="40" y="170" class="mono" style="font-size:11px;fill:var(--teal)">Req C</text>
+    <rect x="104" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="136" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="168" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="200" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="232" y="156" width="28" height="22" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="444" y1="123" x2="518" y2="123" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M518 123 l-11 -5 v10 z" style="fill:var(--line)"/>
+    <rect x="524" y="92" width="208" height="62" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="628" y="118" text-anchor="middle" style="font-weight:700">model forward</text>
+    <text x="628" y="138" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">single forward</text>
+    <text x="24" y="240" style="fill:var(--muted);font-size:12px">Tensors shared by this batch:</text>
+    <rect x="24" y="252" width="150" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="99" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">input_ids</text>
+    <rect x="190" y="252" width="150" height="34" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="265" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">positions</text>
+    <rect x="356" y="252" width="180" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="446" y="274" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">out_cache_loc</text>
+  </svg>
+  <div class="figcap"><b>Fig 19B · ScheduleBatch packs several Reqs</b> — a few different-length Reqs (A/B/C) are placed into one ScheduleBatch and computed by the model in a single forward; the batch's tensors input_ids, positions, out_cache_loc are shared by everyone this beat and discarded after use.</div>
 </div>
 
 <h2>3. Key fields at a glance: what each holds, what role it plays</h2>
