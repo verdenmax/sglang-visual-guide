@@ -457,8 +457,8 @@ LESSON_44 = {"zh": r"""
         self.speculative_num_draft_tokens = \
             server_args.speculative_num_draft_tokens             # nodes to verify
 
-    def draft(self, batch):
-        ...   # EAGLE draft head expands a TREE of candidate tokens
+    # 起草委托给 self.draft_worker（一个 EagleDraftWorker）：
+    #   self.draft_worker.draft(batch) 用 EAGLE 头展开候选 token 树
 
     def verify(self, batch):
         ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
@@ -629,8 +629,8 @@ LESSON_44 = {"zh": r"""
         self.speculative_num_draft_tokens = \
             server_args.speculative_num_draft_tokens             # nodes to verify
 
-    def draft(self, batch):
-        ...   # EAGLE draft head expands a TREE of candidate tokens
+    # drafting is delegated to self.draft_worker (an EagleDraftWorker):
+    #   self.draft_worker.draft(batch)  -&gt; EAGLE head expands a TREE
 
     def verify(self, batch):
         ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
@@ -796,7 +796,9 @@ LESSON_45 = {"zh": r"""
     # the DECODE side of PD disaggregation: pull the KV that the
     # prefill node produced, into this node's KV pool.
     @abstractmethod
-    def init(self, kv_indices, ...): ...
+    def init(self, ...): ...                        # set up the receive session
+    @abstractmethod
+    def send_metadata(self, kv_indices, ...): ...   # announce where the KV lands
     @abstractmethod
     def poll(self) -&gt; KVPoll:
         ...   # WaitingForInput -&gt; Transferring -&gt; Success
@@ -962,7 +964,9 @@ LESSON_45 = {"zh": r"""
     # the DECODE side of PD disaggregation: pull the KV that the
     # prefill node produced, into this node's KV pool.
     @abstractmethod
-    def init(self, kv_indices, ...): ...
+    def init(self, ...): ...                        # set up the receive session
+    @abstractmethod
+    def send_metadata(self, kv_indices, ...): ...   # announce where the KV lands
     @abstractmethod
     def poll(self) -&gt; KVPoll:
         ...   # WaitingForInput -&gt; Transferring -&gt; Success
