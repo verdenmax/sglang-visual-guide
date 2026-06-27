@@ -421,6 +421,37 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
   <div class="cells"><span class="lab">清完之后</span><span class="cell hl">root</span><span class="cell hl">你是一个</span><span class="cell hl">助手·在跑</span><span class="sep">→</span><span class="cell q">只剩在用链；空出的槽位还给分配器，容下新请求</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="LRU 驱逐：可回收的冷叶被释放，被锁定的在用节点幸存">
+    <line x1="350" y1="66" x2="220" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="350" y1="66" x2="520" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="146" x2="220" y2="190" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="520" y1="146" x2="430" y2="190" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="520" y1="146" x2="620" y2="190" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="305" y="32" width="90" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="350" y="54" text-anchor="middle" class="mono">root</text>
+    <rect x="165" y="108" width="110" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="220" y="126" text-anchor="middle">你是一个</text>
+    <text x="220" y="140" text-anchor="middle" class="mono" style="font-size:10px">lock&gt;0</text>
+    <rect x="465" y="108" width="110" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="126" text-anchor="middle">共享前缀</text>
+    <text x="520" y="140" text-anchor="middle" class="mono" style="font-size:10px">父·可上浮</text>
+    <rect x="165" y="190" width="110" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="220" y="210" text-anchor="middle">助手·在跑</text>
+    <text x="220" y="226" text-anchor="middle" class="mono" style="font-size:10px">lock=20 幸存</text>
+    <rect x="375" y="190" width="110" height="44" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="430" y="210" text-anchor="middle" style="fill:var(--red);font-weight:700">冷叶 t=2</text>
+    <text x="430" y="226" text-anchor="middle" class="mono" style="font-size:10px">LRU→释放</text>
+    <rect x="565" y="190" width="110" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="620" y="210" text-anchor="middle">冷叶 t=5</text>
+    <text x="620" y="226" text-anchor="middle" class="mono" style="font-size:10px">lock=0 次老</text>
+    <text x="24" y="40" style="fill:var(--muted);font-size:12px">显存告急 → 自底向上回收</text>
+    <text x="24" y="272" style="fill:var(--red);font-size:12px">红：最久未访问的冷叶，先被 free</text>
+    <text x="430" y="272" style="fill:var(--teal);font-size:12px">青：lock&gt;0 在用链，驱逐看不见</text>
+  </svg>
+  <div class="figcap"><b>图 32·1 · LRU 驱逐冷叶，锁定的在用节点幸存</b> — 显存告急时，最久未访问、<span class="mono">lock_ref=0</span> 的冷叶（红）被选中并 <span class="mono">free</span> 回池；而 <span class="mono">lock_ref&gt;0</span> 的在用前缀链（青）即便更老也绝不被驱逐。释放冷叶后其父节点变成新叶、上浮为下一候选。</div>
+</div>
+
 <h2>命中率：这一切的回报，以及那笔取舍</h2>
 <p>绕了一圈，驱逐到底图什么？图的是<strong>命中率</strong>——衡量"<strong>有多少 prompt token 是从缓存直接拿到、不必重算的</strong>"那个比例。
 命中率是把前面所有努力串起来的<strong>收益指标</strong>：高前缀共享（第 7/29 课）让更多 token 能复用；缓存感知调度（第 20 课）则更进一步，它<strong>主动重排队列</strong>、优先把"前缀已在树上"的请求放进批，让命中真正发生。
@@ -435,6 +466,29 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 <div class="cols">
   <div class="col"><h4>驱逐（evict & 将来重算）</h4><p>立刻把冷前缀的 KV 槽位还给池，<strong>腾出 HBM</strong>给更高并发；代价是若它将来再被命中，要<strong>从头重算几千 token</strong>（一次昂贵前向）。赌"它不会再来"。</p></div>
   <div class="col"><h4>保留（keep in HBM）</h4><p>把前缀一直留在显存里，再撞上就<strong>零重算</strong>、直接复用；代价是它<strong>长期占着 HBM</strong>，挤掉了本可用于更大批量、更高并发的空间。赌"它还会再来"。</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="命中率越高，需重算的 prefill token 越少，吞吐越高">
+    <line x1="90" y1="50" x2="90" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="90" y1="240" x2="720" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="204" width="64" height="36" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="148" width="64" height="92" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="420" y="90" width="64" height="150" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="40" width="64" height="200" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="152" y1="204" x2="302" y2="148" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="302" y1="148" x2="452" y2="90" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="452" y1="90" x2="602" y2="40" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="152" y="258" text-anchor="middle" class="mono" style="font-size:11px">0%</text>
+    <text x="302" y="258" text-anchor="middle" class="mono" style="font-size:11px">30%</text>
+    <text x="452" y="258" text-anchor="middle" class="mono" style="font-size:11px">60%</text>
+    <text x="602" y="258" text-anchor="middle" class="mono" style="font-size:11px">90%</text>
+    <text x="24" y="44" style="fill:var(--muted);font-size:12px">吞吐 tokens/s</text>
+    <text x="405" y="282" text-anchor="middle" style="fill:var(--muted);font-size:12px">前缀缓存命中率</text>
+    <text x="112" y="84" style="fill:var(--teal);font-size:12px">命中率越高</text>
+    <text x="112" y="102" style="fill:var(--teal);font-size:12px">→ 需重算的 prefill token 越少</text>
+  </svg>
+  <div class="figcap"><b>图 32·2 · 命中率越高，吞吐越高</b> — 横轴是前缀缓存命中率（0%→90%），纵轴是吞吐（tokens/s）。命中率上升 → 需要重算的 prefill token 减少 → 吞吐随之爬升；命中率越高，要预填的 token 越少，这正是驱逐与缓存机制最终兑换出的回报。</div>
 </div>
 
 <p>真正决定"清谁"的那行代码出奇地短——驱逐策略的全部分歧，就浓缩在 <span class="mono">get_priority</span> 返回什么：</p>
@@ -455,6 +509,30 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
     <span class="kw">def</span> get_priority(self, node: TreeNode) -&gt; Tuple[int, float]:
         <span class="kw">return</span> (node.hit_count, node.last_access_time)  <span class="cm"># 命中最少者先走</span></pre>
 </div>
+
+<p>上面那行 <span class="mono">get_priority</span> 只回答"<strong>谁该先走</strong>"；真正驱动整轮回收的，是 <span class="mono">RadixCache.evict</span> 里那个<strong>堆循环</strong>——它把可驱逐叶子按优先级堆好，逐个弹出最低者、<span class="mono">free</span> 掉 KV 槽位、把叶子摘除，再把刚变成叶子的父节点压回堆，直到回收够 <span class="mono">num_tokens</span> 个槽位：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.evict</span><span class="ln">按优先级堆淘汰可回收叶子，释放 KV 槽</span></div>
+  <pre><span class="kw">def</span> evict(self, params: <span class="st">EvictParams</span>) -&gt; <span class="st">EvictResult</span>:
+    <span class="cm"># 丢掉优先级最低的叶子，回收 `num_tokens` 个 KV 槽位。</span>
+    <span class="cm"># 只有可驱逐叶子是候选；被锁住（在用）的节点</span>
+    <span class="cm"># 不在集合里，所以在飞请求绝不会丢失自己的缓存。</span>
+    heap = [(self.eviction_strategy.get_priority(n), n)
+            <span class="kw">for</span> n <span class="kw">in</span> self.evictable_leaves]
+    heapq.heapify(heap)
+    num_evicted = 0
+    <span class="kw">while</span> num_evicted &lt; params.num_tokens <span class="kw">and</span> heap:
+        _, x = heapq.heappop(heap)
+        self.token_to_kv_pool_allocator.free(x.value)   <span class="cm"># 释放 KV 槽位</span>
+        num_evicted += len(x.value)
+        self._delete_leaf(x)
+        <span class="kw">if</span> <span class="kw">not</span> x.parent.children <span class="kw">and</span> x.parent.lock_ref == 0:
+            heapq.heappush(heap, (get_priority(x.parent), x.parent))   <span class="cm"># 父变新叶 → 上浮</span>
+    <span class="kw">return</span> <span class="st">EvictResult</span>(num_tokens_evicted=num_evicted)</pre>
+</div>
+
+<p>用具体数字感受这套机制：一段 <strong>2000 token 的共享系统提示</strong>在 90% 命中率下，意味着绝大多数请求<strong>直接跳过约 2000 个 prefill token</strong>、几乎零重算就进入解码；而正在跑的请求把这条前缀链锁着（<span class="mono">lock_ref&gt;0</span>），所以哪怕显存告急、<span class="mono">evict</span> 正忙，它也<strong>绝不会在生成中途被清掉</strong>——堆里弹出的只会是没人锁、最久没碰的冷叶。</p>
 
 <div class="card key">
   <div class="tag">🔑 本课要点</div>
@@ -590,6 +668,37 @@ This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight refer
   <div class="cells"><span class="lab">After clearing</span><span class="cell hl">root</span><span class="cell hl">"you are a"</span><span class="cell hl">assistant·live</span><span class="sep">→</span><span class="cell q">only the in-use chain remains; freed slots return to allocator for new work</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="LRU evicts evictable cold leaves; locked in-use nodes survive">
+    <line x1="350" y1="66" x2="220" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="350" y1="66" x2="520" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="146" x2="220" y2="190" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="520" y1="146" x2="430" y2="190" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="520" y1="146" x2="620" y2="190" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="305" y="32" width="90" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="350" y="54" text-anchor="middle" class="mono">root</text>
+    <rect x="165" y="108" width="110" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="220" y="126" text-anchor="middle">you are a</text>
+    <text x="220" y="140" text-anchor="middle" class="mono" style="font-size:10px">lock&gt;0</text>
+    <rect x="465" y="108" width="110" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="126" text-anchor="middle">shared pfx</text>
+    <text x="520" y="140" text-anchor="middle" class="mono" style="font-size:10px">parent·floats up</text>
+    <rect x="165" y="190" width="110" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="220" y="210" text-anchor="middle">asst·live</text>
+    <text x="220" y="226" text-anchor="middle" class="mono" style="font-size:10px">lock=20 survives</text>
+    <rect x="375" y="190" width="110" height="44" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="430" y="210" text-anchor="middle" style="fill:var(--red);font-weight:700">cold leaf t=2</text>
+    <text x="430" y="226" text-anchor="middle" class="mono" style="font-size:10px">LRU→freed</text>
+    <rect x="565" y="190" width="110" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="620" y="210" text-anchor="middle">cold leaf t=5</text>
+    <text x="620" y="226" text-anchor="middle" class="mono" style="font-size:10px">lock=0 older</text>
+    <text x="24" y="40" style="fill:var(--muted);font-size:12px">HBM starved → reclaim bottom-up</text>
+    <text x="24" y="272" style="fill:var(--red);font-size:12px">red: oldest cold leaf → freed first</text>
+    <text x="430" y="272" style="fill:var(--teal);font-size:12px">teal: lock&gt;0 chain survives evict</text>
+  </svg>
+  <div class="figcap"><b>Fig 32·1 · LRU evicts cold leaves; locked in-use nodes survive</b> — under memory pressure the oldest-untouched, <span class="mono">lock_ref=0</span> cold leaf (red) is selected and <span class="mono">free</span>d back to the pool; the in-use prefix chain with <span class="mono">lock_ref&gt;0</span> (teal) is never evicted even if older. After a leaf is freed its parent becomes a new leaf and floats up as the next candidate.</div>
+</div>
+
 <h2>Hit rate: the payoff, and that one trade</h2>
 <p>After all this — what is eviction for? For the <strong>hit rate</strong> — the fraction measuring "<strong>how many prompt tokens were served straight from the cache, with no recompute</strong>."
 Hit rate is the <strong>payoff metric</strong> that ties every earlier effort together: high prefix sharing (Lessons 7/29) lets more tokens be reused; cache-aware scheduling (Lesson 20) goes further, <strong>reordering the queue</strong> to favor requests whose prefix is already in the tree, so hits actually happen.
@@ -602,6 +711,29 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 <div class="cols">
   <div class="col"><h4>Evict (& recompute later)</h4><p>Immediately return a cold prefix's KV slots to the pool, <strong>freeing HBM</strong> for more concurrency; the cost is that if it's hit again later you must <strong>recompute thousands of tokens</strong> (one expensive forward). Bet "it won't come back."</p></div>
   <div class="col"><h4>Keep (in HBM)</h4><p>Hold the prefix in memory; a re-hit is <strong>zero recompute</strong>, pure reuse; the cost is it <strong>occupies HBM long-term</strong>, squeezing out space for bigger batches and higher concurrency. Bet "it'll come back."</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="higher hit rate means fewer prefill tokens to recompute and higher throughput">
+    <line x1="90" y1="50" x2="90" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="90" y1="240" x2="720" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="204" width="64" height="36" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="148" width="64" height="92" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="420" y="90" width="64" height="150" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="40" width="64" height="200" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="152" y1="204" x2="302" y2="148" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="302" y1="148" x2="452" y2="90" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="452" y1="90" x2="602" y2="40" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="152" y="258" text-anchor="middle" class="mono" style="font-size:11px">0%</text>
+    <text x="302" y="258" text-anchor="middle" class="mono" style="font-size:11px">30%</text>
+    <text x="452" y="258" text-anchor="middle" class="mono" style="font-size:11px">60%</text>
+    <text x="602" y="258" text-anchor="middle" class="mono" style="font-size:11px">90%</text>
+    <text x="24" y="44" style="fill:var(--muted);font-size:12px">throughput tok/s</text>
+    <text x="405" y="282" text-anchor="middle" style="fill:var(--muted);font-size:12px">prefix cache hit rate</text>
+    <text x="112" y="84" style="fill:var(--teal);font-size:12px">higher hit rate</text>
+    <text x="112" y="102" style="fill:var(--teal);font-size:12px">→ fewer prefill tokens to recompute</text>
+  </svg>
+  <div class="figcap"><b>Fig 32·2 · higher hit rate, higher throughput</b> — x is the prefix cache hit rate (0%→90%), y is throughput (tokens/s). As hit rate rises, the recomputed prefill tokens fall, so throughput climbs; a higher hit rate means fewer tokens to prefill — exactly the payoff that eviction and caching ultimately buy.</div>
 </div>
 
 <p>The line that actually decides "who to clear" is surprisingly short — a strategy's entire difference is condensed into what <span class="mono">get_priority</span> returns:</p>
@@ -622,6 +754,30 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
     <span class="kw">def</span> get_priority(self, node: TreeNode) -&gt; Tuple[int, float]:
         <span class="kw">return</span> (node.hit_count, node.last_access_time)  <span class="cm"># least-hit goes first</span></pre>
 </div>
+
+<p>That <span class="mono">get_priority</span> line only answers "<strong>who goes first</strong>"; what drives the whole reclaim round is the <strong>heap loop</strong> inside <span class="mono">RadixCache.evict</span> — it heaps the evictable leaves by priority, pops the lowest one by one, <span class="mono">free</span>s its KV slots, deletes the leaf, and pushes a parent that just became a leaf back onto the heap, until it has reclaimed enough <span class="mono">num_tokens</span> slots:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.evict</span><span class="ln">pop lowest-priority evictable leaves off a heap, free their KV slots</span></div>
+  <pre><span class="kw">def</span> evict(self, params: <span class="st">EvictParams</span>) -&gt; <span class="st">EvictResult</span>:
+    <span class="cm"># free `num_tokens` of KV by dropping the LOWEST-priority leaves.</span>
+    <span class="cm"># only EVICTABLE leaves are candidates; locked (in-use) nodes are</span>
+    <span class="cm"># excluded, so live requests never lose their cache.</span>
+    heap = [(self.eviction_strategy.get_priority(n), n)
+            <span class="kw">for</span> n <span class="kw">in</span> self.evictable_leaves]
+    heapq.heapify(heap)
+    num_evicted = 0
+    <span class="kw">while</span> num_evicted &lt; params.num_tokens <span class="kw">and</span> heap:
+        _, x = heapq.heappop(heap)
+        self.token_to_kv_pool_allocator.free(x.value)   <span class="cm"># release KV slots</span>
+        num_evicted += len(x.value)
+        self._delete_leaf(x)
+        <span class="kw">if</span> <span class="kw">not</span> x.parent.children <span class="kw">and</span> x.parent.lock_ref == 0:
+            heapq.heappush(heap, (get_priority(x.parent), x.parent))   <span class="cm"># parent is a new leaf → float up</span>
+    <span class="kw">return</span> <span class="st">EvictResult</span>(num_tokens_evicted=num_evicted)</pre>
+</div>
+
+<p>Feel the mechanism with concrete numbers: a <strong>2000-token shared system prompt</strong> at a 90% hit rate means most requests <strong>skip about 2000 prefill tokens</strong> and enter decode with almost zero recompute; meanwhile a running request keeps that prefix chain locked (<span class="mono">lock_ref&gt;0</span>), so however starved HBM gets and however busy <span class="mono">evict</span> is, it is <strong>never cleared mid-flight</strong> — the heap only ever pops the unlocked, longest-untouched cold leaves.</p>
 
 <div class="card key">
   <div class="tag">🔑 Key takeaways</div>

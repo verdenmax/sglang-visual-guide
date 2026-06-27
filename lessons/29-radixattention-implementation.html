@@ -448,10 +448,91 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <span class="kw">return</span> value, node                        <span class="cm"># 命中的 indices + 最深节点</span></pre>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="match_prefix 从 root 沿匹配的边逐段下行，高亮最长命中前缀的路径与终点节点，未命中的尾巴作为新分支挂出">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">查询 query：[你 是 一 个 助 手 X]</text>
+    <rect x="20" y="40" width="470" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="40" y="60" class="mono" style="font-size:12px;fill:var(--accent-ink)">你 是 一 个 助 手</text>
+    <text x="360" y="60" class="mono" style="font-size:12px;fill:var(--faint)">X（未命中）</text>
+    <rect x="20" y="150" width="74" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="177" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="94" y1="172" x2="168" y2="172" style="stroke:var(--accent);stroke-width:3"/>
+    <rect x="168" y="150" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="228" y="170" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">[你 是]</text>
+    <text x="228" y="186" text-anchor="middle" style="font-size:10px;fill:var(--muted)">共享前缀</text>
+    <line x1="288" y1="166" x2="360" y2="112" style="stroke:var(--accent);stroke-width:3"/>
+    <line x1="288" y1="180" x2="360" y2="232" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="360" y="90" width="160" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="440" y="110" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">[一 个 助 手]</text>
+    <text x="440" y="126" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">最长命中 · 终点</text>
+    <rect x="360" y="210" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="420" y="237" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">[专 家]</text>
+    <line x1="520" y1="112" x2="592" y2="112" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
+    <rect x="592" y="90" width="160" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="672" y="110" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">[X …]</text>
+    <text x="672" y="126" text-anchor="middle" style="font-size:10px;fill:var(--blue)">未命中尾巴 → 新分支</text>
+  </svg>
+  <div class="figcap"><b>图 1 · match_prefix 沿 radix 树走到最长命中</b> — 从 <span class="mono">root</span> 出发，用当前 token 的首 id 逐段匹配下行：命中的边连成高亮路径（<span class="mono">[你 是] → [一 个 助 手]</span>），终点节点就是返回的最深匹配；剩下未命中的尾巴 <span class="mono">[X …]</span> 之后会作为一条新分支挂上去。</div>
+</div>
+
+<p>上面的 <span class="mono">_match_prefix_helper</span> 是<strong>内部</strong>下行循环；真正被外界调用的<strong>公有入口</strong>是 <span class="mono">match_prefix</span>。它接收一个 <span class="mono">MatchPrefixParams</span>、返回一个 <span class="mono">MatchResult</span>：先把 key 按页对齐，禁用或空 key 直接返回空结果，否则委托 helper 下行（途中可能分裂一个节点），最后刷新访问时间戳供驱逐使用：</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">公有入口：找最长缓存前缀，必要时分裂节点</span></div>
+  <pre><span class="kw">def</span> match_prefix(self, params: MatchPrefixParams) -&gt; MatchResult:
+    <span class="cm"># 在 radix 树里找 params.key 的最长缓存前缀。</span>
+    <span class="cm"># 若命中点落在某段存储的中间，就把该节点分裂一次以</span>
+    <span class="cm"># 暴露边界；同时刷新访问时间戳（之后给驱逐用）。</span>
+    key = params.key.page_aligned(self.page_size)   <span class="cm"># 先按页对齐 key</span>
+    <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
+        <span class="kw">return</span> self._empty_match_result
+    ...
+    <span class="kw">return</span> MatchResult(device_indices=..., last_device_node=node)</pre>
+</div>
+
+<div class="card detail">
+  <div class="tag">🧮 具体例子</div>
+  <strong>例 1：共享系统前导。</strong> 两条请求都以同一段 100 token 的系统提示开头。第一条把它算完、<span class="mono">insert</span> 进树；第二条来时 <span class="mono">match_prefix</span> 直接命中这 100 个 token，返回它们在池里的 <strong>100 个 KV 槽位号</strong>——这 100 步前向被整个跳过，只需计算各自新的后缀。
+  <strong>例 2：page_size &gt; 1 的对齐。</strong> 设 <span class="mono">page_size = 16</span>，一条 key 长 100。<span class="mono">key.page_aligned(16)</span> 先把长度截到 16 的整数倍即 <strong>96</strong>，再去匹配；尾部 4 个不足一页的 token 不参与前缀复用，留给后续随新内容一起计算。
+</div>
+
 <h2>insert 与 lock_ref：挂上新尾巴、锁住在用前缀</h2>
 <p>匹配只解决了"已有多少"。剩下那段<strong>从未见过的后缀</strong>怎么办？交给 <span class="mono">insert</span>：它沿着和 match 一样的路径走到匹配点，
 把<strong>分叉出来的新 token 作为一个新子节点</strong>挂在最深匹配节点下，新节点的 value 就是这段 token 把 K/V 写进池子后拿到的那串 indices。
 若插入途中也遇到"半条边"，同样会先 <span class="mono">_split_node</span> 再挂——所以 match 和 insert 共用同一套分裂逻辑，保证树<strong>永远是规范的</strong>。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="insert 在两个序列分叉处分裂节点：原来一个节点存 [A B C D]，新序列共享 [A B] 后分叉，分裂后 [A B] 成为父节点，[C D] 与新的 [X Y] 成为两个子节点">
+    <line x1="400" y1="30" x2="400" y2="300" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">之前 before</text>
+    <rect x="40" y="60" width="74" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="77" y="85" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="77" y1="100" x2="160" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="160" y="150" width="180" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:2"/>
+    <text x="250" y="170" text-anchor="middle" class="mono" style="font-size:13px">[A B C D]</text>
+    <text x="250" y="186" text-anchor="middle" style="font-size:10px;fill:var(--muted)">一个节点存整段</text>
+    <rect x="120" y="232" width="260" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="250" y="254" text-anchor="middle" style="font-size:11px;fill:var(--amber)">新序列 [A B X Y]</text>
+    <text x="250" y="272" text-anchor="middle" style="font-size:11px;fill:var(--amber)">共享 [A B]，在第 3 个 token 分叉</text>
+    <text x="420" y="26" style="font-weight:700;fill:var(--accent-ink)">之后 after</text>
+    <rect x="440" y="50" width="74" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="477" y="75" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="477" y1="90" x2="600" y2="120" style="stroke:var(--accent);stroke-width:3"/>
+    <rect x="540" y="120" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="600" y="140" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">[A B]</text>
+    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">父 · 公共前缀只存一份</text>
+    <line x1="585" y1="164" x2="520" y2="220" style="stroke:var(--teal);stroke-width:2"/>
+    <line x1="615" y1="164" x2="700" y2="220" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
+    <rect x="450" y="220" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="240" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">[C D]</text>
+    <text x="510" y="256" text-anchor="middle" style="font-size:10px;fill:var(--teal)">原节点的尾巴</text>
+    <rect x="640" y="220" width="120" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="700" y="240" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">[X Y]</text>
+    <text x="700" y="256" text-anchor="middle" style="font-size:10px;fill:var(--blue)">新序列的尾巴</text>
+  </svg>
+  <div class="figcap"><b>图 2 · insert 在两个序列分叉处分裂节点</b> — 之前一个节点把 <span class="mono">[A B C D]</span> 整段存在一起；新序列 <span class="mono">[A B X Y]</span> 共享 <span class="mono">[A B]</span> 后分叉。<span class="mono">_split_node</span> 把它切成父 <span class="mono">[A B]</span>（公共前缀，只存一份）+ 子 <span class="mono">[C D]</span>（原尾巴）+ 新的兄弟子节点 <span class="mono">[X Y]</span>，于是公共前缀被两条序列共享。</div>
+</div>
+
 <p>最后是<strong>锁</strong>。一条请求开始使用某段命中前缀时，引擎从最深匹配节点<strong>一路向上 walk 到根</strong>，途中每个节点 <span class="mono">lock_ref += 1</span>（这就是 <span class="mono">inc_lock_ref</span>）。
 为什么要向上锁整条链？因为驱逐是从叶子往上回收的（第 32 课），只要这段前缀在飞，<strong>它的每一个祖先都不能被当成"可驱逐叶子"清掉</strong>，否则正在算的请求会读到一片被回收的垃圾槽位。
 请求结束时调 <span class="mono">dec_lock_ref</span> 反向把计数减回去；当某节点 <span class="mono">lock_ref</span> 归零，它才重新变成"可驱逐"的候选。一句话：<strong>lock_ref 守护的是"正在被使用的 KV 不被回收"这条铁律</strong>。</p>
@@ -630,10 +711,92 @@ not planned ahead. <span class="mono">match_prefix</span> ultimately returns two
     <span class="kw">return</span> value, node                        <span class="cm"># matched indices + deepest node</span></pre>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="match_prefix descends from root along matching edges, highlighting the path of the longest matched prefix and the terminal node, while the unmatched tail is attached as a new branch">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">query: [you are an assistant X]</text>
+    <rect x="20" y="40" width="470" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="40" y="60" class="mono" style="font-size:12px;fill:var(--accent-ink)">you are an assistant</text>
+    <text x="360" y="60" class="mono" style="font-size:12px;fill:var(--faint)">X (no hit)</text>
+    <rect x="20" y="150" width="74" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="177" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="94" y1="172" x2="168" y2="172" style="stroke:var(--accent);stroke-width:3"/>
+    <rect x="168" y="150" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="228" y="170" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">[you are]</text>
+    <text x="228" y="186" text-anchor="middle" style="font-size:10px;fill:var(--muted)">shared prefix</text>
+    <line x1="288" y1="166" x2="360" y2="112" style="stroke:var(--accent);stroke-width:3"/>
+    <line x1="288" y1="180" x2="360" y2="232" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="360" y="90" width="160" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="440" y="110" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">[an assistant]</text>
+    <text x="440" y="126" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">longest hit · terminal</text>
+    <rect x="360" y="210" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="420" y="237" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">[an expert]</text>
+    <line x1="520" y1="112" x2="592" y2="112" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
+    <rect x="592" y="90" width="160" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="672" y="110" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">[X …]</text>
+    <text x="672" y="126" text-anchor="middle" style="font-size:10px;fill:var(--blue)">unmatched tail → new branch</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · match_prefix walks the radix tree to the longest hit</b> — starting at <span class="mono">root</span>, it descends edge by edge using the current token's first id: the matched edges form the highlighted path (<span class="mono">[you are] → [an assistant]</span>), and the terminal node is the deepest match returned; the leftover unmatched tail <span class="mono">[X …]</span> is later attached as a new branch.</div>
+</div>
+
+<p>The <span class="mono">_match_prefix_helper</span> above is the <strong>internal</strong> walk-down loop; the <strong>public entry</strong> callers actually use is <span class="mono">match_prefix</span>. It takes a <span class="mono">MatchPrefixParams</span> and returns a <span class="mono">MatchResult</span>: it first page-aligns the key, returns an empty result if disabled or the key is empty, otherwise delegates the descent to the helper (which may split a node along the way), and finally refreshes the access timestamps used by eviction:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">public entry: find the longest cached prefix, split a node if needed</span></div>
+  <pre><span class="kw">def</span> match_prefix(self, params: MatchPrefixParams) -&gt; MatchResult:
+    <span class="cm"># find the LONGEST cached prefix of params.key in the radix tree.</span>
+    <span class="cm"># if the match ends INSIDE a stored segment, that node is split</span>
+    <span class="cm"># once to expose the boundary; access timestamps are refreshed</span>
+    <span class="cm"># (used later by eviction).</span>
+    key = params.key.page_aligned(self.page_size)   <span class="cm"># page-align the key first</span>
+    <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
+        <span class="kw">return</span> self._empty_match_result
+    ...
+    <span class="kw">return</span> MatchResult(device_indices=..., last_device_node=node)</pre>
+</div>
+
+<div class="card detail">
+  <div class="tag">🧮 Concrete examples</div>
+  <strong>Example 1: shared system preamble.</strong> Two requests both begin with the same 100-token system prompt. The first computes it and <span class="mono">insert</span>s it into the tree; when the second arrives, <span class="mono">match_prefix</span> hits all 100 tokens and returns their <strong>100 KV slot numbers</strong> in the pool — those 100 forward steps are skipped entirely, only each request's new suffix is computed.
+  <strong>Example 2: alignment with page_size &gt; 1.</strong> Let <span class="mono">page_size = 16</span> and a key of length 100. <span class="mono">key.page_aligned(16)</span> first truncates the length to a multiple of 16, i.e. <strong>96</strong>, before matching; the trailing 4 tokens (less than a full page) don't take part in prefix reuse and are computed later with the new content.
+</div>
+
 <h2>insert and lock_ref: attach the new tail, lock the in-use prefix</h2>
 <p>Matching only answers "how much already exists." What about the <strong>never-seen suffix</strong> left over? That's <span class="mono">insert</span>: it walks the same path to the match point and
 <strong>attaches the diverging new tokens as a new child node</strong> under the deepest matched node, the new node's value being the run of indices from writing this run's K/V into the pool.
 If insert also hits a "half edge" along the way, it likewise <span class="mono">_split_node</span> first then attaches — so match and insert share the same split logic, keeping the tree <strong>always canonical</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="insert splits a node where two sequences diverge: one node held [A B C D]; a new sequence shares [A B] then diverges, so after the split [A B] becomes the parent and [C D] plus the new [X Y] become two children">
+    <line x1="400" y1="30" x2="400" y2="300" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">before</text>
+    <rect x="40" y="60" width="74" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="77" y="85" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="77" y1="100" x2="160" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="160" y="150" width="180" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:2"/>
+    <text x="250" y="170" text-anchor="middle" class="mono" style="font-size:13px">[A B C D]</text>
+    <text x="250" y="186" text-anchor="middle" style="font-size:10px;fill:var(--muted)">one node holds the whole run</text>
+    <rect x="120" y="232" width="260" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="250" y="254" text-anchor="middle" style="font-size:11px;fill:var(--amber)">new sequence [A B X Y]</text>
+    <text x="250" y="272" text-anchor="middle" style="font-size:11px;fill:var(--amber)">shares [A B], diverges at the 3rd token</text>
+    <text x="420" y="26" style="font-weight:700;fill:var(--accent-ink)">after</text>
+    <rect x="440" y="50" width="74" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="477" y="75" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="477" y1="90" x2="600" y2="120" style="stroke:var(--accent);stroke-width:3"/>
+    <rect x="540" y="120" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="600" y="140" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">[A B]</text>
+    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">parent · shared prefix stored once</text>
+    <line x1="585" y1="164" x2="520" y2="220" style="stroke:var(--teal);stroke-width:2"/>
+    <line x1="615" y1="164" x2="700" y2="220" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
+    <rect x="450" y="220" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="240" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">[C D]</text>
+    <text x="510" y="256" text-anchor="middle" style="font-size:10px;fill:var(--teal)">original node's tail</text>
+    <rect x="640" y="220" width="120" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="700" y="240" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">[X Y]</text>
+    <text x="700" y="256" text-anchor="middle" style="font-size:10px;fill:var(--blue)">new sequence's tail</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · insert splits a node where two sequences diverge</b> — before, one node holds the whole run <span class="mono">[A B C D]</span>; a new sequence <span class="mono">[A B X Y]</span> shares <span class="mono">[A B]</span> then diverges. <span class="mono">_split_node</span> cuts it into parent <span class="mono">[A B]</span> (the shared prefix, stored once) + child <span class="mono">[C D]</span> (the original tail) + a new sibling child <span class="mono">[X Y]</span>, so the shared prefix is held by both sequences.</div>
+</div>
+
 <p>Finally, the <strong>lock</strong>. When a request starts using a matched prefix, the engine walks <strong>upward from the deepest matched node all the way to the root</strong>, doing <span class="mono">lock_ref += 1</span> on each node (that's <span class="mono">inc_lock_ref</span>).
 Why lock the whole chain upward? Because eviction reclaims from leaves upward (Lesson 32); as long as this prefix is in flight, <strong>none of its ancestors may be treated as an "evictable leaf"</strong>, or a running request would read a swath of reclaimed garbage slots.
 On finish, <span class="mono">dec_lock_ref</span> decrements the counts back; once a node's <span class="mono">lock_ref</span> hits zero it becomes an eviction candidate again. In one line: <strong>lock_ref guards the iron rule that KV in use is never reclaimed</strong>.</p>

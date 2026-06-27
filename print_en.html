@@ -7968,7 +7968,7 @@ and now the fixed cost of "launching a kernel" becomes the dominant term. Worst 
     <rect x="366" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
     <rect x="400" y="78" width="34" height="28" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <rect x="434" y="78" width="30" height="28" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
-    <text x="476" y="97" style="fill:var(--faint);font-size:12px">… hundreds of kernels × gaps, launch overhead dominates</text>
+    <text x="476" y="97" style="fill:var(--faint);font-size:12px">… many kernels × gaps, overhead dominates</text>
     <rect x="64" y="124" width="14" height="14" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
     <text x="86" y="135" style="fill:var(--blue);font-size:11px">kernel (compute)</text>
     <rect x="200" y="124" width="14" height="14" rx="3" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
@@ -8033,12 +8033,12 @@ at run time it takes the real batch, <strong>rounds it up to the nearest bucket<
     <text x="492" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">replay × many</text>
     <text x="540" y="34" style="font-weight:700;fill:var(--teal)">Replay · many (every decode step)</text>
     <rect x="540" y="46" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
-    <text x="556" y="68" style="font-size:12px">decode step 1 · one-submission replay (new data · same shape)</text>
+    <text x="556" y="68" style="font-size:12px">decode step 1 · replay</text>
     <rect x="540" y="88" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
-    <text x="556" y="110" style="font-size:12px">decode step 2 · one-submission replay (new data · same shape)</text>
+    <text x="556" y="110" style="font-size:12px">decode step 2 · replay</text>
     <rect x="540" y="130" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
-    <text x="556" y="152" style="font-size:12px">decode step 3 · one-submission replay (new data · same shape)</text>
-    <text x="540" y="190" style="fill:var(--muted);font-size:12px">… the same graph is replayed thousands of times, near-zero launch overhead</text>
+    <text x="556" y="152" style="font-size:12px">decode step 3 · replay</text>
+    <text x="540" y="190" style="fill:var(--muted);font-size:12px">… same graph replayed many times</text>
   </svg>
   <div class="figcap"><b>Fig 2 · Capture once → replay many</b> — on the left you <strong>capture only once</strong>: run one forward at a fixed batch shape to record hundreds of kernels' call order and deps into a <strong>graph object</strong> (no real compute); on the right every decode step <strong>cheaply replays</strong> that recorded graph — same shape, just new data.</div>
 </div>
@@ -8560,10 +8560,92 @@ not planned ahead. <span class="mono">match_prefix</span> ultimately returns two
     <span class="kw">return</span> value, node                        <span class="cm"># matched indices + deepest node</span></pre>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="match_prefix descends from root along matching edges, highlighting the path of the longest matched prefix and the terminal node, while the unmatched tail is attached as a new branch">
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">query: [you are an assistant X]</text>
+    <rect x="20" y="40" width="470" height="30" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="40" y="60" class="mono" style="font-size:12px;fill:var(--accent-ink)">you are an assistant</text>
+    <text x="360" y="60" class="mono" style="font-size:12px;fill:var(--faint)">X (no hit)</text>
+    <rect x="20" y="150" width="74" height="44" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="57" y="177" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="94" y1="172" x2="168" y2="172" style="stroke:var(--accent);stroke-width:3"/>
+    <rect x="168" y="150" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="228" y="170" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">[you are]</text>
+    <text x="228" y="186" text-anchor="middle" style="font-size:10px;fill:var(--muted)">shared prefix</text>
+    <line x1="288" y1="166" x2="360" y2="112" style="stroke:var(--accent);stroke-width:3"/>
+    <line x1="288" y1="180" x2="360" y2="232" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="360" y="90" width="160" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="440" y="110" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">[an assistant]</text>
+    <text x="440" y="126" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">longest hit · terminal</text>
+    <rect x="360" y="210" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="420" y="237" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">[an expert]</text>
+    <line x1="520" y1="112" x2="592" y2="112" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
+    <rect x="592" y="90" width="160" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 4"/>
+    <text x="672" y="110" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">[X …]</text>
+    <text x="672" y="126" text-anchor="middle" style="font-size:10px;fill:var(--blue)">unmatched tail → new branch</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · match_prefix walks the radix tree to the longest hit</b> — starting at <span class="mono">root</span>, it descends edge by edge using the current token's first id: the matched edges form the highlighted path (<span class="mono">[you are] → [an assistant]</span>), and the terminal node is the deepest match returned; the leftover unmatched tail <span class="mono">[X …]</span> is later attached as a new branch.</div>
+</div>
+
+<p>The <span class="mono">_match_prefix_helper</span> above is the <strong>internal</strong> walk-down loop; the <strong>public entry</strong> callers actually use is <span class="mono">match_prefix</span>. It takes a <span class="mono">MatchPrefixParams</span> and returns a <span class="mono">MatchResult</span>: it first page-aligns the key, returns an empty result if disabled or the key is empty, otherwise delegates the descent to the helper (which may split a node along the way), and finally refreshes the access timestamps used by eviction:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.match_prefix</span><span class="ln">public entry: find the longest cached prefix, split a node if needed</span></div>
+  <pre><span class="kw">def</span> match_prefix(self, params: MatchPrefixParams) -&gt; MatchResult:
+    <span class="cm"># find the LONGEST cached prefix of params.key in the radix tree.</span>
+    <span class="cm"># if the match ends INSIDE a stored segment, that node is split</span>
+    <span class="cm"># once to expose the boundary; access timestamps are refreshed</span>
+    <span class="cm"># (used later by eviction).</span>
+    key = params.key.page_aligned(self.page_size)   <span class="cm"># page-align the key first</span>
+    <span class="kw">if</span> self.disable <span class="kw">or</span> len(key) == 0:
+        <span class="kw">return</span> self._empty_match_result
+    ...
+    <span class="kw">return</span> MatchResult(device_indices=..., last_device_node=node)</pre>
+</div>
+
+<div class="card detail">
+  <div class="tag">🧮 Concrete examples</div>
+  <strong>Example 1: shared system preamble.</strong> Two requests both begin with the same 100-token system prompt. The first computes it and <span class="mono">insert</span>s it into the tree; when the second arrives, <span class="mono">match_prefix</span> hits all 100 tokens and returns their <strong>100 KV slot numbers</strong> in the pool — those 100 forward steps are skipped entirely, only each request's new suffix is computed.
+  <strong>Example 2: alignment with page_size &gt; 1.</strong> Let <span class="mono">page_size = 16</span> and a key of length 100. <span class="mono">key.page_aligned(16)</span> first truncates the length to a multiple of 16, i.e. <strong>96</strong>, before matching; the trailing 4 tokens (less than a full page) don't take part in prefix reuse and are computed later with the new content.
+</div>
+
 <h2>insert and lock_ref: attach the new tail, lock the in-use prefix</h2>
 <p>Matching only answers "how much already exists." What about the <strong>never-seen suffix</strong> left over? That's <span class="mono">insert</span>: it walks the same path to the match point and
 <strong>attaches the diverging new tokens as a new child node</strong> under the deepest matched node, the new node's value being the run of indices from writing this run's K/V into the pool.
 If insert also hits a "half edge" along the way, it likewise <span class="mono">_split_node</span> first then attaches — so match and insert share the same split logic, keeping the tree <strong>always canonical</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="insert splits a node where two sequences diverge: one node held [A B C D]; a new sequence shares [A B] then diverges, so after the split [A B] becomes the parent and [C D] plus the new [X Y] become two children">
+    <line x1="400" y1="30" x2="400" y2="300" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="20" y="26" style="font-weight:700;fill:var(--muted)">before</text>
+    <rect x="40" y="60" width="74" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="77" y="85" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="77" y1="100" x2="160" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="160" y="150" width="180" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:2"/>
+    <text x="250" y="170" text-anchor="middle" class="mono" style="font-size:13px">[A B C D]</text>
+    <text x="250" y="186" text-anchor="middle" style="font-size:10px;fill:var(--muted)">one node holds the whole run</text>
+    <rect x="120" y="232" width="260" height="56" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="250" y="254" text-anchor="middle" style="font-size:11px;fill:var(--amber)">new sequence [A B X Y]</text>
+    <text x="250" y="272" text-anchor="middle" style="font-size:11px;fill:var(--amber)">shares [A B], diverges at the 3rd token</text>
+    <text x="420" y="26" style="font-weight:700;fill:var(--accent-ink)">after</text>
+    <rect x="440" y="50" width="74" height="40" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="477" y="75" text-anchor="middle" style="font-size:13px">root</text>
+    <line x1="477" y1="90" x2="600" y2="120" style="stroke:var(--accent);stroke-width:3"/>
+    <rect x="540" y="120" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
+    <text x="600" y="140" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">[A B]</text>
+    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">parent · shared prefix stored once</text>
+    <line x1="585" y1="164" x2="520" y2="220" style="stroke:var(--teal);stroke-width:2"/>
+    <line x1="615" y1="164" x2="700" y2="220" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
+    <rect x="450" y="220" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="510" y="240" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">[C D]</text>
+    <text x="510" y="256" text-anchor="middle" style="font-size:10px;fill:var(--teal)">original node's tail</text>
+    <rect x="640" y="220" width="120" height="44" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="700" y="240" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">[X Y]</text>
+    <text x="700" y="256" text-anchor="middle" style="font-size:10px;fill:var(--blue)">new sequence's tail</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · insert splits a node where two sequences diverge</b> — before, one node holds the whole run <span class="mono">[A B C D]</span>; a new sequence <span class="mono">[A B X Y]</span> shares <span class="mono">[A B]</span> then diverges. <span class="mono">_split_node</span> cuts it into parent <span class="mono">[A B]</span> (the shared prefix, stored once) + child <span class="mono">[C D]</span> (the original tail) + a new sibling child <span class="mono">[X Y]</span>, so the shared prefix is held by both sequences.</div>
+</div>
+
 <p>Finally, the <strong>lock</strong>. When a request starts using a matched prefix, the engine walks <strong>upward from the deepest matched node all the way to the root</strong>, doing <span class="mono">lock_ref += 1</span> on each node (that's <span class="mono">inc_lock_ref</span>).
 Why lock the whole chain upward? Because eviction reclaims from leaves upward (Lesson 32); as long as this prefix is in flight, <strong>none of its ancestors may be treated as an "evictable leaf"</strong>, or a running request would read a swath of reclaimed garbage slots.
 On finish, <span class="mono">dec_lock_ref</span> decrements the counts back; once a node's <span class="mono">lock_ref</span> hits zero it becomes an eviction candidate again. In one line: <strong>lock_ref guards the iron rule that KV in use is never reclaimed</strong>.</p>
@@ -8687,6 +8769,57 @@ while each request's ledger only tracks "which numbers are mine," indifferent to
   <div class="layer l-core"><div class="lh"><span class="badge">Real thing</span><span class="name">physical K / V tensors</span></div><div class="ld">What truly eats GPU memory. Pre-allocated once by <span class="mono">mem_fraction_static</span> (Lesson 8).</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Left, ReqToTokenPool is the index ledger that maps a request row and position to a token slot number; right, TokenToKVPool stores the per-layer physical K/V indexed by those slot numbers; an arrow runs from a slot number in the left table into the same slot in the right data buffer, showing two-hop indirection">
+    <text x="20" y="26" style="font-weight:700;fill:var(--accent-ink)">ReqToTokenPool · index ledger</text>
+    <text x="20" y="44" style="fill:var(--muted);font-size:12px">rows=requests · cols=positions · cell=token slot id (numbers only)</text>
+    <text x="142" y="78" text-anchor="middle" style="fill:var(--faint);font-size:12px">pos0</text>
+    <text x="212" y="78" text-anchor="middle" style="fill:var(--faint);font-size:12px">pos1</text>
+    <text x="282" y="78" text-anchor="middle" style="fill:var(--faint);font-size:12px">pos2</text>
+    <rect x="20" y="88" width="84" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="62" y="110" text-anchor="middle" style="font-size:12px">req A</text>
+    <rect x="110" y="88" width="64" height="34" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="142" y="110" text-anchor="middle" class="mono" style="font-size:12px">#12</text>
+    <rect x="180" y="88" width="64" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="212" y="110" text-anchor="middle" class="mono" style="font-size:12px">#40</text>
+    <rect x="250" y="88" width="64" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="282" y="110" text-anchor="middle" class="mono" style="font-size:12px">#41</text>
+    <rect x="20" y="130" width="84" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="62" y="152" text-anchor="middle" style="font-size:12px">req B</text>
+    <rect x="110" y="130" width="64" height="34" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="142" y="152" text-anchor="middle" class="mono" style="font-size:12px">#12</text>
+    <rect x="180" y="130" width="64" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="212" y="152" text-anchor="middle" class="mono" style="font-size:12px">#88</text>
+    <rect x="250" y="130" width="64" height="34" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="282" y="152" text-anchor="middle" class="mono" style="font-size:12px">#90</text>
+    <text x="430" y="26" style="font-weight:700;fill:var(--accent-ink)">TokenToKVPool · K/V data</text>
+    <text x="430" y="44" style="fill:var(--muted);font-size:12px">a K/V buffer pair per layer · indexed by slot id</text>
+    <text x="430" y="108" style="fill:var(--muted);font-size:12px">layer 0</text>
+    <rect x="470" y="88" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="498" y="110" text-anchor="middle" class="mono" style="font-size:11px">#10</text>
+    <rect x="530" y="88" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="558" y="110" text-anchor="middle" class="mono" style="font-size:11px">#11</text>
+    <rect x="590" y="88" width="56" height="34" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="618" y="110" text-anchor="middle" class="mono" style="font-size:11px">#12</text>
+    <rect x="650" y="88" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="678" y="110" text-anchor="middle" class="mono" style="font-size:11px">#13</text>
+    <text x="430" y="160" style="fill:var(--muted);font-size:12px">layer 1</text>
+    <rect x="470" y="140" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="498" y="162" text-anchor="middle" class="mono" style="font-size:11px">#10</text>
+    <rect x="530" y="140" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="558" y="162" text-anchor="middle" class="mono" style="font-size:11px">#11</text>
+    <rect x="590" y="140" width="56" height="34" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2"/>
+    <text x="618" y="162" text-anchor="middle" class="mono" style="font-size:11px">#12</text>
+    <rect x="650" y="140" width="56" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="678" y="162" text-anchor="middle" class="mono" style="font-size:11px">#13</text>
+    <line x1="316" y1="105" x2="586" y2="105" style="stroke:var(--accent);stroke-width:2;stroke-dasharray:5 4"/>
+    <polygon points="578,100 590,105 578,110" style="fill:var(--accent)"/>
+    <text x="450" y="98" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slot id #12 → points at data (indirection)</text>
+    <text x="430" y="206" style="fill:var(--faint);font-size:12px">the same slot id #12 picks one K/V cell in every layer — allocate once, reuse across layers</text>
+  </svg>
+  <div class="figcap"><b>Fig 3 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
+</div>
+
 <h2>The allocator: pre-reserve, hand out on admit, reclaim on evict</h2>
 <p>Who decides which slots are free and which one to hand out? <span class="mono">TokenToKVPoolAllocator</span> (base <span class="mono">BaseTokenToKVPoolAllocator</span>). It's the coat-check attendant, holding a <strong>free-page list</strong>.
 When a batch of requests is admitted to do a forward, the scheduler <strong>requests</strong> the token slots it needs — the allocator carves them out of the free list <strong>by page</strong> (fixed size, Lesson 6) and hands them over;
@@ -8703,6 +8836,52 @@ So the small allocator is the <strong>master valve of the memory budget</strong>
   <div class="node"><div class="nt">reuse on hit</div><div class="nd">Lesson 29's tree points at<br>the same slots · zero copy</div></div>
   <div class="arrow">→</div>
   <div class="node hl"><div class="nt">evict free</div><div class="nd">Lesson 32 returns the slots<br>to the allocator's list</div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 340" role="img" aria-label="A row of fixed-size KV slots across four timesteps t0 to t3: request X claims two pages first, request Y claims two more, occupancy rises; then X finishes and returns its two pages to the free list, occupancy drops; free and used are color coded">
+    <text x="20" y="26" style="font-weight:700;fill:var(--accent-ink)">Paged alloc on growth, free on finish (occupancy over time)</text>
+    <rect x="20" y="40" width="16" height="14" rx="3" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="44" y="52" style="fill:var(--muted);font-size:12px">free</text>
+    <rect x="100" y="40" width="16" height="14" rx="3" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="124" y="52" style="fill:var(--muted);font-size:12px">used by X</text>
+    <rect x="210" y="40" width="16" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="234" y="52" style="fill:var(--muted);font-size:12px">used by Y</text>
+    <text x="24" y="100" style="font-weight:700;fill:var(--muted)">t0</text>
+    <rect x="70" y="78" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="140" y="78" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="210" y="78" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="280" y="78" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="350" y="78" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="420" y="78" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="100" style="fill:var(--faint);font-size:12px">all free · used 0/6</text>
+    <text x="24" y="150" style="font-weight:700;fill:var(--muted)">t1</text>
+    <rect x="70" y="128" width="64" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="140" y="128" width="64" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="210" y="128" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="280" y="128" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="350" y="128" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="420" y="128" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="150" style="fill:var(--blue);font-size:12px">X claims 2 pages · used 2/6 ↑</text>
+    <text x="24" y="200" style="font-weight:700;fill:var(--muted)">t2</text>
+    <rect x="70" y="178" width="64" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="140" y="178" width="64" height="34" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="210" y="178" width="64" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="280" y="178" width="64" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="350" y="178" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="420" y="178" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="200" style="fill:var(--teal);font-size:12px">Y claims 2 more · used 4/6 ↑</text>
+    <text x="24" y="250" style="font-weight:700;fill:var(--muted)">t3</text>
+    <rect x="70" y="228" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="140" y="228" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="210" y="228" width="64" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="280" y="228" width="64" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <rect x="350" y="228" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="420" y="228" width="64" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="250" style="fill:var(--amber);font-size:12px">X finishes, 2 pages returned · used 2/6 ↓</text>
+    <text x="70" y="296" style="fill:var(--faint);font-size:12px">dashed = pages just returned to the free list; allocation is per fixed-size page, freeing only edits the list, never the tensors.</text>
+  </svg>
+  <div class="figcap"><b>Fig 4 · Paged alloc on growth, free on finish (occupancy over time)</b> — the same row of fixed-size KV pages is claimed by requests as they decode (occupancy rises), then a finished request's pages return to the free list (occupancy drops); free vs used are color coded, total pages nailed at startup.</div>
 </div>
 
 <h2>Why split into two tables, not merge into one</h2>
@@ -8764,6 +8943,25 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
                          self.head_num, self.v_head_dim), ...)
                          <span class="kw">for</span> _ <span class="kw">in</span> range(self.layer_num)]</pre>
 </div>
+
+<p>Now show the <strong>warehouse itself</strong> in the flesh — that's <span class="mono">MHATokenToKVPool</span>: each layer holds <strong>one K tensor and one V tensor</strong>, and a write drops this token's K/V into the cell at slot <span class="mono">loc</span>:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">the real KV data warehouse: a K/V buffer pair per layer</span></div>
+  <pre><span class="kw">class</span> MHATokenToKVPool(KVCache):
+    <span class="cm"># the actual KV DATA store: ONE K and ONE V tensor PER layer,</span>
+    <span class="cm"># each shaped [size, num_kv_heads, head_dim]. ReqToTokenPool maps</span>
+    <span class="cm"># a request's positions -&gt; slot indices INTO these buffers.</span>
+    <span class="kw">def</span> __init__(self, size, dtype, head_num, head_dim, layer_num, ...):
+        self.k_buffer = [...]   <span class="cm"># list over layers of K tensors</span>
+        self.v_buffer = [...]   <span class="cm"># list over layers of V tensors</span>
+    <span class="kw">def</span> set_kv_buffer(self, layer, loc, cache_k, cache_v):
+        <span class="cm"># write this token's K/V at slot `loc` for this layer</span>
+        self.k_buffer[layer.layer_id][loc] = cache_k
+        self.v_buffer[layer.layer_id][loc] = cache_v</pre>
+</div>
+
+<p>Concretely: for a <strong>32-layer</strong> model the pool holds <strong>32 K buffers + 32 V buffers</strong> (one pair per layer). Each KV "slot" stores the K and V of <strong>one token at one layer</strong>; a request's row in <span class="mono">ReqToTokenPool</span> gives the <strong>slot-number list</strong> for its positions — e.g. <span class="mono">[#12, #40, #41]</span> means this request's tokens 0/1/2 land in slots 12, 40, 41, and each slot number covers all 32 layers at once.</p>
 
 <div class="card key">
   <div class="tag">🔑 Key takeaways</div>
@@ -8857,6 +9055,29 @@ Meanwhile CPU RAM sits right next door, <strong>10–100×</strong> the capacity
   <div class="layer l-core"><div class="lh"><span class="badge">Cold</span><span class="name">Disk / object store</span></div><div class="ld">Effectively unlimited, slowest. Huge shared prefixes that won't even fit in CPU RAM land here (can be shared across processes/hosts). Latency ≈ ms, capacity ≈ near-infinite. Optional.</div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Three tiers: GPU HBM smallest and fastest on top, CPU RAM bigger and slower in the middle, disk/SSD near-infinite and slowest at the bottom; capacity grows downward, latency grows downward">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Three tiers: bigger &amp; slower downward</text>
+    <line x1="70" y1="70" x2="70" y2="250" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="70,262 63,248 77,248" style="fill:var(--line)"/>
+    <text x="70" y="60" text-anchor="middle" style="fill:var(--faint);font-size:12px">small·fast</text>
+    <text x="70" y="282" text-anchor="middle" style="fill:var(--faint);font-size:12px">big·slow</text>
+    <rect x="150" y="64" width="200" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="250" y="86" text-anchor="middle" style="font-weight:700;fill:var(--amber)">GPU HBM</text>
+    <text x="250" y="106" text-anchor="middle" style="font-size:12px">hot · fastest</text>
+    <rect x="150" y="134" width="320" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="310" y="156" text-anchor="middle" style="font-weight:700;fill:var(--teal)">CPU RAM</text>
+    <text x="310" y="176" text-anchor="middle" style="font-size:12px">warm · 10× bigger</text>
+    <rect x="150" y="204" width="460" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="380" y="226" text-anchor="middle" style="font-weight:700;fill:var(--blue)">Disk / SSD</text>
+    <text x="380" y="246" text-anchor="middle" style="font-size:12px">cold · ~infinite</text>
+    <text x="624" y="94" style="fill:var(--muted);font-size:12px">lat ≈ ns</text>
+    <text x="624" y="164" style="fill:var(--muted);font-size:12px">lat ≈ µs</text>
+    <text x="624" y="234" style="fill:var(--muted);font-size:12px">lat ≈ ms</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Three tiers</b> — GPU HBM (hot) is smallest and fastest, read directly by the forward; CPU RAM (warm) is ~10× bigger and catches evicted KV; disk/SSD (cold) is near-infinite. Going down, <strong>capacity grows and latency grows</strong> — that's why trading a copy for a recompute pays off.</div>
+</div>
+
 <h2>How HiCache extends the tree: writeback and prefetch</h2>
 <p>HiCache's two protagonists are <span class="mono">HiRadixCache</span> and <span class="mono">HiCacheController</span>. <span class="mono">HiRadixCache</span> directly <strong>inherits</strong> Lesson 29's <span class="mono">RadixCache</span> — same tree, same <span class="mono">match_prefix</span> / <span class="mono">insert</span> / <span class="mono">lock_ref</span> logic, reused wholesale — it just hangs one extra field, <span class="mono">host_value</span>, on each <span class="mono">TreeNode</span>,
 recording "which host slots hold this run's KV copy in the <strong>lower tier</strong>." So every node can now answer a new question: <strong>which tier do I currently live in?</strong> — GPU only (<span class="mono">value</span> valid), host only (evicted, <span class="mono">host_value</span> valid), or <strong>both</strong>.</p>
@@ -8868,6 +9089,31 @@ The prefix has <strong>sunk into the warm tier</strong>; the tree structure stay
   <div class="step"><div class="num">2</div><div class="sc"><h4>Writeback down ↓</h4><p><span class="mono">write_backup</span> copies the node's <span class="mono">value</span> (GPU slots) to host, records it in <span class="mono">host_value</span>, then frees the GPU slots. The prefix <strong>sinks to the CPU warm tier</strong>; the tree node remains.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Later request hits a lower tier</h4><p>A new request's <span class="mono">match_prefix</span> reaches this node and finds <span class="mono">value</span> empty but <span class="mono">host_value</span> backed up — a hit on a prefix <strong>living in the warm tier</strong>.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Prefetch up ↑</h4><p><span class="mono">load_back</span> copies the <span class="mono">host_value</span> KV back to GPU, refills <span class="mono">value</span>, and <span class="mono">inc_lock_ref</span> locks the ancestors. The forward reads it directly, <strong>skipping a recompute</strong>.</p></div></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="On a hit to a node already sunk to CPU, load_back copies it up to GPU as a swap-in; under GPU memory pressure write_backup writes a cold LRU node down to CPU as an evict-down">
+    <text x="24" y="28" style="font-weight:700;fill:var(--muted)">Deeper-tier hit → swap in · pressure → evict down</text>
+    <text x="52" y="50" style="fill:var(--muted);font-size:12px">GPU HBM (hot · under pressure)</text>
+    <rect x="40" y="56" width="720" height="78" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="80" y="74" width="180" height="42" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="170" y="100" text-anchor="middle" style="font-size:12px">cold LRU node</text>
+    <rect x="520" y="74" width="200" height="42" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="620" y="100" text-anchor="middle" style="font-size:12px">swapped-in, usable</text>
+    <text x="52" y="194" style="fill:var(--muted);font-size:12px">CPU host RAM (warm · backup)</text>
+    <rect x="40" y="200" width="720" height="78" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="80" y="218" width="180" height="42" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="170" y="244" text-anchor="middle" style="font-size:12px">sunk KV copy</text>
+    <rect x="520" y="218" width="200" height="42" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="620" y="244" text-anchor="middle" style="font-size:12px">hit · host backup</text>
+    <line x1="170" y1="118" x2="170" y2="214" style="stroke:var(--amber);stroke-width:2"/>
+    <polygon points="170,216 164,204 176,204" style="fill:var(--amber)"/>
+    <text x="185" y="172" style="fill:var(--amber);font-size:12px">write_backup ↓ evict</text>
+    <line x1="620" y1="214" x2="620" y2="120" style="stroke:var(--teal);stroke-width:2"/>
+    <polygon points="620,118 614,130 626,130" style="fill:var(--teal)"/>
+    <text x="605" y="172" text-anchor="end" style="fill:var(--teal);font-size:12px">load_back ↑ swap-in</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Swap-in and evict-down</b> — when a prefix hits a node living in the CPU warm tier, <span class="mono">load_back</span> copies it <strong>up to GPU (swap-in)</strong>; meanwhile, under GPU memory pressure the coldest LRU node is written <strong>down to CPU (evict-down)</strong> by <span class="mono">write_backup</span>. Two arrows: up = swap-in, down = evict-down.</div>
 </div>
 
 <h2>Comparison and background I/O: trade a copy for a recompute, without stalling the scheduler</h2>
@@ -8917,6 +9163,24 @@ Because of these costs, HiCache is <strong>optional</strong>: turned on by a fla
                 self.inc_lock_ref(node)        <span class="cm"># lock during writeback so it isn't snatched</span>
         <span class="kw">return</span> len(host_indices)</pre>
 </div>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/hiradix_cache.py ::HiRadixCache.load_back</span><span class="ln">hit an evicted node: copy its host KV back to GPU (swap-in)</span></div>
+  <pre>    <span class="kw">def</span> load_back(self, node, mem_quota=None):
+        <span class="cm"># a prefix hit landed on EVICTED (host-resident) nodes. Walk up</span>
+        <span class="cm"># collecting evicted-but-backuped ancestors, lock them, then copy</span>
+        <span class="cm"># their host KV back onto the GPU (skip if too small / over quota).</span>
+        nodes_to_load = []
+        <span class="kw">while</span> node.evicted:
+            nodes_to_load.insert(0, node)      <span class="cm"># host-side, needs swap-in</span>
+            node = node.parent
+        self.inc_lock_ref(node)                <span class="cm"># protect ancestors</span>
+        host_indices = torch.cat([n.host_value <span class="kw">for</span> n <span class="kw">in</span> nodes_to_load])
+        device_indices = self.cache_controller.load(host_indices, ...)  <span class="cm"># host -&gt; GPU</span>
+        <span class="kw">return</span> device_indices</pre>
+</div>
+
+<p>Two concrete numbers make the trade vivid. First, the <strong>host/CPU tier is often ~10× the GPU KV capacity</strong>, so it can keep roughly an order of magnitude more prefixes cached — far more hot prefixes stay resident instead of being dropped the moment HBM fills. Second, a <strong>deep prefix hit</strong> triggers just <strong>one host→GPU copy</strong> (walking <span class="mono">node.parent</span> to grab every "host-only" ancestor on the chain at once) instead of recomputing <strong>thousands of tokens</strong> — a cheap data move replaces an expensive forward.</p>
 
 <div class="card key">
   <div class="tag">🔑 Key takeaways</div>
@@ -9056,6 +9320,37 @@ This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight refer
   <div class="cells"><span class="lab">After clearing</span><span class="cell hl">root</span><span class="cell hl">"you are a"</span><span class="cell hl">assistant·live</span><span class="sep">→</span><span class="cell q">only the in-use chain remains; freed slots return to allocator for new work</span></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="LRU evicts evictable cold leaves; locked in-use nodes survive">
+    <line x1="350" y1="66" x2="220" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="350" y1="66" x2="520" y2="108" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="220" y1="146" x2="220" y2="190" style="stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="520" y1="146" x2="430" y2="190" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <line x1="520" y1="146" x2="620" y2="190" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="305" y="32" width="90" height="34" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="350" y="54" text-anchor="middle" class="mono">root</text>
+    <rect x="165" y="108" width="110" height="38" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="220" y="126" text-anchor="middle">you are a</text>
+    <text x="220" y="140" text-anchor="middle" class="mono" style="font-size:10px">lock&gt;0</text>
+    <rect x="465" y="108" width="110" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="520" y="126" text-anchor="middle">shared pfx</text>
+    <text x="520" y="140" text-anchor="middle" class="mono" style="font-size:10px">parent·floats up</text>
+    <rect x="165" y="190" width="110" height="44" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="220" y="210" text-anchor="middle">asst·live</text>
+    <text x="220" y="226" text-anchor="middle" class="mono" style="font-size:10px">lock=20 survives</text>
+    <rect x="375" y="190" width="110" height="44" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="430" y="210" text-anchor="middle" style="fill:var(--red);font-weight:700">cold leaf t=2</text>
+    <text x="430" y="226" text-anchor="middle" class="mono" style="font-size:10px">LRU→freed</text>
+    <rect x="565" y="190" width="110" height="44" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="620" y="210" text-anchor="middle">cold leaf t=5</text>
+    <text x="620" y="226" text-anchor="middle" class="mono" style="font-size:10px">lock=0 older</text>
+    <text x="24" y="40" style="fill:var(--muted);font-size:12px">HBM starved → reclaim bottom-up</text>
+    <text x="24" y="272" style="fill:var(--red);font-size:12px">red: oldest cold leaf → freed first</text>
+    <text x="430" y="272" style="fill:var(--teal);font-size:12px">teal: lock&gt;0 chain survives evict</text>
+  </svg>
+  <div class="figcap"><b>Fig 32·1 · LRU evicts cold leaves; locked in-use nodes survive</b> — under memory pressure the oldest-untouched, <span class="mono">lock_ref=0</span> cold leaf (red) is selected and <span class="mono">free</span>d back to the pool; the in-use prefix chain with <span class="mono">lock_ref&gt;0</span> (teal) is never evicted even if older. After a leaf is freed its parent becomes a new leaf and floats up as the next candidate.</div>
+</div>
+
 <h2>Hit rate: the payoff, and that one trade</h2>
 <p>After all this — what is eviction for? For the <strong>hit rate</strong> — the fraction measuring "<strong>how many prompt tokens were served straight from the cache, with no recompute</strong>."
 Hit rate is the <strong>payoff metric</strong> that ties every earlier effort together: high prefix sharing (Lessons 7/29) lets more tokens be reused; cache-aware scheduling (Lesson 20) goes further, <strong>reordering the queue</strong> to favor requests whose prefix is already in the tree, so hits actually happen.
@@ -9068,6 +9363,29 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 <div class="cols">
   <div class="col"><h4>Evict (& recompute later)</h4><p>Immediately return a cold prefix's KV slots to the pool, <strong>freeing HBM</strong> for more concurrency; the cost is that if it's hit again later you must <strong>recompute thousands of tokens</strong> (one expensive forward). Bet "it won't come back."</p></div>
   <div class="col"><h4>Keep (in HBM)</h4><p>Hold the prefix in memory; a re-hit is <strong>zero recompute</strong>, pure reuse; the cost is it <strong>occupies HBM long-term</strong>, squeezing out space for bigger batches and higher concurrency. Bet "it'll come back."</p></div>
+</div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="higher hit rate means fewer prefill tokens to recompute and higher throughput">
+    <line x1="90" y1="50" x2="90" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <line x1="90" y1="240" x2="720" y2="240" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="120" y="204" width="64" height="36" rx="4" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <rect x="270" y="148" width="64" height="92" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <rect x="420" y="90" width="64" height="150" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <rect x="570" y="40" width="64" height="200" rx="4" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <line x1="152" y1="204" x2="302" y2="148" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="302" y1="148" x2="452" y2="90" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <line x1="452" y1="90" x2="602" y2="40" style="stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="152" y="258" text-anchor="middle" class="mono" style="font-size:11px">0%</text>
+    <text x="302" y="258" text-anchor="middle" class="mono" style="font-size:11px">30%</text>
+    <text x="452" y="258" text-anchor="middle" class="mono" style="font-size:11px">60%</text>
+    <text x="602" y="258" text-anchor="middle" class="mono" style="font-size:11px">90%</text>
+    <text x="24" y="44" style="fill:var(--muted);font-size:12px">throughput tok/s</text>
+    <text x="405" y="282" text-anchor="middle" style="fill:var(--muted);font-size:12px">prefix cache hit rate</text>
+    <text x="112" y="84" style="fill:var(--teal);font-size:12px">higher hit rate</text>
+    <text x="112" y="102" style="fill:var(--teal);font-size:12px">→ fewer prefill tokens to recompute</text>
+  </svg>
+  <div class="figcap"><b>Fig 32·2 · higher hit rate, higher throughput</b> — x is the prefix cache hit rate (0%→90%), y is throughput (tokens/s). As hit rate rises, the recomputed prefill tokens fall, so throughput climbs; a higher hit rate means fewer tokens to prefill — exactly the payoff that eviction and caching ultimately buy.</div>
 </div>
 
 <p>The line that actually decides "who to clear" is surprisingly short — a strategy's entire difference is condensed into what <span class="mono">get_priority</span> returns:</p>
@@ -9088,6 +9406,30 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
     <span class="kw">def</span> get_priority(self, node: TreeNode) -&gt; Tuple[int, float]:
         <span class="kw">return</span> (node.hit_count, node.last_access_time)  <span class="cm"># least-hit goes first</span></pre>
 </div>
+
+<p>That <span class="mono">get_priority</span> line only answers "<strong>who goes first</strong>"; what drives the whole reclaim round is the <strong>heap loop</strong> inside <span class="mono">RadixCache.evict</span> — it heaps the evictable leaves by priority, pops the lowest one by one, <span class="mono">free</span>s its KV slots, deletes the leaf, and pushes a parent that just became a leaf back onto the heap, until it has reclaimed enough <span class="mono">num_tokens</span> slots:</p>
+
+<div class="codefile">
+  <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/radix_cache.py ::RadixCache.evict</span><span class="ln">pop lowest-priority evictable leaves off a heap, free their KV slots</span></div>
+  <pre><span class="kw">def</span> evict(self, params: <span class="st">EvictParams</span>) -&gt; <span class="st">EvictResult</span>:
+    <span class="cm"># free `num_tokens` of KV by dropping the LOWEST-priority leaves.</span>
+    <span class="cm"># only EVICTABLE leaves are candidates; locked (in-use) nodes are</span>
+    <span class="cm"># excluded, so live requests never lose their cache.</span>
+    heap = [(self.eviction_strategy.get_priority(n), n)
+            <span class="kw">for</span> n <span class="kw">in</span> self.evictable_leaves]
+    heapq.heapify(heap)
+    num_evicted = 0
+    <span class="kw">while</span> num_evicted &lt; params.num_tokens <span class="kw">and</span> heap:
+        _, x = heapq.heappop(heap)
+        self.token_to_kv_pool_allocator.free(x.value)   <span class="cm"># release KV slots</span>
+        num_evicted += len(x.value)
+        self._delete_leaf(x)
+        <span class="kw">if</span> <span class="kw">not</span> x.parent.children <span class="kw">and</span> x.parent.lock_ref == 0:
+            heapq.heappush(heap, (get_priority(x.parent), x.parent))   <span class="cm"># parent is a new leaf → float up</span>
+    <span class="kw">return</span> <span class="st">EvictResult</span>(num_tokens_evicted=num_evicted)</pre>
+</div>
+
+<p>Feel the mechanism with concrete numbers: a <strong>2000-token shared system prompt</strong> at a 90% hit rate means most requests <strong>skip about 2000 prefill tokens</strong> and enter decode with almost zero recompute; meanwhile a running request keeps that prefix chain locked (<span class="mono">lock_ref&gt;0</span>), so however starved HBM gets and however busy <span class="mono">evict</span> is, it is <strong>never cleared mid-flight</strong> — the heap only ever pops the unlocked, longest-untouched cold leaves.</p>
 
 <div class="card key">
   <div class="tag">🔑 Key takeaways</div>
