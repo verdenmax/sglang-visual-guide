@@ -56,7 +56,7 @@ LESSON_09 = {
   <div class="step"><div class="num">4</div><div class="sc"><h4>第二次 gen：得到最终答案</h4><p><span class="mono">gen("answer", stop="\n")</span>——再挖一个空收尾。两个 gen ⇒ <strong>两次调用</strong>，共享同一段前缀。</p></div></div>
 </div>
 
-<p>把上面这条链翻译成代码也就几行：先 <span class="mono">s += gen("分析", max_new_tokens=128)</span> 生成总览，再 <span class="mono">forks = s.fork(2)</span> 分出两支，各自 <span class="mono">f += gen("观点", max_new_tokens=64)</span>，最后 join 汇总——<strong>结构一旦写出来，运行时就看得见</strong>。</p>
+<p>把上面这条链翻译成代码也就几行：先 <span class="mono">s += gen("分析", max_tokens=128)</span> 生成总览，再 <span class="mono">forks = s.fork(2)</span> 分出两支，各自 <span class="mono">f += gen("观点", max_tokens=64)</span>，最后 join 汇总——<strong>结构一旦写出来，运行时就看得见</strong>。</p>
 
 <div class="fig">
   <svg viewBox="0 0 760 320" role="img" aria-label="把一段 DSL 程序画成依赖图：gen 分析先执行，fork 分成两条并行分支各自 gen，再 join 合并；运行时能直接看见这张结构图，而普通 Python 循环对它是不透明的">
@@ -214,7 +214,7 @@ LESSON_09 = {
         ...</pre>
 </div>
 
-<p>对照这个节点：你写的一行 <span class="mono">s += gen("answer", max_new_tokens=64, stop="\n")</span> 不会立刻请求模型，而是构造一个 <span class="mono">SglGen</span> 节点挂进意图树，<strong>等解释器来执行</strong>。</p>
+<p>对照这个节点：你写的一行 <span class="mono">s += gen("answer", max_tokens=64, stop="\n")</span> 不会立刻请求模型，而是构造一个 <span class="mono">SglGen</span> 节点挂进意图树，<strong>等解释器来执行</strong>。</p>
 
 <p>读懂这段，你就抓住了 SGLang 前端的灵魂：<strong>你写的程序不是"立即执行的代码"，而是一棵"待执行的意图树"</strong>。
 正因为是树、是声明式的，框架才能<strong>在执行前看清全局结构</strong>——哪些前缀共享、哪些分支能并行、哪些输出要约束——
@@ -282,7 +282,7 @@ with arbitrary Python logic between them.</p>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Second gen: final answer</h4><p><span class="mono">gen("answer", stop="\n")</span> — dig one more blank. Two gens ⇒ <strong>two calls</strong>, sharing one prefix.</p></div></div>
 </div>
 
-<p>Translating that chain into code is just a few lines: first <span class="mono">s += gen("analyze", max_new_tokens=128)</span> for an overview, then <span class="mono">forks = s.fork(2)</span> to split, each branch <span class="mono">f += gen("view", max_new_tokens=64)</span>, and finally join — <strong>once the structure is written, the runtime can see it</strong>.</p>
+<p>Translating that chain into code is just a few lines: first <span class="mono">s += gen("analyze", max_tokens=128)</span> for an overview, then <span class="mono">forks = s.fork(2)</span> to split, each branch <span class="mono">f += gen("view", max_tokens=64)</span>, and finally join — <strong>once the structure is written, the runtime can see it</strong>.</p>
 
 <div class="fig">
   <svg viewBox="0 0 760 320" role="img" aria-label="A DSL program drawn as a dependency graph: gen analyze runs first, fork splits into two parallel branches each running gen, then join merges them; the runtime can see this structure directly, while a plain Python loop is opaque to it">
@@ -431,7 +431,7 @@ as needed. Here is the real snippet of <span class="mono">gen</span> from <span 
         ...</pre>
 </div>
 
-<p>Against this node: your one line <span class="mono">s += gen("answer", max_new_tokens=64, stop="\n")</span> does not hit the model immediately — it builds an <span class="mono">SglGen</span> node and hangs it on the intent tree, <strong>waiting for the interpreter to execute</strong>.</p>
+<p>Against this node: your one line <span class="mono">s += gen("answer", max_tokens=64, stop="\n")</span> does not hit the model immediately — it builds an <span class="mono">SglGen</span> node and hangs it on the intent tree, <strong>waiting for the interpreter to execute</strong>.</p>
 
 <p>Grasp this and you have the soul of the SGLang front end: <strong>the program you write is not "code that runs immediately" but a "tree of intent
 to be executed."</strong> Precisely because it is a declarative tree, the framework can <strong>see the whole structure before execution</strong> — which
@@ -649,7 +649,7 @@ worker 取出后 <span class="mono">_execute</span>，其中 <span class="mono">
         self.variables = {}        <span class="cm"># name -&gt; generated value</span>
     <span class="kw">def</span> submit(self, expr):
         ...   <span class="cm"># enqueue an IR node (gen / select / fill ...) to execute</span>
-    <span class="kw">def</span> fork(self, number):
+    <span class="kw">def</span> fork(self, size=1):
         ...   <span class="cm"># split into parallel branches that share the current prefix</span>
     <span class="kw">def</span> _execute_gen(self, expr):
         ...   <span class="cm"># call the backend to actually generate the tokens</span></pre>
@@ -855,7 +855,7 @@ the worker pops it and <span class="mono">_execute</span>s, and <span class="mon
         self.variables = {}        <span class="cm"># name -&gt; generated value</span>
     <span class="kw">def</span> submit(self, expr):
         ...   <span class="cm"># enqueue an IR node (gen / select / fill ...) to execute</span>
-    <span class="kw">def</span> fork(self, number):
+    <span class="kw">def</span> fork(self, size=1):
         ...   <span class="cm"># split into parallel branches that share the current prefix</span>
     <span class="kw">def</span> _execute_gen(self, expr):
         ...   <span class="cm"># call the backend to actually generate the tokens</span></pre>
@@ -1040,8 +1040,8 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
     <span class="cm"># the handle a DSL program function receives (the `s` in def prog(s, ...))</span>
     <span class="kw">def</span> __init__(self, stream_executor):
         self.stream_executor = stream_executor
-    <span class="kw">def</span> fork(self, number):
-        ...   <span class="cm"># branch into `number` parallel states that share the current prefix</span>
+    <span class="kw">def</span> fork(self, size=1):
+        ...   <span class="cm"># branch into `size` parallel states that share the current prefix</span>
     <span class="kw">def</span> text(self):
         ...   <span class="cm"># the accumulated text so far</span>
     <span class="kw">def</span> __getitem__(self, name):
@@ -1214,8 +1214,8 @@ Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/
     <span class="cm"># the handle a DSL program function receives (the `s` in def prog(s, ...))</span>
     <span class="kw">def</span> __init__(self, stream_executor):
         self.stream_executor = stream_executor
-    <span class="kw">def</span> fork(self, number):
-        ...   <span class="cm"># branch into `number` parallel states that share the current prefix</span>
+    <span class="kw">def</span> fork(self, size=1):
+        ...   <span class="cm"># branch into `size` parallel states that share the current prefix</span>
     <span class="kw">def</span> text(self):
         ...   <span class="cm"># the accumulated text so far</span>
     <span class="kw">def</span> __getitem__(self, name):
