@@ -12098,8 +12098,8 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
         self.speculative_num_draft_tokens = \
             server_args.speculative_num_draft_tokens             # nodes to verify
 
-    def draft(self, batch):
-        ...   # EAGLE draft head expands a TREE of candidate tokens
+    # drafting is delegated to self.draft_worker (an EagleDraftWorker):
+    #   self.draft_worker.draft(batch)  -&gt; EAGLE head expands a TREE
 
     def verify(self, batch):
         ...   # target scores the whole tree in ONE forward, accept a path</pre></div>
@@ -12316,7 +12316,9 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
     # the DECODE side of PD disaggregation: pull the KV that the
     # prefill node produced, into this node's KV pool.
     @abstractmethod
-    def init(self, kv_indices, ...): ...
+    def init(self, ...): ...                        # set up the receive session
+    @abstractmethod
+    def send_metadata(self, kv_indices, ...): ...   # announce where the KV lands
     @abstractmethod
     def poll(self) -&gt; KVPoll:
         ...   # WaitingForInput -&gt; Transferring -&gt; Success
@@ -13031,10 +13033,85 @@ class ExpertLocationMetadata:
 
 <div class="flow"><div class="node">raw image / audio</div><div class="arrow">→</div><div class="node">processor: to tensors + insert placeholder tokens</div><div class="arrow">→</div><div class="node">ViT / audio encoder</div><div class="arrow">→</div><div class="node">splice embeddings at placeholders</div><div class="arrow">→</div><div class="node">normal decode (sched / KV / attention)</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="media goes through the processor to tensors and placeholder tokens, the vision encoder produces image embeddings, the placeholder slots are replaced at the model input, then handed to the LLM">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">media → placeholders → encoder → splice</text>
+    <rect x="24" y="120" width="118" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="83" y="145" text-anchor="middle" style="font-size:12px">image + text</text>
+    <text x="83" y="163" text-anchor="middle" style="fill:var(--muted);font-size:11px">prompt</text>
+    <line x1="142" y1="148" x2="170" y2="148" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M170 148 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="174" y="110" width="106" height="76" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="227" y="140" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">processor</text>
+    <text x="227" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">to tensors</text>
+    <text x="227" y="173" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">add slots</text>
+    <path d="M280 128 C 304 110, 312 92, 330 82" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <rect x="330" y="58" width="208" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="344" y="86" class="mono" style="font-size:11px">txt</text>
+    <rect x="362" y="66" width="118" height="30" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="421" y="86" text-anchor="middle" class="mono" style="font-size:11px">&lt;image&gt; × N</text>
+    <text x="500" y="86" class="mono" style="font-size:11px">txt</text>
+    <text x="330" y="118" style="fill:var(--muted);font-size:11px">token stream (with slots)</text>
+    <path d="M280 168 C 304 188, 312 200, 330 210" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <rect x="330" y="200" width="118" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="389" y="227" text-anchor="middle" style="font-size:12px">vision encoder</text>
+    <line x1="448" y1="222" x2="476" y2="222" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M476 222 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="480" y="200" width="108" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="534" y="227" text-anchor="middle" style="font-size:12px">img emb ×N</text>
+    <path d="M538 92 C 580 104, 598 110, 612 124" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <path d="M588 214 C 600 200, 606 192, 612 176" style="fill:none;stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="610" y="120" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="670" y="146" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">model input</text>
+    <text x="670" y="164" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slots ← emb</text>
+    <line x1="730" y1="150" x2="752" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M752 150 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="756" y="124" width="38" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="775" y="154" text-anchor="middle" style="font-weight:700;font-size:12px">LLM</text>
+  </svg>
+  <div class="figcap"><b>Fig A · media → placeholders → encoder → splice</b> — the processor turns the image into tensors and inserts <span class="mono">&lt;image&gt;×N</span> placeholders into the token stream; the vision encoder produces N image embeddings in parallel; at the model input the placeholder slots are replaced by those embeddings, then the LLM runs forward as usual.</div>
+</div>
+
 <h2>2. Where the splice happens: the "picture squares" inside one row of embeddings</h2>
 <p>The most intuitive picture of VLM is to stare at that one row of <strong>token embeddings</strong> at the forward entry. Suppose the prompt is "this is [picture] a cat." After the input seam, the token stream becomes: <span class="mono">this / is / IMG / IMG / IMG / a / cat</span>, where the three <span class="mono">IMG</span> are placeholder tokens. <span class="mono">general_mm_embed_routine</span> first looks up each id to get an embedding, giving a full row of embedding vectors; then the ViT encodes that cat photo into three media embeddings that <strong>replace</strong> the placeholder embeddings originally sitting in those three <span class="mono">IMG</span> slots. After the replacement, this row no longer has any notion of "placeholder" — it is just a strip of embedding vectors side by side, some from text, some from the picture, mixed together completely homogeneously.</p>
 
 <div class="cellgroup"><div class="cell">this</div><div class="cell">is</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell">a</div><div class="cell">cat</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="one row of token embeddings: most slots are text-token embeddings, while a contiguous run of placeholder slots is filled by the vision encoder's image-patch embeddings">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">input-embedding row: image embeddings fill the slots</text>
+    <rect x="188" y="48" width="324" height="32" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="350" y="69" text-anchor="middle" style="font-size:12px">vision encoder</text>
+    <line x1="227" y1="80" x2="227" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="309" y1="80" x2="309" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="391" y1="80" x2="391" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="473" y1="80" x2="473" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="24" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="63" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="106" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="145" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="188" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="227" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="270" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="309" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="352" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="391" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="434" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="473" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="516" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="555" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="598" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="637" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="680" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="719" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <text x="350" y="200" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">image-patch emb × k</text>
+    <text x="103" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
+    <text x="678" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
+  </svg>
+  <div class="figcap"><b>Fig B · one embedding row: image embeddings fill the slots</b> — in one row of token embeddings, most slots are text-token embeddings; a contiguous run of placeholder slots (different color) is filled by the vision encoder's k image-patch embeddings, forming text · [img emb × k] · text.</div>
+</div>
+
+<p>A concrete example: a single <span class="mono">448×448</span> image, after the processor tiles it, might expand to about <strong>256 placeholder tokens</strong>, and the vision encoder then produces exactly <strong>256 image-patch embeddings</strong> that fill those contiguous slots one-for-one — the counts line up exactly. Seen from the scalability angle: to make the same engine serve a brand-new VLM, you usually only swap the two boxes <strong>processor + vision tower</strong>; the scheduler, paged KV, attention, and sampler are not touched at all, and the new model runs.</p>
 
 <p>In the row of squares above, the three shaded cells were originally <span class="mono">IMG</span> placeholders and are now replaced by image embeddings (<span class="mono">img-emb</span>). The key point: <strong>the count and positions of the squares do not change at all</strong> — however many slots the placeholders held, that many image embeddings fill them. This guarantees the sequence length is identical before and after the splice, so every downstream component that works by position (positional encoding, attention mask, KV slots) needs no special handling.</p>
 <p>There is an often-overlooked detail here: <strong>the number of placeholders must be computed exactly in advance</strong>. When the processor inserts placeholders at the input seam, it does not stuff in some arbitrary count — it computes it precisely from that model's ViT output length: however many visual tokens an image produces after tiling and pooling, that many placeholders go in. If the counts disagree, the scatter's source (media embeddings) and target (placeholder slots) will mismatch in shape and error out immediately. So there is an <strong>implicit contract</strong> between the input seam and the embed seam: the processor promises "I reserved N slots for this image," the encoder promises "I produce exactly N embeddings," and the same placeholder token strings the two together. Precisely because this contract is nailed down in preprocessing, downstream batching, paging, and attention can treat this "image span" as ordinary tokens with no special-casing. The same holds for multiple images and mixed modalities: each media item has its own run of placeholders, mutually disjoint, and the scatter returns each to its own slots.</p>
@@ -13050,6 +13127,16 @@ class ExpertLocationMetadata:
 <p>Let us walk the whole path once more to feel how the two seams hand off. A user sends a request with an image; the tokenizer (L14) cuts the text part into tokens, while the processor at the input seam decodes, normalizes, and tiles the image into tensors per the model's rules, and inserts a run of placeholder tokens at the corresponding positions in the text token stream. At this point the request, carrying "tensors + a token sequence with placeholders," enters the scheduler (L18) to queue and batch. When its turn to run forward comes, the embed seam takes over: it looks up the whole batch of token ids to get text embeddings, lets the ViT/audio encoder encode the tensors into media embeddings, and in one scatter writes those media embeddings onto the placeholder slots. From this step on, the sequence is pure embeddings: paged KV (L30) allocates cache per token, RadixAttention (L29) does prefix matching and reuse, and the sampler (L28) samples the next token from logits — none of them knows, or needs to know, that an image was ever here. Each newly decoded token continues the loop until generation ends. <strong>Across the whole pipeline, "multimodality" appears only briefly at the two front seams and afterward dissolves completely into the generic embedding stream</strong> — that is the entire essence of SGLang's VLM design: the smallest change surface in exchange for full reuse of the whole high-performance infrastructure.</p>
 
 <table class="t"><tr><th>Seam</th><th>Stage</th><th>Responsibility</th></tr><tr><td>input processor <span class="mono">BaseMultimodalProcessor</span></td><td>tokenize / preprocess (L14)</td><td>raw pixels / audio → model tensors; insert placeholder tokens into the token stream</td></tr><tr><td>embed entry <span class="mono">general_mm_embed_routine</span></td><td>forward entry</td><td>run encoders to compute media embeddings; scatter-splice where <span class="mono">input_ids==placeholder</span></td></tr></table>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/multimodal/processors/base_processor.py ::BaseMultimodalProcessor</span><span class="ln">turn raw media into features + placeholder tokens (subclassed per model)</span></div><pre>class BaseMultimodalProcessor(ABC):
+    # turns raw media (image/audio/video) into model-ready features
+    # AND inserts placeholder token ids marking where those embeddings
+    # get spliced into the text token stream. One subclass per model.
+    def __init__(self, hf_config, server_args, _processor, ...):
+        ...
+    @abstractmethod
+    async def process_mm_data_async(self, ...):
+        ...   # -&gt; input_ids (with placeholders) + pixel/feature tensors</pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/mm_utils.py ::general_mm_embed_routine</span><span class="ln">splice media embeddings into the token stream at placeholder slots</span></div><pre>def general_mm_embed_routine(
     input_ids,                  # prompt tokens, with PLACEHOLDER ids where media goes
@@ -13146,6 +13233,35 @@ class ExpertLocationMetadata:
 <p>Why is <span class="mono">B·A</span> so cheap? Let the weight dimension be <span class="mono">d×d</span>; full fine-tuning updates about <span class="mono">d²</span> parameters, whereas LoRA learns only <span class="mono">A</span> (about <span class="mono">r×d</span>) and <span class="mono">B</span> (about <span class="mono">d×r</span>), roughly <span class="mono">2·r·d</span> parameters in total. When the rank <span class="mono">r</span> is only a few dozen while the dimension <span class="mono">d</span> is a few thousand, the parameter count differs by two or three orders of magnitude. That means <strong>training cost</strong>, <strong>storage cost</strong>, and <strong>memory footprint</strong> all plunge — an adapter is small enough that dozens fit into the spare room of a single card, which is precisely what makes the "adapter pool" practical in engineering terms.</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 820 290" role="img" aria-label="Base weight W plus low-rank B·A gives the adapted effective weight; the rank r of A and B is far smaller than the dimension d">
+    <text x="28" y="34" style="font-weight:700;fill:var(--muted)">effective W = base W + scaling·(B·A)</text>
+    <rect x="36" y="70" width="120" height="120" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="96" y="126" text-anchor="middle" style="font-weight:700">W</text>
+    <text x="96" y="148" text-anchor="middle" style="fill:var(--muted);font-size:12px">d×d · frozen</text>
+    <text x="178" y="138" text-anchor="middle" style="font-size:22px;fill:var(--muted)">+</text>
+    <rect x="206" y="70" width="34" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="223" y="134" text-anchor="middle" style="font-weight:700;fill:var(--blue)">B</text>
+    <text x="223" y="208" text-anchor="middle" style="fill:var(--muted);font-size:12px">d×r</text>
+    <text x="258" y="138" text-anchor="middle" style="font-size:20px;fill:var(--muted)">·</text>
+    <rect x="276" y="116" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="336" y="138" text-anchor="middle" style="font-weight:700;fill:var(--teal)">A</text>
+    <text x="336" y="208" text-anchor="middle" style="fill:var(--muted);font-size:12px">r×d</text>
+    <text x="418" y="138" text-anchor="middle" style="font-size:22px;fill:var(--muted)">=</text>
+    <rect x="446" y="70" width="128" height="120" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="510" y="126" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">W + s·(B·A)</text>
+    <text x="510" y="148" text-anchor="middle" style="fill:var(--muted);font-size:12px">adapted W</text>
+    <rect x="604" y="78" width="184" height="104" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="620" y="106" style="font-weight:700;fill:var(--amber)">rank r ≪ d</text>
+    <text x="620" y="130" style="fill:var(--ink);font-size:12px">A, B tiny · r=8/16</text>
+    <text x="620" y="152" style="fill:var(--ink);font-size:12px">each adapter ~few MB</text>
+    <text x="620" y="172" class="mono" style="fill:var(--muted);font-size:12px">s = alpha / r</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · base W + low-rank B·A</b> — the frozen base weight W (d×d) plus a low-rank update: B (d×r) times A (r×d), so effective weight = W + scaling·(B·A). Because rank r ≪ d, A and B are tiny — each adapter is only a few MB.</div>
+</div>
+
+<p>Run the numbers: with dimension <span class="mono">d=4096</span> and rank <span class="mono">r=16</span>, one LoRA layer adds only about <span class="mono">2·4096·16 ≈ 131K</span> parameters, versus <span class="mono">16.8M</span> in the full <span class="mono">4096×4096</span> matrix — roughly <span class="mono">0.8%</span>. The scaling <span class="mono">s = alpha/r</span> (e.g. <span class="mono">32/16 = 2</span>) controls how strongly that delta is added onto the base.</p>
+
 <h2>Why "one base + an adapter pool"</h2>
 <p>Suppose you have N fine-tunes: one writes SQL, one does medical Q&amp;A, one summarizes legal text. The most literal deployment is N full models — but each occupies full memory while <strong>99% of their weights are identical</strong> (all derived from the same base). That is enormous waste.</p>
 <p>SGLang's approach: keep just <span class="mono">one</span> base model in memory (see <strong>Lesson 25</strong> on loading base weights), plus a <strong>LoRA memory pool</strong> holding several small adapters. For each request, take the adapter name it specifies and temporarily add the corresponding <span class="mono">B·A</span> delta onto the base output. Adapters are small, so the pool can hold many; the real constraint is <span class="mono">max_loras_per_batch</span> — it caps how many distinct adapters can coexist in <strong>one batch</strong> (bounded by pool/memory size).</p>
@@ -13159,6 +13275,46 @@ class ExpertLocationMetadata:
 <p>It helps to put "per-adapter loop" and "grouped GEMM" side by side. With a per-adapter loop, suppose this batch has 5 distinct adapters: you launch 5 small kernels, each carrying a kernel-launch overhead and a memory round-trip, while each small kernel processes very few rows, so the GPU's compute utilization is low — exactly the "fragmentation" continuous batching most wants to avoid. A grouped GEMM instead stitches these 5 segments into <strong>one</strong> call: the launch overhead is amortized over the whole batch, memory is traversed once, and the GPU's many compute units are fed at once. The more requests and the more varied the adapters, the more this "done in one pass" wins over "looping N times."</p>
 <p>Concretely, the idea of a grouped GEMM is: slice the large batch by "which adapter" into several <strong>segments</strong>, each segment corresponding to one adapter and containing all request rows in the batch that use it. These segments are packed side by side as the input of a single kernel call, and inside the kernel each segment applies its own <span class="mono">B, A</span> matrices. So from the outside there is still just <strong>one</strong> kernel launch and one memory round-trip; from the inside, every request gets exactly the ΔW it should. This is precisely the "staging" work <span class="mono">prepare_lora_batch</span> quietly does before the forward — computing each segment's offset, length, and adapter index, turning the scattered "who wants which" into the tidy layout GPUs love.</p>
 <p>This also shows why <span class="mono">max_loras_per_batch</span> matters: more segments means more distinct adapters active in this batch, which means more weights must reside in the pool and participate in this grouped GEMM. Set it too large and the LoRA memory pool gets tight; set it too small and the scheduler may be forced to defer a request wanting the "(K+1)-th" adapter to the next batch. It is essentially a line drawn between <strong>adapter diversity</strong> and <strong>memory budget</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="In one batch different requests use different adapters: the shared base W·x is one GEMM, and the per-adapter B·A·x is done in one grouped GEMM segmented by adapter">
+    <text x="28" y="34" style="font-weight:700;fill:var(--muted)">one batch · per-row adapter · grouped GEMM</text>
+    <text x="28" y="64" style="fill:var(--muted);font-size:12px">batch rows (requests)</text>
+    <rect x="28" y="74" width="128" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="92" y="94" text-anchor="middle" class="mono" style="font-size:12px">req1 · A</text>
+    <rect x="28" y="110" width="128" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="92" y="130" text-anchor="middle" class="mono" style="font-size:12px">req2 · B</text>
+    <rect x="28" y="146" width="128" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="92" y="166" text-anchor="middle" class="mono" style="font-size:12px">req3 · A</text>
+    <rect x="28" y="182" width="128" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="92" y="202" text-anchor="middle" class="mono" style="font-size:12px">req4 · C</text>
+    <line x1="156" y1="120" x2="204" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="204,120 196,116 196,124" style="fill:var(--muted)"/>
+    <line x1="156" y1="200" x2="204" y2="222" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="204,222 195,219 199,212" style="fill:var(--muted)"/>
+    <rect x="208" y="92" width="190" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="303" y="116" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">shared base W·x</text>
+    <text x="303" y="136" text-anchor="middle" style="fill:var(--muted);font-size:12px">one GEMM</text>
+    <rect x="208" y="166" width="190" height="126" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="303" y="186" text-anchor="middle" style="fill:var(--muted);font-size:12px">grouped GEMM · by adapter</text>
+    <rect x="222" y="196" width="162" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="303" y="214" text-anchor="middle" class="mono" style="font-size:11px">seg A · rows 1,3</text>
+    <rect x="222" y="226" width="162" height="26" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="303" y="244" text-anchor="middle" class="mono" style="font-size:11px">seg B · row 2</text>
+    <rect x="222" y="256" width="162" height="26" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="303" y="274" text-anchor="middle" class="mono" style="font-size:11px">seg C · row 4</text>
+    <line x1="398" y1="120" x2="450" y2="150" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="450,150 441,148 444,140" style="fill:var(--muted)"/>
+    <line x1="398" y1="226" x2="450" y2="186" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="450,186 444,193 441,185" style="fill:var(--muted)"/>
+    <rect x="452" y="120" width="170" height="80" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="537" y="150" text-anchor="middle" style="font-weight:700;fill:var(--purple)">(W + B·A)·x</text>
+    <text x="537" y="172" text-anchor="middle" style="fill:var(--muted);font-size:12px">per-row result</text>
+    <text x="648" y="150" style="font-weight:700;fill:var(--ink);font-size:13px">one kernel launch</text>
+    <text x="648" y="172" style="fill:var(--muted);font-size:12px">applies all ΔW</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · one batch, grouped GEMM</b> — in the same batch req1/req3 use adapter A, req2 uses B, req4 uses C. The shared W·x is one GEMM; each request's B·A·x is grouped into segments A/B/C and computed together in one grouped GEMM, so every row gets its own (W+B·A)·x.</div>
+</div>
 
 <h2>The runtime lifecycle</h2>
 <p>Stringing the whole path together: at startup <span class="mono">LoRAManager</span> receives the base model, the <span class="mono">max_loras_per_batch</span> cap, and a LoRA backend (default <span class="mono">triton</span>), and builds the memory pool. During operation, new skills enter the pool via <span class="mono">load_lora_adapter</span> and old ones leave via <span class="mono">unload_lora_adapter</span>. On each forward step the scheduler first calls <span class="mono">prepare_lora_batch</span> to stage every request's adapter for this batch, then lets the base run its normal forward and add each ΔW in the LoRA layers with a grouped GEMM. This whole mechanism lets a single deployment flexibly serve dozens of task-specific adapters, like swapping bits.</p>
@@ -13194,6 +13350,14 @@ class ExpertLocationMetadata:
         # for THIS batch: gather which adapter each request needs and stage them so a
         # segmented/grouped GEMM applies each request's own delta-W in one kernel
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/lora/lora.py ::LoRAAdapter</span><span class="ln">one adapter: a stack of low-rank layers, scaling = alpha / r</span></div><pre>class LoRAAdapter(nn.Module):
+    # one LoRA adapter = a stack of low-rank LoRALayers over the base.
+    def __init__(self, uid, config, ..., lora_backend):
+        self.uid = uid
+        self.scaling = config.lora_alpha / config.r   # scales B·A
+        self.layers = nn.ModuleList([...])            # per-target A,B (rank r)
+    # effective weight = base_W + scaling * (B @ A)   # A,B tiny, rank r</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>
@@ -13282,6 +13446,34 @@ class ExpertLocationMetadata:
 <div class="step"><div class="num">4</div><div class="sc"><h4>Next rollout</h4><p>regenerate with the just-updated weights → back to ①, the loop keeps rolling</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RL loop: SGLang generates rollouts, the trainer computes reward and gradient, weights are updated, then new weights are synced back into the engine">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">RL loop: generate → score → update → generate</text>
+    <rect x="40" y="60" width="200" height="60" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="140" y="86" text-anchor="middle" style="font-weight:700">① Rollout</text>
+    <text x="140" y="106" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">SGLang engine</text>
+    <rect x="540" y="60" width="200" height="60" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="86" text-anchor="middle" style="font-weight:700">② Reward + grad</text>
+    <text x="640" y="106" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">trainer</text>
+    <rect x="540" y="200" width="200" height="60" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="640" y="226" text-anchor="middle" style="font-weight:700">③ Update weights</text>
+    <text x="640" y="246" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">grad descent</text>
+    <rect x="40" y="200" width="200" height="60" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="140" y="226" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">④ Sync weights</text>
+    <text x="140" y="246" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">update_weights</text>
+    <line x1="240" y1="90" x2="536" y2="90" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="536,90 526,85 526,95" style="fill:var(--line)"/>
+    <line x1="640" y1="120" x2="640" y2="196" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="640,196 635,186 645,186" style="fill:var(--line)"/>
+    <line x1="540" y1="230" x2="244" y2="230" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="244,230 254,225 254,235" style="fill:var(--line)"/>
+    <line x1="140" y1="200" x2="140" y2="124" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="140,124 135,134 145,134" style="fill:var(--line)"/>
+    <text x="390" y="282" text-anchor="middle" style="fill:var(--faint);font-size:12px">new weights flow back; next rollout samples the updated policy</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · RL loop: rollout → reward+grad → update → rollout</b> — The SGLang inference engine generates rollout samples, the trainer scores them (reward) and computes gradients, the policy weights are updated, and the new weights are synced back into the engine for the next rollout. SGLang is the fast generator inside the RL loop.</div>
+</div>
+
 <h2>2. Why we can't restart the server every step</h2>
 <p>The naïve idea: have the trainer save a new checkpoint and just <strong>restart</strong> the SGLang server to reload it. The problem is a "cold start" is hugely expensive: it must <strong>re-read the weight files</strong> (Lesson 25's weight-loading flow), <strong>re-warm</strong>, <strong>re-capture CUDA graphs</strong>, and rebuild the KV pools. These one-time costs are tens of seconds to minutes, while RL training runs thousands to tens of thousands of steps — restarting each step means startup time would <strong>dominate</strong> actual compute, which is unacceptable.</p>
 <p>SGLang's answer is the <strong>in-place weight update</strong>: the process never restarts, CUDA graphs aren't re-captured, KV pools stay in place, and only the values in the <strong>model-parameter memory</strong> get swapped for the freshly-trained tensors. <span class="mono">update_weights_from_tensor(named_tensors, load_format=…)</span> writes the new tensors straight onto the running model's matching parameters in milliseconds, ready for the next rollout immediately.</p>
@@ -13318,6 +13510,43 @@ class ExpertLocationMetadata:
 <div class="node">Reconstruct on engine side → write into live params</div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="Many named tensors packed into one bucket, copied once, then reconstructed into the running model's live params">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">many named tensors → one bucket → one copy → live params</text>
+    <rect x="20" y="60" width="150" height="180" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="95" y="80" text-anchor="middle" style="font-size:12px;fill:var(--muted)">many tensors</text>
+    <rect x="34" y="92" width="122" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="108" text-anchor="middle" class="mono" style="font-size:11px">q_proj.weight</text>
+    <rect x="34" y="120" width="122" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="95" y="136" text-anchor="middle" class="mono" style="font-size:11px">mlp.up.weight</text>
+    <rect x="34" y="148" width="122" height="22" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="95" y="164" text-anchor="middle" class="mono" style="font-size:11px">norm.weight</text>
+    <text x="95" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">… thousands</text>
+    <line x1="170" y1="150" x2="216" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="216,150 206,145 206,155" style="fill:var(--line)"/>
+    <rect x="220" y="80" width="180" height="140" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="310" y="104" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">one bucket</text>
+    <text x="310" y="124" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">FlattenedTensorBucket</text>
+    <rect x="236" y="138" width="148" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="310" y="154" text-anchor="middle" class="mono" style="font-size:11px">contiguous buffer</text>
+    <text x="310" y="188" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">+ metadata (name/shape/off)</text>
+    <line x1="400" y1="150" x2="446" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="446,150 436,145 436,155" style="fill:var(--line)"/>
+    <rect x="450" y="118" width="150" height="64" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="525" y="144" text-anchor="middle" style="font-weight:700">one copy</text>
+    <text x="525" y="166" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">single transfer</text>
+    <line x1="600" y1="150" x2="646" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="646,150 636,145 636,155" style="fill:var(--line)"/>
+    <rect x="650" y="80" width="130" height="140" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="715" y="104" text-anchor="middle" style="font-weight:700">live params</text>
+    <text x="715" y="124" text-anchor="middle" style="font-size:11px;fill:var(--blue)">reconstruct</text>
+    <text x="715" y="146" text-anchor="middle" style="font-size:11px;fill:var(--blue)">into running model</text>
+    <text x="715" y="186" text-anchor="middle" class="mono" style="font-size:11px">write</text>
+    <text x="400" y="280" text-anchor="middle" style="fill:var(--faint);font-size:12px">a few big copies replace thousands of tiny ones → faster sync</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · many named tensors → one bucket → one copy → live params</b> — Weight sync packs many small named weight tensors into one flattened bucket (+metadata), transfers it as a single contiguous copy, then reconstructs and writes them into the running model's live parameters — far fewer ops than copying thousands of tensors individually.</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::update_weights_from_tensor</span><span class="ln">write freshly-trained weights into the running model in place, no restart</span></div><pre>def update_weights_from_tensor(
     self,
     named_tensors,              # [(name, tensor)] freshly-trained weights from the trainer
@@ -13332,6 +13561,18 @@ class ExpertLocationMetadata:
     # CUDA graphs and KV pools stay in place
     ...
 # update_weights_from_distributed(...) streams weights over a process group instead</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/weight_sync/tensor_bucket.py ::FlattenedTensorBucket</span><span class="ln">flatten many named tensors into one bucket for a single-copy sync</span></div><pre>class FlattenedTensorBucket:
+    # flatten MANY named tensors into ONE buffer (+ metadata) so a weight
+    # sync is a single contiguous copy, not thousands of tiny ones.
+    def __init__(self, named_tensors=None, flattened_tensor=None, metadata=None):
+        # from named_tensors: record each tensor's name/shape/dtype/offset,
+        # then pack their flattened bytes into self.flattened_tensor.
+        ...
+    def reconstruct_tensors(self):
+        ...   # split the buffer back into the original named tensors</pre></div>
+
+<p>A concrete feel: a 7B model has <strong>hundreds</strong> of weight tensors (per-layer q/k/v/o projections, MLPs, LayerNorms…). Syncing them one by one is hundreds of small copies; packing them with <span class="mono">FlattenedTensorBucket</span> turns those hundreds of small copies into <strong>a handful of big ones</strong>, so weight sync after each RL update is far faster. The division of labor stays the same: <strong>SGLang serves the rollout generation while the trainer owns the gradients</strong>, glued efficiently by this bucket.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>
@@ -13417,6 +13658,33 @@ class ExpertLocationMetadata:
 <p>Why "denoise" and not "paint"? During training, the diffusion model saw this process: take a clean image and <strong>progressively add noise</strong> until it becomes pure random noise; what the model learns is the <strong>reverse</strong> — given a noisy image and "which step we're at", predict how much noise to subtract. So at inference we run it backwards: start from pure noise and let the model "erase" the noise step by step, finally reconstructing a brand-new image that never existed before yet matches the prompt. Each step moves only a little because jumping from pure noise to a sharp image in one shot is too hard and too error-prone; sliced into dozens of small steps, the model only needs a tiny correction each step, and overall quality is far more stable.</p>
 <p>Because the step count N is fixed in advance, diffusion inference has a <strong>very regular compute graph</strong>: the same DiT, the same input shapes, the same op sequence, repeated N times unchanged. Compared to an LLM's dynamic shape — "the sequence grows as it generates and the KV cache keeps swelling" — diffusion's denoise loop is a <strong>near-perfect static loop</strong>. As you'll see, this regularity is exactly why SGLang's acceleration tricks (especially CUDA graph) plug straight in.</p>
 
+<div class="fig">
+  <svg viewBox="0 0 800 260" role="img" aria-label="Diffusion inference pipeline: start from a pure-noise latent, the DiT runs N denoise steps conditioned on the prompt, each step removes a bit of noise, and the final clean latent is decoded by a VAE into the output image">
+    <path d="M 360 104 C 360 44, 220 44, 220 104" style="fill:none;stroke:var(--teal);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <polygon points="220,104 213,90 227,90" style="fill:var(--teal)"/>
+    <text x="290" y="38" text-anchor="middle" style="fill:var(--teal);font-size:12px">each step removes a bit of noise</text>
+    <rect x="24" y="104" width="132" height="52" rx="8" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <text x="90" y="128" text-anchor="middle">Pure noise</text>
+    <text x="90" y="146" text-anchor="middle" class="mono" style="fill:var(--muted)">latent</text>
+    <text x="178" y="134" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="200" y="104" width="180" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="290" y="128" text-anchor="middle">DiT denoise</text>
+    <text x="290" y="146" text-anchor="middle" class="mono" style="fill:var(--muted)">× N steps</text>
+    <text x="403" y="134" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="426" y="104" width="130" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="491" y="128" text-anchor="middle">VAE decode</text>
+    <text x="491" y="146" text-anchor="middle" class="mono" style="fill:var(--muted)">latent→pixel</text>
+    <text x="579" y="134" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="602" y="104" width="150" height="52" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="677" y="134" text-anchor="middle">Output image</text>
+    <rect x="222" y="200" width="136" height="40" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="290" y="224" text-anchor="middle">prompt cond</text>
+    <path d="M 290 200 L 290 158" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
+    <polygon points="290,156 283,170 297,170" style="fill:var(--amber)"/>
+  </svg>
+  <div class="figcap"><b>Fig 1 · noise → denoise ×N → VAE → image</b> — start from a pure Gaussian-noise latent; the DiT runs N denoise steps conditioned on the prompt (each predicts and removes a bit of noise); the final clean latent is decoded by a VAE into the output image.</div>
+</div>
+
 <h2>2. The three parts of a diffusion pipeline</h2>
 <p>A diffusion generation pipeline has three parts, all described by a single <span class="mono">PipelineConfig</span>:</p>
 <p>First, the <strong>text encoder(s)</strong> (there may be more than one): they turn your prompt into a <strong>conditioning</strong> vector that tells the denoiser "I want a cat wearing a hat". Second, the <strong>DiT</strong> (Diffusion Transformer): this is the <strong>denoiser</strong>, run once per denoise step — the heaviest, most central, repeatedly-invoked compute body of the pipeline. Third, the <strong>VAE</strong> (variational autoencoder): it maps back and forth between the compressed <strong>latent space</strong> and real <strong>pixel space</strong> — all the denoising happens in the small latent space (saving memory and compute), and only the final step uses the VAE to decode the latent into an actual image or video frame.</p>
@@ -13433,6 +13701,40 @@ class ExpertLocationMetadata:
 <h2>4. The two paradigms side by side</h2>
 <p>The same SGLang engine serves both the autoregressive LLM that "chains one token at a time" and the diffusion model that "develops the same latent canvas repeatedly". Kernels, scheduling, memory, CUDA graph, multi-hardware, API — all shared; only the upper generation paradigm differs. This embodies SGLang's design philosophy: <strong>everything is pluggable</strong>, and new capabilities reuse the existing foundation at minimal cost.</p>
 <p>Put side by side, their "hard parts" are nicely offset and complementary: autoregression is hard because of <strong>dynamic shapes and an ever-growing KV cache</strong>, so continuous batching and prefix caching shine; diffusion is hard because <strong>the same image is run many steps over</strong>, so "static-loop optimizations" like CUDA-graph capture and TeaCache step-skipping matter most. But the foundation under both — high-performance kernels, unified scheduling and memory management, multi-hardware support, an external API — is <strong>the same one</strong>. That's why SGLang can cleanly bolt a task from the "image generation" world onto a pipeline originally serving LLMs, without rewriting the engine. For users it means the operational intuition you built deploying LLMs — how to start a server, tune concurrency, switch hardware, squeeze memory — transfers almost unchanged to diffusion, at very low learning cost.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Two paradigms contrasted: the autoregressive LLM emits one token per forward, its KV cache keeps growing with each step and the length is data-dependent; diffusion runs a fixed N denoise steps refining the same latent with no growing KV cache">
+    <path d="M 24 150 L 776 150" style="fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:4 4"/>
+    <text x="24" y="30" style="fill:var(--blue);font-size:13px;font-weight:700">Autoregressive: token-by-token</text>
+    <rect x="40" y="48" width="96" height="36" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="88" y="71" text-anchor="middle" class="mono">fwd→t1</text>
+    <rect x="156" y="48" width="96" height="36" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="204" y="71" text-anchor="middle" class="mono">fwd→t2</text>
+    <rect x="272" y="48" width="96" height="36" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="320" y="71" text-anchor="middle" class="mono">fwd→t3</text>
+    <text x="392" y="72" text-anchor="middle" style="fill:var(--muted)">…</text>
+    <text x="432" y="58" style="fill:var(--amber);font-size:12px">KV cache grows</text>
+    <rect x="432" y="120" width="22" height="14" rx="2" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1"/>
+    <rect x="460" y="106" width="22" height="28" rx="2" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1"/>
+    <rect x="488" y="92" width="22" height="42" rx="2" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1"/>
+    <rect x="516" y="78" width="22" height="56" rx="2" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1"/>
+    <text x="656" y="104" text-anchor="middle" style="fill:var(--muted);font-size:12px">data-dependent</text>
+    <text x="24" y="180" style="fill:var(--teal);font-size:13px;font-weight:700">Diffusion: N-step denoise</text>
+    <rect x="40" y="198" width="86" height="46" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="83" y="226" text-anchor="middle">latent</text>
+    <rect x="146" y="198" width="86" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="189" y="226" text-anchor="middle">denoise 1</text>
+    <rect x="252" y="198" width="86" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="295" y="226" text-anchor="middle">denoise 2</text>
+    <rect x="358" y="198" width="86" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="401" y="226" text-anchor="middle">denoise 3</text>
+    <text x="466" y="226" text-anchor="middle" style="fill:var(--muted)">…</text>
+    <rect x="490" y="198" width="86" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="533" y="226" text-anchor="middle">denoise N</text>
+    <text x="664" y="224" text-anchor="middle" style="fill:var(--muted);font-size:12px">fixed N · no KV</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · autoregressive (token-by-token) vs diffusion (N-step denoise)</b> — top: the LLM emits one token per forward, the sequence grows and the KV cache keeps swelling, length set by the data; bottom: diffusion runs a fixed N denoise steps over the same latent with no growing KV — an entirely different compute shape.</div>
+</div>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Pure random noise</h4><p class="mono">latent</p><p>Start from a contentless Gaussian-noise latent; nothing is visible in the picture yet.</p></div></div>
@@ -13478,6 +13780,19 @@ class ExpertLocationMetadata:
     text_encoder_configs: tuple         # text conditioning encoders
     should_use_guidance: bool = True    # classifier-free guidance toward the prompt
     embedded_cfg_scale: float = 6.0</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/multimodal_gen/runtime/cache/teacache.py ::TeaCacheContext</span><span class="ln">TeaCache skip context: reuse the last step when the L1 change is small</span></div><pre>@dataclass
+class TeaCacheContext:
+    # inputs to the TeaCache skip decision per diffusion (DiT) step:
+    # if the accumulated L1 change stays below teacache_thresh, REUSE
+    # the cached residual instead of recomputing this step.
+    current_timestep: int
+    num_inference_steps: int
+    do_cfg: bool                    # classifier-free guidance on?
+    teacache_thresh: float          # accumulated-L1 threshold to skip
+    teacache_params: "TeaCacheParams"</pre></div>
+
+<p>A concrete example: in a 50-step diffusion run, later adjacent denoise steps differ less and less, so TeaCache may skip roughly 20%–40% of the DiT steps whose change falls below the threshold — say skipping 15 of 50 steps and truly computing only 35, with almost no quality loss yet a sizable compute saving. Unlike an LLM, the step count N here (<span class="mono">num_inference_steps</span>) is <strong>fixed up front</strong> and not data-dependent, so there is <strong>no growing KV cache</strong>, only a denoise loop of known length; all TeaCache does is check whether the accumulated L1 change at the current <span class="mono">current_timestep</span> stays below <span class="mono">teacache_thresh</span>, and if so reuse the cached residual and skip this step.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>

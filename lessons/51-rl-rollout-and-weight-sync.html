@@ -369,6 +369,34 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="step"><div class="num">4</div><div class="sc"><h4>下一轮 Rollout</h4><p>用刚更新的权重重新生成 → 回到 ①，闭环不断滚动</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RL 闭环：SGLang 生成 rollout，训练器算 reward 与梯度，更新权重，再把新权重同步回引擎">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">RL 闭环：生成 → 打分 → 更新 → 再生成</text>
+    <rect x="40" y="60" width="200" height="60" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="140" y="86" text-anchor="middle" style="font-weight:700">① Rollout 生成</text>
+    <text x="140" y="106" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">SGLang 引擎</text>
+    <rect x="540" y="60" width="200" height="60" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="86" text-anchor="middle" style="font-weight:700">② 奖励 + 梯度</text>
+    <text x="640" y="106" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">训练器</text>
+    <rect x="540" y="200" width="200" height="60" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="640" y="226" text-anchor="middle" style="font-weight:700">③ 更新权重</text>
+    <text x="640" y="246" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">梯度下降</text>
+    <rect x="40" y="200" width="200" height="60" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="140" y="226" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">④ 同步新权重</text>
+    <text x="140" y="246" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">update_weights</text>
+    <line x1="240" y1="90" x2="536" y2="90" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="536,90 526,85 526,95" style="fill:var(--line)"/>
+    <line x1="640" y1="120" x2="640" y2="196" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="640,196 635,186 645,186" style="fill:var(--line)"/>
+    <line x1="540" y1="230" x2="244" y2="230" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="244,230 254,225 254,235" style="fill:var(--line)"/>
+    <line x1="140" y1="200" x2="140" y2="124" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="140,124 135,134 145,134" style="fill:var(--line)"/>
+    <text x="390" y="282" text-anchor="middle" style="fill:var(--faint);font-size:12px">新权重回流，下一轮用更新后的策略采样</text>
+  </svg>
+  <div class="figcap"><b>图 1 · RL 闭环：rollout → 奖励+梯度 → 更新 → rollout</b> — SGLang 引擎生成 rollout 样本，训练器打分（reward）并算梯度，策略权重被更新，新权重再同步回引擎供下一轮 rollout。SGLang 是 RL 循环里的高速生成器。</div>
+</div>
+
 <h2>二、为什么不能每步重启服务器</h2>
 <p>最朴素的想法是：训练器存一个新的 checkpoint，SGLang 服务器<strong>重启</strong>一下、把新 checkpoint 重新加载进来不就行了？问题在于一次"冷启动"代价极大：要<strong>重新读权重文件</strong>（第25课的权重加载流程）、<strong>重新预热</strong>、<strong>重新捕获 CUDA Graph</strong>、重建 KV 缓存池。这些一次性开销动辄几十秒甚至上分钟，而 RL 训练动辄成千上万步——每步都重启，光启动时间就会<strong>压倒</strong>真正的计算时间，完全不可接受。这里尤其要强调 CUDA Graph 的重新捕获：它需要把整个前向过程录制一遍，本身就要跑若干次预热前向，代价不菲；而 KV 缓存池则要按显存大小重新规划、重新分配，这些都是只有"启动时"才做一次的重活，决不该被塞进训练内循环里反复执行。</p>
 <p>SGLang 的答案是<strong>原地权重更新（in-place weight update）</strong>：进程不重启，CUDA Graph 不重新捕获，KV 池原地保留，只把<strong>模型参数这块显存</strong>里的数值换成新训练好的张量。<span class="mono">update_weights_from_tensor(named_tensors, load_format=…)</span> 直接把新张量写进运行中模型的对应参数上，毫秒级完成，下一轮 rollout 立刻可用。这里的关键洞察是：模型的"骨架"——计算图的结构、算子的排布、KV 池的内存布局——在训练全程<strong>从不改变</strong>，真正变的只有参数张量里的<strong>数值</strong>。既然结构不变，就完全没必要把昂贵的结构性初始化（图捕获、内存规划）重做一遍，只需把数值就地刷新即可。这是一种典型的"只改该改的、别动不该动的"工程取舍。</p>
@@ -405,6 +433,43 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="node">引擎侧重建 → 写进活的参数</div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="许多命名张量打包进一个桶，一次拷贝，再重建为运行模型的活动参数">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">许多命名张量 → 一个桶 → 一次拷贝 → 活动参数</text>
+    <rect x="20" y="60" width="150" height="180" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="95" y="80" text-anchor="middle" style="font-size:12px;fill:var(--muted)">许多命名张量</text>
+    <rect x="34" y="92" width="122" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="108" text-anchor="middle" class="mono" style="font-size:11px">q_proj.weight</text>
+    <rect x="34" y="120" width="122" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="95" y="136" text-anchor="middle" class="mono" style="font-size:11px">mlp.up.weight</text>
+    <rect x="34" y="148" width="122" height="22" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="95" y="164" text-anchor="middle" class="mono" style="font-size:11px">norm.weight</text>
+    <text x="95" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">… 成千上万个</text>
+    <line x1="170" y1="150" x2="216" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="216,150 206,145 206,155" style="fill:var(--line)"/>
+    <rect x="220" y="80" width="180" height="140" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="310" y="104" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">一个桶</text>
+    <text x="310" y="124" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">FlattenedTensorBucket</text>
+    <rect x="236" y="138" width="148" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="310" y="154" text-anchor="middle" class="mono" style="font-size:11px">连续 buffer</text>
+    <text x="310" y="188" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">+ 元数据(名/形/偏移)</text>
+    <line x1="400" y1="150" x2="446" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="446,150 436,145 436,155" style="fill:var(--line)"/>
+    <rect x="450" y="118" width="150" height="64" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="525" y="144" text-anchor="middle" style="font-weight:700">一次拷贝</text>
+    <text x="525" y="166" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">单次连续传输</text>
+    <line x1="600" y1="150" x2="646" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="646,150 636,145 636,155" style="fill:var(--line)"/>
+    <rect x="650" y="80" width="130" height="140" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="715" y="104" text-anchor="middle" style="font-weight:700">活动参数</text>
+    <text x="715" y="124" text-anchor="middle" style="font-size:11px;fill:var(--blue)">重建并写入</text>
+    <text x="715" y="146" text-anchor="middle" style="font-size:11px;fill:var(--blue)">运行中的模型</text>
+    <text x="715" y="186" text-anchor="middle" class="mono" style="font-size:11px">reconstruct</text>
+    <text x="400" y="280" text-anchor="middle" style="fill:var(--faint);font-size:12px">少量大拷贝取代成千上万次小拷贝 → 同步更快</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 许多命名张量 → 一个桶 → 一次拷贝 → 活动参数</b> — 权重同步把许多小的命名张量打包进一个摊平的桶（含元数据），作为单次连续拷贝高速传输，再重建并写进运行模型的活动参数——比逐个搬运成千上万个张量少得多的操作。</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::update_weights_from_tensor</span><span class="ln">把新训练好的权重原地写进运行中的模型，免重启</span></div><pre>def update_weights_from_tensor(
     self,
     named_tensors,              # [(name, tensor)] 训练器刚训好的权重
@@ -419,6 +484,18 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     # CUDA Graph 与 KV 池原地保留
     ...
 # update_weights_from_distributed(...) 改为经进程组流式传权重</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/weight_sync/tensor_bucket.py ::FlattenedTensorBucket</span><span class="ln">把多个命名张量摊平进一个桶，便于一次性同步</span></div><pre>class FlattenedTensorBucket:
+    # 把许多命名张量摊平进一个 buffer（+ 元数据），
+    # 让权重同步变成一次连续拷贝，而不是成千上万次小拷贝。
+    def __init__(self, named_tensors=None, flattened_tensor=None, metadata=None):
+        # 从 named_tensors：记录每个张量的 名字/形状/dtype/偏移，
+        # 再把它们摊平后的字节打包进 self.flattened_tensor。
+        ...
+    def reconstruct_tensors(self):
+        ...   # 把 buffer 切回原来的各个命名张量</pre></div>
+
+<p>给个具体感觉：一个 7B 模型有<strong>几百个</strong>权重张量（每层的 q/k/v/o 投影、MLP、LayerNorm…）。逐个同步就是几百次小拷贝；用 <span class="mono">FlattenedTensorBucket</span> 打包后，这几百次小拷贝就变成<strong>少数几次大拷贝</strong>，每次 RL 更新后的权重同步因此快得多。分工依旧是那句话：<strong>SGLang 负责 rollout 生成，训练器持有梯度</strong>，两者靠这个桶高效衔接。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
 <ul>
@@ -505,6 +582,34 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="step"><div class="num">4</div><div class="sc"><h4>Next rollout</h4><p>regenerate with the just-updated weights → back to ①, the loop keeps rolling</p></div></div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="RL loop: SGLang generates rollouts, the trainer computes reward and gradient, weights are updated, then new weights are synced back into the engine">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">RL loop: generate → score → update → generate</text>
+    <rect x="40" y="60" width="200" height="60" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="140" y="86" text-anchor="middle" style="font-weight:700">① Rollout</text>
+    <text x="140" y="106" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--blue)">SGLang engine</text>
+    <rect x="540" y="60" width="200" height="60" rx="10" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="640" y="86" text-anchor="middle" style="font-weight:700">② Reward + grad</text>
+    <text x="640" y="106" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--amber)">trainer</text>
+    <rect x="540" y="200" width="200" height="60" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="640" y="226" text-anchor="middle" style="font-weight:700">③ Update weights</text>
+    <text x="640" y="246" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--teal)">grad descent</text>
+    <rect x="40" y="200" width="200" height="60" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="140" y="226" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">④ Sync weights</text>
+    <text x="140" y="246" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--accent-ink)">update_weights</text>
+    <line x1="240" y1="90" x2="536" y2="90" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="536,90 526,85 526,95" style="fill:var(--line)"/>
+    <line x1="640" y1="120" x2="640" y2="196" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="640,196 635,186 645,186" style="fill:var(--line)"/>
+    <line x1="540" y1="230" x2="244" y2="230" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="244,230 254,225 254,235" style="fill:var(--line)"/>
+    <line x1="140" y1="200" x2="140" y2="124" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="140,124 135,134 145,134" style="fill:var(--line)"/>
+    <text x="390" y="282" text-anchor="middle" style="fill:var(--faint);font-size:12px">new weights flow back; next rollout samples the updated policy</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · RL loop: rollout → reward+grad → update → rollout</b> — The SGLang inference engine generates rollout samples, the trainer scores them (reward) and computes gradients, the policy weights are updated, and the new weights are synced back into the engine for the next rollout. SGLang is the fast generator inside the RL loop.</div>
+</div>
+
 <h2>2. Why we can't restart the server every step</h2>
 <p>The naïve idea: have the trainer save a new checkpoint and just <strong>restart</strong> the SGLang server to reload it. The problem is a "cold start" is hugely expensive: it must <strong>re-read the weight files</strong> (Lesson 25's weight-loading flow), <strong>re-warm</strong>, <strong>re-capture CUDA graphs</strong>, and rebuild the KV pools. These one-time costs are tens of seconds to minutes, while RL training runs thousands to tens of thousands of steps — restarting each step means startup time would <strong>dominate</strong> actual compute, which is unacceptable.</p>
 <p>SGLang's answer is the <strong>in-place weight update</strong>: the process never restarts, CUDA graphs aren't re-captured, KV pools stay in place, and only the values in the <strong>model-parameter memory</strong> get swapped for the freshly-trained tensors. <span class="mono">update_weights_from_tensor(named_tensors, load_format=…)</span> writes the new tensors straight onto the running model's matching parameters in milliseconds, ready for the next rollout immediately.</p>
@@ -541,6 +646,43 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="node">Reconstruct on engine side → write into live params</div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 320" role="img" aria-label="Many named tensors packed into one bucket, copied once, then reconstructed into the running model's live params">
+    <text x="20" y="28" style="font-weight:700;fill:var(--muted)">many named tensors → one bucket → one copy → live params</text>
+    <rect x="20" y="60" width="150" height="180" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="95" y="80" text-anchor="middle" style="font-size:12px;fill:var(--muted)">many tensors</text>
+    <rect x="34" y="92" width="122" height="22" rx="4" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="108" text-anchor="middle" class="mono" style="font-size:11px">q_proj.weight</text>
+    <rect x="34" y="120" width="122" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="95" y="136" text-anchor="middle" class="mono" style="font-size:11px">mlp.up.weight</text>
+    <rect x="34" y="148" width="122" height="22" rx="4" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="95" y="164" text-anchor="middle" class="mono" style="font-size:11px">norm.weight</text>
+    <text x="95" y="196" text-anchor="middle" style="fill:var(--faint);font-size:11px">… thousands</text>
+    <line x1="170" y1="150" x2="216" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="216,150 206,145 206,155" style="fill:var(--line)"/>
+    <rect x="220" y="80" width="180" height="140" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="310" y="104" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">one bucket</text>
+    <text x="310" y="124" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--accent-ink)">FlattenedTensorBucket</text>
+    <rect x="236" y="138" width="148" height="24" rx="4" style="fill:var(--panel-2);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="310" y="154" text-anchor="middle" class="mono" style="font-size:11px">contiguous buffer</text>
+    <text x="310" y="188" text-anchor="middle" style="font-size:11px;fill:var(--accent-ink)">+ metadata (name/shape/off)</text>
+    <line x1="400" y1="150" x2="446" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="446,150 436,145 436,155" style="fill:var(--line)"/>
+    <rect x="450" y="118" width="150" height="64" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="525" y="144" text-anchor="middle" style="font-weight:700">one copy</text>
+    <text x="525" y="166" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--teal)">single transfer</text>
+    <line x1="600" y1="150" x2="646" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="646,150 636,145 636,155" style="fill:var(--line)"/>
+    <rect x="650" y="80" width="130" height="140" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="715" y="104" text-anchor="middle" style="font-weight:700">live params</text>
+    <text x="715" y="124" text-anchor="middle" style="font-size:11px;fill:var(--blue)">reconstruct</text>
+    <text x="715" y="146" text-anchor="middle" style="font-size:11px;fill:var(--blue)">into running model</text>
+    <text x="715" y="186" text-anchor="middle" class="mono" style="font-size:11px">write</text>
+    <text x="400" y="280" text-anchor="middle" style="fill:var(--faint);font-size:12px">a few big copies replace thousands of tiny ones → faster sync</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · many named tensors → one bucket → one copy → live params</b> — Weight sync packs many small named weight tensors into one flattened bucket (+metadata), transfers it as a single contiguous copy, then reconstructs and writes them into the running model's live parameters — far fewer ops than copying thousands of tensors individually.</div>
+</div>
+
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/entrypoints/engine.py ::update_weights_from_tensor</span><span class="ln">write freshly-trained weights into the running model in place, no restart</span></div><pre>def update_weights_from_tensor(
     self,
     named_tensors,              # [(name, tensor)] freshly-trained weights from the trainer
@@ -555,6 +697,18 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     # CUDA graphs and KV pools stay in place
     ...
 # update_weights_from_distributed(...) streams weights over a process group instead</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/weight_sync/tensor_bucket.py ::FlattenedTensorBucket</span><span class="ln">flatten many named tensors into one bucket for a single-copy sync</span></div><pre>class FlattenedTensorBucket:
+    # flatten MANY named tensors into ONE buffer (+ metadata) so a weight
+    # sync is a single contiguous copy, not thousands of tiny ones.
+    def __init__(self, named_tensors=None, flattened_tensor=None, metadata=None):
+        # from named_tensors: record each tensor's name/shape/dtype/offset,
+        # then pack their flattened bytes into self.flattened_tensor.
+        ...
+    def reconstruct_tensors(self):
+        ...   # split the buffer back into the original named tensors</pre></div>
+
+<p>A concrete feel: a 7B model has <strong>hundreds</strong> of weight tensors (per-layer q/k/v/o projections, MLPs, LayerNorms…). Syncing them one by one is hundreds of small copies; packing them with <span class="mono">FlattenedTensorBucket</span> turns those hundreds of small copies into <strong>a handful of big ones</strong>, so weight sync after each RL update is far faster. The division of labor stays the same: <strong>SGLang serves the rollout generation while the trainer owns the gradients</strong>, glued efficiently by this bucket.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>

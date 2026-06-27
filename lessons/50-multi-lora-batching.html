@@ -357,6 +357,35 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>为什么 <span class="mono">B·A</span> 会这么便宜？设权重维度是 <span class="mono">d×d</span>，全量微调要更新约 <span class="mono">d²</span> 个参数；而 LoRA 只学 <span class="mono">A</span>（约 <span class="mono">r×d</span>）和 <span class="mono">B</span>（约 <span class="mono">d×r</span>），合计约 <span class="mono">2·r·d</span> 个参数。当秩 <span class="mono">r</span> 只有几十、而维度 <span class="mono">d</span> 是几千时，参数量会差出两三个数量级。这意味着<strong>训练成本</strong>、<strong>存储成本</strong>、<strong>显存占用</strong>都随之骤降——一个适配器小到可以几十个一起塞进一块卡的余量里，这正是"适配器池"在工程上成立的前提。</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 820 290" role="img" aria-label="基座权重 W 加上低秩 B·A 得到适配后的有效权重，A 与 B 的秩 r 远小于维度 d">
+    <text x="28" y="34" style="font-weight:700;fill:var(--muted)">有效权重 = 基座 W + 缩放·(B·A)</text>
+    <rect x="36" y="70" width="120" height="120" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="96" y="126" text-anchor="middle" style="font-weight:700">W</text>
+    <text x="96" y="148" text-anchor="middle" style="fill:var(--muted);font-size:12px">d×d · 冻结</text>
+    <text x="178" y="138" text-anchor="middle" style="font-size:22px;fill:var(--muted)">+</text>
+    <rect x="206" y="70" width="34" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="223" y="134" text-anchor="middle" style="font-weight:700;fill:var(--blue)">B</text>
+    <text x="223" y="208" text-anchor="middle" style="fill:var(--muted);font-size:12px">d×r</text>
+    <text x="258" y="138" text-anchor="middle" style="font-size:20px;fill:var(--muted)">·</text>
+    <rect x="276" y="116" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="336" y="138" text-anchor="middle" style="font-weight:700;fill:var(--teal)">A</text>
+    <text x="336" y="208" text-anchor="middle" style="fill:var(--muted);font-size:12px">r×d</text>
+    <text x="418" y="138" text-anchor="middle" style="font-size:22px;fill:var(--muted)">=</text>
+    <rect x="446" y="70" width="128" height="120" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="510" y="126" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">W + s·(B·A)</text>
+    <text x="510" y="148" text-anchor="middle" style="fill:var(--muted);font-size:12px">适配后权重</text>
+    <rect x="604" y="78" width="184" height="104" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="620" y="106" style="font-weight:700;fill:var(--amber)">秩 r ≪ d</text>
+    <text x="620" y="130" style="fill:var(--ink);font-size:12px">A、B 很小 · r=8/16</text>
+    <text x="620" y="152" style="fill:var(--ink);font-size:12px">每个适配器仅几 MB</text>
+    <text x="620" y="172" class="mono" style="fill:var(--muted);font-size:12px">s = alpha / r</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 基座 W + 低秩 B·A</b> — 冻结的基座权重 W（d×d）叠加一个低秩增量：B（d×r）乘 A（r×d），有效权重 = W + 缩放·(B·A)。因为秩 r ≪ d，A 与 B 极小，每个适配器只占几 MB。</div>
+</div>
+
+<p>具体算一笔账：取维度 <span class="mono">d=4096</span>、秩 <span class="mono">r=16</span>，一层 LoRA 只新增约 <span class="mono">2·4096·16 ≈ 131K</span> 个参数，而整块 <span class="mono">4096×4096</span> 矩阵有 <span class="mono">16.8M</span> 个参数——只占约 <span class="mono">0.8%</span>。缩放 <span class="mono">s = alpha/r</span>（例如 <span class="mono">32/16 = 2</span>）则控制这份增量叠加到基座上的强度。</p>
+
 <h2>为什么"一份基座 + 适配器池"</h2>
 <p>假设你有 N 个微调版本：一个会写 SQL、一个会医疗问答、一个会法律摘要。最直白的部署是起 N 份完整模型——但每份都要完整地占据显存，而它们之间<strong>99% 的权重是一模一样的</strong>（都源自同一个基座）。这是巨大的浪费。</p>
 <p>SGLang 的做法是：显存里只放<span class="mono">一份</span>基座模型（参见 <strong>第25课</strong> 讲的基座权重加载），另外维护一个 <strong>LoRA 内存池</strong>，池子里放着若干个小适配器。每来一个请求，就根据它指定的适配器名，把对应的 <span class="mono">B·A</span> 增量临时叠加到基座输出上。适配器很小，所以池子能装下很多个；真正的约束是 <span class="mono">max_loras_per_batch</span>——它限定<strong>同一个批次</strong>里最多能共存多少个不同的适配器（受池子/显存大小限制）。</p>
@@ -370,6 +399,46 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>不妨把"逐适配器循环"和"分组 GEMM"放在一起比较。逐适配器循环时，假设这批里有 5 个不同适配器，就要发起 5 次小内核，每次都伴随一次内核启动开销、一次显存读写，而每个小内核处理的行数又很少，GPU 的算力利用率很低——这恰恰是连续批处理最想避免的"碎片化"。分组 GEMM 则把这 5 段拼成<strong>一次</strong>调用：启动开销摊到整批、显存只走一遍、GPU 的众多计算单元被同时喂饱。请求数越多、适配器越杂，这种"一趟做完"相对于"循环 N 趟"的优势就越明显。</p>
 <p>具体一点说，分组 GEMM（grouped GEMM）的思路是：把一个大批次按"用哪个适配器"切成若干<strong>段（segment）</strong>，每一段对应一个适配器、包含该批里所有用到它的请求行。这些段被并排打包成一次内核调用的输入，内核内部对每一段套用它自己的 <span class="mono">B、A</span> 矩阵。于是从外部看，仍然只有<strong>一次</strong>内核启动、一次显存往返；从内部看，每个请求都精确地拿到了它该有的 ΔW。这正是 <span class="mono">prepare_lora_batch</span> 要在前向之前默默做好的"摆放"工作——计算每段的偏移、长度、对应的适配器索引，把零散的"谁要谁"整理成 GPU 喜欢的规整布局。</p>
 <p>这里也能看出 <span class="mono">max_loras_per_batch</span> 为什么重要：段数越多，意味着这一批里活跃的不同适配器越多，需要常驻在池子里、参与这次分组 GEMM 的权重也越多。把它设得过大，会让 LoRA 内存池吃紧；设得过小，则可能逼迫调度器把"想用第 K+1 个适配器"的请求推迟到下一批。它本质上是在<strong>适配器多样性</strong>与<strong>显存预算</strong>之间画的一条线。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="一个批次里不同请求各用不同适配器：共享基座 W·x 是一次 GEMM，按适配器分段的 B·A·x 用一次分组 GEMM 完成">
+    <text x="28" y="34" style="font-weight:700;fill:var(--muted)">一个批次 · 各行各用适配器 · 分组 GEMM</text>
+    <text x="28" y="64" style="fill:var(--muted);font-size:12px">批次行（请求）</text>
+    <rect x="28" y="74" width="128" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="92" y="94" text-anchor="middle" class="mono" style="font-size:12px">req1 · A</text>
+    <rect x="28" y="110" width="128" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="92" y="130" text-anchor="middle" class="mono" style="font-size:12px">req2 · B</text>
+    <rect x="28" y="146" width="128" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="92" y="166" text-anchor="middle" class="mono" style="font-size:12px">req3 · A</text>
+    <rect x="28" y="182" width="128" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="92" y="202" text-anchor="middle" class="mono" style="font-size:12px">req4 · C</text>
+    <line x1="156" y1="120" x2="204" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="204,120 196,116 196,124" style="fill:var(--muted)"/>
+    <line x1="156" y1="200" x2="204" y2="222" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="204,222 195,219 199,212" style="fill:var(--muted)"/>
+    <rect x="208" y="92" width="190" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="303" y="116" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">共享基座 W·x</text>
+    <text x="303" y="136" text-anchor="middle" style="fill:var(--muted);font-size:12px">一次 GEMM</text>
+    <rect x="208" y="166" width="190" height="126" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="303" y="186" text-anchor="middle" style="fill:var(--muted);font-size:12px">分组 GEMM · 按适配器</text>
+    <rect x="222" y="196" width="162" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="303" y="214" text-anchor="middle" class="mono" style="font-size:11px">段 A · 行 1,3</text>
+    <rect x="222" y="226" width="162" height="26" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="303" y="244" text-anchor="middle" class="mono" style="font-size:11px">段 B · 行 2</text>
+    <rect x="222" y="256" width="162" height="26" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="303" y="274" text-anchor="middle" class="mono" style="font-size:11px">段 C · 行 4</text>
+    <line x1="398" y1="120" x2="450" y2="150" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="450,150 441,148 444,140" style="fill:var(--muted)"/>
+    <line x1="398" y1="226" x2="450" y2="186" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="450,186 444,193 441,185" style="fill:var(--muted)"/>
+    <rect x="452" y="120" width="170" height="80" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="537" y="150" text-anchor="middle" style="font-weight:700;fill:var(--purple)">(W + B·A)·x</text>
+    <text x="537" y="172" text-anchor="middle" style="fill:var(--muted);font-size:12px">每行各自结果</text>
+    <text x="648" y="150" style="font-weight:700;fill:var(--ink);font-size:13px">一次内核启动</text>
+    <text x="648" y="172" style="fill:var(--muted);font-size:12px">应用所有 ΔW</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 一个批次，分组 GEMM</b> — 同一批里 req1/req3 用适配器 A、req2 用 B、req4 用 C。共享的 W·x 是一次 GEMM；各请求的 B·A·x 按适配器分成段 A/B/C，用一次分组 GEMM 同时算完，每行得到各自的 (W+B·A)·x。</div>
+</div>
 
 <h2>运行时的生命周期</h2>
 <p>把整条链路串起来：服务启动时，<span class="mono">LoRAManager</span> 拿到基座模型、<span class="mono">max_loras_per_batch</span> 上限和一个 LoRA 后端（默认 <span class="mono">triton</span>），建立起内存池。运营过程中，新技能通过 <span class="mono">load_lora_adapter</span> 进池、旧技能通过 <span class="mono">unload_lora_adapter</span> 出池。每一步前向，调度器先调用 <span class="mono">prepare_lora_batch</span> 为这一批摆好各请求的适配器，再让基座按常规跑前向、在 LoRA 层用分组 GEMM 叠加各自 ΔW。整套机制让单一部署能像换批头一样，灵活地服务几十种任务专用适配器。</p>
@@ -405,6 +474,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         # for THIS batch: gather which adapter each request needs and stage them so a
         # segmented/grouped GEMM applies each request's own delta-W in one kernel
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/lora/lora.py ::LoRAAdapter</span><span class="ln">一个适配器：低秩层栈，缩放=alpha/r</span></div><pre>class LoRAAdapter(nn.Module):
+    # one LoRA adapter = a stack of low-rank LoRALayers over the base.
+    def __init__(self, uid, config, ..., lora_backend):
+        self.uid = uid
+        self.scaling = config.lora_alpha / config.r   # scales B·A
+        self.layers = nn.ModuleList([...])            # per-target A,B (rank r)
+    # effective weight = base_W + scaling * (B @ A)   # A,B tiny, rank r</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
 <ul>
@@ -479,6 +556,35 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Why is <span class="mono">B·A</span> so cheap? Let the weight dimension be <span class="mono">d×d</span>; full fine-tuning updates about <span class="mono">d²</span> parameters, whereas LoRA learns only <span class="mono">A</span> (about <span class="mono">r×d</span>) and <span class="mono">B</span> (about <span class="mono">d×r</span>), roughly <span class="mono">2·r·d</span> parameters in total. When the rank <span class="mono">r</span> is only a few dozen while the dimension <span class="mono">d</span> is a few thousand, the parameter count differs by two or three orders of magnitude. That means <strong>training cost</strong>, <strong>storage cost</strong>, and <strong>memory footprint</strong> all plunge — an adapter is small enough that dozens fit into the spare room of a single card, which is precisely what makes the "adapter pool" practical in engineering terms.</p>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 820 290" role="img" aria-label="Base weight W plus low-rank B·A gives the adapted effective weight; the rank r of A and B is far smaller than the dimension d">
+    <text x="28" y="34" style="font-weight:700;fill:var(--muted)">effective W = base W + scaling·(B·A)</text>
+    <rect x="36" y="70" width="120" height="120" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="96" y="126" text-anchor="middle" style="font-weight:700">W</text>
+    <text x="96" y="148" text-anchor="middle" style="fill:var(--muted);font-size:12px">d×d · frozen</text>
+    <text x="178" y="138" text-anchor="middle" style="font-size:22px;fill:var(--muted)">+</text>
+    <rect x="206" y="70" width="34" height="120" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="223" y="134" text-anchor="middle" style="font-weight:700;fill:var(--blue)">B</text>
+    <text x="223" y="208" text-anchor="middle" style="fill:var(--muted);font-size:12px">d×r</text>
+    <text x="258" y="138" text-anchor="middle" style="font-size:20px;fill:var(--muted)">·</text>
+    <rect x="276" y="116" width="120" height="34" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="336" y="138" text-anchor="middle" style="font-weight:700;fill:var(--teal)">A</text>
+    <text x="336" y="208" text-anchor="middle" style="fill:var(--muted);font-size:12px">r×d</text>
+    <text x="418" y="138" text-anchor="middle" style="font-size:22px;fill:var(--muted)">=</text>
+    <rect x="446" y="70" width="128" height="120" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="510" y="126" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">W + s·(B·A)</text>
+    <text x="510" y="148" text-anchor="middle" style="fill:var(--muted);font-size:12px">adapted W</text>
+    <rect x="604" y="78" width="184" height="104" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="620" y="106" style="font-weight:700;fill:var(--amber)">rank r ≪ d</text>
+    <text x="620" y="130" style="fill:var(--ink);font-size:12px">A, B tiny · r=8/16</text>
+    <text x="620" y="152" style="fill:var(--ink);font-size:12px">each adapter ~few MB</text>
+    <text x="620" y="172" class="mono" style="fill:var(--muted);font-size:12px">s = alpha / r</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · base W + low-rank B·A</b> — the frozen base weight W (d×d) plus a low-rank update: B (d×r) times A (r×d), so effective weight = W + scaling·(B·A). Because rank r ≪ d, A and B are tiny — each adapter is only a few MB.</div>
+</div>
+
+<p>Run the numbers: with dimension <span class="mono">d=4096</span> and rank <span class="mono">r=16</span>, one LoRA layer adds only about <span class="mono">2·4096·16 ≈ 131K</span> parameters, versus <span class="mono">16.8M</span> in the full <span class="mono">4096×4096</span> matrix — roughly <span class="mono">0.8%</span>. The scaling <span class="mono">s = alpha/r</span> (e.g. <span class="mono">32/16 = 2</span>) controls how strongly that delta is added onto the base.</p>
+
 <h2>Why "one base + an adapter pool"</h2>
 <p>Suppose you have N fine-tunes: one writes SQL, one does medical Q&amp;A, one summarizes legal text. The most literal deployment is N full models — but each occupies full memory while <strong>99% of their weights are identical</strong> (all derived from the same base). That is enormous waste.</p>
 <p>SGLang's approach: keep just <span class="mono">one</span> base model in memory (see <strong>Lesson 25</strong> on loading base weights), plus a <strong>LoRA memory pool</strong> holding several small adapters. For each request, take the adapter name it specifies and temporarily add the corresponding <span class="mono">B·A</span> delta onto the base output. Adapters are small, so the pool can hold many; the real constraint is <span class="mono">max_loras_per_batch</span> — it caps how many distinct adapters can coexist in <strong>one batch</strong> (bounded by pool/memory size).</p>
@@ -492,6 +598,46 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>It helps to put "per-adapter loop" and "grouped GEMM" side by side. With a per-adapter loop, suppose this batch has 5 distinct adapters: you launch 5 small kernels, each carrying a kernel-launch overhead and a memory round-trip, while each small kernel processes very few rows, so the GPU's compute utilization is low — exactly the "fragmentation" continuous batching most wants to avoid. A grouped GEMM instead stitches these 5 segments into <strong>one</strong> call: the launch overhead is amortized over the whole batch, memory is traversed once, and the GPU's many compute units are fed at once. The more requests and the more varied the adapters, the more this "done in one pass" wins over "looping N times."</p>
 <p>Concretely, the idea of a grouped GEMM is: slice the large batch by "which adapter" into several <strong>segments</strong>, each segment corresponding to one adapter and containing all request rows in the batch that use it. These segments are packed side by side as the input of a single kernel call, and inside the kernel each segment applies its own <span class="mono">B, A</span> matrices. So from the outside there is still just <strong>one</strong> kernel launch and one memory round-trip; from the inside, every request gets exactly the ΔW it should. This is precisely the "staging" work <span class="mono">prepare_lora_batch</span> quietly does before the forward — computing each segment's offset, length, and adapter index, turning the scattered "who wants which" into the tidy layout GPUs love.</p>
 <p>This also shows why <span class="mono">max_loras_per_batch</span> matters: more segments means more distinct adapters active in this batch, which means more weights must reside in the pool and participate in this grouped GEMM. Set it too large and the LoRA memory pool gets tight; set it too small and the scheduler may be forced to defer a request wanting the "(K+1)-th" adapter to the next batch. It is essentially a line drawn between <strong>adapter diversity</strong> and <strong>memory budget</strong>.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 820 320" role="img" aria-label="In one batch different requests use different adapters: the shared base W·x is one GEMM, and the per-adapter B·A·x is done in one grouped GEMM segmented by adapter">
+    <text x="28" y="34" style="font-weight:700;fill:var(--muted)">one batch · per-row adapter · grouped GEMM</text>
+    <text x="28" y="64" style="fill:var(--muted);font-size:12px">batch rows (requests)</text>
+    <rect x="28" y="74" width="128" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="92" y="94" text-anchor="middle" class="mono" style="font-size:12px">req1 · A</text>
+    <rect x="28" y="110" width="128" height="30" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="92" y="130" text-anchor="middle" class="mono" style="font-size:12px">req2 · B</text>
+    <rect x="28" y="146" width="128" height="30" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="92" y="166" text-anchor="middle" class="mono" style="font-size:12px">req3 · A</text>
+    <rect x="28" y="182" width="128" height="30" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="92" y="202" text-anchor="middle" class="mono" style="font-size:12px">req4 · C</text>
+    <line x1="156" y1="120" x2="204" y2="120" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="204,120 196,116 196,124" style="fill:var(--muted)"/>
+    <line x1="156" y1="200" x2="204" y2="222" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="204,222 195,219 199,212" style="fill:var(--muted)"/>
+    <rect x="208" y="92" width="190" height="56" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="303" y="116" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">shared base W·x</text>
+    <text x="303" y="136" text-anchor="middle" style="fill:var(--muted);font-size:12px">one GEMM</text>
+    <rect x="208" y="166" width="190" height="126" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="303" y="186" text-anchor="middle" style="fill:var(--muted);font-size:12px">grouped GEMM · by adapter</text>
+    <rect x="222" y="196" width="162" height="26" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="303" y="214" text-anchor="middle" class="mono" style="font-size:11px">seg A · rows 1,3</text>
+    <rect x="222" y="226" width="162" height="26" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="303" y="244" text-anchor="middle" class="mono" style="font-size:11px">seg B · row 2</text>
+    <rect x="222" y="256" width="162" height="26" rx="5" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="303" y="274" text-anchor="middle" class="mono" style="font-size:11px">seg C · row 4</text>
+    <line x1="398" y1="120" x2="450" y2="150" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="450,150 441,148 444,140" style="fill:var(--muted)"/>
+    <line x1="398" y1="226" x2="450" y2="186" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="450,186 444,193 441,185" style="fill:var(--muted)"/>
+    <rect x="452" y="120" width="170" height="80" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="537" y="150" text-anchor="middle" style="font-weight:700;fill:var(--purple)">(W + B·A)·x</text>
+    <text x="537" y="172" text-anchor="middle" style="fill:var(--muted);font-size:12px">per-row result</text>
+    <text x="648" y="150" style="font-weight:700;fill:var(--ink);font-size:13px">one kernel launch</text>
+    <text x="648" y="172" style="fill:var(--muted);font-size:12px">applies all ΔW</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · one batch, grouped GEMM</b> — in the same batch req1/req3 use adapter A, req2 uses B, req4 uses C. The shared W·x is one GEMM; each request's B·A·x is grouped into segments A/B/C and computed together in one grouped GEMM, so every row gets its own (W+B·A)·x.</div>
+</div>
 
 <h2>The runtime lifecycle</h2>
 <p>Stringing the whole path together: at startup <span class="mono">LoRAManager</span> receives the base model, the <span class="mono">max_loras_per_batch</span> cap, and a LoRA backend (default <span class="mono">triton</span>), and builds the memory pool. During operation, new skills enter the pool via <span class="mono">load_lora_adapter</span> and old ones leave via <span class="mono">unload_lora_adapter</span>. On each forward step the scheduler first calls <span class="mono">prepare_lora_batch</span> to stage every request's adapter for this batch, then lets the base run its normal forward and add each ΔW in the LoRA layers with a grouped GEMM. This whole mechanism lets a single deployment flexibly serve dozens of task-specific adapters, like swapping bits.</p>
@@ -527,6 +673,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
         # for THIS batch: gather which adapter each request needs and stage them so a
         # segmented/grouped GEMM applies each request's own delta-W in one kernel
         ...</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/lora/lora.py ::LoRAAdapter</span><span class="ln">one adapter: a stack of low-rank layers, scaling = alpha / r</span></div><pre>class LoRAAdapter(nn.Module):
+    # one LoRA adapter = a stack of low-rank LoRALayers over the base.
+    def __init__(self, uid, config, ..., lora_backend):
+        self.uid = uid
+        self.scaling = config.lora_alpha / config.r   # scales B·A
+        self.layers = nn.ModuleList([...])            # per-target A,B (rank r)
+    # effective weight = base_W + scaling * (B @ A)   # A,B tiny, rank r</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>

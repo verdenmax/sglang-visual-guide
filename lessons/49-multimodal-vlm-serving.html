@@ -362,10 +362,85 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">原始图像 / 音频</div><div class="arrow">→</div><div class="node">处理器：转张量 + 插占位符 token</div><div class="arrow">→</div><div class="node">ViT / 音频编码器</div><div class="arrow">→</div><div class="node">在占位符处缝合嵌入</div><div class="arrow">→</div><div class="node">照常解码（调度 / KV / 注意力）</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="媒体经处理器转为张量并插入占位符 token，视觉编码器产出图像嵌入，在模型输入处替换占位槽，再交给 LLM">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">媒体 → 占位符 → 编码器 → 缝合</text>
+    <rect x="24" y="120" width="118" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="83" y="145" text-anchor="middle" style="font-size:12px">图像 + 文本</text>
+    <text x="83" y="163" text-anchor="middle" style="fill:var(--muted);font-size:11px">提示</text>
+    <line x1="142" y1="148" x2="170" y2="148" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M170 148 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="174" y="110" width="106" height="76" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="227" y="140" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">处理器</text>
+    <text x="227" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">转张量</text>
+    <text x="227" y="173" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">插占位</text>
+    <path d="M280 128 C 304 110, 312 92, 330 82" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <rect x="330" y="58" width="208" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="344" y="86" class="mono" style="font-size:11px">文</text>
+    <rect x="362" y="66" width="118" height="30" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="421" y="86" text-anchor="middle" class="mono" style="font-size:11px">&lt;image&gt; × N</text>
+    <text x="500" y="86" class="mono" style="font-size:11px">文</text>
+    <text x="330" y="118" style="fill:var(--muted);font-size:11px">token 流（含占位符）</text>
+    <path d="M280 168 C 304 188, 312 200, 330 210" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <rect x="330" y="200" width="118" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="389" y="227" text-anchor="middle" style="font-size:12px">视觉编码器</text>
+    <line x1="448" y1="222" x2="476" y2="222" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M476 222 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="480" y="200" width="108" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="534" y="227" text-anchor="middle" style="font-size:12px">图像嵌入 ×N</text>
+    <path d="M538 92 C 580 104, 598 110, 612 124" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <path d="M588 214 C 600 200, 606 192, 612 176" style="fill:none;stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="610" y="120" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="670" y="146" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">模型输入</text>
+    <text x="670" y="164" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">占位槽 ← 嵌入</text>
+    <line x1="730" y1="150" x2="752" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M752 150 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="756" y="124" width="38" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="775" y="154" text-anchor="middle" style="font-weight:700;font-size:12px">LLM</text>
+  </svg>
+  <div class="figcap"><b>图 A · 媒体 → 占位符 → 编码器 → 缝合</b> — 处理器把图像转张量并在 token 流插入 <span class="mono">&lt;image&gt;×N</span> 占位符；视觉编码器并行产出 N 个图像嵌入；在模型输入处，占位槽被这些嵌入替换，随后 LLM 照常前向。</div>
+</div>
+
 <h2>二、缝合发生在哪里：一行嵌入里的“图片格子”</h2>
 <p>理解 VLM 最直观的画面，是盯住前向计算入口那一行<strong>token 嵌入</strong>。假设 prompt 是“这是 [图片] 一只猫”，经过输入接缝后，token 流变成：<span class="mono">这 / 是 / IMG / IMG / IMG / 一 / 只 / 猫</span>，其中三个 <span class="mono">IMG</span> 就是占位符 token。<span class="mono">general_mm_embed_routine</span> 先把每个 id 查表得到嵌入，于是得到一整行嵌入向量；接着 ViT 把那张猫图编码成三枚媒体嵌入，<strong>替换</strong>掉那三个 <span class="mono">IMG</span> 槽位原本的占位嵌入。替换完成后，这一行里再也没有“占位符”的概念了——它就是 8 个并排的嵌入向量，前两个来自文字、中间三个来自图片、后三个又来自文字，混在一起完全均质。</p>
 
 <div class="cellgroup"><div class="cell">这</div><div class="cell">是</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell">一</div><div class="cell">只</div><div class="cell">猫</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="一行 token 嵌入：多数槽位是文本 token 嵌入，中间一段连续的占位槽被视觉编码器的图像块嵌入填充">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">输入嵌入行：占位槽填入图像嵌入</text>
+    <rect x="188" y="48" width="324" height="32" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="350" y="69" text-anchor="middle" style="font-size:12px">视觉编码器</text>
+    <line x1="227" y1="80" x2="227" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="309" y1="80" x2="309" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="391" y1="80" x2="391" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="473" y1="80" x2="473" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="24" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="63" y="146" text-anchor="middle" style="font-size:12px">文本</text>
+    <rect x="106" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="145" y="146" text-anchor="middle" style="font-size:12px">文本</text>
+    <rect x="188" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="227" y="146" text-anchor="middle" style="font-size:12px">图块</text>
+    <rect x="270" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="309" y="146" text-anchor="middle" style="font-size:12px">图块</text>
+    <rect x="352" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="391" y="146" text-anchor="middle" style="font-size:12px">图块</text>
+    <rect x="434" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="473" y="146" text-anchor="middle" style="font-size:12px">图块</text>
+    <rect x="516" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="555" y="146" text-anchor="middle" style="font-size:12px">文本</text>
+    <rect x="598" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="637" y="146" text-anchor="middle" style="font-size:12px">文本</text>
+    <rect x="680" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="719" y="146" text-anchor="middle" style="font-size:12px">文本</text>
+    <text x="350" y="200" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">图像块嵌入 × k</text>
+    <text x="103" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">文本 token 嵌入</text>
+    <text x="678" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">文本 token 嵌入</text>
+  </svg>
+  <div class="figcap"><b>图 B · 一行嵌入：占位槽填入图像嵌入</b> — 同一行 token 嵌入里，多数槽位是文本 token 嵌入；中间一段连续的占位槽（异色）由视觉编码器的 k 个图像块嵌入填充，形成 文本 · [图块嵌入 × k] · 文本。</div>
+</div>
+
+<p>举个具体例子：一张 <span class="mono">448×448</span> 的图片经处理器切块后，可能展开成约 <strong>256 个占位符 token</strong>，视觉编码器随后正好产出 <strong>256 个图像块嵌入</strong>，一一填进这些连续槽位——数量严丝合缝。再换个角度看可扩展性：要让同一台引擎服务一个新的 VLM，往往只需<strong>替换处理器 + 视觉塔（vision tower）</strong>这两个盒子，调度器、分页 KV、注意力、采样器一行都不改，新模型就能跑起来。</p>
 
 <p>上面这排格子里，带底色的三格原本是 <span class="mono">IMG</span> 占位符，现在被换成了图片嵌入（<span class="mono">img-emb</span>）。关键是：<strong>格子的数量和位置完全没变</strong>——占位符占了几格，图片嵌入就填几格。这保证了序列长度在缝合前后一致，于是下游所有按位置工作的组件（位置编码、注意力掩码、KV 槽位）都不需要任何特殊处理。</p>
 <p>这里还藏着一个常被忽略的细节：<strong>占位符的数量必须事先算准</strong>。处理器在输入接缝插占位符时，并不是随便塞几个，而是按该模型 ViT 的输出长度精确计算——一张图经过切块、池化后会产生多少个视觉 token，就插多少个占位符。如果数量对不上，缝合时散射的源（媒体嵌入）和目标（占位符槽位）就会形状不匹配，直接报错。所以输入接缝和嵌入接缝之间有一个<strong>隐含契约</strong>：处理器承诺“我为这张图留了 N 个槽位”，编码器承诺“我恰好产出 N 个嵌入”，两者由同一个占位符 token 串成一条线。正因为这个契约在预处理阶段就钉死了，下游拼批、分页、注意力才能把这段“图片区间”当成普通 token 一视同仁地处理。多图、多模态混排时也一样：每个媒体项各有自己的一段占位符，互不干扰，散射时各回各的槽位。</p>
@@ -381,6 +456,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>不妨把整条路径再完整走一遍，体会两处接缝如何接力。用户发来一条带图请求，分词器（第14课）先把文本部分切成 token，与此同时输入接缝里的处理器把图片解码、归一化、按模型规则切块成张量，并在文本 token 流的对应位置插入一串占位符 token；此刻请求带着“张量 + 含占位符的 token 序列”进入调度器（第18课）排队、拼批。轮到它前向时，嵌入接缝接手：先把整批 token id 查表得到文本嵌入，再让 ViT/音频编码器把张量编码成媒体嵌入，最后一次散射把媒体嵌入写到占位符槽位上。从这一步往后，序列就是纯粹的嵌入，分页 KV（第30课）按 token 分配缓存、RadixAttention（第29课）做前缀匹配与复用、采样器（第28课）从 logits 采样下一个 token——它们谁都不知道、也不需要知道这里曾经有过一张图。每解码出一个新 token，循环继续，直到生成结束。<strong>整条链路里，“多模态”只在最前面两处接缝短暂现身，之后彻底消融进通用的嵌入流</strong>，这就是 SGLang VLM 设计的全部精髓：用最小的改动面，换来对整套高性能基础设施的完整复用。</p>
 
 <table class="t"><tr><th>接缝</th><th>所在阶段</th><th>职责</th></tr><tr><td>输入处理器 <span class="mono">BaseMultimodalProcessor</span></td><td>分词 / 预处理（第14课）</td><td>原始像素 / 音频 → 模型张量；往 token 流插入占位符 token</td></tr><tr><td>嵌入入口 <span class="mono">general_mm_embed_routine</span></td><td>前向计算入口</td><td>跑编码器算媒体嵌入；在 <span class="mono">input_ids==占位符</span> 处散射缝合</td></tr></table>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/multimodal/processors/base_processor.py ::BaseMultimodalProcessor</span><span class="ln">把原始媒体转成特征 + 占位符 token（各模型子类化）</span></div><pre>class BaseMultimodalProcessor(ABC):
+    # turns raw media (image/audio/video) into model-ready features
+    # AND inserts placeholder token ids marking where those embeddings
+    # get spliced into the text token stream. One subclass per model.
+    def __init__(self, hf_config, server_args, _processor, ...):
+        ...
+    @abstractmethod
+    async def process_mm_data_async(self, ...):
+        ...   # -&gt; input_ids (with placeholders) + pixel/feature tensors</pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/mm_utils.py ::general_mm_embed_routine</span><span class="ln">在占位符处把媒体嵌入拼接进 token 序列</span></div><pre>def general_mm_embed_routine(
     input_ids,                  # prompt tokens, with PLACEHOLDER ids where media goes
@@ -478,10 +563,85 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">raw image / audio</div><div class="arrow">→</div><div class="node">processor: to tensors + insert placeholder tokens</div><div class="arrow">→</div><div class="node">ViT / audio encoder</div><div class="arrow">→</div><div class="node">splice embeddings at placeholders</div><div class="arrow">→</div><div class="node">normal decode (sched / KV / attention)</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="media goes through the processor to tensors and placeholder tokens, the vision encoder produces image embeddings, the placeholder slots are replaced at the model input, then handed to the LLM">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">media → placeholders → encoder → splice</text>
+    <rect x="24" y="120" width="118" height="56" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="83" y="145" text-anchor="middle" style="font-size:12px">image + text</text>
+    <text x="83" y="163" text-anchor="middle" style="fill:var(--muted);font-size:11px">prompt</text>
+    <line x1="142" y1="148" x2="170" y2="148" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M170 148 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="174" y="110" width="106" height="76" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="227" y="140" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">processor</text>
+    <text x="227" y="158" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">to tensors</text>
+    <text x="227" y="173" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">add slots</text>
+    <path d="M280 128 C 304 110, 312 92, 330 82" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <rect x="330" y="58" width="208" height="46" rx="8" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="344" y="86" class="mono" style="font-size:11px">txt</text>
+    <rect x="362" y="66" width="118" height="30" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="421" y="86" text-anchor="middle" class="mono" style="font-size:11px">&lt;image&gt; × N</text>
+    <text x="500" y="86" class="mono" style="font-size:11px">txt</text>
+    <text x="330" y="118" style="fill:var(--muted);font-size:11px">token stream (with slots)</text>
+    <path d="M280 168 C 304 188, 312 200, 330 210" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <rect x="330" y="200" width="118" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="389" y="227" text-anchor="middle" style="font-size:12px">vision encoder</text>
+    <line x1="448" y1="222" x2="476" y2="222" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M476 222 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="480" y="200" width="108" height="44" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="534" y="227" text-anchor="middle" style="font-size:12px">img emb ×N</text>
+    <path d="M538 92 C 580 104, 598 110, 612 124" style="fill:none;stroke:var(--line);stroke-width:1.5"/>
+    <path d="M588 214 C 600 200, 606 192, 612 176" style="fill:none;stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="610" y="120" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="670" y="146" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">model input</text>
+    <text x="670" y="164" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slots ← emb</text>
+    <line x1="730" y1="150" x2="752" y2="150" style="stroke:var(--line);stroke-width:1.5"/>
+    <path d="M752 150 l-8 -4 v8 z" style="fill:var(--line)"/>
+    <rect x="756" y="124" width="38" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="775" y="154" text-anchor="middle" style="font-weight:700;font-size:12px">LLM</text>
+  </svg>
+  <div class="figcap"><b>Fig A · media → placeholders → encoder → splice</b> — the processor turns the image into tensors and inserts <span class="mono">&lt;image&gt;×N</span> placeholders into the token stream; the vision encoder produces N image embeddings in parallel; at the model input the placeholder slots are replaced by those embeddings, then the LLM runs forward as usual.</div>
+</div>
+
 <h2>2. Where the splice happens: the "picture squares" inside one row of embeddings</h2>
 <p>The most intuitive picture of VLM is to stare at that one row of <strong>token embeddings</strong> at the forward entry. Suppose the prompt is "this is [picture] a cat." After the input seam, the token stream becomes: <span class="mono">this / is / IMG / IMG / IMG / a / cat</span>, where the three <span class="mono">IMG</span> are placeholder tokens. <span class="mono">general_mm_embed_routine</span> first looks up each id to get an embedding, giving a full row of embedding vectors; then the ViT encodes that cat photo into three media embeddings that <strong>replace</strong> the placeholder embeddings originally sitting in those three <span class="mono">IMG</span> slots. After the replacement, this row no longer has any notion of "placeholder" — it is just a strip of embedding vectors side by side, some from text, some from the picture, mixed together completely homogeneously.</p>
 
 <div class="cellgroup"><div class="cell">this</div><div class="cell">is</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell sc">🖼️ img-emb</div><div class="cell">a</div><div class="cell">cat</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="one row of token embeddings: most slots are text-token embeddings, while a contiguous run of placeholder slots is filled by the vision encoder's image-patch embeddings">
+    <text x="24" y="26" style="font-weight:700;fill:var(--muted)">input-embedding row: image embeddings fill the slots</text>
+    <rect x="188" y="48" width="324" height="32" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="350" y="69" text-anchor="middle" style="font-size:12px">vision encoder</text>
+    <line x1="227" y1="80" x2="227" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="309" y1="80" x2="309" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="391" y1="80" x2="391" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <line x1="473" y1="80" x2="473" y2="110" style="stroke:var(--teal);stroke-width:1.5;stroke-dasharray:4 3"/>
+    <rect x="24" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="63" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="106" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="145" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="188" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="227" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="270" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="309" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="352" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="391" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="434" y="112" width="78" height="58" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="473" y="146" text-anchor="middle" style="font-size:12px">patch</text>
+    <rect x="516" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="555" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="598" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="637" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <rect x="680" y="112" width="78" height="58" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="719" y="146" text-anchor="middle" style="font-size:12px">text</text>
+    <text x="350" y="200" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">image-patch emb × k</text>
+    <text x="103" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
+    <text x="678" y="200" text-anchor="middle" style="fill:var(--muted);font-size:12px">text-token emb</text>
+  </svg>
+  <div class="figcap"><b>Fig B · one embedding row: image embeddings fill the slots</b> — in one row of token embeddings, most slots are text-token embeddings; a contiguous run of placeholder slots (different color) is filled by the vision encoder's k image-patch embeddings, forming text · [img emb × k] · text.</div>
+</div>
+
+<p>A concrete example: a single <span class="mono">448×448</span> image, after the processor tiles it, might expand to about <strong>256 placeholder tokens</strong>, and the vision encoder then produces exactly <strong>256 image-patch embeddings</strong> that fill those contiguous slots one-for-one — the counts line up exactly. Seen from the scalability angle: to make the same engine serve a brand-new VLM, you usually only swap the two boxes <strong>processor + vision tower</strong>; the scheduler, paged KV, attention, and sampler are not touched at all, and the new model runs.</p>
 
 <p>In the row of squares above, the three shaded cells were originally <span class="mono">IMG</span> placeholders and are now replaced by image embeddings (<span class="mono">img-emb</span>). The key point: <strong>the count and positions of the squares do not change at all</strong> — however many slots the placeholders held, that many image embeddings fill them. This guarantees the sequence length is identical before and after the splice, so every downstream component that works by position (positional encoding, attention mask, KV slots) needs no special handling.</p>
 <p>There is an often-overlooked detail here: <strong>the number of placeholders must be computed exactly in advance</strong>. When the processor inserts placeholders at the input seam, it does not stuff in some arbitrary count — it computes it precisely from that model's ViT output length: however many visual tokens an image produces after tiling and pooling, that many placeholders go in. If the counts disagree, the scatter's source (media embeddings) and target (placeholder slots) will mismatch in shape and error out immediately. So there is an <strong>implicit contract</strong> between the input seam and the embed seam: the processor promises "I reserved N slots for this image," the encoder promises "I produce exactly N embeddings," and the same placeholder token strings the two together. Precisely because this contract is nailed down in preprocessing, downstream batching, paging, and attention can treat this "image span" as ordinary tokens with no special-casing. The same holds for multiple images and mixed modalities: each media item has its own run of placeholders, mutually disjoint, and the scatter returns each to its own slots.</p>
@@ -497,6 +657,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Let us walk the whole path once more to feel how the two seams hand off. A user sends a request with an image; the tokenizer (L14) cuts the text part into tokens, while the processor at the input seam decodes, normalizes, and tiles the image into tensors per the model's rules, and inserts a run of placeholder tokens at the corresponding positions in the text token stream. At this point the request, carrying "tensors + a token sequence with placeholders," enters the scheduler (L18) to queue and batch. When its turn to run forward comes, the embed seam takes over: it looks up the whole batch of token ids to get text embeddings, lets the ViT/audio encoder encode the tensors into media embeddings, and in one scatter writes those media embeddings onto the placeholder slots. From this step on, the sequence is pure embeddings: paged KV (L30) allocates cache per token, RadixAttention (L29) does prefix matching and reuse, and the sampler (L28) samples the next token from logits — none of them knows, or needs to know, that an image was ever here. Each newly decoded token continues the loop until generation ends. <strong>Across the whole pipeline, "multimodality" appears only briefly at the two front seams and afterward dissolves completely into the generic embedding stream</strong> — that is the entire essence of SGLang's VLM design: the smallest change surface in exchange for full reuse of the whole high-performance infrastructure.</p>
 
 <table class="t"><tr><th>Seam</th><th>Stage</th><th>Responsibility</th></tr><tr><td>input processor <span class="mono">BaseMultimodalProcessor</span></td><td>tokenize / preprocess (L14)</td><td>raw pixels / audio → model tensors; insert placeholder tokens into the token stream</td></tr><tr><td>embed entry <span class="mono">general_mm_embed_routine</span></td><td>forward entry</td><td>run encoders to compute media embeddings; scatter-splice where <span class="mono">input_ids==placeholder</span></td></tr></table>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/multimodal/processors/base_processor.py ::BaseMultimodalProcessor</span><span class="ln">turn raw media into features + placeholder tokens (subclassed per model)</span></div><pre>class BaseMultimodalProcessor(ABC):
+    # turns raw media (image/audio/video) into model-ready features
+    # AND inserts placeholder token ids marking where those embeddings
+    # get spliced into the text token stream. One subclass per model.
+    def __init__(self, hf_config, server_args, _processor, ...):
+        ...
+    @abstractmethod
+    async def process_mm_data_async(self, ...):
+        ...   # -&gt; input_ids (with placeholders) + pixel/feature tensors</pre></div>
 
 <div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/mm_utils.py ::general_mm_embed_routine</span><span class="ln">splice media embeddings into the token stream at placeholder slots</span></div><pre>def general_mm_embed_routine(
     input_ids,                  # prompt tokens, with PLACEHOLDER ids where media goes
