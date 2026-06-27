@@ -358,19 +358,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  每个 TP rank 有<strong>一个 ModelRunner</strong>（由 TpWorker 持有），它握着<strong>加载好的模型</strong>（第 25/26 课）和
+  每个 TP rank 有<strong>一个 ModelRunner</strong>（由 TpModelWorker 持有），它握着<strong>加载好的模型</strong>（第 25/26 课）和
   <strong>KV 缓存池</strong>（第 30 课）。一次 <span class="mono">forward(forward_batch)</span> 把一批请求跑出 logits，再由
   <span class="mono">sample()</span> 交给采样器（第 28 课）出 token。而 <span class="inline">ForwardBatch</span> 就是
   <strong>ScheduleBatch（第 19 课）的 GPU 视图</strong>——同一批请求，换成 GPU 看得懂的张量与元数据。
 </div>
 
 <h2>run_batch 之后：谁把这一批递到了 ModelRunner 手里</h2>
-<p>先把调用链补全。第 18 课的调度器主循环每一步都会调 <span class="mono">run_batch</span>，但 run_batch 本身其实很<strong>薄</strong>：它把刚组好的 <span class="mono">ScheduleBatch</span> 交给 <strong>TpWorker</strong>，TpWorker 再原样转手喂给它<strong>独占的那一个 ModelRunner</strong>。这条链路之所以要分这么多层，是因为每一层只盯着一件事——调度器只关心"这一步该算哪一批"，TpWorker 只关心"我这个 rank 的边界与跨卡通信"，ModelRunner 只关心"把张量在这张卡上真正算出来"。层与层之间职责清晰、互不越界，正是这套代码能被上千名贡献者协作维护的原因。</p>
-<p>这条链还藏着一个容易忽视却致命的约束：在 8 路 TP 的部署里，8 个 TpWorker 各自的 ModelRunner 必须<strong>严格同步地跑同一批</strong>。它们各算模型的一片（权重按行/列切开，第 25/46 课），层中途要靠 all-reduce / all-gather 把注意力输出和残差拼齐——只要有一个 rank 早走或晚走半步，集合通信就会<strong>整组卡死</strong>。这就是为什么进入前向之前，ScheduleBatch 的内容必须在所有 rank 上<strong>逐字节一致</strong>：同样的 token、同样的形状、同样的 forward_mode。理解了这一点，你就明白第 18 课强调的"调度决策必须确定性、可复现"不是洁癖，而是分布式前向能不死锁的硬前提。</p>
+<p>先把调用链补全。第 18 课的调度器主循环每一步都会调 <span class="mono">run_batch</span>，但 run_batch 本身其实很<strong>薄</strong>：它把刚组好的 <span class="mono">ScheduleBatch</span> 交给 <strong>TpModelWorker</strong>，TpModelWorker 再原样转手喂给它<strong>独占的那一个 ModelRunner</strong>。这条链路之所以要分这么多层，是因为每一层只盯着一件事——调度器只关心"这一步该算哪一批"，TpModelWorker 只关心"我这个 rank 的边界与跨卡通信"，ModelRunner 只关心"把张量在这张卡上真正算出来"。层与层之间职责清晰、互不越界，正是这套代码能被上千名贡献者协作维护的原因。</p>
+<p>这条链还藏着一个容易忽视却致命的约束：在 8 路 TP 的部署里，8 个 TpModelWorker 各自的 ModelRunner 必须<strong>严格同步地跑同一批</strong>。它们各算模型的一片（权重按行/列切开，第 25/46 课），层中途要靠 all-reduce / all-gather 把注意力输出和残差拼齐——只要有一个 rank 早走或晚走半步，集合通信就会<strong>整组卡死</strong>。这就是为什么进入前向之前，ScheduleBatch 的内容必须在所有 rank 上<strong>逐字节一致</strong>：同样的 token、同样的形状、同样的 forward_mode。理解了这一点，你就明白第 18 课强调的"调度决策必须确定性、可复现"不是洁癖，而是分布式前向能不死锁的硬前提。</p>
 
 <h2>从 ScheduleBatch 到 ForwardBatch：换一副 GPU 的眼镜</h2>
-<p>先厘清一个常被混淆的层级：<strong>TpWorker</strong> 是张量并行里"一个 rank"的封装，它内部<strong>持有一个 ModelRunner</strong>；
-所以在 8 路 TP 的部署里，有 8 个 TpWorker、8 个 ModelRunner，各自<strong>只算模型的一片</strong>（权重按列/行切开，第 25/46 课），
+<p>先厘清一个常被混淆的层级：<strong>TpModelWorker</strong> 是张量并行里"一个 rank"的封装，它内部<strong>持有一个 ModelRunner</strong>；
+所以在 8 路 TP 的部署里，有 8 个 TpModelWorker、8 个 ModelRunner，各自<strong>只算模型的一片</strong>（权重按列/行切开，第 25/46 课），
 再靠集合通信把结果拼起来。调度器（第 18 课）每步调 <span class="mono">run_batch</span>，本质就是把活儿派给这些 ModelRunner。
 记住这条分工：<strong>调度器只有一个大脑、负责决策；ModelRunner 有很多双手、负责把决策算出来</strong>。</p>
 <p>调度器交出来的是 <span class="mono">ScheduleBatch</span>（一堆 Req 的集合，第 19 课）。ModelRunner 要先把它翻译成
@@ -626,7 +626,7 @@ GPU is this lesson's star, <span class="inline">ModelRunner</span>. It is <stron
 
 <div class="card macro">
   <div class="tag">🌍 The big picture</div>
-  Each TP rank has <strong>one ModelRunner</strong> (owned by the TpWorker); it holds the <strong>loaded model</strong>
+  Each TP rank has <strong>one ModelRunner</strong> (owned by the TpModelWorker); it holds the <strong>loaded model</strong>
   (Lessons 25/26) and the <strong>KV pool</strong> (Lesson 30). One <span class="mono">forward(forward_batch)</span> runs a
   batch into logits, and <span class="mono">sample()</span> hands them to the Sampler (Lesson 28) for the token. A
   <span class="inline">ForwardBatch</span> is <strong>the GPU view of a ScheduleBatch (Lesson 19)</strong> — the same
@@ -636,12 +636,12 @@ GPU is this lesson's star, <span class="inline">ModelRunner</span>. It is <stron
 <h2>After run_batch: who handed this batch to ModelRunner</h2>
 <p>Let's complete the call chain. The scheduler's main loop (Lesson 18) calls <span class="mono">run_batch</span> every step,
 but run_batch itself is <strong>thin</strong>: it passes the freshly assembled <span class="mono">ScheduleBatch</span> to the
-<strong>TpWorker</strong>, which hands it straight to <strong>the one ModelRunner it owns</strong>. The chain is layered this
-deep because each layer watches exactly one thing — the scheduler cares about "which batch to run this step", the TpWorker
+<strong>TpModelWorker</strong>, which hands it straight to <strong>the one ModelRunner it owns</strong>. The chain is layered this
+deep because each layer watches exactly one thing — the scheduler cares about "which batch to run this step", the TpModelWorker
 cares about "my rank's boundary and cross-card communication", and the ModelRunner cares about "actually computing the
 tensors on this card". Clean, non-overlapping responsibilities are precisely what lets thousands of contributors maintain
 this code together.</p>
-<p>The chain also hides a subtle but fatal constraint: in an 8-way TP deployment, the 8 TpWorkers' ModelRunners must run
+<p>The chain also hides a subtle but fatal constraint: in an 8-way TP deployment, the 8 TpModelWorkers' ModelRunners must run
 the <strong>same batch in strict lockstep</strong>. Each computes a slice of the model (weights split row/column-wise,
 Lessons 25/46), and mid-layer they stitch attention outputs and residuals back together via all-reduce / all-gather — if
 any rank steps even half a beat early or late, the collective <strong>deadlocks the whole group</strong>. That is why,

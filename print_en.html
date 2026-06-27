@@ -805,7 +805,7 @@ After this, whenever you dive into any directory you will know <strong>where you
   greets visitors and turns spoken requests into standard work orders; the <strong>dispatch room on floor two (Scheduler)</strong>
   is the brain that decides which orders to <strong>merge into one batch</strong>, who goes first, and how to queue — but the
   dispatcher <strong>does no hands-on work</strong>; the ones actually turning bolts on the line are the
-  <strong>technicians (TpWorker / ModelRunner)</strong> who tend the <strong>expensive machines in the machine room (GPUs and
+  <strong>technicians (TpModelWorker / ModelRunner)</strong> who tend the <strong>expensive machines in the machine room (GPUs and
   operator kernels)</strong>; when a job is done, <strong>shipping &amp; packing (DetokenizerManager)</strong> translates the
   half-product into a finished item the customer can read and mails it back. The key: <strong>front desk, dispatch+floor, and
   shipping are three independent departments (processes)</strong> that pass work orders via the <strong>internal mail system
@@ -947,7 +947,7 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
 <div class="flow">
   <div class="node hl"><div class="nt">TokenizerManager</div><div class="nd">main process · tokenize, send/recv</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Scheduler + TpWorker</div><div class="nd">subprocess · one per TP rank · GPU forward</div></div>
+  <div class="node"><div class="nt">Scheduler + TpModelWorker</div><div class="nd">subprocess · one per TP rank · GPU forward</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">DetokenizerManager</div><div class="nd">subprocess · detokenize</div></div>
   <div class="arrow">→</div>
@@ -961,7 +961,7 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
     <text x="119" y="96" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:13px">TokenizerManager</text>
     <text x="119" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">main process · tokenize I/O</text>
     <rect x="285" y="64" width="190" height="72" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
-    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpWorker)</text>
+    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpModelWorker)</text>
     <text x="380" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">subprocess · GPU forward</text>
     <rect x="546" y="64" width="190" height="72" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
     <text x="641" y="96" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">DetokenizerManager</text>
@@ -981,7 +981,7 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
 
 <p>Never confuse the three roles: <strong>TokenizerManager is in the main process</strong> (so are the HTTP server and the
 <span class="inline">Engine</span>); <strong>Scheduler is in a subprocess</strong>, and <strong>tensor parallelism (TP) starts one
-Scheduler process per rank</strong>, each holding its own <span class="inline">TpWorker</span> and <span class="inline">ModelRunner</span>
+Scheduler process per rank</strong>, each holding its own <span class="inline">TpModelWorker</span> and <span class="inline">ModelRunner</span>
 and occupying one GPU to do the forward; <strong>DetokenizerManager is yet another subprocess</strong>. Remember: <strong>the Scheduler
 is the process holding the GPU</strong>, while the two Managers are just "translators" on the way in and out — do not lump them together.</p>
 
@@ -995,7 +995,7 @@ Scheduler subprocess and the Detokenizer subprocess, and finally leaves the Toke
     <span class="cm"># 1) allocate IPC ports for all three (ZMQ communication)</span>
     port_args = PortArgs.init_new(server_args)
 
-    <span class="cm"># 2) Scheduler subprocess: one per TP rank, holds TpWorker/ModelRunner, does GPU forward</span>
+    <span class="cm"># 2) Scheduler subprocess: one per TP rank, holds TpModelWorker/ModelRunner, does GPU forward</span>
     scheduler_init_result, scheduler_procs = cls._launch_scheduler_processes(
         server_args, port_args, run_scheduler_process_func)
 
@@ -1067,7 +1067,7 @@ it belongs to, which future lesson it maps to. This locating habit pays off acro
   <ul>
     <li><strong>Two halves</strong>: <span class="mono">python/sglang/lang/</span> (frontend DSL, expresses) + <span class="mono">python/sglang/srt/</span> (runtime engine, executes; srt = SGLang RunTime), with <span class="mono">sgl-kernel/</span> and <span class="mono">jit_kernel/</span> kernels underneath.</li>
     <li><strong>srt layers</strong>: entrypoints (entry) → managers (translators + Scheduler brain) → model_executor/models (execute) → sampling → layers/mem_cache (ops &amp; cache) → kernels/distributed (hardware &amp; multi-GPU).</li>
-    <li><strong>Three processes</strong>: TokenizerManager (main) ↔ Scheduler+TpWorker (subprocess, one per TP rank, holds the GPU) ↔ DetokenizerManager (subprocess), talking over <strong>ZMQ IPC</strong>.</li>
+    <li><strong>Three processes</strong>: TokenizerManager (main) ↔ Scheduler+TpModelWorker (subprocess, one per TP rank, holds the GPU) ↔ DetokenizerManager (subprocess), talking over <strong>ZMQ IPC</strong>.</li>
     <li><strong>Don't confuse</strong>: the Scheduler is the process holding ModelRunner and the GPU; the two Managers are just in/out "translators".</li>
     <li><strong>Tuning entry</strong>: model path, parallelism, memory fraction, etc. live in <span class="inline">ServerArgs</span> in <span class="mono">srt/server_args.py</span>.</li>
   </ul>
@@ -1269,7 +1269,7 @@ here they are unrolled as vertical steps:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests</h4><p class="mono">Scheduler · via ZMQ</p><p>Receive newly arrived <span class="inline">TokenizedGenerateReqInput</span> from TokenizerManager and put it in the <strong>waiting queue</strong>.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>get_next_batch_to_run</h4><p class="mono">Scheduler · decide</p><p>Decide whether this step runs <strong>prefill</strong> (eat new requests' prompts) or <strong>decode</strong> (advance running requests by one token each), and assemble a <span class="inline">ScheduleBatch</span>.</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>run_batch</h4><p class="mono">TpWorker · ModelRunner</p><p>Run one model forward on the GPU for logits, then <span class="inline">Sampler</span> picks each request's next token.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>run_batch</h4><p class="mono">TpModelWorker · ModelRunner</p><p>Run one model forward on the GPU for logits, then <span class="inline">Sampler</span> picks each request's next token.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>process_batch_result</h4><p class="mono">Scheduler → Detok</p><p>Send new tokens to the detokenizer; unfinished requests <strong>append the new token</strong> and loop on; finished ones <strong>yield their slot</strong>.</p></div></div>
 </div>
 
@@ -1307,7 +1307,7 @@ into the current batch any turn, a finished one yields any turn (Lesson 5); <str
 KV cache only once (Lesson 7); the concrete batching/queuing policy is Lesson 20, and a close source read of the whole loop is Lesson 18.</p>
 
 <p>One more key detail: step 3's <span class="inline">run_batch</span> is the <strong>only place that actually touches the GPU</strong>. It
-hands the whole batch to <span class="inline">ModelRunner.forward</span> inside the <span class="inline">TpWorker</span>, runs one model
+hands the whole batch to <span class="inline">ModelRunner.forward</span> inside the <span class="inline">TpModelWorker</span>, runs one model
 forward on the card to get each request's "next token" logits, then passes them to the <span class="inline">Sampler</span> to sample by
 temperature / top-p / top-k. Note the whole loop runs <strong>single-threaded</strong>, turn by turn — no callbacks flying around, no
 complex multi-thread synchronization, just a plain <span class="inline">while True</span>. This <strong>"one big loop governs
@@ -5285,7 +5285,7 @@ as fast as possible, then immediately starts the next beat. This lesson sits rig
   <span class="inline">process_input_requests</span> (enqueue), <span class="inline">get_next_batch_to_run</span> (form batch),
   <span class="inline">run_batch</span> (forward), <span class="inline">process_batch_result</span> (finish). It is the engine's
   <strong>single decision-maker</strong>: it <strong>owns the KV-cache accounting</strong> and decides <strong>who is in this step's
-  batch</strong>. It <strong>only decides, never computes</strong> — the real GPU matmuls go to TpWorker→ModelRunner (Lesson 24).
+  batch</strong>. It <strong>only decides, never computes</strong> — the real GPU matmuls go to TpModelWorker→ModelRunner (Lesson 24).
   The shorter and faster the loop, the higher the throughput — exactly what the <strong>overlap scheduler</strong> (Lesson 21) later optimizes.
 </div>
 
@@ -5298,7 +5298,7 @@ every later lesson just <strong>zooms into one of these stages</strong>:</p>
   <div class="step"><div class="num">1</div><div class="sc"><h4>recv_requests() — receive</h4><p><strong>Drain</strong> the ZMQ inbox of all new <span class="mono">TokenizedGenerateReqInput</span> (Lesson 16, sent by the TokenizerManager). If none, you get an empty list — it never blocks.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>process_input_requests() — enqueue</h4><p>Add new requests to the <strong>waiting queue</strong>; also handle control messages (abort / flush cache / update weights, etc.).</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>get_next_batch_to_run() — form batch</h4><p>Build <strong>this step's</strong> batch: budget permitting, form a <strong>prefill batch</strong> from waiting reqs, else a <strong>decode batch</strong> of running reqs (Lessons 19/20). Continuous batching (Lesson 5) <strong>re-happens here every step</strong>.</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>run_batch() — forward</h4><p>Hand the batch to TpWorker → <span class="mono">ModelRunner.forward</span> on the GPU (Lesson 24), get logits, then <strong>sample</strong> the new tokens.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>run_batch() — forward</h4><p>Hand the batch to TpModelWorker → <span class="mono">ModelRunner.forward</span> on the GPU (Lesson 24), get logits, then <strong>sample</strong> the new tokens.</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>process_batch_result() — finish</h4><p>Append new tokens; detect <strong>finished</strong> reqs (stop conditions); <strong>free their KV slots</strong>; send outputs to the DetokenizerManager (Lesson 17). Then <strong>go back to step 1</strong>.</p></div></div>
 </div>
 
@@ -5341,7 +5341,7 @@ step of the heartbeat" to its detail lesson, and conversely, while reading a det
   <tr><td><strong>recv_requests</strong></td><td>Drain the ZMQ inbox, receive TokenizedGenerateReqInput</td><td class="mono">Lesson 16 io_struct / IPC</td></tr>
   <tr><td><strong>process_input_requests</strong></td><td>New reqs into the <strong>waiting queue</strong>; handle abort/flush control msgs</td><td class="mono">Lesson 19 Req / ScheduleBatch</td></tr>
   <tr><td><strong>get_next_batch_to_run</strong></td><td>Form this step's batch: prefill first, else decode (continuous batching)</td><td class="mono">Lesson 20 policy · Lesson 22 chunked prefill</td></tr>
-  <tr><td><strong>run_batch</strong></td><td>Hand to TpWorker→ModelRunner.forward on GPU, sample tokens</td><td class="mono">Lesson 24 model forward</td></tr>
+  <tr><td><strong>run_batch</strong></td><td>Hand to TpModelWorker→ModelRunner.forward on GPU, sample tokens</td><td class="mono">Lesson 24 model forward</td></tr>
   <tr><td><strong>process_batch_result</strong></td><td>Append tokens, detect finished, free KV, send to detokenize</td><td class="mono">Lesson 17 detokenize & streaming</td></tr>
 </table>
 
@@ -5356,7 +5356,7 @@ a limitation but a <strong>design</strong>: letting <strong>one</strong> role ow
   <strong>owns the KV-cache ledger</strong>, decides <strong>who is in this step's batch</strong>, who finishes and leaves, who fills in.
   It does only <strong>lightweight CPU accounting and judgment</strong>, <strong>touching not a single matmul</strong> — precisely because
   it is light, it can beat tens of thousands of times per second.</p></div>
-  <div class="col"><h4>TpWorker / ModelRunner: computes, doesn't decide</h4><p>It takes the batch the scheduler formed and dutifully runs
+  <div class="col"><h4>TpModelWorker / ModelRunner: computes, doesn't decide</h4><p>It takes the batch the scheduler formed and dutifully runs
   <span class="mono">forward</span> on the <strong>GPU</strong> (Lesson 24), producing logits, then samples. It <strong>does not decide what
   the batch is</strong> nor touch scheduling policy — it just <strong>squeezes the compute</strong>. Decoupling decision from compute is
   what lets the two <strong>pipeline in parallel</strong> in the overlap scheduler.</p></div>
@@ -5491,7 +5491,7 @@ exit on the right and free their KV — while the running batch's <strong>member
 </div>
 
 <h2>run_batch: hand one batch to the worker for a single forward</h2>
-<p>Step 4, <span class="inline">run_batch</span>, is itself <strong>very thin</strong> — it hands the whole batch to the TpWorker for
+<p>Step 4, <span class="inline">run_batch</span>, is itself <strong>very thin</strong> — it hands the whole batch to the TpModelWorker for
 <strong>one</strong> forward, gets back logits and the sampled tokens, and bumps <span class="mono">forward_ct</span> by one. That counter is
 the running tally of <strong>how many heartbeats the engine has taken so far</strong>.</p>
 
@@ -5521,7 +5521,7 @@ composition is reshuffled every revolution</strong>.</p>
     <li><strong>The scheduler is the engine's heart</strong>: it runs in its <strong>own subprocess</strong>; its core is the infinite loop <span class="mono">event_loop_normal</span>, beating thousands of times per second, each beat a <strong>step</strong>.</li>
     <li><strong>The five stages of a step</strong> (memorize the order): recv_requests → process_input_requests → get_next_batch_to_run → run_batch → process_batch_result → back to the top.</li>
     <li><strong>The batch is re-formed every step</strong>: stage 3 reruns each revolution — finished reqs leave on the spot and free KV, waiting ones fill in — this is Lesson 5's continuous batching in the flesh.</li>
-    <li><strong>Decide vs compute</strong>: the scheduler is single-threaded, the sole decision-maker, owns the KV ledger, does only light CPU accounting; only TpWorker/ModelRunner runs forward on the GPU (Lesson 24).</li>
+    <li><strong>Decide vs compute</strong>: the scheduler is single-threaded, the sole decision-maker, owns the KV ledger, does only light CPU accounting; only TpModelWorker/ModelRunner runs forward on the GPU (Lesson 24).</li>
     <li><strong>Loop speed caps throughput</strong>: CPU batching and GPU compute are serial in the normal version ⇒ Lesson 21's <span class="mono">event_loop_overlap</span> pipelines to hide CPU time behind GPU compute. Builds on Lessons 16/17; leads to Lessons 19/20/22/24.</li>
   </ul>
 </div>
@@ -7017,7 +7017,7 @@ GPU is this lesson's star, <span class="inline">ModelRunner</span>. It is <stron
 
 <div class="card macro">
   <div class="tag">🌍 The big picture</div>
-  Each TP rank has <strong>one ModelRunner</strong> (owned by the TpWorker); it holds the <strong>loaded model</strong>
+  Each TP rank has <strong>one ModelRunner</strong> (owned by the TpModelWorker); it holds the <strong>loaded model</strong>
   (Lessons 25/26) and the <strong>KV pool</strong> (Lesson 30). One <span class="mono">forward(forward_batch)</span> runs a
   batch into logits, and <span class="mono">sample()</span> hands them to the Sampler (Lesson 28) for the token. A
   <span class="inline">ForwardBatch</span> is <strong>the GPU view of a ScheduleBatch (Lesson 19)</strong> — the same
@@ -7027,12 +7027,12 @@ GPU is this lesson's star, <span class="inline">ModelRunner</span>. It is <stron
 <h2>After run_batch: who handed this batch to ModelRunner</h2>
 <p>Let's complete the call chain. The scheduler's main loop (Lesson 18) calls <span class="mono">run_batch</span> every step,
 but run_batch itself is <strong>thin</strong>: it passes the freshly assembled <span class="mono">ScheduleBatch</span> to the
-<strong>TpWorker</strong>, which hands it straight to <strong>the one ModelRunner it owns</strong>. The chain is layered this
-deep because each layer watches exactly one thing — the scheduler cares about "which batch to run this step", the TpWorker
+<strong>TpModelWorker</strong>, which hands it straight to <strong>the one ModelRunner it owns</strong>. The chain is layered this
+deep because each layer watches exactly one thing — the scheduler cares about "which batch to run this step", the TpModelWorker
 cares about "my rank's boundary and cross-card communication", and the ModelRunner cares about "actually computing the
 tensors on this card". Clean, non-overlapping responsibilities are precisely what lets thousands of contributors maintain
 this code together.</p>
-<p>The chain also hides a subtle but fatal constraint: in an 8-way TP deployment, the 8 TpWorkers' ModelRunners must run
+<p>The chain also hides a subtle but fatal constraint: in an 8-way TP deployment, the 8 TpModelWorkers' ModelRunners must run
 the <strong>same batch in strict lockstep</strong>. Each computes a slice of the model (weights split row/column-wise,
 Lessons 25/46), and mid-layer they stitch attention outputs and residuals back together via all-reduce / all-gather — if
 any rank steps even half a beat early or late, the collective <strong>deadlocks the whole group</strong>. That is why,

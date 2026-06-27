@@ -354,7 +354,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">🔌 生活类比</div>
   把 SGLang 想成一栋<strong>运转中的公司办公楼</strong>。一楼<strong>前台（TokenizerManager）</strong>接待来访者，
   把口头需求登记成标准工单；二楼<strong>调度室（Scheduler）</strong>是大脑，决定哪些工单<strong>并成一批</strong>、先做谁、
-  怎么排队，但调度长自己<strong>不动手干活</strong>；真正流水线上拧螺丝的，是车间里的<strong>技工（TpWorker / ModelRunner）</strong>，
+  怎么排队，但调度长自己<strong>不动手干活</strong>；真正流水线上拧螺丝的，是车间里的<strong>技工（TpModelWorker / ModelRunner）</strong>，
   他们守着<strong>机房里昂贵的机器（GPU 与算子内核）</strong>；活干完，<strong>打包发货处（DetokenizerManager）</strong>
   把半成品翻译成客户看得懂的成品寄回去。关键是：<strong>前台、调度＋车间、发货处是三个独立的部门（进程）</strong>，
   靠<strong>内部邮件系统（ZMQ）</strong>传递工单，谁也不挡谁的路——这样前台接待和车间开工才能<strong>同时进行</strong>。
@@ -480,7 +480,7 @@ CPU 的活和 GPU 的活才能<strong>真正并行流水</strong>，互不阻塞
 <div class="flow">
   <div class="node hl"><div class="nt">TokenizerManager</div><div class="nd">主进程 · 分词、收发请求</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Scheduler + TpWorker</div><div class="nd">子进程 · 每 TP rank 一个 · GPU 前向</div></div>
+  <div class="node"><div class="nt">Scheduler + TpModelWorker</div><div class="nd">子进程 · 每 TP rank 一个 · GPU 前向</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">DetokenizerManager</div><div class="nd">子进程 · 反分词</div></div>
   <div class="arrow">→</div>
@@ -494,7 +494,7 @@ CPU 的活和 GPU 的活才能<strong>真正并行流水</strong>，互不阻塞
     <text x="119" y="96" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:13px">TokenizerManager</text>
     <text x="119" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">主进程 · 分词收发</text>
     <rect x="285" y="64" width="190" height="72" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
-    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpWorker)</text>
+    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpModelWorker)</text>
     <text x="380" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">子进程 · GPU 模型前向</text>
     <rect x="546" y="64" width="190" height="72" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
     <text x="641" y="96" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">DetokenizerManager</text>
@@ -514,7 +514,7 @@ CPU 的活和 GPU 的活才能<strong>真正并行流水</strong>，互不阻塞
 
 <p>注意三者的角色千万别混：<strong>TokenizerManager 在主进程</strong>（HTTP 服务器、<span class="inline">Engine</span> 也都在主进程）；
 <strong>Scheduler 在子进程</strong>，而且<strong>张量并行（TP）每一路 rank 各起一个 Scheduler 进程</strong>，每个都持有自己的
-<span class="inline">TpWorker</span> 与 <span class="inline">ModelRunner</span>，真正占着一张 GPU 干前向；<strong>DetokenizerManager 又是另一个子进程</strong>。
+<span class="inline">TpModelWorker</span> 与 <span class="inline">ModelRunner</span>，真正占着一张 GPU 干前向；<strong>DetokenizerManager 又是另一个子进程</strong>。
 请记牢：<strong>Scheduler 才是握着 GPU 的那个进程</strong>，TokenizerManager 与 DetokenizerManager 只是一进一出的“翻译官”，三者不可混为一谈。</p>
 
 <p>这套“谁在哪个进程、怎么被拉起来”的逻辑，源码里写得很直白。下面这段就是引擎启动时<strong>分裂进程</strong>的骨架——
@@ -526,7 +526,7 @@ CPU 的活和 GPU 的活才能<strong>真正并行流水</strong>，互不阻塞
     <span class="cm"># 1) 给三方分配 IPC 端口（ZMQ 通信）</span>
     port_args = PortArgs.init_new(server_args)
 
-    <span class="cm"># 2) Scheduler 子进程：每个 TP rank 一个，持有 TpWorker/ModelRunner，做 GPU 前向</span>
+    <span class="cm"># 2) Scheduler 子进程：每个 TP rank 一个，持有 TpModelWorker/ModelRunner，做 GPU 前向</span>
     scheduler_init_result, scheduler_procs = cls._launch_scheduler_processes(
         server_args, port_args, run_scheduler_process_func)
 
@@ -588,7 +588,7 @@ TokenizerManager 的方法都在主进程，Scheduler 与 ModelRunner 的方法�
   <ul>
     <li><strong>两半</strong>：<span class="mono">python/sglang/lang/</span>（前端 DSL，表达）+ <span class="mono">python/sglang/srt/</span>（运行时引擎，执行；srt = SGLang RunTime），底下垫着 <span class="mono">sgl-kernel/</span> 与 <span class="mono">jit_kernel/</span> 算子。</li>
     <li><strong>srt 分层</strong>：entrypoints（入口）→ managers（翻译 + Scheduler 大脑）→ model_executor/models（执行）→ sampling（采样）→ layers/mem_cache（算子与缓存）→ kernels/distributed（硬件与多卡）。</li>
-    <li><strong>三进程</strong>：TokenizerManager（主进程）↔ Scheduler+TpWorker（子进程，每 TP rank 一个，握着 GPU）↔ DetokenizerManager（子进程），靠 <strong>ZMQ 的 IPC</strong> 通信。</li>
+    <li><strong>三进程</strong>：TokenizerManager（主进程）↔ Scheduler+TpModelWorker（子进程，每 TP rank 一个，握着 GPU）↔ DetokenizerManager（子进程），靠 <strong>ZMQ 的 IPC</strong> 通信。</li>
     <li><strong>别混淆</strong>：Scheduler 才是持有 ModelRunner、占着 GPU 的进程；两个 Manager 只是一进一出的“翻译官”。</li>
     <li><strong>调参入口</strong>：模型路径、并行度、显存占比等集中在 <span class="mono">srt/server_args.py</span> 的 <span class="inline">ServerArgs</span>。</li>
   </ul>
@@ -657,7 +657,7 @@ After this, whenever you dive into any directory you will know <strong>where you
   greets visitors and turns spoken requests into standard work orders; the <strong>dispatch room on floor two (Scheduler)</strong>
   is the brain that decides which orders to <strong>merge into one batch</strong>, who goes first, and how to queue — but the
   dispatcher <strong>does no hands-on work</strong>; the ones actually turning bolts on the line are the
-  <strong>technicians (TpWorker / ModelRunner)</strong> who tend the <strong>expensive machines in the machine room (GPUs and
+  <strong>technicians (TpModelWorker / ModelRunner)</strong> who tend the <strong>expensive machines in the machine room (GPUs and
   operator kernels)</strong>; when a job is done, <strong>shipping &amp; packing (DetokenizerManager)</strong> translates the
   half-product into a finished item the customer can read and mails it back. The key: <strong>front desk, dispatch+floor, and
   shipping are three independent departments (processes)</strong> that pass work orders via the <strong>internal mail system
@@ -799,7 +799,7 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
 <div class="flow">
   <div class="node hl"><div class="nt">TokenizerManager</div><div class="nd">main process · tokenize, send/recv</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Scheduler + TpWorker</div><div class="nd">subprocess · one per TP rank · GPU forward</div></div>
+  <div class="node"><div class="nt">Scheduler + TpModelWorker</div><div class="nd">subprocess · one per TP rank · GPU forward</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">DetokenizerManager</div><div class="nd">subprocess · detokenize</div></div>
   <div class="arrow">→</div>
@@ -813,7 +813,7 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
     <text x="119" y="96" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:13px">TokenizerManager</text>
     <text x="119" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">main process · tokenize I/O</text>
     <rect x="285" y="64" width="190" height="72" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
-    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpWorker)</text>
+    <text x="380" y="96" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:13px">Scheduler (+TpModelWorker)</text>
     <text x="380" y="118" text-anchor="middle" style="fill:var(--muted);font-size:12px">subprocess · GPU forward</text>
     <rect x="546" y="64" width="190" height="72" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
     <text x="641" y="96" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">DetokenizerManager</text>
@@ -833,7 +833,7 @@ engineering basis for "zero-overhead overlap" (Lesson 21).</p>
 
 <p>Never confuse the three roles: <strong>TokenizerManager is in the main process</strong> (so are the HTTP server and the
 <span class="inline">Engine</span>); <strong>Scheduler is in a subprocess</strong>, and <strong>tensor parallelism (TP) starts one
-Scheduler process per rank</strong>, each holding its own <span class="inline">TpWorker</span> and <span class="inline">ModelRunner</span>
+Scheduler process per rank</strong>, each holding its own <span class="inline">TpModelWorker</span> and <span class="inline">ModelRunner</span>
 and occupying one GPU to do the forward; <strong>DetokenizerManager is yet another subprocess</strong>. Remember: <strong>the Scheduler
 is the process holding the GPU</strong>, while the two Managers are just "translators" on the way in and out — do not lump them together.</p>
 
@@ -847,7 +847,7 @@ Scheduler subprocess and the Detokenizer subprocess, and finally leaves the Toke
     <span class="cm"># 1) allocate IPC ports for all three (ZMQ communication)</span>
     port_args = PortArgs.init_new(server_args)
 
-    <span class="cm"># 2) Scheduler subprocess: one per TP rank, holds TpWorker/ModelRunner, does GPU forward</span>
+    <span class="cm"># 2) Scheduler subprocess: one per TP rank, holds TpModelWorker/ModelRunner, does GPU forward</span>
     scheduler_init_result, scheduler_procs = cls._launch_scheduler_processes(
         server_args, port_args, run_scheduler_process_func)
 
@@ -919,7 +919,7 @@ it belongs to, which future lesson it maps to. This locating habit pays off acro
   <ul>
     <li><strong>Two halves</strong>: <span class="mono">python/sglang/lang/</span> (frontend DSL, expresses) + <span class="mono">python/sglang/srt/</span> (runtime engine, executes; srt = SGLang RunTime), with <span class="mono">sgl-kernel/</span> and <span class="mono">jit_kernel/</span> kernels underneath.</li>
     <li><strong>srt layers</strong>: entrypoints (entry) → managers (translators + Scheduler brain) → model_executor/models (execute) → sampling → layers/mem_cache (ops &amp; cache) → kernels/distributed (hardware &amp; multi-GPU).</li>
-    <li><strong>Three processes</strong>: TokenizerManager (main) ↔ Scheduler+TpWorker (subprocess, one per TP rank, holds the GPU) ↔ DetokenizerManager (subprocess), talking over <strong>ZMQ IPC</strong>.</li>
+    <li><strong>Three processes</strong>: TokenizerManager (main) ↔ Scheduler+TpModelWorker (subprocess, one per TP rank, holds the GPU) ↔ DetokenizerManager (subprocess), talking over <strong>ZMQ IPC</strong>.</li>
     <li><strong>Don't confuse</strong>: the Scheduler is the process holding ModelRunner and the GPU; the two Managers are just in/out "translators".</li>
     <li><strong>Tuning entry</strong>: model path, parallelism, memory fraction, etc. live in <span class="inline">ServerArgs</span> in <span class="mono">srt/server_args.py</span>.</li>
   </ul>
