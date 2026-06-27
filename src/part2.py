@@ -183,7 +183,7 @@ LESSON_04 = {
     <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV 显存（MB）</text>
-    <text x="640" y="270" style="fill:var(--muted);font-size:12px">序列长度（token）</text>
+    <text x="380" y="270" text-anchor="middle" style="fill:var(--muted);font-size:12px">序列长度（token）</text>
     <text x="90" y="250" text-anchor="end" style="fill:var(--faint);font-size:11px">0</text>
     <text x="90" y="150" text-anchor="end" style="fill:var(--faint);font-size:11px">512</text>
     <text x="90" y="64" text-anchor="end" style="fill:var(--faint);font-size:11px">1024</text>
@@ -426,7 +426,7 @@ parameter count</strong> but with <strong>context length</strong> — longer con
     <line x1="96" y1="40" x2="96" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <line x1="96" y1="246" x2="712" y2="246" style="stroke:var(--line);stroke-width:1.5"/>
     <text x="30" y="34" style="fill:var(--muted);font-size:12px">KV memory (MB)</text>
-    <text x="624" y="270" style="fill:var(--muted);font-size:12px">sequence length (tokens)</text>
+    <text x="380" y="270" text-anchor="middle" style="fill:var(--muted);font-size:12px">sequence length (tokens)</text>
     <text x="90" y="250" text-anchor="end" style="fill:var(--faint);font-size:11px">0</text>
     <text x="90" y="150" text-anchor="end" style="fill:var(--faint);font-size:11px">512</text>
     <text x="90" y="64" text-anchor="end" style="fill:var(--faint);font-size:11px">1024</text>
@@ -1463,7 +1463,7 @@ physically scattered, page-table-linked":</p>
     <polygon points="600,169 586,162 586,176" style="fill:var(--blue)"/>
     <path d="M 502 112 C 555 112, 545 55, 600 55" style="fill:none;stroke:var(--amber);stroke-width:1.5"/>
     <polygon points="600,55 586,48 586,62" style="fill:var(--amber)"/>
-    <text x="312" y="200" style="font-size:11px;fill:var(--muted)">logically contiguous · physically scattered · linked by the table</text>
+    <text x="24" y="218" style="font-size:11px;fill:var(--muted)">logically contiguous · physically scattered · linked by the table</text>
   </svg>
   <div class="figcap"><b>Fig 2 · The page table</b> — logically contiguous token positions (0, 1, 2, 3) map through the page table to scattered physical pages (#7, #2): logically contiguous, physically scattered.</div>
 </div>

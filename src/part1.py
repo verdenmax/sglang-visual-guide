@@ -1663,7 +1663,7 @@ it is <strong>memory-bound</strong> and <strong>loops many times</strong>. The t
     <line x1="40" y1="200" x2="760" y2="200" style="stroke:var(--line);stroke-width:1.5"/>
     <path d="M760 200 l-9 -4 v8 z" style="fill:var(--faint)"/>
     <text x="708" y="222" style="fill:var(--faint);font-size:11px">time →</text>
-    <text x="142" y="244" text-anchor="middle" style="fill:var(--amber);font-size:11px">one parallel pass over the whole prompt · compute-bound</text>
+    <text x="142" y="244" text-anchor="middle" style="fill:var(--amber);font-size:11px">one parallel pass · compute-bound</text>
     <text x="470" y="244" text-anchor="middle" style="fill:var(--blue);font-size:11px">one token per step, one forward each · bandwidth-bound</text>
   </svg>
   <div class="figcap"><b>Fig 2 · Prefill vs decode (over time)</b> — prefill is <strong>one wide block</strong>: a single parallel pass over the whole prompt that fills the KV cache, hungry for compute (compute-bound); decode is the <strong>many thin bars</strong> after it: each computes only the newest token in one forward pass, bottlenecked on repeatedly moving the KV cache (bandwidth-bound). One request is "one wide block + many thin bars".</div>

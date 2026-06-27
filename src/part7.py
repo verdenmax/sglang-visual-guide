@@ -405,7 +405,7 @@ If insert also hits a "half edge" along the way, it likewise <span class="mono">
     <line x1="477" y1="90" x2="600" y2="120" style="stroke:var(--accent);stroke-width:3"/>
     <rect x="540" y="120" width="120" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:2.5"/>
     <text x="600" y="140" text-anchor="middle" class="mono" style="font-size:13px;fill:var(--accent-ink)">[A B]</text>
-    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">parent · prefix stored once</text>
+    <text x="600" y="156" text-anchor="middle" style="font-size:10px;fill:var(--accent-ink);font-weight:700">parent · stored once</text>
     <line x1="585" y1="164" x2="520" y2="220" style="stroke:var(--teal);stroke-width:2"/>
     <line x1="615" y1="164" x2="700" y2="220" style="stroke:var(--blue);stroke-width:2;stroke-dasharray:5 4"/>
     <rect x="450" y="220" width="120" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
@@ -797,7 +797,7 @@ while each request's ledger only tracks "which numbers are mine," indifferent to
     <text x="678" y="162" text-anchor="middle" class="mono" style="font-size:11px">#13</text>
     <line x1="316" y1="105" x2="586" y2="105" style="stroke:var(--accent);stroke-width:2;stroke-dasharray:5 4"/>
     <polygon points="578,100 590,105 578,110" style="fill:var(--accent)"/>
-    <text x="450" y="98" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slot id #12 → points at data (indirection)</text>
+    <text x="450" y="92" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px">slot id #12 → points at data (indirection)</text>
     <text x="430" y="206" style="fill:var(--faint);font-size:12px">slot #12 picks one K/V cell per layer — reused across layers</text>
   </svg>
   <div class="figcap"><b>Fig 3 · Two pools: ReqToToken (index) + TokenToKV (data)</b> — the left table looks up a token slot number by request row and position; the right side fetches data from each layer's K/V buffer by those slot numbers; the arrow is the "look up the number, then fetch by number" two-hop indirection.</div>
