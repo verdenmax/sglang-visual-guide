@@ -382,6 +382,39 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">负载生成器<br><span class="mono">bench_serving</span></div><div class="arrow">→</div><div class="node">运行中的<br>SGLang 服务器</div><div class="arrow">→</div><div class="node">逐请求收集<br>TTFT / TPOT</div><div class="arrow">→</div><div class="node">聚合成<br><span class="mono">BenchmarkMetrics</span></div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="压测流水线：负载生成器按速率发射 N 个请求到 SGLang 服务器，服务器流式响应，逐请求采集 TTFT 与 TPOT，最后汇总成吞吐与 P50/P95/P99 百分位">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">压测流水线：发请求 → 采延迟 → 算百分位</text>
+    <rect x="18" y="50" width="165" height="66" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="78" text-anchor="middle" style="font-weight:700">负载生成器</text>
+    <text x="100" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">N 请求 @ rate</text>
+    <text x="192" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="205" y="50" width="165" height="66" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="287" y="78" text-anchor="middle" style="font-weight:700">SGLang 服务器</text>
+    <text x="287" y="100" text-anchor="middle" style="font-size:11px;fill:var(--muted)">流式响应</text>
+    <text x="379" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="392" y="50" width="165" height="66" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="474" y="78" text-anchor="middle" style="font-weight:700">逐请求采集</text>
+    <text x="474" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">TTFT · TPOT</text>
+    <text x="566" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="579" y="50" width="165" height="66" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="661" y="78" text-anchor="middle" style="font-weight:700">汇总指标</text>
+    <text x="661" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">P50·P95·P99</text>
+    <text x="18" y="150" style="fill:var(--muted);font-size:12px">延迟分布（右偏长尾）</text>
+    <line x1="40" y1="215" x2="740" y2="215" style="stroke:var(--line);stroke-width:1.5"/>
+    <polyline points="40,212 130,168 210,176 330,198 470,208 620,212 740,214" style="fill:none;stroke:var(--accent);stroke-width:2"/>
+    <line x1="210" y1="176" x2="210" y2="215" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="210" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">P50</text>
+    <line x1="560" y1="210" x2="560" y2="215" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="560" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">P95</text>
+    <line x1="660" y1="213" x2="660" y2="215" style="stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="664" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--purple)">P99 尾</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 压测流水线与百分位</b> — 负载生成器按 <span class="mono">request_rate</span> / 并发把 N 个请求打到服务器，服务器流式返回，逐请求记下 <span class="mono">TTFT</span> 与 <span class="mono">TPOT</span>，再汇总成吞吐与 P50/P95/P99；右偏长尾里 <span class="mono">P99</span> 才是用户真正的痛点。</div>
+</div>
+
+<p><strong>一个具体例子</strong>：<span class="mono">python -m sglang.bench_serving --backend sglang --request-rate 16 --num-prompts 1000</span> 会以 16 req/s 的速率把 1000 条 prompt 打到服务器，跑完后打印 <span class="mono">output_throughput</span> 以及 P50/P99 的 <span class="mono">ttft</span>；如果尾延迟难看，再开 profiler 看一段 trace，就能判断到底是 attention 还是 GEMM 占了大头。</p>
+
 <table class="t"><tr><th>指标</th><th>含义</th></tr>
 <tr><td><span class="mono">request_throughput</span></td><td>每秒完成的请求数（req/s）</td></tr>
 <tr><td><span class="mono">input_throughput</span></td><td>每秒吃进的 prompt token 数（tokens/s）</td></tr>
@@ -391,6 +424,33 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <tr><td><span class="mono">p99</span></td><td>分布的尾部——负载之下用户真正感受到的卡顿</td></tr></table>
 
 <div class="cols"><div class="col"><strong>benchmark（黑盒数字）</strong><br>向真实服务器发射负载，问"有多慢？慢在第几分位？"。产出 <span class="mono">request_throughput</span>、<span class="mono">ttft</span>、<span class="mono">tpot</span> 等汇总数字，负责<strong>量化</strong>。</div><div class="col"><strong>profiler（白盒时间线）</strong><br>录下每个 CUDA kernel 的时间线，问"为什么慢？慢在哪个 kernel / 哪个阶段？"。产出可在 <span class="mono">chrome://tracing</span> 打开的 trace，负责<strong>定位</strong>。</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="对比：基准只给出 tokens/s 与 TTFT 等结果数字，内部不可见是黑盒；profiler 时间线展开 GPU 上的 Attn 与 GEMM 等 kernel，看清 GEMM 最久是瓶颈，是白盒">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">基准（黑盒）vs profiler（白盒）</text>
+    <rect x="18" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="198" y="74" text-anchor="middle" style="font-weight:700;fill:var(--muted)">基准：只有结果</text>
+    <rect x="120" y="92" width="156" height="92" rx="8" style="fill:var(--ink);stroke:var(--line);stroke-width:1.5;opacity:0.85"/>
+    <text x="198" y="148" text-anchor="middle" style="font-size:38px;fill:var(--faint)">?</text>
+    <text x="34" y="120" style="font-size:12px;fill:var(--muted)">请求流 →</text>
+    <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
+    <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">知结果，不知原因</text>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler：看见过程</text>
+    <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="481" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <rect x="524" y="122" width="140" height="48" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="594" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">GEMM</text>
+    <rect x="668" y="122" width="30" height="48" rx="5" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="702" y="122" width="60" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="732" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <text x="683" y="192" text-anchor="middle" style="font-size:10px;fill:var(--faint)">bubble</text>
+    <text x="602" y="232" text-anchor="middle" style="font-size:12px;fill:var(--ink)">GPU kernel 时间线</text>
+    <text x="602" y="258" text-anchor="middle" style="font-weight:700;fill:var(--amber)">GEMM 最久 → 瓶颈</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 黑盒数字 vs 白盒时间线</b> — 基准给出 <span class="mono">tokens/s</span>、<span class="mono">TTFT</span> 等结果，却看不到内部（黑盒）；profiler 把盒子打开成一条 GPU kernel 时间线，<span class="mono">Attn</span> / <span class="mono">GEMM</span> / 空隙各占多少一目了然，于是能定位到「<span class="mono">GEMM</span> 最久」这种瓶颈（白盒）。</div>
+</div>
 
 <div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>预热服务器（warm up）</h4><p>先发几条请求，让 CUDA graph 捕获、显存分配、缓存都就绪，避免冷启动污染数据。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>发射负载</h4><p>设定 <span class="mono">request rate</span> / 输入输出长度 / 数据集（如 ShareGPT），正式打压。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>读取分位数</h4><p>看 mean / median / p90 / p95 / <span class="mono">p99</span>，重点关注尾部。</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>打开 profiler trace</h4><p>用 <span class="mono">chrome://tracing</span> / Perfetto 查看每个 kernel，定位瓶颈。</p></div></div></div>
 
@@ -406,6 +466,13 @@ class BenchmarkMetrics:
     mean_tpot_ms: float            # Time Per Output Token = token 间隔 (ITL)
     p99_tpot_ms: float
     # ... 还有 p90 / p95 变体, 以及 e2e 端到端延迟</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::benchmark</span><span class="ln">负载生成器：按速率打请求，采集并汇总延迟指标</span></div><pre>async def benchmark(backend, api_url, base_url, model_id, tokenizer,
+                    input_requests, request_rate, max_concurrency, ...):
+    # 负载生成器：按目标 request_rate 发射 input_requests
+    # （受 max_concurrency 限流），逐请求记录 TTFT/TPOT，
+    # 再归约成吞吐 + 延迟百分位（BenchmarkMetrics）。
+    ...</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>两段式循环</strong>：<span class="mono">benchmark</span> 量化"有多慢"，<span class="mono">profile</span> 定位"为什么慢"。</li>
@@ -506,6 +573,39 @@ class BenchmarkMetrics:
 
 <div class="flow"><div class="node">load generator<br><span class="mono">bench_serving</span></div><div class="arrow">→</div><div class="node">running<br>SGLang server</div><div class="arrow">→</div><div class="node">collect per-request<br>TTFT / TPOT</div><div class="arrow">→</div><div class="node">aggregate into<br><span class="mono">BenchmarkMetrics</span></div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="Benchmark pipeline: the load generator fires N requests at a target rate into the SGLang server, the server streams responses, TTFT and TPOT are recorded per request, then aggregated into throughput and P50/P95/P99 percentiles">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">Benchmark pipeline: fire → collect → percentiles</text>
+    <rect x="18" y="50" width="165" height="66" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="78" text-anchor="middle" style="font-weight:700">load generator</text>
+    <text x="100" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">N reqs @ rate</text>
+    <text x="192" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="205" y="50" width="165" height="66" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="287" y="78" text-anchor="middle" style="font-weight:700">SGLang server</text>
+    <text x="287" y="100" text-anchor="middle" style="font-size:11px;fill:var(--muted)">streaming</text>
+    <text x="379" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="392" y="50" width="165" height="66" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="474" y="78" text-anchor="middle" style="font-weight:700">per request</text>
+    <text x="474" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">TTFT · TPOT</text>
+    <text x="566" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="579" y="50" width="165" height="66" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="661" y="78" text-anchor="middle" style="font-weight:700">aggregate</text>
+    <text x="661" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">P50·P95·P99</text>
+    <text x="18" y="150" style="fill:var(--muted);font-size:12px">latency dist (right-skewed tail)</text>
+    <line x1="40" y1="215" x2="740" y2="215" style="stroke:var(--line);stroke-width:1.5"/>
+    <polyline points="40,212 130,168 210,176 330,198 470,208 620,212 740,214" style="fill:none;stroke:var(--accent);stroke-width:2"/>
+    <line x1="210" y1="176" x2="210" y2="215" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="210" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">P50</text>
+    <line x1="560" y1="210" x2="560" y2="215" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="560" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">P95</text>
+    <line x1="660" y1="213" x2="660" y2="215" style="stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="664" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--purple)">P99 tail</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Benchmark pipeline & percentiles</b> — the load generator fires N requests at the server by <span class="mono">request_rate</span> / concurrency, the server streams back, each request's <span class="mono">TTFT</span> and <span class="mono">TPOT</span> is recorded, then aggregated into throughput and P50/P95/P99; in the right-skewed tail, <span class="mono">P99</span> is the user's real pain point.</div>
+</div>
+
+<p><strong>A concrete example</strong>: <span class="mono">python -m sglang.bench_serving --backend sglang --request-rate 16 --num-prompts 1000</span> drives 1000 prompts at 16 req/s and, when done, prints <span class="mono">output_throughput</span> plus P50/P99 <span class="mono">ttft</span>; if the tail looks bad, capture a profiler trace next and you can tell whether attention or GEMM dominates.</p>
+
 <table class="t"><tr><th>Metric</th><th>Meaning</th></tr>
 <tr><td><span class="mono">request_throughput</span></td><td>requests finished per second (req/s)</td></tr>
 <tr><td><span class="mono">input_throughput</span></td><td>prompt tokens ingested per second (tokens/s)</td></tr>
@@ -515,6 +615,33 @@ class BenchmarkMetrics:
 <tr><td><span class="mono">p99</span></td><td>the tail of the distribution — what users actually feel under load</td></tr></table>
 
 <div class="cols"><div class="col"><strong>benchmark (black-box numbers)</strong><br>Fires load at a real server, asking "how slow? slow at which percentile?". Produces summary numbers like <span class="mono">request_throughput</span>, <span class="mono">ttft</span>, <span class="mono">tpot</span> — it <strong>quantifies</strong>.</div><div class="col"><strong>profiler (white-box timeline)</strong><br>Records the timeline of every CUDA kernel, asking "why slow? which kernel / which phase?". Produces a trace you open in <span class="mono">chrome://tracing</span> — it <strong>locates</strong>.</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Contrast: the benchmark only gives result numbers like tokens/s and TTFT with internals hidden (black box); the profiler timeline unfolds GPU kernels like Attn and GEMM, showing GEMM is longest and the bottleneck (white box)">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">benchmark (black box) vs profiler (white box)</text>
+    <rect x="18" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="198" y="74" text-anchor="middle" style="font-weight:700;fill:var(--muted)">benchmark: results only</text>
+    <rect x="120" y="92" width="156" height="92" rx="8" style="fill:var(--ink);stroke:var(--line);stroke-width:1.5;opacity:0.85"/>
+    <text x="198" y="148" text-anchor="middle" style="font-size:38px;fill:var(--faint)">?</text>
+    <text x="34" y="120" style="font-size:12px;fill:var(--muted)">requests →</text>
+    <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
+    <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">outcome, not why</text>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler: see the process</text>
+    <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="481" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <rect x="524" y="122" width="140" height="48" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="594" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">GEMM</text>
+    <rect x="668" y="122" width="30" height="48" rx="5" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="702" y="122" width="60" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="732" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <text x="683" y="192" text-anchor="middle" style="font-size:10px;fill:var(--faint)">bubble</text>
+    <text x="602" y="232" text-anchor="middle" style="font-size:12px;fill:var(--ink)">GPU kernel timeline</text>
+    <text x="602" y="258" text-anchor="middle" style="font-weight:700;fill:var(--amber)">GEMM longest → bottleneck</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Black-box numbers vs white-box timeline</b> — the benchmark gives results like <span class="mono">tokens/s</span> and <span class="mono">TTFT</span> but hides the internals (black box); the profiler opens the box into a GPU kernel timeline where the shares of <span class="mono">Attn</span> / <span class="mono">GEMM</span> / gaps are obvious, so you can pin a bottleneck like "<span class="mono">GEMM</span> is longest" (white box).</div>
+</div>
 
 <div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>warm up the server</h4><p>Send a few requests first so CUDA-graph capture, memory allocation, and caches are ready, avoiding cold-start contamination.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>run the load</h4><p>Set <span class="mono">request rate</span> / input-output lengths / dataset (e.g. ShareGPT) and fire for real.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>read the percentiles</h4><p>Look at mean / median / p90 / p95 / <span class="mono">p99</span>, focusing on the tail.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>open the profiler trace</h4><p>Use <span class="mono">chrome://tracing</span> / Perfetto to inspect each kernel and locate the bottleneck.</p></div></div></div>
 
@@ -530,6 +657,13 @@ class BenchmarkMetrics:
     mean_tpot_ms: float            # Time Per Output Token = inter-token latency (ITL)
     p99_tpot_ms: float
     # ... also p90 / p95 variants, and e2e latency</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::benchmark</span><span class="ln">load generator: fire requests at a rate, collect &amp; reduce latency metrics</span></div><pre>async def benchmark(backend, api_url, base_url, model_id, tokenizer,
+                    input_requests, request_rate, max_concurrency, ...):
+    # the load generator: fire input_requests at the target request_rate
+    # (capped by max_concurrency), record TTFT/TPOT per request, then
+    # reduce to throughput + latency percentiles (BenchmarkMetrics).
+    ...</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Two-stage loop</strong>: <span class="mono">benchmark</span> quantifies "how slow," <span class="mono">profile</span> locates "why slow."</li>

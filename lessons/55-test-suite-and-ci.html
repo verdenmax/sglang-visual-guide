@@ -367,6 +367,47 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>用 <span class="mono">popen_launch_server</span> 拉起真实服务器 → 发请求 → 校验输出/准确率。慢、吃 GPU，但能证明整屋「通电」无误。</p>
 </div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="单元测试不起服务器，直接 import 函数并断言输出，毫秒级无 GPU；端到端测试用 popen_launch_server 拉起真实服务器子进程，发 HTTP 请求校验后再拆除">
+    <line x1="390" y1="20" x2="390" y2="282" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="32" style="font-weight:700;fill:var(--blue)">单元测试 · 不起服务器</text>
+    <rect x="24" y="48" width="220" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="134" y="72" text-anchor="middle" class="mono" style="font-size:12px">import 函数 / 类</text>
+    <line x1="134" y1="86" x2="134" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="134,112 128,104 140,104" style="fill:var(--line)"/>
+    <rect x="24" y="112" width="220" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="134" y="136" text-anchor="middle" class="mono" style="font-size:12px">assert 输出</text>
+    <rect x="24" y="186" width="260" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="154" y="206" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">毫秒级 · 无 GPU</text>
+    <text x="154" y="223" text-anchor="middle" style="fill:var(--teal);font-size:11px">失败时定位精准</text>
+    <text x="414" y="32" style="font-weight:700;fill:var(--purple)">端到端测试 · 起一个服务器</text>
+    <rect x="414" y="48" width="320" height="36" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="574" y="71" text-anchor="middle" class="mono" style="font-size:12px">popen_launch_server</text>
+    <line x1="574" y1="84" x2="574" y2="100" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,106 568,98 580,98" style="fill:var(--line)"/>
+    <rect x="414" y="106" width="320" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="574" y="129" text-anchor="middle" style="font-size:12px">真实服务器子进程</text>
+    <line x1="574" y1="142" x2="574" y2="158" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,164 568,156 580,156" style="fill:var(--line)"/>
+    <rect x="414" y="164" width="320" height="36" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="574" y="187" text-anchor="middle" style="font-size:12px">HTTP 请求 / 响应</text>
+    <rect x="414" y="220" width="320" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="574" y="247" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">慢 · 吃 GPU · 跑完拆除</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 单元测试 vs 端到端测试</b> — 单元测试直接 <span class="mono">import</span> 函数并断言输出，毫秒级、不占 GPU；端到端测试用 <span class="mono">popen_launch_server</span> 拉起真实服务器子进程，发 HTTP 请求校验后再把它拆除。</div>
+</div>
+
+<p>举两个具体例子：一个采样辅助函数的单元测试只需 <span class="mono">import</span> 它、喂一组 logits、断言挑出的 token 对不对，整个过程在毫秒级完成、完全不碰 GPU；而一个端到端准确率测试会先用 <span class="mono">popen_launch_server</span> 拉起服务器，再在 <span class="mono">GSM8K</span> 数据集上跑一遍，断言得分高于某个阈值（比如 0.8）才算通过。下面这个辅助函数就是端到端测试的「起服务器」入口：</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">起一个真实服务器子进程，轮询 /health 直到就绪</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+                        other_args=None, ...):
+    # spawn a REAL server subprocess:
+    #   python -m sglang.launch_server --model-path model ...other_args
+    # then poll /health until ready (or raise on `timeout`). e2e tests
+    # hit this server over HTTP, then tear it down.
+    ...
+    return process</pre></div>
+
 <h2>二、基类 CustomTestCase：保证善后</h2>
 <p>SGLang 的测试不直接继承裸的 <span class="mono">unittest.TestCase</span>，而是继承 <span class="mono">CustomTestCase</span>。它做的事看似微小却很关键：<strong>包裹 <span class="mono">setUpClass</span>，使得即便 <span class="mono">setUpClass</span> 抛异常，<span class="mono">tearDownClass</span> 也一定会被调用</strong>。这里要先理解 <span class="mono">setUpClass</span> 与 <span class="mono">tearDownClass</span> 是一对：前者在一个测试类里所有用例开始前跑一次（往往就是在这里拉起服务器、占用端口、申请显存），后者在所有用例结束后跑一次（负责把这些资源全部释放掉）。</p>
 <p>为什么重要？原生 <span class="mono">unittest</span> 的行为是：如果 <span class="mono">setUpClass</span> 失败，它会<strong>跳过</strong> <span class="mono">tearDownClass</span>。在一个会启动服务器的测试套件里，这意味着已经占用的<strong>端口</strong>和拉起的 <span class="mono">GPU</span> 进程不会被回收——于是端口被占、显存被占，后面的测试想再拉一台服务器时，要么端口冲突起不来，要么显存不足直接崩，最终<strong>连环失败</strong>。更糟的是，这种失败往往看起来和真正出问题的那个测试毫无关系，排查起来极其费神。<span class="mono">CustomTestCase</span> 用 <span class="mono">__init_subclass__</span> 在每个子类定义时自动把 <span class="mono">setUpClass</span> 包一层 <span class="mono">try/except</span>，异常时先调用 <span class="mono">tearDownClass</span> 清理、再把异常重新抛出，从而保证清理一定发生。这让「一个坏掉的 setup 不会毒害整套测试」，正是上面类比里那条「无论如何都要拉闸收工」的铁律。</p>
@@ -397,6 +438,36 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>这里「打标签的运行机」是关键一环：不同测试对硬件的要求不同——有的只需一张消费级显卡，有的要多卡做张量并行，有的要特定型号才能复现某个内核的行为。CI 通过标签把每一片测试精确地投递到符合要求的机器上，既不会让小测试白占大机器，也不会让大测试被分到带不动的机器上。理解了这套分片加标签的调度，你就能明白为什么有时你的 PR 要排队等某类 GPU 空闲，也能在写测试时主动声明它真正需要的资源，避免浪费集群算力、拖慢所有人的 CI。</p>
 
 <div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit 风格/lint</div><div class="arrow">→</div><div class="node">CI 分片 · GPU 运行机</div><div class="arrow">→</div><div class="node">合并门禁 merge</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 820 280" role="img" aria-label="PR 推送先过 pre-commit 风格与 lint，再进入 CI 把测试分桶并行跑在 GPU runners 上（单元、端到端、准确率三片），全绿才进入合并">
+    <rect x="20" y="112" width="120" height="48" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="80" y="141" text-anchor="middle" style="font-weight:700;font-size:12px">PR 推送</text>
+    <line x1="140" y1="136" x2="168" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="174,136 166,131 166,141" style="fill:var(--line)"/>
+    <rect x="174" y="112" width="146" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="247" y="133" text-anchor="middle" style="font-weight:700;font-size:12px">pre-commit</text>
+    <text x="247" y="150" text-anchor="middle" style="font-size:11px">lint / 格式</text>
+    <line x1="320" y1="136" x2="348" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="354,136 346,131 346,141" style="fill:var(--line)"/>
+    <rect x="354" y="40" width="286" height="200" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="497" y="62" text-anchor="middle" style="fill:var(--muted);font-weight:700;font-size:12px">CI 分桶并行 · GPU runners</text>
+    <rect x="376" y="78" width="242" height="42" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="497" y="104" text-anchor="middle" style="font-size:12px">单元 · 分片 1</text>
+    <rect x="376" y="128" width="242" height="42" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="497" y="154" text-anchor="middle" style="font-size:12px">端到端 · 分片 2</text>
+    <rect x="376" y="178" width="242" height="42" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="497" y="204" text-anchor="middle" style="font-size:12px">准确率 · 分片 3</text>
+    <line x1="640" y1="140" x2="668" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="674,140 666,135 666,145" style="fill:var(--line)"/>
+    <rect x="674" y="116" width="130" height="48" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="739" y="139" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">合并 merge</text>
+    <text x="739" y="156" text-anchor="middle" style="fill:var(--teal);font-size:11px">全绿才合并</text>
+  </svg>
+  <div class="figcap"><b>图 2 · CI 流水线</b> — 推上去的 PR 先过 <span class="mono">pre-commit</span>（lint/格式），再进入 CI：把测试<strong>分桶</strong>派到多台 GPU runner 上并行跑（单元、端到端、准确率三片），全部变绿才进入合并门禁。</div>
+</div>
+
+<p>正因为有分桶，CI 才能把成百上千个测试文件拆散、分到多台 runner 上同时跑，让整个套件在并行下几分钟跑完，而不是串行排上几个小时。</p>
 
 <h2>四、把工具对号入座</h2>
 <p>记住几个关键辅助件各自的角色，写测试时就不会乱。它们分工明确：基类管「善后」，启动器管「拉起服务」，运行器管「发现并执行」。理清这三者，你就能看懂任意一个 SGLang 测试文件的骨架。</p>
@@ -493,6 +564,47 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Use <span class="mono">popen_launch_server</span> to bring up a real server → send requests → verify outputs/accuracy. Slow and GPU-hungry, but proves the whole house is "powered" correctly.</p>
 </div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="A unit test launches no server: it imports a function and asserts its output, millisecond-scale with no GPU; an e2e test uses popen_launch_server to spawn a real server subprocess, sends HTTP requests to verify, then tears it down">
+    <line x1="390" y1="20" x2="390" y2="282" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="32" style="font-weight:700;fill:var(--blue)">Unit test · no server</text>
+    <rect x="24" y="48" width="240" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="144" y="72" text-anchor="middle" class="mono" style="font-size:12px">import function / class</text>
+    <line x1="144" y1="86" x2="144" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="144,112 138,104 150,104" style="fill:var(--line)"/>
+    <rect x="24" y="112" width="240" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="144" y="136" text-anchor="middle" class="mono" style="font-size:12px">assert output</text>
+    <rect x="24" y="186" width="280" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="164" y="206" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">ms-scale · no GPU</text>
+    <text x="164" y="223" text-anchor="middle" style="fill:var(--teal);font-size:11px">precise on failure</text>
+    <text x="414" y="32" style="font-weight:700;fill:var(--purple)">E2E test · launches a server</text>
+    <rect x="414" y="48" width="320" height="36" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="574" y="71" text-anchor="middle" class="mono" style="font-size:12px">popen_launch_server</text>
+    <line x1="574" y1="84" x2="574" y2="100" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,106 568,98 580,98" style="fill:var(--line)"/>
+    <rect x="414" y="106" width="320" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="574" y="129" text-anchor="middle" style="font-size:12px">real server subprocess</text>
+    <line x1="574" y1="142" x2="574" y2="158" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,164 568,156 580,156" style="fill:var(--line)"/>
+    <rect x="414" y="164" width="320" height="36" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="574" y="187" text-anchor="middle" style="font-size:12px">HTTP request / response</text>
+    <rect x="414" y="220" width="320" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="574" y="247" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">slow · GPU · torn down</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Unit test vs e2e test</b> — a unit test just <span class="mono">import</span>s the function and asserts its output—millisecond-scale, no GPU; an e2e test uses <span class="mono">popen_launch_server</span> to spawn a real server subprocess, sends HTTP requests to verify, then tears it down.</div>
+</div>
+
+<p>Two concrete examples: a unit test for a sampling helper just <span class="mono">import</span>s it, feeds a set of logits, and asserts the chosen token is right—all in milliseconds, never touching a GPU; an e2e accuracy test instead calls <span class="mono">popen_launch_server</span> to bring up a server, runs the <span class="mono">GSM8K</span> dataset through it, and passes only if the score is above a threshold (say 0.8). The helper below is exactly that "launch a server" entry point for e2e tests:</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">spawn a real server subprocess, poll /health until ready</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+                        other_args=None, ...):
+    # spawn a REAL server subprocess:
+    #   python -m sglang.launch_server --model-path model ...other_args
+    # then poll /health until ready (or raise on `timeout`). e2e tests
+    # hit this server over HTTP, then tear it down.
+    ...
+    return process</pre></div>
+
 <h2>2. The base class CustomTestCase: guarantee cleanup</h2>
 <p>SGLang tests don't inherit bare <span class="mono">unittest.TestCase</span>; they inherit <span class="mono">CustomTestCase</span>. What it does looks tiny but matters a lot: it <strong>wraps <span class="mono">setUpClass</span> so that even if <span class="mono">setUpClass</span> raises, <span class="mono">tearDownClass</span> is still called</strong>.</p>
 <p>Why does this matter? Plain <span class="mono">unittest</span> behaves like this: if <span class="mono">setUpClass</span> fails, it <strong>skips</strong> <span class="mono">tearDownClass</span>. In a suite that launches servers, that means the <strong>ports</strong> already taken and the <span class="mono">GPU</span> processes already spawned won't be reclaimed—so ports stay occupied, VRAM stays occupied, and later tests cascade-fail. <span class="mono">CustomTestCase</span> guarantees cleanup happens, so "one broken setup doesn't poison the whole suite." This is exactly the "flip the breaker and pack up no matter what" rule from the analogy.</p>
@@ -519,6 +631,36 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>A contributor's typical workflow: <strong>find or add</strong> the matching test under <span class="mono">test/registered/unit/…</span>, run it locally with <span class="mono">pytest</span> until it passes, then push; CI re-runs it on real GPUs. Knowing this chain lets you <strong>confidently add coverage</strong> for your change. This ties Lesson 13 (the server those e2e tests launch) to <strong>Lesson 56</strong> (the PR flow that actually runs these tests). There's also a dedicated project convention/skill for writing SGLang tests to reference.</p>
 
 <div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit style/lint</div><div class="arrow">→</div><div class="node">CI partitioned · GPU runners</div><div class="arrow">→</div><div class="node">merge gate</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 820 280" role="img" aria-label="A pushed PR first clears pre-commit lint and format, then enters CI which partitions tests across GPU runners (unit, e2e, accuracy shards) running in parallel; only all-green reaches merge">
+    <rect x="20" y="112" width="120" height="48" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="80" y="141" text-anchor="middle" style="font-weight:700;font-size:12px">PR push</text>
+    <line x1="140" y1="136" x2="168" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="174,136 166,131 166,141" style="fill:var(--line)"/>
+    <rect x="174" y="112" width="146" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="247" y="133" text-anchor="middle" style="font-weight:700;font-size:12px">pre-commit</text>
+    <text x="247" y="150" text-anchor="middle" style="font-size:11px">lint / format</text>
+    <line x1="320" y1="136" x2="348" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="354,136 346,131 346,141" style="fill:var(--line)"/>
+    <rect x="354" y="40" width="286" height="200" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="497" y="62" text-anchor="middle" style="fill:var(--muted);font-weight:700;font-size:12px">CI partitioned · GPU runners</text>
+    <rect x="376" y="78" width="242" height="42" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="497" y="104" text-anchor="middle" style="font-size:12px">unit · shard 1</text>
+    <rect x="376" y="128" width="242" height="42" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="497" y="154" text-anchor="middle" style="font-size:12px">e2e · shard 2</text>
+    <rect x="376" y="178" width="242" height="42" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="497" y="204" text-anchor="middle" style="font-size:12px">accuracy · shard 3</text>
+    <line x1="640" y1="140" x2="668" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="674,140 666,135 666,145" style="fill:var(--line)"/>
+    <rect x="674" y="116" width="130" height="48" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="739" y="139" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">merge</text>
+    <text x="739" y="156" text-anchor="middle" style="fill:var(--teal);font-size:11px">all green to merge</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · CI pipeline</b> — a pushed PR first clears <span class="mono">pre-commit</span> (lint/format), then enters CI: it <strong>partitions</strong> the tests across many GPU runners to run in parallel (unit, e2e, accuracy shards), and only when all turn green does it reach the merge gate.</div>
+</div>
+
+<p>Partitioning is exactly why CI can split hundreds of test files across many runners and run them at once, finishing the whole suite in a few parallel minutes instead of hours of serial launches.</p>
 
 <h2>4. Matching the tools to their roles</h2>
 <p>Remember the role of each key helper and you won't get lost when writing tests:</p>

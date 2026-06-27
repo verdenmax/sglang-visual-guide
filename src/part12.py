@@ -30,6 +30,43 @@ LESSON_53 = {"zh": r"""
 
 <div class="flow"><div class="node">CLI flags</div><div class="arrow">→</div><div class="node">ServerArgs</div><div class="arrow">→</div><div class="node">启动引擎<br>Tokenizer/Scheduler/Detokenizer</div><div class="arrow">→</div><div class="node">HTTP 端点<br>/generate · /v1/...</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="启动路径：命令行旗标解析进 ServerArgs，run_server 据此构建引擎（分词器、调度器、反分词器），再暴露 HTTP / OpenAI 兼容端点">
+    <rect x="20" y="44" width="150" height="58" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="70" text-anchor="middle" style="fill:var(--blue);font-weight:700">CLI 旗标</text>
+    <text x="95" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">--model-path …</text>
+    <rect x="224" y="44" width="150" height="58" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="299" y="70" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ServerArgs</text>
+    <text x="299" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">解析 + 校验</text>
+    <rect x="428" y="44" width="150" height="58" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="503" y="70" text-anchor="middle" class="mono" style="fill:var(--teal);font-weight:700;font-size:13px">run_server</text>
+    <text x="503" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">构建引擎</text>
+    <rect x="632" y="44" width="150" height="58" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="707" y="70" text-anchor="middle" style="fill:var(--purple);font-weight:700">HTTP 端点</text>
+    <text x="707" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">/generate · /v1</text>
+    <line x1="170" y1="73" x2="218" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="218,68 218,78 224,73" style="fill:var(--muted)"/>
+    <line x1="374" y1="73" x2="422" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="422,68 422,78 428,73" style="fill:var(--muted)"/>
+    <line x1="578" y1="73" x2="626" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="626,68 626,78 632,73" style="fill:var(--muted)"/>
+    <line x1="503" y1="102" x2="503" y2="150" style="stroke:var(--teal);stroke-width:1.5"/>
+    <polygon points="498,150 508,150 503,156" style="fill:var(--teal)"/>
+    <rect x="250" y="156" width="420" height="120" rx="12" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="460" y="180" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">引擎 · 进程内</text>
+    <rect x="266" y="196" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="326" y="222" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">分词器</text>
+    <text x="326" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Tokenizer</text>
+    <rect x="400" y="196" width="120" height="60" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="460" y="222" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:12px">调度器</text>
+    <text x="460" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Scheduler</text>
+    <rect x="534" y="196" width="120" height="60" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="594" y="222" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">反分词器</text>
+    <text x="594" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Detokenizer</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 启动路径</b> — 命令行 <span class="mono">--flag</span> 解析进 <span class="mono">ServerArgs</span>，<span class="mono">run_server</span> 据此构建引擎（分词器 + 调度器 + 反分词器），再暴露 HTTP / OpenAI 兼容端点（<span class="mono">/generate</span>、<span class="mono">/v1/...</span>）。</div>
+</div>
+
 <h2>二、关键洞见：每个字段就是一个旋钮</h2>
 <p>这是本课真正想让你记住的事。<span class="mono">ServerArgs</span> 是一个 <span class="mono">@dataclasses.dataclass</span>，它的每个字段都会<strong>自动映射</strong>成一个 <span class="mono">--kebab-case</span> 风格的命令行参数：字段 <span class="mono">tp_size</span> → 参数 <span class="mono">--tp-size</span>，字段 <span class="mono">mem_fraction_static</span> → 参数 <span class="mono">--mem-fraction-static</span>。所以你看到的那“一面墙的 flag”，本质上就是这个 dataclass 字段的清单。</p>
 <p>规则简单到可以一句话概括：<strong>下划线变连字符，前面加两道杠</strong>。字段类型还顺带决定了这个 flag 怎么用——布尔字段通常变成一个无需取值的开关（如 <span class="mono">--enable-eplb</span>），整数和浮点字段则要跟一个数值，字符串字段跟一个名字（如后端名、量化方式名）。正因为这套映射是机械且一致的，SGLang 的帮助文档（<span class="mono">--help</span>）几乎是自动生成的，你看到的每条 flag 说明，往往就来自字段旁边那行注释。理解了这一层，你查文档、读别人脚本、写自己的部署命令，都会快上一个数量级。</p>
@@ -53,6 +90,33 @@ LESSON_53 = {"zh": r"""
 <p>怎么选？如果你要对外提供服务、支持多客户端并发、或者要接进现有的 OpenAI 生态工具链，就用 HTTP 服务器；如果你只是想在一个脚本里跑几千条 prompt 做离线评测、或在训练流程里嵌入一次性的批量生成，<span class="mono">Engine</span> 更轻、更快、也更好调试。关键是要意识到：两种模式的<strong>调优旋钮完全一样</strong>——无论走哪条路，你设置的都是同一个 <span class="mono">ServerArgs</span>（或它的等价构造参数），所以本课学到的“flag ↔ 组件”映射，对在线和离线两种场景同时生效。这也正是 SGLang 设计的优雅之处：内核只有一个，门面可以换。</p>
 
 <div class="cols"><div class="col"><strong>Engine（离线 / 进程内）</strong><br>在 Python 脚本里直接实例化，无 HTTP、无网络。直接内存调用生成。适合脚本化、批量评测、离线数据生成。启动快、开销小。</div><div class="col"><strong>HTTP server（在线）</strong><br>常驻进程监听端口，客户端经网络发请求。暴露 <span class="mono">/generate</span> 与 OpenAI 兼容 <span class="mono">/v1/...</span>。适合生产部署、对外提供服务、多客户端并发。</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="两种用法对比：Engine 离线进程内直接调用 generate 不走网络，HTTP 服务器在线监听端口接收 REST 请求，底层是同一内核">
+    <rect x="30" y="40" width="320" height="150" rx="12" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="190" y="66" text-anchor="middle" style="fill:var(--teal);font-weight:700">Engine · 离线（进程内）</text>
+    <rect x="50" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="106" class="mono" style="font-size:11px">import sglang as sgl</text>
+    <rect x="50" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="148" class="mono" style="font-size:11px">engine.generate(prompts)</text>
+    <text x="190" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">无网络 · 批量 / 离线</text>
+    <rect x="430" y="40" width="320" height="150" rx="12" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="590" y="66" text-anchor="middle" style="fill:var(--blue);font-weight:700">HTTP 服务器 · 在线</text>
+    <rect x="450" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="106" class="mono" style="font-size:11px">launch_server 进程</text>
+    <rect x="450" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="148" class="mono" style="font-size:11px">POST /generate（REST）</text>
+    <text x="590" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">多客户端 · 在线服务</text>
+    <line x1="190" y1="190" x2="190" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="185,232 195,232 190,238" style="fill:var(--muted)"/>
+    <line x1="590" y1="190" x2="590" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="585,232 595,232 590,238" style="fill:var(--muted)"/>
+    <rect x="150" y="238" width="480" height="48" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="390" y="260" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">同一内核</text>
+    <text x="390" y="278" text-anchor="middle" style="fill:var(--muted);font-size:10px">引擎 + ServerArgs</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 离线 Engine vs 在线 HTTP</b> — 左：<span class="mono">import sglang</span>，进程内直接 <span class="mono">engine.generate(...)</span>，不走网络（批量 / 离线）；右：启动服务进程，客户端发 REST 请求（在线、多客户端）。底层是同一套内核。</div>
+</div>
 
 <p>把这两副面孔放在一起看，就更能体会“一套内核、两种门面”的价值：你在开发阶段可以用 <span class="mono">Engine</span> 在脚本里快速迭代、验证 prompt 与采样参数，等逻辑稳定了，再用<strong>完全相同的一组 flag</strong> 切换到 HTTP 服务器对外上线，几乎零迁移成本。这种一致性不是巧合，而是因为两者底层都把配置塞进同一个 <span class="mono">ServerArgs</span>。所以当有人问“离线脚本里那个参数，在线服务怎么设”，答案永远是同一个：找到对应的字段名，把下划线换成连字符，加上两道杠即可。</p>
 
@@ -79,6 +143,17 @@ class ServerArgs:
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (第35课)
     max_running_requests: int = None   # --max-running-requests: 批大小上限 (第5课)
     # ... 还有几十个字段；每个都自动映射成一个 --kebab-case CLI flag</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/launch_server.py ::run_server</span><span class="ln">按 ServerArgs 选择并启动对应形态的服务器</span></div><pre>def run_server(server_args):
+    # 按解析好的 ServerArgs 启动对应形态的服务器
+    if server_args.grpc_mode:
+        serve_grpc(server_args)             # gRPC 入口
+    else:
+        # 默认路径：HTTP / OpenAI 兼容服务器
+        from sglang.srt.entrypoints.http_server import launch_server
+        launch_server(server_args)          # 构建引擎 + HTTP 路由</pre></div>
+
+<p>两个具体例子帮你把链路对上号。<strong>在线：</strong><span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct --tp-size 2</span> —— 这串 flag 被解析进 <span class="mono">ServerArgs</span>，交给 <span class="mono">run_server</span> 走默认分支构建引擎，最终在 <span class="mono">:30000</span> 上提供 HTTP 服务。<strong>离线：</strong><span class="mono">sgl.Engine(model_path="meta-llama/Llama-3.1-8B-Instruct").generate(prompts)</span> —— 同一份配置走 <span class="mono">Engine</span> 形态，在进程内直接生成，完全跳过网络。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>启动只需一条命令：<span class="mono">python -m sglang.launch_server --model-path &lt;模型&gt; [flags]</span>。</li>
@@ -112,6 +187,43 @@ class ServerArgs:
 
 <div class="flow"><div class="node">CLI flags</div><div class="arrow">→</div><div class="node">ServerArgs</div><div class="arrow">→</div><div class="node">boot engine<br>Tokenizer/Scheduler/Detokenizer</div><div class="arrow">→</div><div class="node">HTTP endpoint<br>/generate · /v1/...</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Boot path: command-line flags parse into ServerArgs, run_server builds the engine (tokenizer, scheduler, detokenizer) and exposes an HTTP / OpenAI-compatible endpoint">
+    <rect x="20" y="44" width="150" height="58" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="70" text-anchor="middle" style="fill:var(--blue);font-weight:700">CLI flags</text>
+    <text x="95" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">--model-path …</text>
+    <rect x="224" y="44" width="150" height="58" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="299" y="70" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ServerArgs</text>
+    <text x="299" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">parse + validate</text>
+    <rect x="428" y="44" width="150" height="58" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="503" y="70" text-anchor="middle" class="mono" style="fill:var(--teal);font-weight:700;font-size:13px">run_server</text>
+    <text x="503" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">build engine</text>
+    <rect x="632" y="44" width="150" height="58" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="707" y="70" text-anchor="middle" style="fill:var(--purple);font-weight:700">HTTP endpoint</text>
+    <text x="707" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">/generate · /v1</text>
+    <line x1="170" y1="73" x2="218" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="218,68 218,78 224,73" style="fill:var(--muted)"/>
+    <line x1="374" y1="73" x2="422" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="422,68 422,78 428,73" style="fill:var(--muted)"/>
+    <line x1="578" y1="73" x2="626" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="626,68 626,78 632,73" style="fill:var(--muted)"/>
+    <line x1="503" y1="102" x2="503" y2="150" style="stroke:var(--teal);stroke-width:1.5"/>
+    <polygon points="498,150 508,150 503,156" style="fill:var(--teal)"/>
+    <rect x="250" y="156" width="420" height="120" rx="12" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="460" y="180" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">engine · in-process</text>
+    <rect x="266" y="196" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="326" y="222" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:11px">Tokenizer</text>
+    <text x="326" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Manager</text>
+    <rect x="400" y="196" width="120" height="60" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="460" y="222" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:11px">Scheduler</text>
+    <text x="460" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">batch + fwd</text>
+    <rect x="534" y="196" width="120" height="60" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="594" y="222" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:11px">Detokenizer</text>
+    <text x="594" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Manager</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Boot path</b> — command-line <span class="mono">--flag</span>s parse into <span class="mono">ServerArgs</span>; <span class="mono">run_server</span> builds the engine (tokenizer + scheduler + detokenizer) and then exposes an HTTP / OpenAI-compatible endpoint (<span class="mono">/generate</span>, <span class="mono">/v1/...</span>).</div>
+</div>
+
 <h2>2. The key insight: every field is a knob</h2>
 <p>This is what the lesson really wants you to remember. <span class="mono">ServerArgs</span> is a <span class="mono">@dataclasses.dataclass</span>, and every field <strong>auto-maps</strong> to a <span class="mono">--kebab-case</span> command-line flag: field <span class="mono">tp_size</span> → flag <span class="mono">--tp-size</span>, field <span class="mono">mem_fraction_static</span> → flag <span class="mono">--mem-fraction-static</span>. So that "wall of flags" you see is essentially the list of this dataclass's fields.</p>
 <p>The rule is simple enough to state in one line: <strong>underscores become hyphens, prefixed with two dashes</strong>. The field type even dictates how the flag is used — a boolean field usually becomes a valueless switch (like <span class="mono">--enable-eplb</span>), int and float fields take a number, and string fields take a name (a backend, a quantization scheme). Because the mapping is mechanical and consistent, SGLang's <span class="mono">--help</span> is essentially auto-generated, and each flag's description often comes straight from the comment next to its field. Grasp this layer and reading docs, others' scripts, and writing your own launch command all get an order of magnitude faster.</p>
@@ -135,6 +247,33 @@ class ServerArgs:
 <p>How to choose? If you need to serve external clients, support many concurrent users, or plug into existing OpenAI-ecosystem tooling, use the HTTP server; if you just want to run a few thousand prompts in a script for offline eval, or embed a one-shot batch generation inside a training pipeline, <span class="mono">Engine</span> is lighter, faster, and easier to debug. The key realization: both modes share the <strong>exact same tuning knobs</strong> — whichever path you take, you set the same <span class="mono">ServerArgs</span> (or its equivalent constructor args), so the "flag ↔ component" map from this lesson applies to online and offline alike. That's the elegance of SGLang's design: one core, swappable facades.</p>
 
 <div class="cols"><div class="col"><strong>Engine (offline / in-process)</strong><br>Instantiate directly in a Python script, no HTTP, no network. Call generation in memory. Great for scripting, batch eval, offline data generation. Fast to start, low overhead.</div><div class="col"><strong>HTTP server (online)</strong><br>Long-lived process listening on a port, clients send requests over the network. Exposes <span class="mono">/generate</span> and OpenAI-compatible <span class="mono">/v1/...</span>. Great for production, external APIs, many concurrent clients.</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Two ways to use SGLang: the offline in-process Engine calls generate directly with no network, the online HTTP server listens on a port for REST requests; the same core sits underneath">
+    <rect x="30" y="40" width="320" height="150" rx="12" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="190" y="66" text-anchor="middle" style="fill:var(--teal);font-weight:700">Engine · offline (in-process)</text>
+    <rect x="50" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="106" class="mono" style="font-size:11px">import sglang as sgl</text>
+    <rect x="50" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="148" class="mono" style="font-size:11px">engine.generate(prompts)</text>
+    <text x="190" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">no network · batch / offline</text>
+    <rect x="430" y="40" width="320" height="150" rx="12" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="590" y="66" text-anchor="middle" style="fill:var(--blue);font-weight:700">HTTP server · online</text>
+    <rect x="450" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="106" class="mono" style="font-size:11px">launch_server process</text>
+    <rect x="450" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="148" class="mono" style="font-size:11px">POST /generate (REST)</text>
+    <text x="590" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">many clients · online serving</text>
+    <line x1="190" y1="190" x2="190" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="185,232 195,232 190,238" style="fill:var(--muted)"/>
+    <line x1="590" y1="190" x2="590" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="585,232 595,232 590,238" style="fill:var(--muted)"/>
+    <rect x="150" y="238" width="480" height="48" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="390" y="260" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">same core</text>
+    <text x="390" y="278" text-anchor="middle" style="fill:var(--muted);font-size:10px">engine + ServerArgs</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Offline Engine vs online HTTP</b> — left: <span class="mono">import sglang</span> and call <span class="mono">engine.generate(...)</span> in-process, no network (batch / offline); right: launch a server process and clients send REST requests (online, many clients). The same core sits underneath both.</div>
+</div>
 
 <p>Putting the two faces side by side drives home the value of "one core, two facades": during development you can iterate quickly in a script with <span class="mono">Engine</span>, validating prompts and sampling params, and once the logic stabilizes you flip to the HTTP server for production using the <strong>exact same set of flags</strong>, at almost zero migration cost. That consistency isn't a coincidence — both stuff their config into the same <span class="mono">ServerArgs</span> underneath. So when someone asks "how do I set that offline-script parameter on the online service", the answer is always the same: find the matching field name, swap underscores for hyphens, and prefix two dashes.</p>
 
@@ -161,6 +300,17 @@ class ServerArgs:
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (Lesson 35)
     max_running_requests: int = None   # --max-running-requests: batch cap (Lesson 5)
     # ... dozens more fields; each auto-maps to a --kebab-case CLI flag</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/launch_server.py ::run_server</span><span class="ln">pick and launch the right server flavor from ServerArgs</span></div><pre>def run_server(server_args):
+    # launch the right server flavor based on the parsed ServerArgs.
+    if server_args.grpc_mode:
+        serve_grpc(server_args)             # gRPC entrypoint
+    else:
+        # the default: HTTP / OpenAI-compatible server
+        from sglang.srt.entrypoints.http_server import launch_server
+        launch_server(server_args)          # builds engine + HTTP routes</pre></div>
+
+<p>Two concrete examples to line up the path. <strong>Online:</strong> <span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct --tp-size 2</span> — these flags are parsed into <span class="mono">ServerArgs</span>, handed to <span class="mono">run_server</span>, which takes the default branch to build the engine and serves HTTP on <span class="mono">:30000</span>. <strong>Offline:</strong> <span class="mono">sgl.Engine(model_path="meta-llama/Llama-3.1-8B-Instruct").generate(prompts)</span> — the same config takes the <span class="mono">Engine</span> flavor, generating in-process and skipping the network entirely.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>Launching takes one command: <span class="mono">python -m sglang.launch_server --model-path &lt;model&gt; [flags]</span>.</li>
@@ -211,6 +361,39 @@ LESSON_54 = {"zh": r"""
 
 <div class="flow"><div class="node">负载生成器<br><span class="mono">bench_serving</span></div><div class="arrow">→</div><div class="node">运行中的<br>SGLang 服务器</div><div class="arrow">→</div><div class="node">逐请求收集<br>TTFT / TPOT</div><div class="arrow">→</div><div class="node">聚合成<br><span class="mono">BenchmarkMetrics</span></div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="压测流水线：负载生成器按速率发射 N 个请求到 SGLang 服务器，服务器流式响应，逐请求采集 TTFT 与 TPOT，最后汇总成吞吐与 P50/P95/P99 百分位">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">压测流水线：发请求 → 采延迟 → 算百分位</text>
+    <rect x="18" y="50" width="165" height="66" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="78" text-anchor="middle" style="font-weight:700">负载生成器</text>
+    <text x="100" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">N 请求 @ rate</text>
+    <text x="192" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="205" y="50" width="165" height="66" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="287" y="78" text-anchor="middle" style="font-weight:700">SGLang 服务器</text>
+    <text x="287" y="100" text-anchor="middle" style="font-size:11px;fill:var(--muted)">流式响应</text>
+    <text x="379" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="392" y="50" width="165" height="66" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="474" y="78" text-anchor="middle" style="font-weight:700">逐请求采集</text>
+    <text x="474" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">TTFT · TPOT</text>
+    <text x="566" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="579" y="50" width="165" height="66" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="661" y="78" text-anchor="middle" style="font-weight:700">汇总指标</text>
+    <text x="661" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">P50·P95·P99</text>
+    <text x="18" y="150" style="fill:var(--muted);font-size:12px">延迟分布（右偏长尾）</text>
+    <line x1="40" y1="215" x2="740" y2="215" style="stroke:var(--line);stroke-width:1.5"/>
+    <polyline points="40,212 130,168 210,176 330,198 470,208 620,212 740,214" style="fill:none;stroke:var(--accent);stroke-width:2"/>
+    <line x1="210" y1="176" x2="210" y2="215" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="210" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">P50</text>
+    <line x1="560" y1="210" x2="560" y2="215" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="560" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">P95</text>
+    <line x1="660" y1="213" x2="660" y2="215" style="stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="664" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--purple)">P99 尾</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 压测流水线与百分位</b> — 负载生成器按 <span class="mono">request_rate</span> / 并发把 N 个请求打到服务器，服务器流式返回，逐请求记下 <span class="mono">TTFT</span> 与 <span class="mono">TPOT</span>，再汇总成吞吐与 P50/P95/P99；右偏长尾里 <span class="mono">P99</span> 才是用户真正的痛点。</div>
+</div>
+
+<p><strong>一个具体例子</strong>：<span class="mono">python -m sglang.bench_serving --backend sglang --request-rate 16 --num-prompts 1000</span> 会以 16 req/s 的速率把 1000 条 prompt 打到服务器，跑完后打印 <span class="mono">output_throughput</span> 以及 P50/P99 的 <span class="mono">ttft</span>；如果尾延迟难看，再开 profiler 看一段 trace，就能判断到底是 attention 还是 GEMM 占了大头。</p>
+
 <table class="t"><tr><th>指标</th><th>含义</th></tr>
 <tr><td><span class="mono">request_throughput</span></td><td>每秒完成的请求数（req/s）</td></tr>
 <tr><td><span class="mono">input_throughput</span></td><td>每秒吃进的 prompt token 数（tokens/s）</td></tr>
@@ -220,6 +403,33 @@ LESSON_54 = {"zh": r"""
 <tr><td><span class="mono">p99</span></td><td>分布的尾部——负载之下用户真正感受到的卡顿</td></tr></table>
 
 <div class="cols"><div class="col"><strong>benchmark（黑盒数字）</strong><br>向真实服务器发射负载，问"有多慢？慢在第几分位？"。产出 <span class="mono">request_throughput</span>、<span class="mono">ttft</span>、<span class="mono">tpot</span> 等汇总数字，负责<strong>量化</strong>。</div><div class="col"><strong>profiler（白盒时间线）</strong><br>录下每个 CUDA kernel 的时间线，问"为什么慢？慢在哪个 kernel / 哪个阶段？"。产出可在 <span class="mono">chrome://tracing</span> 打开的 trace，负责<strong>定位</strong>。</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="对比：基准只给出 tokens/s 与 TTFT 等结果数字，内部不可见是黑盒；profiler 时间线展开 GPU 上的 Attn 与 GEMM 等 kernel，看清 GEMM 最久是瓶颈，是白盒">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">基准（黑盒）vs profiler（白盒）</text>
+    <rect x="18" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="198" y="74" text-anchor="middle" style="font-weight:700;fill:var(--muted)">基准：只有结果</text>
+    <rect x="120" y="92" width="156" height="92" rx="8" style="fill:var(--ink);stroke:var(--line);stroke-width:1.5;opacity:0.85"/>
+    <text x="198" y="148" text-anchor="middle" style="font-size:38px;fill:var(--faint)">?</text>
+    <text x="34" y="120" style="font-size:12px;fill:var(--muted)">请求流 →</text>
+    <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
+    <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">知结果，不知原因</text>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler：看见过程</text>
+    <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="481" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <rect x="524" y="122" width="140" height="48" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="594" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">GEMM</text>
+    <rect x="668" y="122" width="30" height="48" rx="5" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="702" y="122" width="60" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="732" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <text x="683" y="192" text-anchor="middle" style="font-size:10px;fill:var(--faint)">bubble</text>
+    <text x="602" y="232" text-anchor="middle" style="font-size:12px;fill:var(--ink)">GPU kernel 时间线</text>
+    <text x="602" y="258" text-anchor="middle" style="font-weight:700;fill:var(--amber)">GEMM 最久 → 瓶颈</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 黑盒数字 vs 白盒时间线</b> — 基准给出 <span class="mono">tokens/s</span>、<span class="mono">TTFT</span> 等结果，却看不到内部（黑盒）；profiler 把盒子打开成一条 GPU kernel 时间线，<span class="mono">Attn</span> / <span class="mono">GEMM</span> / 空隙各占多少一目了然，于是能定位到「<span class="mono">GEMM</span> 最久」这种瓶颈（白盒）。</div>
+</div>
 
 <div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>预热服务器（warm up）</h4><p>先发几条请求，让 CUDA graph 捕获、显存分配、缓存都就绪，避免冷启动污染数据。</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>发射负载</h4><p>设定 <span class="mono">request rate</span> / 输入输出长度 / 数据集（如 ShareGPT），正式打压。</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>读取分位数</h4><p>看 mean / median / p90 / p95 / <span class="mono">p99</span>，重点关注尾部。</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>打开 profiler trace</h4><p>用 <span class="mono">chrome://tracing</span> / Perfetto 查看每个 kernel，定位瓶颈。</p></div></div></div>
 
@@ -235,6 +445,13 @@ class BenchmarkMetrics:
     mean_tpot_ms: float            # Time Per Output Token = token 间隔 (ITL)
     p99_tpot_ms: float
     # ... 还有 p90 / p95 变体, 以及 e2e 端到端延迟</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::benchmark</span><span class="ln">负载生成器：按速率打请求，采集并汇总延迟指标</span></div><pre>async def benchmark(backend, api_url, base_url, model_id, tokenizer,
+                    input_requests, request_rate, max_concurrency, ...):
+    # 负载生成器：按目标 request_rate 发射 input_requests
+    # （受 max_concurrency 限流），逐请求记录 TTFT/TPOT，
+    # 再归约成吞吐 + 延迟百分位（BenchmarkMetrics）。
+    ...</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>两段式循环</strong>：<span class="mono">benchmark</span> 量化"有多慢"，<span class="mono">profile</span> 定位"为什么慢"。</li>
@@ -286,6 +503,39 @@ class BenchmarkMetrics:
 
 <div class="flow"><div class="node">load generator<br><span class="mono">bench_serving</span></div><div class="arrow">→</div><div class="node">running<br>SGLang server</div><div class="arrow">→</div><div class="node">collect per-request<br>TTFT / TPOT</div><div class="arrow">→</div><div class="node">aggregate into<br><span class="mono">BenchmarkMetrics</span></div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 250" role="img" aria-label="Benchmark pipeline: the load generator fires N requests at a target rate into the SGLang server, the server streams responses, TTFT and TPOT are recorded per request, then aggregated into throughput and P50/P95/P99 percentiles">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">Benchmark pipeline: fire → collect → percentiles</text>
+    <rect x="18" y="50" width="165" height="66" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="100" y="78" text-anchor="middle" style="font-weight:700">load generator</text>
+    <text x="100" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">N reqs @ rate</text>
+    <text x="192" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="205" y="50" width="165" height="66" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="287" y="78" text-anchor="middle" style="font-weight:700">SGLang server</text>
+    <text x="287" y="100" text-anchor="middle" style="font-size:11px;fill:var(--muted)">streaming</text>
+    <text x="379" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="392" y="50" width="165" height="66" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="474" y="78" text-anchor="middle" style="font-weight:700">per request</text>
+    <text x="474" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">TTFT · TPOT</text>
+    <text x="566" y="90" text-anchor="middle" style="fill:var(--muted)">→</text>
+    <rect x="579" y="50" width="165" height="66" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="661" y="78" text-anchor="middle" style="font-weight:700">aggregate</text>
+    <text x="661" y="100" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">P50·P95·P99</text>
+    <text x="18" y="150" style="fill:var(--muted);font-size:12px">latency dist (right-skewed tail)</text>
+    <line x1="40" y1="215" x2="740" y2="215" style="stroke:var(--line);stroke-width:1.5"/>
+    <polyline points="40,212 130,168 210,176 330,198 470,208 620,212 740,214" style="fill:none;stroke:var(--accent);stroke-width:2"/>
+    <line x1="210" y1="176" x2="210" y2="215" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="210" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">P50</text>
+    <line x1="560" y1="210" x2="560" y2="215" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="560" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">P95</text>
+    <line x1="660" y1="213" x2="660" y2="215" style="stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 4"/>
+    <text x="664" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--purple)">P99 tail</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Benchmark pipeline & percentiles</b> — the load generator fires N requests at the server by <span class="mono">request_rate</span> / concurrency, the server streams back, each request's <span class="mono">TTFT</span> and <span class="mono">TPOT</span> is recorded, then aggregated into throughput and P50/P95/P99; in the right-skewed tail, <span class="mono">P99</span> is the user's real pain point.</div>
+</div>
+
+<p><strong>A concrete example</strong>: <span class="mono">python -m sglang.bench_serving --backend sglang --request-rate 16 --num-prompts 1000</span> drives 1000 prompts at 16 req/s and, when done, prints <span class="mono">output_throughput</span> plus P50/P99 <span class="mono">ttft</span>; if the tail looks bad, capture a profiler trace next and you can tell whether attention or GEMM dominates.</p>
+
 <table class="t"><tr><th>Metric</th><th>Meaning</th></tr>
 <tr><td><span class="mono">request_throughput</span></td><td>requests finished per second (req/s)</td></tr>
 <tr><td><span class="mono">input_throughput</span></td><td>prompt tokens ingested per second (tokens/s)</td></tr>
@@ -295,6 +545,33 @@ class BenchmarkMetrics:
 <tr><td><span class="mono">p99</span></td><td>the tail of the distribution — what users actually feel under load</td></tr></table>
 
 <div class="cols"><div class="col"><strong>benchmark (black-box numbers)</strong><br>Fires load at a real server, asking "how slow? slow at which percentile?". Produces summary numbers like <span class="mono">request_throughput</span>, <span class="mono">ttft</span>, <span class="mono">tpot</span> — it <strong>quantifies</strong>.</div><div class="col"><strong>profiler (white-box timeline)</strong><br>Records the timeline of every CUDA kernel, asking "why slow? which kernel / which phase?". Produces a trace you open in <span class="mono">chrome://tracing</span> — it <strong>locates</strong>.</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Contrast: the benchmark only gives result numbers like tokens/s and TTFT with internals hidden (black box); the profiler timeline unfolds GPU kernels like Attn and GEMM, showing GEMM is longest and the bottleneck (white box)">
+    <text x="20" y="28" style="font-weight:700;fill:var(--accent-ink)">benchmark (black box) vs profiler (white box)</text>
+    <rect x="18" y="48" width="360" height="224" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="198" y="74" text-anchor="middle" style="font-weight:700;fill:var(--muted)">benchmark: results only</text>
+    <rect x="120" y="92" width="156" height="92" rx="8" style="fill:var(--ink);stroke:var(--line);stroke-width:1.5;opacity:0.85"/>
+    <text x="198" y="148" text-anchor="middle" style="font-size:38px;fill:var(--faint)">?</text>
+    <text x="34" y="120" style="font-size:12px;fill:var(--muted)">requests →</text>
+    <text x="198" y="212" text-anchor="middle" class="mono" style="font-size:12px;fill:var(--ink)">tokens/s · TTFT</text>
+    <text x="198" y="246" text-anchor="middle" style="font-size:12px;fill:var(--muted)">outcome, not why</text>
+    <rect x="422" y="48" width="360" height="224" rx="10" style="fill:var(--panel);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="602" y="74" text-anchor="middle" style="font-weight:700;fill:var(--accent-ink)">profiler: see the process</text>
+    <line x1="442" y1="172" x2="762" y2="172" style="stroke:var(--line);stroke-width:1.5"/>
+    <rect x="442" y="122" width="78" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="481" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <rect x="524" y="122" width="140" height="48" rx="5" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="594" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--amber)">GEMM</text>
+    <rect x="668" y="122" width="30" height="48" rx="5" style="fill:var(--faint);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="702" y="122" width="60" height="48" rx="5" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="732" y="151" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--blue)">Attn</text>
+    <text x="683" y="192" text-anchor="middle" style="font-size:10px;fill:var(--faint)">bubble</text>
+    <text x="602" y="232" text-anchor="middle" style="font-size:12px;fill:var(--ink)">GPU kernel timeline</text>
+    <text x="602" y="258" text-anchor="middle" style="font-weight:700;fill:var(--amber)">GEMM longest → bottleneck</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Black-box numbers vs white-box timeline</b> — the benchmark gives results like <span class="mono">tokens/s</span> and <span class="mono">TTFT</span> but hides the internals (black box); the profiler opens the box into a GPU kernel timeline where the shares of <span class="mono">Attn</span> / <span class="mono">GEMM</span> / gaps are obvious, so you can pin a bottleneck like "<span class="mono">GEMM</span> is longest" (white box).</div>
+</div>
 
 <div class="vflow"><div class="step"><div class="num">1</div><div class="sc"><h4>warm up the server</h4><p>Send a few requests first so CUDA-graph capture, memory allocation, and caches are ready, avoiding cold-start contamination.</p></div></div><div class="step"><div class="num">2</div><div class="sc"><h4>run the load</h4><p>Set <span class="mono">request rate</span> / input-output lengths / dataset (e.g. ShareGPT) and fire for real.</p></div></div><div class="step"><div class="num">3</div><div class="sc"><h4>read the percentiles</h4><p>Look at mean / median / p90 / p95 / <span class="mono">p99</span>, focusing on the tail.</p></div></div><div class="step"><div class="num">4</div><div class="sc"><h4>open the profiler trace</h4><p>Use <span class="mono">chrome://tracing</span> / Perfetto to inspect each kernel and locate the bottleneck.</p></div></div></div>
 
@@ -310,6 +587,13 @@ class BenchmarkMetrics:
     mean_tpot_ms: float            # Time Per Output Token = inter-token latency (ITL)
     p99_tpot_ms: float
     # ... also p90 / p95 variants, and e2e latency</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/benchmark/serving.py ::benchmark</span><span class="ln">load generator: fire requests at a rate, collect &amp; reduce latency metrics</span></div><pre>async def benchmark(backend, api_url, base_url, model_id, tokenizer,
+                    input_requests, request_rate, max_concurrency, ...):
+    # the load generator: fire input_requests at the target request_rate
+    # (capped by max_concurrency), record TTFT/TPOT per request, then
+    # reduce to throughput + latency percentiles (BenchmarkMetrics).
+    ...</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Two-stage loop</strong>: <span class="mono">benchmark</span> quantifies "how slow," <span class="mono">profile</span> locates "why slow."</li>
@@ -347,6 +631,47 @@ LESSON_55 = {"zh": r"""
 <p>用 <span class="mono">popen_launch_server</span> 拉起真实服务器 → 发请求 → 校验输出/准确率。慢、吃 GPU，但能证明整屋「通电」无误。</p>
 </div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="单元测试不起服务器，直接 import 函数并断言输出，毫秒级无 GPU；端到端测试用 popen_launch_server 拉起真实服务器子进程，发 HTTP 请求校验后再拆除">
+    <line x1="390" y1="20" x2="390" y2="282" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="32" style="font-weight:700;fill:var(--blue)">单元测试 · 不起服务器</text>
+    <rect x="24" y="48" width="220" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="134" y="72" text-anchor="middle" class="mono" style="font-size:12px">import 函数 / 类</text>
+    <line x1="134" y1="86" x2="134" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="134,112 128,104 140,104" style="fill:var(--line)"/>
+    <rect x="24" y="112" width="220" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="134" y="136" text-anchor="middle" class="mono" style="font-size:12px">assert 输出</text>
+    <rect x="24" y="186" width="260" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="154" y="206" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">毫秒级 · 无 GPU</text>
+    <text x="154" y="223" text-anchor="middle" style="fill:var(--teal);font-size:11px">失败时定位精准</text>
+    <text x="414" y="32" style="font-weight:700;fill:var(--purple)">端到端测试 · 起一个服务器</text>
+    <rect x="414" y="48" width="320" height="36" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="574" y="71" text-anchor="middle" class="mono" style="font-size:12px">popen_launch_server</text>
+    <line x1="574" y1="84" x2="574" y2="100" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,106 568,98 580,98" style="fill:var(--line)"/>
+    <rect x="414" y="106" width="320" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="574" y="129" text-anchor="middle" style="font-size:12px">真实服务器子进程</text>
+    <line x1="574" y1="142" x2="574" y2="158" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,164 568,156 580,156" style="fill:var(--line)"/>
+    <rect x="414" y="164" width="320" height="36" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="574" y="187" text-anchor="middle" style="font-size:12px">HTTP 请求 / 响应</text>
+    <rect x="414" y="220" width="320" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="574" y="247" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">慢 · 吃 GPU · 跑完拆除</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 单元测试 vs 端到端测试</b> — 单元测试直接 <span class="mono">import</span> 函数并断言输出，毫秒级、不占 GPU；端到端测试用 <span class="mono">popen_launch_server</span> 拉起真实服务器子进程，发 HTTP 请求校验后再把它拆除。</div>
+</div>
+
+<p>举两个具体例子：一个采样辅助函数的单元测试只需 <span class="mono">import</span> 它、喂一组 logits、断言挑出的 token 对不对，整个过程在毫秒级完成、完全不碰 GPU；而一个端到端准确率测试会先用 <span class="mono">popen_launch_server</span> 拉起服务器，再在 <span class="mono">GSM8K</span> 数据集上跑一遍，断言得分高于某个阈值（比如 0.8）才算通过。下面这个辅助函数就是端到端测试的「起服务器」入口：</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">起一个真实服务器子进程，轮询 /health 直到就绪</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+                        other_args=None, ...):
+    # spawn a REAL server subprocess:
+    #   python -m sglang.launch_server --model-path model ...other_args
+    # then poll /health until ready (or raise on `timeout`). e2e tests
+    # hit this server over HTTP, then tear it down.
+    ...
+    return process</pre></div>
+
 <h2>二、基类 CustomTestCase：保证善后</h2>
 <p>SGLang 的测试不直接继承裸的 <span class="mono">unittest.TestCase</span>，而是继承 <span class="mono">CustomTestCase</span>。它做的事看似微小却很关键：<strong>包裹 <span class="mono">setUpClass</span>，使得即便 <span class="mono">setUpClass</span> 抛异常，<span class="mono">tearDownClass</span> 也一定会被调用</strong>。这里要先理解 <span class="mono">setUpClass</span> 与 <span class="mono">tearDownClass</span> 是一对：前者在一个测试类里所有用例开始前跑一次（往往就是在这里拉起服务器、占用端口、申请显存），后者在所有用例结束后跑一次（负责把这些资源全部释放掉）。</p>
 <p>为什么重要？原生 <span class="mono">unittest</span> 的行为是：如果 <span class="mono">setUpClass</span> 失败，它会<strong>跳过</strong> <span class="mono">tearDownClass</span>。在一个会启动服务器的测试套件里，这意味着已经占用的<strong>端口</strong>和拉起的 <span class="mono">GPU</span> 进程不会被回收——于是端口被占、显存被占，后面的测试想再拉一台服务器时，要么端口冲突起不来，要么显存不足直接崩，最终<strong>连环失败</strong>。更糟的是，这种失败往往看起来和真正出问题的那个测试毫无关系，排查起来极其费神。<span class="mono">CustomTestCase</span> 用 <span class="mono">__init_subclass__</span> 在每个子类定义时自动把 <span class="mono">setUpClass</span> 包一层 <span class="mono">try/except</span>，异常时先调用 <span class="mono">tearDownClass</span> 清理、再把异常重新抛出，从而保证清理一定发生。这让「一个坏掉的 setup 不会毒害整套测试」，正是上面类比里那条「无论如何都要拉闸收工」的铁律。</p>
@@ -377,6 +702,36 @@ LESSON_55 = {"zh": r"""
 <p>这里「打标签的运行机」是关键一环：不同测试对硬件的要求不同——有的只需一张消费级显卡，有的要多卡做张量并行，有的要特定型号才能复现某个内核的行为。CI 通过标签把每一片测试精确地投递到符合要求的机器上，既不会让小测试白占大机器，也不会让大测试被分到带不动的机器上。理解了这套分片加标签的调度，你就能明白为什么有时你的 PR 要排队等某类 GPU 空闲，也能在写测试时主动声明它真正需要的资源，避免浪费集群算力、拖慢所有人的 CI。</p>
 
 <div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit 风格/lint</div><div class="arrow">→</div><div class="node">CI 分片 · GPU 运行机</div><div class="arrow">→</div><div class="node">合并门禁 merge</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 820 280" role="img" aria-label="PR 推送先过 pre-commit 风格与 lint，再进入 CI 把测试分桶并行跑在 GPU runners 上（单元、端到端、准确率三片），全绿才进入合并">
+    <rect x="20" y="112" width="120" height="48" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="80" y="141" text-anchor="middle" style="font-weight:700;font-size:12px">PR 推送</text>
+    <line x1="140" y1="136" x2="168" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="174,136 166,131 166,141" style="fill:var(--line)"/>
+    <rect x="174" y="112" width="146" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="247" y="133" text-anchor="middle" style="font-weight:700;font-size:12px">pre-commit</text>
+    <text x="247" y="150" text-anchor="middle" style="font-size:11px">lint / 格式</text>
+    <line x1="320" y1="136" x2="348" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="354,136 346,131 346,141" style="fill:var(--line)"/>
+    <rect x="354" y="40" width="286" height="200" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="497" y="62" text-anchor="middle" style="fill:var(--muted);font-weight:700;font-size:12px">CI 分桶并行 · GPU runners</text>
+    <rect x="376" y="78" width="242" height="42" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="497" y="104" text-anchor="middle" style="font-size:12px">单元 · 分片 1</text>
+    <rect x="376" y="128" width="242" height="42" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="497" y="154" text-anchor="middle" style="font-size:12px">端到端 · 分片 2</text>
+    <rect x="376" y="178" width="242" height="42" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="497" y="204" text-anchor="middle" style="font-size:12px">准确率 · 分片 3</text>
+    <line x1="640" y1="140" x2="668" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="674,140 666,135 666,145" style="fill:var(--line)"/>
+    <rect x="674" y="116" width="130" height="48" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="739" y="139" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">合并 merge</text>
+    <text x="739" y="156" text-anchor="middle" style="fill:var(--teal);font-size:11px">全绿才合并</text>
+  </svg>
+  <div class="figcap"><b>图 2 · CI 流水线</b> — 推上去的 PR 先过 <span class="mono">pre-commit</span>（lint/格式），再进入 CI：把测试<strong>分桶</strong>派到多台 GPU runner 上并行跑（单元、端到端、准确率三片），全部变绿才进入合并门禁。</div>
+</div>
+
+<p>正因为有分桶，CI 才能把成百上千个测试文件拆散、分到多台 runner 上同时跑，让整个套件在并行下几分钟跑完，而不是串行排上几个小时。</p>
 
 <h2>四、把工具对号入座</h2>
 <p>记住几个关键辅助件各自的角色，写测试时就不会乱。它们分工明确：基类管「善后」，启动器管「拉起服务」，运行器管「发现并执行」。理清这三者，你就能看懂任意一个 SGLang 测试文件的骨架。</p>
@@ -424,6 +779,47 @@ LESSON_55 = {"zh": r"""
 <p>Use <span class="mono">popen_launch_server</span> to bring up a real server → send requests → verify outputs/accuracy. Slow and GPU-hungry, but proves the whole house is "powered" correctly.</p>
 </div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="A unit test launches no server: it imports a function and asserts its output, millisecond-scale with no GPU; an e2e test uses popen_launch_server to spawn a real server subprocess, sends HTTP requests to verify, then tears it down">
+    <line x1="390" y1="20" x2="390" y2="282" style="stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="24" y="32" style="font-weight:700;fill:var(--blue)">Unit test · no server</text>
+    <rect x="24" y="48" width="240" height="38" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="144" y="72" text-anchor="middle" class="mono" style="font-size:12px">import function / class</text>
+    <line x1="144" y1="86" x2="144" y2="106" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="144,112 138,104 150,104" style="fill:var(--line)"/>
+    <rect x="24" y="112" width="240" height="38" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="144" y="136" text-anchor="middle" class="mono" style="font-size:12px">assert output</text>
+    <rect x="24" y="186" width="280" height="46" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="164" y="206" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">ms-scale · no GPU</text>
+    <text x="164" y="223" text-anchor="middle" style="fill:var(--teal);font-size:11px">precise on failure</text>
+    <text x="414" y="32" style="font-weight:700;fill:var(--purple)">E2E test · launches a server</text>
+    <rect x="414" y="48" width="320" height="36" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="574" y="71" text-anchor="middle" class="mono" style="font-size:12px">popen_launch_server</text>
+    <line x1="574" y1="84" x2="574" y2="100" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,106 568,98 580,98" style="fill:var(--line)"/>
+    <rect x="414" y="106" width="320" height="36" rx="6" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <text x="574" y="129" text-anchor="middle" style="font-size:12px">real server subprocess</text>
+    <line x1="574" y1="142" x2="574" y2="158" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="574,164 568,156 580,156" style="fill:var(--line)"/>
+    <rect x="414" y="164" width="320" height="36" rx="6" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="574" y="187" text-anchor="middle" style="font-size:12px">HTTP request / response</text>
+    <rect x="414" y="220" width="320" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="574" y="247" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">slow · GPU · torn down</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Unit test vs e2e test</b> — a unit test just <span class="mono">import</span>s the function and asserts its output—millisecond-scale, no GPU; an e2e test uses <span class="mono">popen_launch_server</span> to spawn a real server subprocess, sends HTTP requests to verify, then tears it down.</div>
+</div>
+
+<p>Two concrete examples: a unit test for a sampling helper just <span class="mono">import</span>s it, feeds a set of logits, and asserts the chosen token is right—all in milliseconds, never touching a GPU; an e2e accuracy test instead calls <span class="mono">popen_launch_server</span> to bring up a server, runs the <span class="mono">GSM8K</span> dataset through it, and passes only if the score is above a threshold (say 0.8). The helper below is exactly that "launch a server" entry point for e2e tests:</p>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/test/test_utils.py ::popen_launch_server</span><span class="ln">spawn a real server subprocess, poll /health until ready</span></div><pre>def popen_launch_server(model, base_url, timeout, api_key=None,
+                        other_args=None, ...):
+    # spawn a REAL server subprocess:
+    #   python -m sglang.launch_server --model-path model ...other_args
+    # then poll /health until ready (or raise on `timeout`). e2e tests
+    # hit this server over HTTP, then tear it down.
+    ...
+    return process</pre></div>
+
 <h2>2. The base class CustomTestCase: guarantee cleanup</h2>
 <p>SGLang tests don't inherit bare <span class="mono">unittest.TestCase</span>; they inherit <span class="mono">CustomTestCase</span>. What it does looks tiny but matters a lot: it <strong>wraps <span class="mono">setUpClass</span> so that even if <span class="mono">setUpClass</span> raises, <span class="mono">tearDownClass</span> is still called</strong>.</p>
 <p>Why does this matter? Plain <span class="mono">unittest</span> behaves like this: if <span class="mono">setUpClass</span> fails, it <strong>skips</strong> <span class="mono">tearDownClass</span>. In a suite that launches servers, that means the <strong>ports</strong> already taken and the <span class="mono">GPU</span> processes already spawned won't be reclaimed—so ports stay occupied, VRAM stays occupied, and later tests cascade-fail. <span class="mono">CustomTestCase</span> guarantees cleanup happens, so "one broken setup doesn't poison the whole suite." This is exactly the "flip the breaker and pack up no matter what" rule from the analogy.</p>
@@ -450,6 +846,36 @@ LESSON_55 = {"zh": r"""
 <p>A contributor's typical workflow: <strong>find or add</strong> the matching test under <span class="mono">test/registered/unit/…</span>, run it locally with <span class="mono">pytest</span> until it passes, then push; CI re-runs it on real GPUs. Knowing this chain lets you <strong>confidently add coverage</strong> for your change. This ties Lesson 13 (the server those e2e tests launch) to <strong>Lesson 56</strong> (the PR flow that actually runs these tests). There's also a dedicated project convention/skill for writing SGLang tests to reference.</p>
 
 <div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit style/lint</div><div class="arrow">→</div><div class="node">CI partitioned · GPU runners</div><div class="arrow">→</div><div class="node">merge gate</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 820 280" role="img" aria-label="A pushed PR first clears pre-commit lint and format, then enters CI which partitions tests across GPU runners (unit, e2e, accuracy shards) running in parallel; only all-green reaches merge">
+    <rect x="20" y="112" width="120" height="48" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="80" y="141" text-anchor="middle" style="font-weight:700;font-size:12px">PR push</text>
+    <line x1="140" y1="136" x2="168" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="174,136 166,131 166,141" style="fill:var(--line)"/>
+    <rect x="174" y="112" width="146" height="48" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="247" y="133" text-anchor="middle" style="font-weight:700;font-size:12px">pre-commit</text>
+    <text x="247" y="150" text-anchor="middle" style="font-size:11px">lint / format</text>
+    <line x1="320" y1="136" x2="348" y2="136" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="354,136 346,131 346,141" style="fill:var(--line)"/>
+    <rect x="354" y="40" width="286" height="200" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:5 5"/>
+    <text x="497" y="62" text-anchor="middle" style="fill:var(--muted);font-weight:700;font-size:12px">CI partitioned · GPU runners</text>
+    <rect x="376" y="78" width="242" height="42" rx="6" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="497" y="104" text-anchor="middle" style="font-size:12px">unit · shard 1</text>
+    <rect x="376" y="128" width="242" height="42" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="497" y="154" text-anchor="middle" style="font-size:12px">e2e · shard 2</text>
+    <rect x="376" y="178" width="242" height="42" rx="6" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="497" y="204" text-anchor="middle" style="font-size:12px">accuracy · shard 3</text>
+    <line x1="640" y1="140" x2="668" y2="140" style="stroke:var(--line);stroke-width:1.5"/>
+    <polygon points="674,140 666,135 666,145" style="fill:var(--line)"/>
+    <rect x="674" y="116" width="130" height="48" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="739" y="139" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">merge</text>
+    <text x="739" y="156" text-anchor="middle" style="fill:var(--teal);font-size:11px">all green to merge</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · CI pipeline</b> — a pushed PR first clears <span class="mono">pre-commit</span> (lint/format), then enters CI: it <strong>partitions</strong> the tests across many GPU runners to run in parallel (unit, e2e, accuracy shards), and only when all turn green does it reach the merge gate.</div>
+</div>
+
+<p>Partitioning is exactly why CI can split hundreds of test files across many runners and run them at once, finishing the whole suite in a few parallel minutes instead of hours of serial launches.</p>
 
 <h2>4. Matching the tools to their roles</h2>
 <p>Remember the role of each key helper and you won't get lost when writing tests:</p>
@@ -491,6 +917,46 @@ LESSON_56 = {"zh": r"""
 <p>新贡献者<strong>不能直接向官方仓库 push</strong>，所以第一步永远是 <strong>fork</strong>——在 GitHub 上点一下，把 <span class="mono">sgl-project/sglang</span> 复制成 <span class="mono">&lt;你的用户名&gt;/sglang</span>。接着把<strong>你自己的 fork</strong> clone 到本地，<span class="mono">git checkout -b my-feature</span> 开一条分支，在分支上做改动。改完之后不要急着 push：先用 <span class="mono">pre-commit</span> 把格式和 lint 过一遍，再按 <strong>第55课</strong> 的方法补一个单元测试并在本地跑通，确认通过后才 <span class="mono">git push origin my-feature</span>，最后在 GitHub 上对着 <span class="mono">main</span> 分支开一个 <strong>Pull Request</strong>。整条链路是：<strong>fork → clone → branch → change → pre-commit → test → push → PR</strong>，每一环都不能跳。</p>
 <p>为什么要在自己的分支上工作，而不是直接在 <span class="mono">main</span> 上改？因为<strong>分支让每一项工作彼此隔离</strong>。一个分支只承载一个功能或一处修复，万一这个改动有问题，删掉分支即可，不会污染你 fork 上干净的 <span class="mono">main</span>。这也方便你<strong>同时推进多个独立的贡献</strong>：每个想法一条分支，互不干扰。分支名最好能<strong>说明意图</strong>，例如 <span class="mono">fix-sampling-overflow</span> 或 <span class="mono">add-glm-model</span>，让 reviewer 一看名字就大概知道你在做什么。</p>
 <p>开 PR 时还有一个常被忽略的细节：要让 PR 的<strong>目标分支是官方仓库的 <span class="mono">main</span></strong>，源分支是你 fork 上的 <span class="mono">my-feature</span>。GitHub 会自动比较两边的差异，把你的提交集中展示给维护者。从这一刻起，你的代码就进入了<strong>公开评审</strong>：CI 会自动触发，维护者会留下评论，你可能需要根据反馈在同一条分支上继续 commit、再 push，PR 会自动更新。这个"提交—反馈—修订"的循环，正是开源协作的核心。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 240" role="img" aria-label="贡献流程：fork 复制仓库 → 开分支 → pre-commit → 跑测试 → 推送 → 开 PR，再由 CI 与审阅者把关合并">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">贡献者路径</text>
+    <rect x="24" y="64" width="104" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="76" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">Fork</text>
+    <text x="76" y="108" text-anchor="middle" style="font-size:11px;fill:var(--muted)">复制仓库</text>
+    <rect x="148" y="64" width="104" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">分支</text>
+    <text x="200" y="108" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">git branch</text>
+    <rect x="272" y="64" width="104" height="58" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="324" y="90" text-anchor="middle" class="mono" style="font-size:12px;font-weight:700">pre-commit</text>
+    <text x="324" y="108" text-anchor="middle" style="font-size:11px;fill:var(--muted)">自动格式化</text>
+    <rect x="396" y="64" width="104" height="58" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="448" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">测试</text>
+    <text x="448" y="108" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">pytest</text>
+    <rect x="520" y="64" width="104" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="572" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">推送</text>
+    <text x="572" y="108" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">git push</text>
+    <rect x="644" y="64" width="104" height="58" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="696" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">开 PR</text>
+    <text x="696" y="108" text-anchor="middle" style="font-size:11px;fill:var(--muted)">合并请求</text>
+    <line x1="130" y1="93" x2="146" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="140,89 146,93 140,97" style="fill:var(--faint)"/>
+    <line x1="254" y1="93" x2="270" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="264,89 270,93 264,97" style="fill:var(--faint)"/>
+    <line x1="378" y1="93" x2="394" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="388,89 394,93 388,97" style="fill:var(--faint)"/>
+    <line x1="502" y1="93" x2="518" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="512,89 518,93 512,97" style="fill:var(--faint)"/>
+    <line x1="626" y1="93" x2="642" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="636,89 642,93 636,97" style="fill:var(--faint)"/>
+    <line x1="696" y1="122" x2="696" y2="156" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="692,150 696,158 700,150" style="fill:var(--faint)"/>
+    <rect x="24" y="158" width="724" height="54" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="386" y="181" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--amber)">CI + 审阅者把关</text>
+    <text x="386" y="200" text-anchor="middle" style="font-size:12px;fill:var(--muted)">通过后才能合并进 main</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 贡献流程</b> — fork 复制仓库 → 开分支 → <span class="mono">pre-commit</span> 自动格式化/lint → 跑测试 → push → 开 PR；最后由 CI 与审阅者一起把关，通过后才合并进 <span class="mono">main</span>。</div>
+</div>
 
 <h2>pre-commit：风格与 lint 的关卡</h2>
 <p><span class="mono">pre-commit</span> 是 SGLang 的<strong>统一格式化与静态检查关卡</strong>。三条命令就能用起来：<span class="mono">pip3 install pre-commit</span> 装工具，<span class="mono">pre-commit install</span> 把它<strong>注册成 git 钩子</strong>（这样你每次 commit 时它会自动跑），<span class="mono">pre-commit run --all-files</span> 对所有文件跑一遍配置好的检查——black、isort 等等——并<strong>自动应用能修的改动</strong>。这里有个关键细节：<strong>第一次跑很可能失败</strong>，因为它会就地改写你的文件（重排 import、补空行、统一引号）。这不是错误，而是它在帮你修。你要做的是<strong>把这些自动改动 add 进来，然后再跑一次</strong>，<strong>反复重跑直到全部 PASS</strong> 为止。必须在开 PR 之前就让它全绿，因为 CI（第55课）会跑<strong>完全相同</strong>的检查，你本地不过，CI 也不会过，PR 会被卡住无法合并。</p>
@@ -535,6 +1001,42 @@ LESSON_56 = {"zh": r"""
 <div class="col"><strong>❌ 难审的 PR</strong><br>一次塞进上千行、夹带无关改动；没有任何测试；描述只有一句"fix bug"，不解释动机。reviewer 不敢合，PR 长期搁置。</div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 330" role="img" aria-label="好 PR（小而有测试）vs 难审 PR：好 PR 审得快，难审 PR 慢或长期停滞">
+    <rect x="20" y="20" width="368" height="294" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="412" y="20" width="368" height="294" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="36" y="36" width="336" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="204" y="63" text-anchor="middle" style="font-size:14px;font-weight:700;fill:var(--teal)">✅ 好 PR · 小而有测试</text>
+    <rect x="428" y="36" width="336" height="44" rx="8" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="596" y="63" text-anchor="middle" style="font-size:14px;font-weight:700;fill:var(--red)">❌ 难审 PR · 大而杂</text>
+    <rect x="44" y="104" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="116" style="font-size:13px">小而聚焦</text>
+    <rect x="44" y="136" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="148" style="font-size:13px">一个关注点</text>
+    <rect x="44" y="168" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="180" style="font-size:13px">含单元测试</text>
+    <rect x="44" y="200" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="212" style="font-size:13px">描述清晰</text>
+    <rect x="436" y="104" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="116" style="font-size:13px">改动巨大</text>
+    <rect x="436" y="136" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="148" style="font-size:13px">多个关注点</text>
+    <rect x="436" y="168" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="180" style="font-size:13px">没有测试</text>
+    <rect x="436" y="200" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="212" style="font-size:13px">描述含糊</text>
+    <text x="44" y="246" style="font-size:12px;fill:var(--muted)">审阅耗时</text>
+    <rect x="44" y="256" width="120" height="26" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="104" y="274" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--teal)">快</text>
+    <text x="44" y="304" style="font-size:12px;fill:var(--teal)">→ 几分钟审完</text>
+    <text x="436" y="246" style="font-size:12px;fill:var(--muted)">审阅耗时</text>
+    <rect x="436" y="256" width="320" height="26" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="596" y="274" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--red)">慢 / 停滞</text>
+    <text x="436" y="304" style="font-size:12px;fill:var(--red)">→ 长期搁置</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 好 PR vs 难审 PR</b> — 好 PR 改动小、只做一件事、带测试、描述清晰，审阅几分钟搞定；难审 PR 改动巨大、夹带多个关注点、没有测试、描述含糊，审阅慢甚至长期停滞。</div>
+</div>
+
 <div class="flow">
 <div class="node">本地 pre-commit + pytest</div>
 <div class="arrow">→</div>
@@ -561,6 +1063,20 @@ pytest test/registered/unit/ -v
 
 # 4) push your branch and open a Pull Request against main
 git push origin my-feature</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">.pre-commit-config.yaml</span><span class="ln">提交即运行的钩子：格式化、lint、拼写、私钥检测…</span></div><pre># .pre-commit-config.yaml — runs automatically on `git commit`
+repos:
+  - repo: pre-commit-hooks      # trailing-whitespace, end-of-file-fixer,
+    hooks: [check-yaml, check-ast, detect-private-key, ...]
+  - repo: isort                 # sort imports
+  - repo: ruff                  # Python lint
+  - repo: black (black-jupyter) # Python format
+  - repo: codespell             # spell-check
+  - repo: clang-format          # C++/CUDA format
+  - repo: local
+    hooks: [check-chinese-characters, sort-ci-permissions, ...]</pre></div>
+
+<p>具体怎么用？<span class="mono">pip install pre-commit &amp;&amp; pre-commit install</span> 一次性把这些钩子<strong>挂上 git</strong>，之后每次 <span class="mono">git commit</span> 它们都会自动跑：<span class="mono">ruff</span> + <span class="mono">black</span> 直接把风格问题改好，于是 reviewer 不必纠结格式，可以<strong>专心看逻辑</strong>。再配合“一个 PR 只做一件事、并带上测试”，你的改动就<strong>又好审又好合</strong>。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div>
 <ul>
@@ -589,6 +1105,46 @@ git push origin my-feature</pre></div>
 <p>New contributors <strong>cannot push directly to the official repo</strong>, so step one is always <strong>fork</strong> — one click on GitHub copies <span class="mono">sgl-project/sglang</span> into <span class="mono">&lt;your_user_name&gt;/sglang</span>. Then clone <strong>your own fork</strong> locally, run <span class="mono">git checkout -b my-feature</span> to open a branch, and make your change on it. Don't rush to push afterwards: first run <span class="mono">pre-commit</span> over formatting and lint, then add a unit test the way <strong>Lesson 55</strong> describes and run it locally, and only once it's green do <span class="mono">git push origin my-feature</span> and finally open a <strong>Pull Request</strong> against the <span class="mono">main</span> branch on GitHub. The chain is <strong>fork → clone → branch → change → pre-commit → test → push → PR</strong>, and no link can be skipped.</p>
 <p>Why work on your own branch instead of editing <span class="mono">main</span> directly? Because <strong>a branch isolates each piece of work</strong>. One branch carries one feature or one fix, so if a change turns out wrong you just delete the branch — it never pollutes the clean <span class="mono">main</span> on your fork. It also lets you <strong>pursue several independent contributions at once</strong>: one idea per branch, none interfering. Branch names should <strong>signal intent</strong>, e.g. <span class="mono">fix-sampling-overflow</span> or <span class="mono">add-glm-model</span>, so a reviewer roughly knows what you're doing from the name alone.</p>
 <p>When opening the PR there's an often-missed detail: the PR's <strong>target branch must be the official repo's <span class="mono">main</span></strong>, with the source being <span class="mono">my-feature</span> on your fork. GitHub automatically diffs the two sides and presents your commits to the maintainers. From that moment your code enters <strong>public review</strong>: CI triggers automatically, maintainers leave comments, and you may need to keep committing on the same branch in response to feedback and push again — the PR updates itself. This "submit–feedback–revise" loop is the heart of open-source collaboration.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 800 240" role="img" aria-label="Contribution flow: fork repo → branch → pre-commit → test → push → open PR, gated by CI and reviewers before merge">
+    <text x="24" y="30" style="font-weight:700;fill:var(--muted)">Contributor path</text>
+    <rect x="24" y="64" width="104" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="76" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">Fork</text>
+    <text x="76" y="108" text-anchor="middle" style="font-size:11px;fill:var(--muted)">copy repo</text>
+    <rect x="148" y="64" width="104" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="200" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">Branch</text>
+    <text x="200" y="108" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">git branch</text>
+    <rect x="272" y="64" width="104" height="58" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="324" y="90" text-anchor="middle" class="mono" style="font-size:12px;font-weight:700">pre-commit</text>
+    <text x="324" y="108" text-anchor="middle" style="font-size:11px;fill:var(--muted)">auto-format</text>
+    <rect x="396" y="64" width="104" height="58" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="448" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">Test</text>
+    <text x="448" y="108" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">pytest</text>
+    <rect x="520" y="64" width="104" height="58" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="572" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">Push</text>
+    <text x="572" y="108" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--muted)">git push</text>
+    <rect x="644" y="64" width="104" height="58" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="696" y="90" text-anchor="middle" style="font-size:13px;font-weight:700">Open PR</text>
+    <text x="696" y="108" text-anchor="middle" style="font-size:11px;fill:var(--muted)">pull request</text>
+    <line x1="130" y1="93" x2="146" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="140,89 146,93 140,97" style="fill:var(--faint)"/>
+    <line x1="254" y1="93" x2="270" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="264,89 270,93 264,97" style="fill:var(--faint)"/>
+    <line x1="378" y1="93" x2="394" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="388,89 394,93 388,97" style="fill:var(--faint)"/>
+    <line x1="502" y1="93" x2="518" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="512,89 518,93 512,97" style="fill:var(--faint)"/>
+    <line x1="626" y1="93" x2="642" y2="93" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="636,89 642,93 636,97" style="fill:var(--faint)"/>
+    <line x1="696" y1="122" x2="696" y2="156" style="stroke:var(--faint);stroke-width:1.5"/>
+    <polygon points="692,150 696,158 700,150" style="fill:var(--faint)"/>
+    <rect x="24" y="158" width="724" height="54" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="386" y="181" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--amber)">CI + reviewers gate</text>
+    <text x="386" y="200" text-anchor="middle" style="font-size:12px;fill:var(--muted)">must pass before merge to main</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Contribution flow</b> — fork the repo → branch → <span class="mono">pre-commit</span> auto-formats/lints → run tests → push → open a PR; CI and reviewers gate it together, and it merges into <span class="mono">main</span> only after it passes.</div>
+</div>
 
 <h2>pre-commit: the style &amp; lint gate</h2>
 <p><span class="mono">pre-commit</span> is SGLang's <strong>unified formatting and static-check gate</strong>. Three commands get you going: <span class="mono">pip3 install pre-commit</span> installs the tool, <span class="mono">pre-commit install</span> <strong>registers it as a git hook</strong> (so it runs automatically on every commit), and <span class="mono">pre-commit run --all-files</span> runs all configured checks — black, isort, etc. — over every file and <strong>applies the fixes it can</strong>. One crucial detail: <strong>the first run will likely fail</strong>, because it rewrites your files in place (reordering imports, adding blank lines, normalizing quotes). That's not an error, it's the tool fixing things for you. What you do is <strong>add those automatic changes, then run it again</strong>, <strong>re-running until everything PASSES</strong>. It must be fully green before you open a PR, because CI (Lesson 55) runs the <strong>exact same</strong> checks — if it doesn't pass locally, it won't pass in CI either, and the PR will be blocked from merging.</p>
@@ -633,6 +1189,42 @@ git push origin my-feature</pre></div>
 <div class="col"><strong>❌ Hard-to-review PR</strong><br>Thousands of lines at once with unrelated edits mixed in; no tests at all; a one-line "fix bug" description with no motivation. The reviewer is afraid to merge, and the PR sits idle.</div>
 </div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 330" role="img" aria-label="A good PR (small, tested) vs a hard-to-review PR: good is reviewed fast, hard is slow or stalled">
+    <rect x="20" y="20" width="368" height="294" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="412" y="20" width="368" height="294" rx="10" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
+    <rect x="36" y="36" width="336" height="44" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="204" y="63" text-anchor="middle" style="font-size:14px;font-weight:700;fill:var(--teal)">✅ Good PR · small, tested</text>
+    <rect x="428" y="36" width="336" height="44" rx="8" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="596" y="63" text-anchor="middle" style="font-size:14px;font-weight:700;fill:var(--red)">❌ Hard PR · big, mixed</text>
+    <rect x="44" y="104" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="116" style="font-size:13px">Small &amp; focused</text>
+    <rect x="44" y="136" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="148" style="font-size:13px">One concern</text>
+    <rect x="44" y="168" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="180" style="font-size:13px">Has unit tests</text>
+    <rect x="44" y="200" width="14" height="14" rx="3" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="66" y="212" style="font-size:13px">Clear description</text>
+    <rect x="436" y="104" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="116" style="font-size:13px">Huge diff</text>
+    <rect x="436" y="136" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="148" style="font-size:13px">Many concerns</text>
+    <rect x="436" y="168" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="180" style="font-size:13px">No tests</text>
+    <rect x="436" y="200" width="14" height="14" rx="3" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="458" y="212" style="font-size:13px">Vague description</text>
+    <text x="44" y="246" style="font-size:12px;fill:var(--muted)">Review time</text>
+    <rect x="44" y="256" width="120" height="26" rx="6" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="104" y="274" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--teal)">fast</text>
+    <text x="44" y="304" style="font-size:12px;fill:var(--teal)">→ merged in minutes</text>
+    <text x="436" y="246" style="font-size:12px;fill:var(--muted)">Review time</text>
+    <rect x="436" y="256" width="320" height="26" rx="6" style="fill:var(--red-soft);stroke:var(--red);stroke-width:1.5"/>
+    <text x="596" y="274" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--red)">slow / stalled</text>
+    <text x="436" y="304" style="font-size:12px;fill:var(--red)">→ sits idle</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Good PR vs hard-to-review PR</b> — a good PR is small, does one thing, ships tests, and has a clear description, so review takes minutes; a hard PR is huge, mixes many concerns, has no tests, and is vaguely described, so review is slow or stalls indefinitely.</div>
+</div>
+
 <div class="flow">
 <div class="node">Local pre-commit + pytest</div>
 <div class="arrow">→</div>
@@ -660,6 +1252,20 @@ pytest test/registered/unit/ -v
 # 4) push your branch and open a Pull Request against main
 git push origin my-feature</pre></div>
 
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">.pre-commit-config.yaml</span><span class="ln">hooks that run on every commit: format, lint, spell, secret-scan…</span></div><pre># .pre-commit-config.yaml — runs automatically on `git commit`
+repos:
+  - repo: pre-commit-hooks      # trailing-whitespace, end-of-file-fixer,
+    hooks: [check-yaml, check-ast, detect-private-key, ...]
+  - repo: isort                 # sort imports
+  - repo: ruff                  # Python lint
+  - repo: black (black-jupyter) # Python format
+  - repo: codespell             # spell-check
+  - repo: clang-format          # C++/CUDA format
+  - repo: local
+    hooks: [check-chinese-characters, sort-ci-permissions, ...]</pre></div>
+
+<p>How do you use it? <span class="mono">pip install pre-commit &amp;&amp; pre-commit install</span> wires these hooks <strong>into git</strong> once, and from then on every <span class="mono">git commit</span> runs them automatically: <span class="mono">ruff</span> + <span class="mono">black</span> fix style issues for you, so reviewers don't argue about formatting and can <strong>focus on the logic</strong>. Pair that with “one concern per PR, with tests” and your change is <strong>both easy to review and easy to merge</strong>.</p>
+
 <div class="card key"><div class="tag">📌 Key points</div>
 <ul>
 <li>New contributors have no write access to the official repo, so the flow starts with <strong>fork</strong>: fork → clone your fork → branch → change → <span class="mono">pre-commit</span> → test → push → open PR (against <span class="mono">main</span>).</li>
@@ -673,6 +1279,71 @@ git push origin my-feature</pre></div>
 """}
 LESSON_57 = {"zh": r"""
 <p class="lead">这是全书的<strong>术语速查表</strong>，把前 56 课出现的关键概念按主题归拢成几张表，每条配<strong>一句话定义</strong>与<strong>所属课次</strong>，方便日后随时回查。读到某个词记不清时，翻到这里、再顺着课次回正文细看。</p>
+
+<div class="fig">
+  <svg viewBox="0 0 840 430" role="img" aria-label="全书地图：13 个部分沿一次请求的一生展开，分为入口与搭建（1-4）、核心引擎（5-9）、扩展进阶实践（10-13）三大段">
+    <text x="16" y="26" style="font-weight:700;fill:var(--accent-ink)">全书地图 · 一次请求的一生</text>
+
+    <rect x="12" y="40" width="816" height="110" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:5 5"/>
+    <text x="24" y="60" style="font-weight:700;fill:var(--muted);font-size:13px">入口与搭建（1–4）</text>
+    <rect x="28" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="119" y="106" text-anchor="middle">1 概览</text>
+    <text x="119" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L01–03</text>
+    <rect x="226" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="317" y="106" text-anchor="middle">2 基础</text>
+    <text x="317" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L04–08</text>
+    <rect x="424" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="515" y="106" text-anchor="middle">3 前端 DSL</text>
+    <text x="515" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L09–12</text>
+    <rect x="622" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="713" y="106" text-anchor="middle">4 入口</text>
+    <text x="713" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L13–17</text>
+
+    <line x1="420" y1="151" x2="420" y2="159" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="420,163 415,154 425,154" style="fill:var(--muted)"/>
+
+    <rect x="12" y="160" width="816" height="110" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:5 5"/>
+    <text x="24" y="180" style="font-weight:700;fill:var(--muted);font-size:13px">核心引擎（5–9）</text>
+    <rect x="28" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="102" y="226" text-anchor="middle">5 调度器</text>
+    <text x="102" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L18–23</text>
+    <rect x="188" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="262" y="226" text-anchor="middle">6 模型执行</text>
+    <text x="262" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L24–28</text>
+    <rect x="348" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="422" y="226" text-anchor="middle">7 KV 缓存</text>
+    <text x="422" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L29–32</text>
+    <rect x="508" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="582" y="226" text-anchor="middle">8 注意力</text>
+    <text x="582" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L33–37</text>
+    <rect x="668" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="742" y="226" text-anchor="middle">9 内核硬件</text>
+    <text x="742" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L38–42</text>
+
+    <line x1="420" y1="271" x2="420" y2="279" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="420,283 415,274 425,274" style="fill:var(--muted)"/>
+
+    <rect x="12" y="280" width="816" height="110" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:5 5"/>
+    <text x="24" y="300" style="font-weight:700;fill:var(--muted);font-size:13px">扩展 · 进阶 · 实践（10–13）</text>
+    <rect x="28" y="324" width="182" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="119" y="346" text-anchor="middle">10 性能</text>
+    <text x="119" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L43–48</text>
+    <rect x="226" y="324" width="182" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="317" y="346" text-anchor="middle">11 进阶</text>
+    <text x="317" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L49–52</text>
+    <rect x="424" y="324" width="182" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="515" y="346" text-anchor="middle">12 实践</text>
+    <text x="515" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L53–57</text>
+    <rect x="622" y="324" width="182" height="52" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="713" y="346" text-anchor="middle">13 设计主题</text>
+    <text x="713" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L58–63</text>
+
+    <text x="24" y="410" style="fill:var(--faint);font-size:12px">沿箭头自上而下，即一次请求从进入到沉淀为设计主题的路径。</text>
+  </svg>
+  <div class="figcap"><b>图 · 全书地图</b> — 13 个部分沿“一次请求的一生”展开：1–4 入口与搭建、5–9 核心引擎、10–13 扩展进阶实践。</div>
+</div>
+
+<p>这张图就是后文术语的坐标系：遇到生词，回到它所属的部分即可。</p>
 
 <h2>一、总览与基础</h2>
 <table class="t">
@@ -789,6 +1460,71 @@ LESSON_57 = {"zh": r"""
 </table>
 """, "en": r"""
 <p class="lead">This is the whole guide's <strong>quick-reference glossary</strong>. It gathers the key concepts from the first 56 lessons into a few themed tables, each with a <strong>one-line definition</strong> and its <strong>lesson number</strong> for easy back-reference. When a term slips your mind, flip here, then follow the lesson number back to the main text.</p>
+
+<div class="fig">
+  <svg viewBox="0 0 840 430" role="img" aria-label="Map of the whole guide: the 13 parts along the life of a request, grouped into entry and setup (1-4), the core engine (5-9), and scale, advanced and practice (10-13)">
+    <text x="16" y="26" style="font-weight:700;fill:var(--accent-ink)">Map · the life of a request</text>
+
+    <rect x="12" y="40" width="816" height="110" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:5 5"/>
+    <text x="24" y="60" style="font-weight:700;fill:var(--muted);font-size:13px">Entry &amp; setup (1–4)</text>
+    <rect x="28" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="119" y="106" text-anchor="middle">1 Overview</text>
+    <text x="119" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L01–03</text>
+    <rect x="226" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="317" y="106" text-anchor="middle">2 Foundations</text>
+    <text x="317" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L04–08</text>
+    <rect x="424" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="515" y="106" text-anchor="middle">3 Frontend DSL</text>
+    <text x="515" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L09–12</text>
+    <rect x="622" y="84" width="182" height="52" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="713" y="106" text-anchor="middle">4 Entrypoints</text>
+    <text x="713" y="124" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L13–17</text>
+
+    <line x1="420" y1="151" x2="420" y2="159" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="420,163 415,154 425,154" style="fill:var(--muted)"/>
+
+    <rect x="12" y="160" width="816" height="110" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:5 5"/>
+    <text x="24" y="180" style="font-weight:700;fill:var(--muted);font-size:13px">The core engine (5–9)</text>
+    <rect x="28" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="102" y="226" text-anchor="middle">5 Scheduler</text>
+    <text x="102" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L18–23</text>
+    <rect x="188" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="262" y="226" text-anchor="middle">6 Model exec</text>
+    <text x="262" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L24–28</text>
+    <rect x="348" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="422" y="226" text-anchor="middle">7 KV cache</text>
+    <text x="422" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L29–32</text>
+    <rect x="508" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="582" y="226" text-anchor="middle">8 Attention</text>
+    <text x="582" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L33–37</text>
+    <rect x="668" y="204" width="148" height="52" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="742" y="226" text-anchor="middle">9 Kernels &amp; HW</text>
+    <text x="742" y="244" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L38–42</text>
+
+    <line x1="420" y1="271" x2="420" y2="279" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="420,283 415,274 425,274" style="fill:var(--muted)"/>
+
+    <rect x="12" y="280" width="816" height="110" rx="10" style="fill:none;stroke:var(--line);stroke-width:1.25;stroke-dasharray:5 5"/>
+    <text x="24" y="300" style="font-weight:700;fill:var(--muted);font-size:13px">Scale · advanced · practice (10–13)</text>
+    <rect x="28" y="324" width="182" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="119" y="346" text-anchor="middle">10 Performance</text>
+    <text x="119" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L43–48</text>
+    <rect x="226" y="324" width="182" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="317" y="346" text-anchor="middle">11 Advanced</text>
+    <text x="317" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L49–52</text>
+    <rect x="424" y="324" width="182" height="52" rx="8" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
+    <text x="515" y="346" text-anchor="middle">12 Practice</text>
+    <text x="515" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L53–57</text>
+    <rect x="622" y="324" width="182" height="52" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="713" y="346" text-anchor="middle">13 Design themes</text>
+    <text x="713" y="364" text-anchor="middle" class="mono" style="fill:var(--muted);font-size:12px">L58–63</text>
+
+    <text x="24" y="410" style="fill:var(--faint);font-size:12px">Follow the arrows top-down: a request enters and settles into design themes.</text>
+  </svg>
+  <div class="figcap"><b>Map · the whole guide</b> — the 13 parts along the life of a request: 1–4 entry &amp; setup, 5–9 the core engine, 10–13 scale, advanced &amp; practice.</div>
+</div>
+
+<p>This map is the coordinate system for the terms below: meet a new word, jump back to its part.</p>
 
 <h2>1. Overview & foundations</h2>
 <table class="t">

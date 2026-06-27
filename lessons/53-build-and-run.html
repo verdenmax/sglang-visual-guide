@@ -366,6 +366,43 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="flow"><div class="node">CLI flags</div><div class="arrow">→</div><div class="node">ServerArgs</div><div class="arrow">→</div><div class="node">启动引擎<br>Tokenizer/Scheduler/Detokenizer</div><div class="arrow">→</div><div class="node">HTTP 端点<br>/generate · /v1/...</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="启动路径：命令行旗标解析进 ServerArgs，run_server 据此构建引擎（分词器、调度器、反分词器），再暴露 HTTP / OpenAI 兼容端点">
+    <rect x="20" y="44" width="150" height="58" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="70" text-anchor="middle" style="fill:var(--blue);font-weight:700">CLI 旗标</text>
+    <text x="95" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">--model-path …</text>
+    <rect x="224" y="44" width="150" height="58" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="299" y="70" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ServerArgs</text>
+    <text x="299" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">解析 + 校验</text>
+    <rect x="428" y="44" width="150" height="58" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="503" y="70" text-anchor="middle" class="mono" style="fill:var(--teal);font-weight:700;font-size:13px">run_server</text>
+    <text x="503" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">构建引擎</text>
+    <rect x="632" y="44" width="150" height="58" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="707" y="70" text-anchor="middle" style="fill:var(--purple);font-weight:700">HTTP 端点</text>
+    <text x="707" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">/generate · /v1</text>
+    <line x1="170" y1="73" x2="218" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="218,68 218,78 224,73" style="fill:var(--muted)"/>
+    <line x1="374" y1="73" x2="422" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="422,68 422,78 428,73" style="fill:var(--muted)"/>
+    <line x1="578" y1="73" x2="626" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="626,68 626,78 632,73" style="fill:var(--muted)"/>
+    <line x1="503" y1="102" x2="503" y2="150" style="stroke:var(--teal);stroke-width:1.5"/>
+    <polygon points="498,150 508,150 503,156" style="fill:var(--teal)"/>
+    <rect x="250" y="156" width="420" height="120" rx="12" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="460" y="180" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">引擎 · 进程内</text>
+    <rect x="266" y="196" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="326" y="222" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">分词器</text>
+    <text x="326" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Tokenizer</text>
+    <rect x="400" y="196" width="120" height="60" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="460" y="222" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:12px">调度器</text>
+    <text x="460" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Scheduler</text>
+    <rect x="534" y="196" width="120" height="60" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="594" y="222" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:12px">反分词器</text>
+    <text x="594" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Detokenizer</text>
+  </svg>
+  <div class="figcap"><b>图 1 · 启动路径</b> — 命令行 <span class="mono">--flag</span> 解析进 <span class="mono">ServerArgs</span>，<span class="mono">run_server</span> 据此构建引擎（分词器 + 调度器 + 反分词器），再暴露 HTTP / OpenAI 兼容端点（<span class="mono">/generate</span>、<span class="mono">/v1/...</span>）。</div>
+</div>
+
 <h2>二、关键洞见：每个字段就是一个旋钮</h2>
 <p>这是本课真正想让你记住的事。<span class="mono">ServerArgs</span> 是一个 <span class="mono">@dataclasses.dataclass</span>，它的每个字段都会<strong>自动映射</strong>成一个 <span class="mono">--kebab-case</span> 风格的命令行参数：字段 <span class="mono">tp_size</span> → 参数 <span class="mono">--tp-size</span>，字段 <span class="mono">mem_fraction_static</span> → 参数 <span class="mono">--mem-fraction-static</span>。所以你看到的那“一面墙的 flag”，本质上就是这个 dataclass 字段的清单。</p>
 <p>规则简单到可以一句话概括：<strong>下划线变连字符，前面加两道杠</strong>。字段类型还顺带决定了这个 flag 怎么用——布尔字段通常变成一个无需取值的开关（如 <span class="mono">--enable-eplb</span>），整数和浮点字段则要跟一个数值，字符串字段跟一个名字（如后端名、量化方式名）。正因为这套映射是机械且一致的，SGLang 的帮助文档（<span class="mono">--help</span>）几乎是自动生成的，你看到的每条 flag 说明，往往就来自字段旁边那行注释。理解了这一层，你查文档、读别人脚本、写自己的部署命令，都会快上一个数量级。</p>
@@ -389,6 +426,33 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>怎么选？如果你要对外提供服务、支持多客户端并发、或者要接进现有的 OpenAI 生态工具链，就用 HTTP 服务器；如果你只是想在一个脚本里跑几千条 prompt 做离线评测、或在训练流程里嵌入一次性的批量生成，<span class="mono">Engine</span> 更轻、更快、也更好调试。关键是要意识到：两种模式的<strong>调优旋钮完全一样</strong>——无论走哪条路，你设置的都是同一个 <span class="mono">ServerArgs</span>（或它的等价构造参数），所以本课学到的“flag ↔ 组件”映射，对在线和离线两种场景同时生效。这也正是 SGLang 设计的优雅之处：内核只有一个，门面可以换。</p>
 
 <div class="cols"><div class="col"><strong>Engine（离线 / 进程内）</strong><br>在 Python 脚本里直接实例化，无 HTTP、无网络。直接内存调用生成。适合脚本化、批量评测、离线数据生成。启动快、开销小。</div><div class="col"><strong>HTTP server（在线）</strong><br>常驻进程监听端口，客户端经网络发请求。暴露 <span class="mono">/generate</span> 与 OpenAI 兼容 <span class="mono">/v1/...</span>。适合生产部署、对外提供服务、多客户端并发。</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="两种用法对比：Engine 离线进程内直接调用 generate 不走网络，HTTP 服务器在线监听端口接收 REST 请求，底层是同一内核">
+    <rect x="30" y="40" width="320" height="150" rx="12" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="190" y="66" text-anchor="middle" style="fill:var(--teal);font-weight:700">Engine · 离线（进程内）</text>
+    <rect x="50" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="106" class="mono" style="font-size:11px">import sglang as sgl</text>
+    <rect x="50" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="148" class="mono" style="font-size:11px">engine.generate(prompts)</text>
+    <text x="190" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">无网络 · 批量 / 离线</text>
+    <rect x="430" y="40" width="320" height="150" rx="12" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="590" y="66" text-anchor="middle" style="fill:var(--blue);font-weight:700">HTTP 服务器 · 在线</text>
+    <rect x="450" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="106" class="mono" style="font-size:11px">launch_server 进程</text>
+    <rect x="450" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="148" class="mono" style="font-size:11px">POST /generate（REST）</text>
+    <text x="590" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">多客户端 · 在线服务</text>
+    <line x1="190" y1="190" x2="190" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="185,232 195,232 190,238" style="fill:var(--muted)"/>
+    <line x1="590" y1="190" x2="590" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="585,232 595,232 590,238" style="fill:var(--muted)"/>
+    <rect x="150" y="238" width="480" height="48" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="390" y="260" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">同一内核</text>
+    <text x="390" y="278" text-anchor="middle" style="fill:var(--muted);font-size:10px">引擎 + ServerArgs</text>
+  </svg>
+  <div class="figcap"><b>图 2 · 离线 Engine vs 在线 HTTP</b> — 左：<span class="mono">import sglang</span>，进程内直接 <span class="mono">engine.generate(...)</span>，不走网络（批量 / 离线）；右：启动服务进程，客户端发 REST 请求（在线、多客户端）。底层是同一套内核。</div>
+</div>
 
 <p>把这两副面孔放在一起看，就更能体会“一套内核、两种门面”的价值：你在开发阶段可以用 <span class="mono">Engine</span> 在脚本里快速迭代、验证 prompt 与采样参数，等逻辑稳定了，再用<strong>完全相同的一组 flag</strong> 切换到 HTTP 服务器对外上线，几乎零迁移成本。这种一致性不是巧合，而是因为两者底层都把配置塞进同一个 <span class="mono">ServerArgs</span>。所以当有人问“离线脚本里那个参数，在线服务怎么设”，答案永远是同一个：找到对应的字段名，把下划线换成连字符，加上两道杠即可。</p>
 
@@ -415,6 +479,17 @@ class ServerArgs:
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (第35课)
     max_running_requests: int = None   # --max-running-requests: 批大小上限 (第5课)
     # ... 还有几十个字段；每个都自动映射成一个 --kebab-case CLI flag</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/launch_server.py ::run_server</span><span class="ln">按 ServerArgs 选择并启动对应形态的服务器</span></div><pre>def run_server(server_args):
+    # 按解析好的 ServerArgs 启动对应形态的服务器
+    if server_args.grpc_mode:
+        serve_grpc(server_args)             # gRPC 入口
+    else:
+        # 默认路径：HTTP / OpenAI 兼容服务器
+        from sglang.srt.entrypoints.http_server import launch_server
+        launch_server(server_args)          # 构建引擎 + HTTP 路由</pre></div>
+
+<p>两个具体例子帮你把链路对上号。<strong>在线：</strong><span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct --tp-size 2</span> —— 这串 flag 被解析进 <span class="mono">ServerArgs</span>，交给 <span class="mono">run_server</span> 走默认分支构建引擎，最终在 <span class="mono">:30000</span> 上提供 HTTP 服务。<strong>离线：</strong><span class="mono">sgl.Engine(model_path="meta-llama/Llama-3.1-8B-Instruct").generate(prompts)</span> —— 同一份配置走 <span class="mono">Engine</span> 形态，在进程内直接生成，完全跳过网络。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li>启动只需一条命令：<span class="mono">python -m sglang.launch_server --model-path &lt;模型&gt; [flags]</span>。</li>
@@ -497,6 +572,43 @@ class ServerArgs:
 
 <div class="flow"><div class="node">CLI flags</div><div class="arrow">→</div><div class="node">ServerArgs</div><div class="arrow">→</div><div class="node">boot engine<br>Tokenizer/Scheduler/Detokenizer</div><div class="arrow">→</div><div class="node">HTTP endpoint<br>/generate · /v1/...</div></div>
 
+<div class="fig">
+  <svg viewBox="0 0 800 300" role="img" aria-label="Boot path: command-line flags parse into ServerArgs, run_server builds the engine (tokenizer, scheduler, detokenizer) and exposes an HTTP / OpenAI-compatible endpoint">
+    <rect x="20" y="44" width="150" height="58" rx="10" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="95" y="70" text-anchor="middle" style="fill:var(--blue);font-weight:700">CLI flags</text>
+    <text x="95" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">--model-path …</text>
+    <rect x="224" y="44" width="150" height="58" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="299" y="70" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700">ServerArgs</text>
+    <text x="299" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">parse + validate</text>
+    <rect x="428" y="44" width="150" height="58" rx="10" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="503" y="70" text-anchor="middle" class="mono" style="fill:var(--teal);font-weight:700;font-size:13px">run_server</text>
+    <text x="503" y="90" text-anchor="middle" style="font-size:10px;fill:var(--muted)">build engine</text>
+    <rect x="632" y="44" width="150" height="58" rx="10" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="707" y="70" text-anchor="middle" style="fill:var(--purple);font-weight:700">HTTP endpoint</text>
+    <text x="707" y="90" text-anchor="middle" class="mono" style="font-size:10px;fill:var(--muted)">/generate · /v1</text>
+    <line x1="170" y1="73" x2="218" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="218,68 218,78 224,73" style="fill:var(--muted)"/>
+    <line x1="374" y1="73" x2="422" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="422,68 422,78 428,73" style="fill:var(--muted)"/>
+    <line x1="578" y1="73" x2="626" y2="73" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="626,68 626,78 632,73" style="fill:var(--muted)"/>
+    <line x1="503" y1="102" x2="503" y2="150" style="stroke:var(--teal);stroke-width:1.5"/>
+    <polygon points="498,150 508,150 503,156" style="fill:var(--teal)"/>
+    <rect x="250" y="156" width="420" height="120" rx="12" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="460" y="180" text-anchor="middle" style="fill:var(--teal);font-weight:700;font-size:12px">engine · in-process</text>
+    <rect x="266" y="196" width="120" height="60" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="326" y="222" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:11px">Tokenizer</text>
+    <text x="326" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Manager</text>
+    <rect x="400" y="196" width="120" height="60" rx="8" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="460" y="222" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:11px">Scheduler</text>
+    <text x="460" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">batch + fwd</text>
+    <rect x="534" y="196" width="120" height="60" rx="8" style="fill:var(--purple-soft);stroke:var(--purple);stroke-width:1.5"/>
+    <text x="594" y="222" text-anchor="middle" style="fill:var(--purple);font-weight:700;font-size:11px">Detokenizer</text>
+    <text x="594" y="240" text-anchor="middle" style="fill:var(--muted);font-size:10px">Manager</text>
+  </svg>
+  <div class="figcap"><b>Fig 1 · Boot path</b> — command-line <span class="mono">--flag</span>s parse into <span class="mono">ServerArgs</span>; <span class="mono">run_server</span> builds the engine (tokenizer + scheduler + detokenizer) and then exposes an HTTP / OpenAI-compatible endpoint (<span class="mono">/generate</span>, <span class="mono">/v1/...</span>).</div>
+</div>
+
 <h2>2. The key insight: every field is a knob</h2>
 <p>This is what the lesson really wants you to remember. <span class="mono">ServerArgs</span> is a <span class="mono">@dataclasses.dataclass</span>, and every field <strong>auto-maps</strong> to a <span class="mono">--kebab-case</span> command-line flag: field <span class="mono">tp_size</span> → flag <span class="mono">--tp-size</span>, field <span class="mono">mem_fraction_static</span> → flag <span class="mono">--mem-fraction-static</span>. So that "wall of flags" you see is essentially the list of this dataclass's fields.</p>
 <p>The rule is simple enough to state in one line: <strong>underscores become hyphens, prefixed with two dashes</strong>. The field type even dictates how the flag is used — a boolean field usually becomes a valueless switch (like <span class="mono">--enable-eplb</span>), int and float fields take a number, and string fields take a name (a backend, a quantization scheme). Because the mapping is mechanical and consistent, SGLang's <span class="mono">--help</span> is essentially auto-generated, and each flag's description often comes straight from the comment next to its field. Grasp this layer and reading docs, others' scripts, and writing your own launch command all get an order of magnitude faster.</p>
@@ -520,6 +632,33 @@ class ServerArgs:
 <p>How to choose? If you need to serve external clients, support many concurrent users, or plug into existing OpenAI-ecosystem tooling, use the HTTP server; if you just want to run a few thousand prompts in a script for offline eval, or embed a one-shot batch generation inside a training pipeline, <span class="mono">Engine</span> is lighter, faster, and easier to debug. The key realization: both modes share the <strong>exact same tuning knobs</strong> — whichever path you take, you set the same <span class="mono">ServerArgs</span> (or its equivalent constructor args), so the "flag ↔ component" map from this lesson applies to online and offline alike. That's the elegance of SGLang's design: one core, swappable facades.</p>
 
 <div class="cols"><div class="col"><strong>Engine (offline / in-process)</strong><br>Instantiate directly in a Python script, no HTTP, no network. Call generation in memory. Great for scripting, batch eval, offline data generation. Fast to start, low overhead.</div><div class="col"><strong>HTTP server (online)</strong><br>Long-lived process listening on a port, clients send requests over the network. Exposes <span class="mono">/generate</span> and OpenAI-compatible <span class="mono">/v1/...</span>. Great for production, external APIs, many concurrent clients.</div></div>
+
+<div class="fig">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Two ways to use SGLang: the offline in-process Engine calls generate directly with no network, the online HTTP server listens on a port for REST requests; the same core sits underneath">
+    <rect x="30" y="40" width="320" height="150" rx="12" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="190" y="66" text-anchor="middle" style="fill:var(--teal);font-weight:700">Engine · offline (in-process)</text>
+    <rect x="50" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="106" class="mono" style="font-size:11px">import sglang as sgl</text>
+    <rect x="50" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--teal);stroke-width:1.5"/>
+    <text x="64" y="148" class="mono" style="font-size:11px">engine.generate(prompts)</text>
+    <text x="190" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">no network · batch / offline</text>
+    <rect x="430" y="40" width="320" height="150" rx="12" style="fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="590" y="66" text-anchor="middle" style="fill:var(--blue);font-weight:700">HTTP server · online</text>
+    <rect x="450" y="84" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="106" class="mono" style="font-size:11px">launch_server process</text>
+    <rect x="450" y="126" width="280" height="34" rx="7" style="fill:var(--panel-2);stroke:var(--blue);stroke-width:1.5"/>
+    <text x="464" y="148" class="mono" style="font-size:11px">POST /generate (REST)</text>
+    <text x="590" y="180" text-anchor="middle" style="fill:var(--muted);font-size:11px">many clients · online serving</text>
+    <line x1="190" y1="190" x2="190" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="185,232 195,232 190,238" style="fill:var(--muted)"/>
+    <line x1="590" y1="190" x2="590" y2="232" style="stroke:var(--muted);stroke-width:1.5"/>
+    <polygon points="585,232 595,232 590,238" style="fill:var(--muted)"/>
+    <rect x="150" y="238" width="480" height="48" rx="10" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+    <text x="390" y="260" text-anchor="middle" style="fill:var(--accent-ink);font-weight:700;font-size:12px">same core</text>
+    <text x="390" y="278" text-anchor="middle" style="fill:var(--muted);font-size:10px">engine + ServerArgs</text>
+  </svg>
+  <div class="figcap"><b>Fig 2 · Offline Engine vs online HTTP</b> — left: <span class="mono">import sglang</span> and call <span class="mono">engine.generate(...)</span> in-process, no network (batch / offline); right: launch a server process and clients send REST requests (online, many clients). The same core sits underneath both.</div>
+</div>
 
 <p>Putting the two faces side by side drives home the value of "one core, two facades": during development you can iterate quickly in a script with <span class="mono">Engine</span>, validating prompts and sampling params, and once the logic stabilizes you flip to the HTTP server for production using the <strong>exact same set of flags</strong>, at almost zero migration cost. That consistency isn't a coincidence — both stuff their config into the same <span class="mono">ServerArgs</span> underneath. So when someone asks "how do I set that offline-script parameter on the online service", the answer is always the same: find the matching field name, swap underscores for hyphens, and prefix two dashes.</p>
 
@@ -546,6 +685,17 @@ class ServerArgs:
     quantization: str = None           # --quantization: fp8 / awq / gptq / ... (Lesson 35)
     max_running_requests: int = None   # --max-running-requests: batch cap (Lesson 5)
     # ... dozens more fields; each auto-maps to a --kebab-case CLI flag</pre></div>
+
+<div class="codefile"><div class="cf-head"><span class="dot"></span><span class="path">python/sglang/launch_server.py ::run_server</span><span class="ln">pick and launch the right server flavor from ServerArgs</span></div><pre>def run_server(server_args):
+    # launch the right server flavor based on the parsed ServerArgs.
+    if server_args.grpc_mode:
+        serve_grpc(server_args)             # gRPC entrypoint
+    else:
+        # the default: HTTP / OpenAI-compatible server
+        from sglang.srt.entrypoints.http_server import launch_server
+        launch_server(server_args)          # builds engine + HTTP routes</pre></div>
+
+<p>Two concrete examples to line up the path. <strong>Online:</strong> <span class="mono">python -m sglang.launch_server --model-path meta-llama/Llama-3.1-8B-Instruct --tp-size 2</span> — these flags are parsed into <span class="mono">ServerArgs</span>, handed to <span class="mono">run_server</span>, which takes the default branch to build the engine and serves HTTP on <span class="mono">:30000</span>. <strong>Offline:</strong> <span class="mono">sgl.Engine(model_path="meta-llama/Llama-3.1-8B-Instruct").generate(prompts)</span> — the same config takes the <span class="mono">Engine</span> flavor, generating in-process and skipping the network entirely.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>Launching takes one command: <span class="mono">python -m sglang.launch_server --model-path &lt;model&gt; [flags]</span>.</li>
