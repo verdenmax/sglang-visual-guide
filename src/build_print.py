@@ -82,7 +82,7 @@ def build_lang(lang):
     for page in shell.PAGES:
         n = int(page[0].split("-", 1)[0])
         title = page[1] if lang == "zh" else page[2]
-        toc.append(f'  <li><a class="xref" href="#lesson-{n:02d}">{title}</a></li>')
+        toc.append(f'  <li><a class="xref" href="#lesson-{n:02d}">{shell.esc(title)}</a></li>')
     toc.append("</ol></div>")
     parts.append("\n".join(toc))
     for page in shell.PAGES:
@@ -93,7 +93,7 @@ def build_lang(lang):
         title = page[1] if lang == "zh" else page[2]
         body = shell.linkify_refs(_expand_details(CONTENT[fname][lang]), n, anchor_for)
         quiz = shell.linkify_refs(_expand_details(quizzes.render(fname, lang)), n, anchor_for)
-        parts.append(f'<section class="lesson-print" id="lesson-{n:02d}">\n<h1>{title}</h1>\n{body}\n{quiz}\n</section>')
+        parts.append(f'<section class="lesson-print" id="lesson-{n:02d}">\n<h1>{shell.esc(title)}</h1>\n{body}\n{quiz}\n</section>')
     return head + "\n".join(parts) + "\n</body>\n</html>\n"
 
 

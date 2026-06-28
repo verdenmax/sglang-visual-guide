@@ -531,7 +531,7 @@ class BenchmarkMetrics:
     <line x1="660" y1="213" x2="660" y2="215" style="stroke:var(--purple);stroke-width:1.5;stroke-dasharray:4 4"/>
     <text x="664" y="232" text-anchor="middle" class="mono" style="font-size:11px;fill:var(--purple)">P99 tail</text>
   </svg>
-  <div class="figcap"><b>Fig 1 · Benchmark pipeline & percentiles</b> — the load generator fires N requests at the server by <span class="mono">request_rate</span> / concurrency, the server streams back, each request's <span class="mono">TTFT</span> and <span class="mono">TPOT</span> is recorded, then aggregated into throughput and P50/P95/P99; in the right-skewed tail, <span class="mono">P99</span> is the user's real pain point.</div>
+  <div class="figcap"><b>Fig 1 · Benchmark pipeline &amp; percentiles</b> — the load generator fires N requests at the server by <span class="mono">request_rate</span> / concurrency, the server streams back, each request's <span class="mono">TTFT</span> and <span class="mono">TPOT</span> is recorded, then aggregated into throughput and P50/P95/P99; in the right-skewed tail, <span class="mono">P99</span> is the user's real pain point.</div>
 </div>
 
 <p><strong>A concrete example</strong>: <span class="mono">python -m sglang.bench_serving --backend sglang --request-rate 16 --num-prompts 1000</span> drives 1000 prompts at 16 req/s and, when done, prints <span class="mono">output_throughput</span> plus P50/P99 <span class="mono">ttft</span>; if the tail looks bad, capture a profiler trace next and you can tell whether attention or GEMM dominates.</p>
@@ -1526,17 +1526,17 @@ LESSON_57 = {"zh": r"""
 
 <p>This map is the coordinate system for the terms below: meet a new word, jump back to its part.</p>
 
-<h2>1. Overview & foundations</h2>
+<h2>1. Overview &amp; foundations</h2>
 <table class="t">
   <tr><th>Term</th><th>One-line definition</th><th>Lesson</th></tr>
-  <tr><td><strong>SGLang</strong></td><td>A high-performance LLM inference & serving engine: a frontend DSL + a runtime (SRT)</td><td>L1</td></tr>
+  <tr><td><strong>SGLang</strong></td><td>A high-performance LLM inference &amp; serving engine: a frontend DSL + a runtime (SRT)</td><td>L1</td></tr>
   <tr><td><strong>Token</strong></td><td>The model's smallest unit — the integer-id sequence text is tokenized into</td><td>L4</td></tr>
   <tr><td><strong>Autoregression</strong></td><td>Each forward emits one token, fed back to produce the next</td><td>L4</td></tr>
   <tr><td><strong>Prefill / Decode</strong></td><td>Prefill computes the whole prompt in parallel (compute-bound); decode emits token-by-token (bandwidth-bound)</td><td>L4, L8</td></tr>
   <tr><td><strong>KV cache</strong></td><td>Caches each token's Key/Value to avoid recomputing history; the main VRAM consumer</td><td>L4</td></tr>
   <tr><td><strong>Continuous batching</strong></td><td>Requests join/leave the batch as they arrive/finish, keeping the GPU saturated</td><td>L5</td></tr>
   <tr><td><strong>PagedAttention / paged KV</strong></td><td>Allocate KV in fixed-size pages — no fragmentation, sharing possible</td><td>L6</td></tr>
-  <tr><td><strong>RadixAttention (concept)</strong></td><td>Share KV of identical prefixes via a radix tree; reuse on a hit to save compute & VRAM</td><td>L7</td></tr>
+  <tr><td><strong>RadixAttention (concept)</strong></td><td>Share KV of identical prefixes via a radix tree; reuse on a hit to save compute &amp; VRAM</td><td>L7</td></tr>
   <tr><td><strong>Throughput vs latency</strong></td><td>The core trade-off: system view (tokens/s) vs user view (TTFT/TPOT)</td><td>L8</td></tr>
 </table>
 
@@ -1549,7 +1549,7 @@ LESSON_57 = {"zh": r"""
   <tr><td><strong>Backends / OpenAI-compat</strong></td><td>The DSL runs on the local runtime or a remote backend like OpenAI</td><td>L12</td></tr>
 </table>
 
-<h2>3. Entrypoints & dispatch</h2>
+<h2>3. Entrypoints &amp; dispatch</h2>
 <table class="t">
   <tr><th>Term</th><th>One-line definition</th><th>Lesson</th></tr>
   <tr><td><strong>Engine / HTTP Server</strong></td><td>Engine is the in-process offline entry; the HTTP Server adds an online API on top</td><td>L13</td></tr>
@@ -1580,7 +1580,7 @@ LESSON_57 = {"zh": r"""
   <tr><td><strong>Sampler / sampling params</strong></td><td>Samples the next token from logits via temperature / top-p / top-k etc.</td><td>L28</td></tr>
 </table>
 
-<h2>6. KV cache & memory</h2>
+<h2>6. KV cache &amp; memory</h2>
 <table class="t">
   <tr><th>Term</th><th>One-line definition</th><th>Lesson</th></tr>
   <tr><td><strong>RadixAttention impl</strong></td><td>Indexes prefix KV in a radix tree; matches the longest common prefix and reuses its cache</td><td>L29</td></tr>
@@ -1589,7 +1589,7 @@ LESSON_57 = {"zh": r"""
   <tr><td><strong>Eviction / hit rate</strong></td><td>LRU evicts evictable leaves, locks in-use nodes; hit rate equals throughput</td><td>L32</td></tr>
 </table>
 
-<h2>7. Attention & layers</h2>
+<h2>7. Attention &amp; layers</h2>
 <table class="t">
   <tr><th>Term</th><th>One-line definition</th><th>Lesson</th></tr>
   <tr><td><strong>Attention backend abstraction</strong></td><td>Attention is a swappable strategy: FlashInfer / Triton / FA, picked by hardware</td><td>L33</td></tr>
@@ -1599,7 +1599,7 @@ LESSON_57 = {"zh": r"""
   <tr><td><strong>Logits / vocab parallel</strong></td><td>lm_head projects hidden into vocab-sized scores; sharded along the vocab dim under TP</td><td>L37</td></tr>
 </table>
 
-<h2>8. Kernels & hardware</h2>
+<h2>8. Kernels &amp; hardware</h2>
 <table class="t">
   <tr><th>Term</th><th>One-line definition</th><th>Lesson</th></tr>
   <tr><td><strong>sgl-kernel</strong></td><td>A standalone C++/CUDA project, AOT-compiled into a .so, exposed as torch.ops.sgl_kernel.*</td><td>L38</td></tr>
@@ -1630,7 +1630,7 @@ LESSON_57 = {"zh": r"""
   <tr><td><strong>Diffusion models</strong></td><td>Iterative denoising rather than autoregression; reuses sgl-kernel / scheduler / CUDA graph</td><td>L52</td></tr>
 </table>
 
-<h2>11. Practice & tooling</h2>
+<h2>11. Practice &amp; tooling</h2>
 <table class="t">
   <tr><th>Term</th><th>One-line definition</th><th>Lesson</th></tr>
   <tr><td><strong>ServerArgs</strong></td><td>The central config dataclass; each field auto-maps to a --kebab CLI flag</td><td>L53</td></tr>

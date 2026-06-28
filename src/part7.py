@@ -1422,7 +1422,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 所以驱逐策略和调度策略其实是同一项优化的两半：驱逐这边决定<strong>留什么</strong>，调度那边决定<strong>何时问</strong>，二者合力，才能把有效命中率、进而把吞吐（第 8 课）顶到硬件允许的上限。</p>
 
 <div class="cols">
-  <div class="col"><h4>驱逐（evict & 将来重算）</h4><p>立刻把冷前缀的 KV 槽位还给池，<strong>腾出 HBM</strong>给更高并发；代价是若它将来再被命中，要<strong>从头重算几千 token</strong>（一次昂贵前向）。赌"它不会再来"。</p></div>
+  <div class="col"><h4>驱逐（evict &amp; 将来重算）</h4><p>立刻把冷前缀的 KV 槽位还给池，<strong>腾出 HBM</strong>给更高并发；代价是若它将来再被命中，要<strong>从头重算几千 token</strong>（一次昂贵前向）。赌"它不会再来"。</p></div>
   <div class="col"><h4>保留（keep in HBM）</h4><p>把前缀一直留在显存里，再撞上就<strong>零重算</strong>、直接复用；代价是它<strong>长期占着 HBM</strong>，挤掉了本可用于更大批量、更高并发的空间。赌"它还会再来"。</p></div>
 </div>
 
@@ -1619,7 +1619,7 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 <p>A subtle point ties it all back to scheduling: hit rate isn't only the cache's job — it depends on the <strong>order requests arrive at the cache</strong>. If two requests share a long prefix but the scheduler interleaves a dozen unrelated requests between them, the shared prefix may be evicted before the second one arrives, turning a guaranteed hit into a miss. That's precisely why cache-aware scheduling (Lesson 20) <strong>reorders the queue</strong> to keep prefix-sharing requests close together — it actively manufactures hits that the cache alone would have lost to eviction. Eviction policy and scheduling policy are thus two halves of one optimization: the eviction side decides <strong>what to keep</strong>, the scheduling side decides <strong>when to ask</strong>, and only together do they push the effective hit rate — and therefore throughput (Lesson 8) — as high as the hardware allows.</p>
 
 <div class="cols">
-  <div class="col"><h4>Evict (& recompute later)</h4><p>Immediately return a cold prefix's KV slots to the pool, <strong>freeing HBM</strong> for more concurrency; the cost is that if it's hit again later you must <strong>recompute thousands of tokens</strong> (one expensive forward). Bet "it won't come back."</p></div>
+  <div class="col"><h4>Evict (&amp; recompute later)</h4><p>Immediately return a cold prefix's KV slots to the pool, <strong>freeing HBM</strong> for more concurrency; the cost is that if it's hit again later you must <strong>recompute thousands of tokens</strong> (one expensive forward). Bet "it won't come back."</p></div>
   <div class="col"><h4>Keep (in HBM)</h4><p>Hold the prefix in memory; a re-hit is <strong>zero recompute</strong>, pure reuse; the cost is it <strong>occupies HBM long-term</strong>, squeezing out space for bigger batches and higher concurrency. Bet "it'll come back."</p></div>
 </div>
 

@@ -11,9 +11,12 @@ Checks each lesson + index:
 * both languages present (lang-zh and lang-en blocks)
 * no unescaped '<' inside <pre> code blocks (and none in prose either: a '<'
   not starting a real tag/comment must be written &lt;)
+* no unescaped '&' outside <script> (a '&' not starting a valid entity -> &amp;)
 * cross-references "第 N 课" within 1..MAX_LESSON (forward refs allowed)
 * nav prev/next chain matches shell.PAGES order
 * index TOC lists every page; '共 N 课 · N 个部分' pill matches PAGES
+* the print editions (print_zh/print_en): tag balance, no bare '&'/'<', and
+  every #lesson-NN anchor resolves to an id
 * registry CONTENT has non-empty zh+en for every PAGES filename (no orphan keys)
 * zh/en inventory parity: equal .fig and .codefile counts, equal <h2> counts
 * every <div class="fig"> has a <div class="figcap">
@@ -113,6 +116,45 @@ def check_balance(name, html, tag):
     c = len(re.findall(rf"</{tag}>", html))
     if o != c:
         add("ERR", name, f"<{tag}> unbalanced: {o} open / {c} close")
+
+
+def _no_scripts(html):
+    """Drop <script>…</script> so JS operators (e.g. && , a<b) aren't mistaken
+    for unescaped HTML."""
+    return re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.S)
+
+
+# A '&' not starting a well-formed entity (named, decimal or hex) is a literal
+# that must be written &amp; — invalid HTML even though browsers tolerate it.
+_BARE_AMP = re.compile(r"&(?![A-Za-z][A-Za-z0-9]*;|#\d+;|#x[0-9A-Fa-f]+;).{0,12}")
+
+
+def check_amp(name, html):
+    m = _BARE_AMP.search(_no_scripts(html))
+    if m:
+        add("ERR", name, f"unescaped '&' (use &amp;): {m.group(0)!r}")
+
+
+def check_print():
+    """Structurally validate the single-document print editions, which the
+    per-lesson checks don't cover: tag balance, no bare '&'/'<', and every
+    in-page #lesson-NN anchor resolves to an id."""
+    for name in ("print_zh.html", "print_en.html"):
+        path = os.path.join(ROOT, name)
+        if not os.path.exists(path):
+            continue  # generated at build time; absent in a plain source checkout
+        html = open(path, encoding="utf-8").read()
+        for tag in ("div", "details", "table", "pre", "summary", "section",
+                    "a", "strong", "span", "em", "b", "code"):
+            check_balance(name, html, tag)
+        check_amp(name, html)
+        bare = re.search(r"<(?![A-Za-z/!]).{0,12}", _no_scripts(html))
+        if bare:
+            add("ERR", name, f"unescaped '<' (use &lt;): {bare.group(0)!r}")
+        ids = set(re.findall(r'id="(lesson-\d+)"', html))
+        for href in sorted(set(re.findall(r'href="#(lesson-\d+)"', html))):
+            if href not in ids:
+                add("ERR", name, f"print anchor #{href} has no matching id")
 
 
 def check_social_meta(name, html):
@@ -259,6 +301,7 @@ def check_lesson(fname, html):
     if 'name="description"' not in html:
         add("ERR", fname, "missing meta description")
     check_social_meta(fname, html)
+    check_amp(fname, html)
     if 'class="lang-zh"' not in html:
         add("ERR", fname, "missing lang-zh content")
     if 'class="lang-en"' not in html:
@@ -340,8 +383,10 @@ def main():
         idx = fh.read()
     check_classes("index.html", idx)
     check_social_meta("index.html", idx)
+    check_amp("index.html", idx)
     check_og_asset()
     check_og_svg_sync()
+    check_print()
     for page in PAGES:
         fname, tz, te = page[0], page[1], page[2]
         if fname not in idx:

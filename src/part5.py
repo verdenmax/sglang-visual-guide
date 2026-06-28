@@ -379,7 +379,7 @@ step of the heartbeat" to its detail lesson, and conversely, while reading a det
   <tr><td><strong>process_input_requests</strong></td><td>New reqs into the <strong>waiting queue</strong>; handle abort/flush control msgs</td><td class="mono">Lesson 19 Req / ScheduleBatch</td></tr>
   <tr><td><strong>get_next_batch_to_run</strong></td><td>Form this step's batch: prefill first, else decode (continuous batching)</td><td class="mono">Lesson 20 policy · Lesson 22 chunked prefill</td></tr>
   <tr><td><strong>run_batch</strong></td><td>Hand to TpModelWorker→ModelRunner.forward on GPU, sample tokens</td><td class="mono">Lesson 24 model forward</td></tr>
-  <tr><td><strong>process_batch_result</strong></td><td>Append tokens, detect finished, free KV, send to detokenize</td><td class="mono">Lesson 17 detokenize & streaming</td></tr>
+  <tr><td><strong>process_batch_result</strong></td><td>Append tokens, detect finished, free KV, send to detokenize</td><td class="mono">Lesson 17 detokenize &amp; streaming</td></tr>
 </table>
 
 <h2>Who decides, who computes: the single-threaded sole decision-maker</h2>
