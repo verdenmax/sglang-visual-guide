@@ -55,6 +55,10 @@ SVG_OVERFLOW_MARGIN = 6  # px past viewBox before flagging a <text> clip (calibr
 # rendering silently broken). Whitelist intentional no-style hooks.
 CSS_DEFINED = set(re.findall(r"\.([A-Za-z][\w-]*)", shell.CSS))
 CSS_CLASS_WHITELIST = {"prev"}  # footnav prev link is styled via `.footnav a`; needs no own rule
+# Classes defined in CSS but legitimately not present as a static class="..."
+# (toggled at runtime by JS). Anything else unused is reported (WARN) so dead
+# CSS can't silently accumulate.
+CSS_UNUSED_WHITELIST = {"hide", "show"}
 
 issues = []
 
@@ -289,6 +293,21 @@ def main():
             add("ERR", "index.html", f"parts says {m.group(2)} but PAGES has {nparts}")
     else:
         add("WARN", "index.html", "could not find '共 N 课 · N 个部分' pill")
+
+    # Defined-but-unused CSS guard (WARN): catch dead rules across the whole
+    # corpus (lessons + index + print), minus runtime JS-toggled classes.
+    used_classes = set()
+    corpus = [os.path.join(ROOT, "lessons", p[0]) for p in PAGES]
+    corpus += [os.path.join(ROOT, shell.INDEX_FILE),
+               os.path.join(ROOT, "print_en.html"),
+               os.path.join(ROOT, "print_zh.html")]
+    for p in corpus:
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as fh:
+                for attr in re.findall(r'class="([^"]+)"', fh.read()):
+                    used_classes.update(attr.split())
+    for cls in sorted(CSS_DEFINED - used_classes - CSS_UNUSED_WHITELIST):
+        add("WARN", "shell.css", f"defined-but-unused CSS class .{cls} (dead rule?)")
 
     errs = [i for i in issues if i[0] == "ERR"]
     warns = [i for i in issues if i[0] == "WARN"]
