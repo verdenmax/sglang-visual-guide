@@ -98,10 +98,18 @@ python3 build.py          # regenerate index.html + lessons/*.html
 python3 build_print.py    # regenerate print_zh.html + print_en.html
 python3 check_html.py     # structural checks (0 error / 0 warning expected)
 python3 check_links.py    # all internal links must resolve
+python3 build_og.py       # (optional) regenerate the og:image share card; needs rsvg-convert
 ```
 
 The generated HTML is committed and kept in sync with the sources; a re-run of `build.py` should
 produce no diff.
+
+### Social share card
+
+`og-cover.png` (1200×630) is the Open Graph / Twitter preview image, referenced by
+absolute URL in every page's `<head>`. It is generated from a brand-palette SVG by
+`python3 build_og.py` (requires `rsvg-convert`); the committed PNG is the served asset,
+so the normal `build.py` stays dependency-free.
 
 ## Project structure
 
@@ -115,9 +123,12 @@ src/            generators + tooling (pure Python 3, no dependencies)
   build_print.py          builds print_zh.html + print_en.html
   check_html.py           structural HTML validation
   check_links.py          internal link validation
+  build_og.py             builds the og:image share card (og-cover.png; needs rsvg-convert)
 lessons/        generated lesson pages (committed, kept in sync)
 index.html      generated table of contents (committed)
 print_*.html    generated print editions (committed)
+og-cover.png    generated social share card (committed; referenced as og:image)
+og-cover.svg    share-card source (committed)
 docs/superpowers/   design specs and implementation plans
 ```
 
