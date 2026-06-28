@@ -27,6 +27,7 @@ English ("Lesson N") or Chinese-numeral references are not range-checked.
 """
 import os
 import re
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -129,6 +130,23 @@ def check_social_meta(name, html):
         add("ERR", name, "missing og:url")
     elif not m.group(1).startswith("https://"):
         add("ERR", name, f"og:url not absolute: {m.group(1)!r}")
+
+
+def check_og_asset():
+    """The committed og-cover.png must exist and be a valid 1200x630 PNG
+    (read the IHDR header with stdlib struct — no Pillow, so this runs in CI)."""
+    path = os.path.join(ROOT, "og-cover.png")
+    if not os.path.exists(path):
+        add("ERR", "og-cover.png", "asset missing (run build_og.py)")
+        return
+    with open(path, "rb") as fh:
+        head = fh.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        add("ERR", "og-cover.png", "not a valid PNG")
+        return
+    w, h = struct.unpack(">II", head[16:24])
+    if (w, h) != (1200, 630):
+        add("ERR", "og-cover.png", f"size {w}x{h}, expected 1200x630")
 
 
 def check_classes(name, html):
@@ -305,6 +323,7 @@ def main():
         idx = fh.read()
     check_classes("index.html", idx)
     check_social_meta("index.html", idx)
+    check_og_asset()
     for page in PAGES:
         fname, tz, te = page[0], page[1], page[2]
         if fname not in idx:
