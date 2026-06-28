@@ -126,7 +126,7 @@ def _no_scripts(html):
 
 # A '&' not starting a well-formed entity (named, decimal or hex) is a literal
 # that must be written &amp; — invalid HTML even though browsers tolerate it.
-_BARE_AMP = re.compile(r"&(?![A-Za-z][A-Za-z0-9]*;|#\d+;|#x[0-9A-Fa-f]+;).{0,12}")
+_BARE_AMP = re.compile(r"&(?![A-Za-z][A-Za-z0-9]*;|#\d+;|#[xX][0-9A-Fa-f]+;).{0,12}")
 
 
 def check_amp(name, html):
