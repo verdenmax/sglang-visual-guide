@@ -607,8 +607,8 @@ QUIZZES = {
                 "en": "Define TTFT, ITL/TPOT, throughput, and goodput each in one sentence, and state what mainly dominates each. Then explain: why can a system with very high throughput still have low goodput? Give a concrete scenario where this happens.",
             },
             {
-                "zh": "你的服务有“TTFT < 300ms”的 SLA，但当前为了冲吞吐把 max_running_requests 调得很大，导致部分请求 TTFT 超标。请描述你会怎样在吞吐-延迟曲线上重新选点（涉及 max_running_requests、mem_fraction_static、chunked_prefill_size 中至少两个），并说明分块预填充（第 22 课）在“长 prompt 引发延迟尖峰”时如何帮你稳住 SLA。",
-                "en": "Your service has an SLA of 'TTFT < 300ms', but to chase throughput you set max_running_requests very large, causing some requests to blow past the TTFT bound. Describe how you would re-pick a point on the throughput-latency curve (touching at least two of max_running_requests, mem_fraction_static, chunked_prefill_size), and explain how chunked prefill (Lesson 22) helps hold the SLA when a long prompt triggers a latency spike.",
+                "zh": "你的服务有“TTFT &lt; 300ms”的 SLA，但当前为了冲吞吐把 max_running_requests 调得很大，导致部分请求 TTFT 超标。请描述你会怎样在吞吐-延迟曲线上重新选点（涉及 max_running_requests、mem_fraction_static、chunked_prefill_size 中至少两个），并说明分块预填充（第 22 课）在“长 prompt 引发延迟尖峰”时如何帮你稳住 SLA。",
+                "en": "Your service has an SLA of 'TTFT &lt; 300ms', but to chase throughput you set max_running_requests very large, causing some requests to blow past the TTFT bound. Describe how you would re-pick a point on the throughput-latency curve (touching at least two of max_running_requests, mem_fraction_static, chunked_prefill_size), and explain how chunked prefill (Lesson 22) helps hold the SLA when a long prompt triggers a latency spike.",
             },
         ],
     },
@@ -2094,8 +2094,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "分裂只发生在“半条边匹配”这一刻：代码里 prefix_len < len(child.key) 为真就调 _split_node，在分歧点把公共前缀提为父、尾巴降为子。整边命中不分裂，直接收下继续下探。分裂与 lock_ref、驱逐无关——它纯粹是为了让共享前缀按需长出来。",
-                    "en": "Splitting happens only at the 'half-edge match' instant: when prefix_len < len(child.key) the code calls _split_node, lifting the common prefix into a parent and trimming the tail into a child. A whole-edge hit doesn't split — it's taken and descent continues. Splitting is unrelated to lock_ref or eviction; it purely grows shared prefixes on demand.",
+                    "zh": "分裂只发生在“半条边匹配”这一刻：代码里 prefix_len &lt; len(child.key) 为真就调 _split_node，在分歧点把公共前缀提为父、尾巴降为子。整边命中不分裂，直接收下继续下探。分裂与 lock_ref、驱逐无关——它纯粹是为了让共享前缀按需长出来。",
+                    "en": "Splitting happens only at the 'half-edge match' instant: when prefix_len &lt; len(child.key) the code calls _split_node, lifting the common prefix into a parent and trimming the tail into a child. A whole-edge hit doesn't split — it's taken and descent continues. Splitting is unrelated to lock_ref or eviction; it purely grows shared prefixes on demand.",
                 },
             },
             {

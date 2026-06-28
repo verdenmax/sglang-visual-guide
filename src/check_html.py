@@ -9,7 +9,8 @@ Checks each lesson + index:
   and details<->summary
 * a <title> + meta description; exactly one <h1> per lesson
 * both languages present (lang-zh and lang-en blocks)
-* no unescaped '<' inside <pre> code blocks
+* no unescaped '<' inside <pre> code blocks (and none in prose either: a '<'
+  not starting a real tag/comment must be written &lt;)
 * cross-references "第 N 课" within 1..MAX_LESSON (forward refs allowed)
 * nav prev/next chain matches shell.PAGES order
 * index TOC lists every page; '共 N 课 · N 个部分' pill matches PAGES
@@ -228,6 +229,13 @@ def check_lesson(fname, html):
             m = re.search(r"<(?!/).{0,20}", cleaned)
             add("ERR", fname, f"unescaped '<' in <pre>: {m.group(0)!r}")
             break
+
+    # A '<' not starting a real tag/comment is a literal that must be escaped as
+    # &lt; — left bare it renders wrong AND breaks the cross-ref linkifier's
+    # tokenizer. (The <pre> check above is stricter; this covers prose, li, etc.)
+    bare = re.search(r"<(?![A-Za-z/!]).{0,20}", html)
+    if bare:
+        add("ERR", fname, f"unescaped '<' (use &lt;): {bare.group(0)!r}")
 
     for m in re.finditer(r"第\s*([0-9、,，~\-－–—\s]+?)\s*课", html):
         nums = [int(x) for x in re.findall(r"[0-9]+", m.group(1))]

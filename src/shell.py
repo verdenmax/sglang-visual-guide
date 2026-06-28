@@ -191,7 +191,9 @@ for _p in PAGES:
 # attributes; code/links must stay literal).
 _XREF_SKIP = {"pre", "a", "svg", "code", "script", "style", "h1", "title"}
 _ZH_REF = re.compile(r"第\s*(\d+)\s*课")
-_EN_REF = re.compile(r"\bLesson\s+(\d+)\b")
+# Trailing guard keeps ranges ("Lesson 18-23") plain, matching the zh side
+# (第 18-23 课 already stays plain because only N-immediately-followed-by-课 links).
+_EN_REF = re.compile(r"\bLesson\s+(\d+)\b(?!\s*[-\u2013\u2014]\s*\d)")
 
 
 def linkify_refs(html, skip_num=None, href_for=None):
@@ -216,8 +218,14 @@ def linkify_refs(html, skip_num=None, href_for=None):
         return f'<a class="xref" href="{href}">{m.group(0)}</a>'
 
     out, depth = [], 0
-    for tok in re.split(r"(<[^>]+>)", html):
-        if tok[:1] == "<":
+    # Split on real tags only: a '<' must be followed by a letter, '/' or '!'
+    # (tag, end-tag, comment/doctype). A bare '<' in prose (e.g. "a < b") then
+    # stays in the text token instead of swallowing up to the next '>', which
+    # would otherwise drop refs or mis-track protected-element depth. re.split
+    # with one capture group yields text at even indices and tags at odd ones,
+    # so use index parity (a text token may itself start with a bare '<').
+    for i, tok in enumerate(re.split(r"(<[A-Za-z/!][^>]*>)", html)):
+        if i % 2:  # tag token (separator)
             mm = re.match(r"</?([A-Za-z][\w-]*)", tok)
             if mm and mm.group(1).lower() in _XREF_SKIP:
                 if tok[:2] == "</":
