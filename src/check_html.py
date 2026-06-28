@@ -149,6 +149,23 @@ def check_og_asset():
         add("ERR", "og-cover.png", f"size {w}x{h}, expected 1200x630")
 
 
+def check_og_svg_sync():
+    """The committed og-cover.svg must equal build_og.card_svg(), so the card's
+    embedded counts/design cannot silently drift from shell.PAGES (CI never runs
+    build_og.py). Stdlib-only: card_svg() does no I/O and importing build_og has
+    no side effects (build() is guarded by __main__)."""
+    import build_og
+    path = os.path.join(ROOT, "og-cover.svg")
+    if not os.path.exists(path):
+        add("ERR", "og-cover.svg", "asset missing (run build_og.py)")
+        return
+    with open(path, encoding="utf-8") as fh:
+        committed = fh.read()
+    if committed != build_og.card_svg():
+        add("ERR", "og-cover.svg",
+            "out of sync with build_og.card_svg() (run build_og.py to regenerate)")
+
+
 def check_classes(name, html):
     """Every class used in the HTML must have a `.cls` rule in shell.CSS."""
     seen = set()
@@ -324,6 +341,7 @@ def main():
     check_classes("index.html", idx)
     check_social_meta("index.html", idx)
     check_og_asset()
+    check_og_svg_sync()
     for page in PAGES:
         fname, tz, te = page[0], page[1], page[2]
         if fname not in idx:
