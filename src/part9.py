@@ -577,7 +577,7 @@ LESSON_39 = {"zh": r"""
 </ul></div>
 """}
 LESSON_40 = {"zh": r"""
-<p class="lead">第40课，我们把镜头拉到最近，正面解剖一个真实的 <strong>attention kernel</strong>（注意力核函数）。前面几课我们讲过分页 KV 缓存（第30课）、解码阶段的带宽瓶颈（第4课）、以及注意力后端的封装方式（第33课），这一课要把这些拼图拼到一起：当一个序列在 <span class="mono">decode</span>（解码，每步只生成一个新 token）阶段需要做注意力时，GPU 上那段被成千上万次反复调用的核函数，里面到底发生了什么。我们不谈玄学，只谈这段代码每一步搬了哪些字节、为什么这么搬。</p>
+<p class="lead">这一课，我们把镜头拉到最近，正面解剖一个真实的 <strong>attention kernel</strong>（注意力核函数）。前面几课我们讲过分页 KV 缓存（第30课）、解码阶段的带宽瓶颈（第4课）、以及注意力后端的封装方式（第33课），这一课要把这些拼图拼到一起：当一个序列在 <span class="mono">decode</span>（解码，每步只生成一个新 token）阶段需要做注意力时，GPU 上那段被成千上万次反复调用的核函数，里面到底发生了什么。我们不谈玄学，只谈这段代码每一步搬了哪些字节、为什么这么搬。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div>
 <p>把 decode 注意力核函数想象成一个<strong>仓库拣货员</strong>。仓库里的货架（KV 缓存）不是一整排连续摆放的，而是被切成一个个<strong>货格</strong>（page，分页），散落在仓库各处。拣货员手里有一张<strong>取货单</strong>（<span class="mono">page_table</span>，块表），上面写着「这个客户的货分别在 7 号、3 号、19 号格子」。他不会把整个仓库搬空，而是<strong>只按单取那几格</strong>，边取边算账。</p>
@@ -775,7 +775,7 @@ LESSON_40 = {"zh": r"""
 <li><strong>MLA 的现实皱褶</strong>：KV 存成压缩潜变量（512）+ rope（64），核函数读 <span class="mono">kv_c_and_k_pe_cache</span>、补齐头数到 128 再派发；封装在注意力后端（第33课）里，CUDA 源码位于 <span class="mono">sgl-kernel/csrc/attention/</span>。前向引用 CUDA Graph（第41课）。</li>
 </ul></div>
 """, "en": r"""
-<p class="lead">In Lesson 40 we zoom all the way in and dissect a real <strong>attention kernel</strong>. Earlier lessons covered the paged KV cache (Lesson 30), why decode is bandwidth-bound (Lesson 4), and how attention backends wrap kernels (Lesson 33). Now we put the pieces together: when a sequence runs an attention step during <span class="mono">decode</span> (generating one new token per step), what actually happens inside that kernel that gets called tens of thousands of times on the GPU? No hand-waving — just which bytes this code moves at each step, and why.</p>
+<p class="lead">In this lesson we zoom all the way in and dissect a real <strong>attention kernel</strong>. Earlier lessons covered the paged KV cache (Lesson 30), why decode is bandwidth-bound (Lesson 4), and how attention backends wrap kernels (Lesson 33). Now we put the pieces together: when a sequence runs an attention step during <span class="mono">decode</span> (generating one new token per step), what actually happens inside that kernel that gets called tens of thousands of times on the GPU? No hand-waving — just which bytes this code moves at each step, and why.</p>
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div>
 <p>Picture a decode attention kernel as a <strong>warehouse picker</strong>. The shelves (the KV cache) are not one long contiguous row; they are cut into <strong>bins</strong> (pages) scattered around the warehouse. The picker holds a <strong>pick list</strong> (<span class="mono">page_table</span>, the block table) that says "this customer's goods are in bins 7, 3, 19." He does not empty the whole warehouse — he <strong>fetches only those bins</strong> and tallies as he goes.</p>

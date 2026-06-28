@@ -3457,8 +3457,8 @@ QUIZZES = {
                 "en": "In your own words, explain why raw EP wastes compute: how MoE routing's long-tail distribution (Lesson 34) creates hot experts, and how EP's all-to-all sync wall (Lesson 46) makes the step time depend on the busiest rank; then explain why merely \"swapping experts between GPUs\" is not enough and why <strong>replicating hot experts</strong> is necessary to cut an indivisible hotspot into parallelizable copies.",
             },
             {
-                "zh": "描述 <span class='mono'>EPLBManager</span> 的完整循环：<span class='mono'>on_forward_pass_end()</span> 如何经由专家分布记录器累加每专家负载、<span class='mono'>rebalance()</span> 如何周期性求解新的专家→GPU 放置并写回 <span class='mono'>expert_location</span>、后续步骤如何按这张新地图路由；解释为什么把“高频轻量的采集”与“低频较重的重排”解耦很关键，并前瞻第61/62课“可插拔、为规模而设计”的主题。",
-                "en": "Describe the full <span class='mono'>EPLBManager</span> loop: how <span class='mono'>on_forward_pass_end()</span> accumulates per-expert load via the expert-distribution recorder, how <span class='mono'>rebalance()</span> periodically solves a new expert→GPU placement and writes it back to <span class='mono'>expert_location</span>, and how subsequent steps route against this new map; explain why decoupling \"high-frequency lightweight collection\" from \"low-frequency heavier rebalancing\" is essential, and forward-ref Lessons 61/62's \"pluggable, designed-for-scale\" themes.",
+                "zh": "描述 <span class='mono'>EPLBManager</span> 的完整循环：<span class='mono'>on_forward_pass_end()</span> 如何经由专家分布记录器累加每专家负载、<span class='mono'>rebalance()</span> 如何周期性求解新的专家→GPU 放置并写回 <span class='mono'>expert_location</span>、后续步骤如何按这张新地图路由；解释为什么把“高频轻量的采集”与“低频较重的重排”解耦很关键，并前瞻第62/63课“可插拔、为规模而设计”的主题。",
+                "en": "Describe the full <span class='mono'>EPLBManager</span> loop: how <span class='mono'>on_forward_pass_end()</span> accumulates per-expert load via the expert-distribution recorder, how <span class='mono'>rebalance()</span> periodically solves a new expert→GPU placement and writes it back to <span class='mono'>expert_location</span>, and how subsequent steps route against this new map; explain why decoupling \"high-frequency lightweight collection\" from \"low-frequency heavier rebalancing\" is essential, and forward-ref Lessons 62/63's \"pluggable, designed-for-scale\" themes.",
             },
         ],
     },
@@ -3565,8 +3565,8 @@ QUIZZES = {
                 },
                 "opts": [
                     {
-                        "zh": "<strong>放到那些 <span class='mono'>input_ids == 该模态占位符 token</span> 的位置——由 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>placeholder_tokens</span> 为键驱动分发</strong>",
-                        "en": "<strong>At the positions where <span class='mono'>input_ids == that modality's placeholder token</span> — dispatched by <span class='mono'>data_embedding_funcs</span> keyed on <span class='mono'>placeholder_tokens</span></strong>",
+                        "zh": "<strong>放到那些 <span class='mono'>input_ids == 该模态占位符 token</span> 的位置——由 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>Modality</span> 为键驱动分发</strong>",
+                        "en": "<strong>At the positions where <span class='mono'>input_ids == that modality's placeholder token</span> — dispatched by <span class='mono'>data_embedding_funcs</span> keyed on <span class='mono'>Modality</span></strong>",
                     },
                     {"zh": "统一追加到序列末尾，作为额外的上下文前缀", "en": "Appended uniformly at the end of the sequence as an extra context prefix"},
                     {"zh": "插到序列最前面，覆盖系统提示词", "en": "Prepended at the very front, overwriting the system prompt"},
@@ -3574,8 +3574,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "处理器在 token 流里为每个媒体项预留了一串占位符 token。前向时 <span class='mono'>general_mm_embed_routine</span> 先正常嵌入文本 id，再跑各模态编码器得到媒体嵌入，最后<strong>精确地</strong>把它们散射到 <span class='mono'>input_ids</span> 等于该模态占位符的槽位上。分发表 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>placeholder_tokens</span> 为键，决定哪种占位符用哪个编码器填，保证位置与数量一一对应。",
-                    "en": "The processor reserves a run of placeholder tokens in the token stream for each media item. At forward time <span class='mono'>general_mm_embed_routine</span> first embeds text ids normally, then runs each modality's encoder to get media embeddings, and finally <strong>precisely</strong> scatters them onto the slots where <span class='mono'>input_ids</span> equals that modality's placeholder. The table <span class='mono'>data_embedding_funcs</span>, keyed on <span class='mono'>placeholder_tokens</span>, decides which placeholder is filled by which encoder, keeping positions and counts in one-to-one correspondence.",
+                    "zh": "处理器在 token 流里为每个媒体项预留了一串占位符 token。前向时 <span class='mono'>general_mm_embed_routine</span> 先正常嵌入文本 id，再跑各模态编码器得到媒体嵌入，最后<strong>精确地</strong>把它们散射到 <span class='mono'>input_ids</span> 等于该模态占位符的槽位上。分发表 <span class='mono'>data_embedding_funcs</span> 以 <span class='mono'>Modality</span> 为键，决定哪种占位符用哪个编码器填，保证位置与数量一一对应。",
+                    "en": "The processor reserves a run of placeholder tokens in the token stream for each media item. At forward time <span class='mono'>general_mm_embed_routine</span> first embeds text ids normally, then runs each modality's encoder to get media embeddings, and finally <strong>precisely</strong> scatters them onto the slots where <span class='mono'>input_ids</span> equals that modality's placeholder. The table <span class='mono'>data_embedding_funcs</span>, keyed on <span class='mono'>Modality</span>, decides which placeholder is filled by which encoder, keeping positions and counts in one-to-one correspondence.",
                 },
             },
             {
@@ -4272,7 +4272,7 @@ QUIZZES = {
             },
             {
                 "zh": "挑出本课提到的至少三处「零开销主线的不同面孔」（如事件循环第18课、重叠调度第21课、分块预填充第22课、CUDA 图第27课、进程拆分第14/16课），说明它们骨子里都是同一句话：找到每个 CPU 气泡，把它藏到 GPU 计算背后或挪到别的进程。",
-                "en": "Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop Lesson 18, overlap scheduling Lesson 21, chunked prefill Lesson 22, CUDA graphs Lesson 27, the process split Lesson 14/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.",
+                "en": "Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop Lesson 18, overlap scheduling Lesson 21, chunked prefill Lesson 22, CUDA graphs Lesson 27, the process split L14/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.",
             },
         ],
     },
