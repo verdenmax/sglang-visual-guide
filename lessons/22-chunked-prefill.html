@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -326,7 +328,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p class="lead">
 上一课我们看清了调度器“先排序、再限流”的双步动作。这一课盯住限流里最棘手的一种情况：当队首是一个<strong>超长 prompt</strong>（比如 32k token 的长文档）时，会发生什么？
 如果让它在<strong>一拍（step）里一口气全部 prefill</strong>，这一步就会变成一头“鲸鱼”——独占整张 GPU 几十毫秒，
-排在它后面所有正在 <span class="inline">decode</span> 的请求<strong>全部卡住</strong>，每个人的 token 都吐不出来，延迟瞬间炸裂（TTFT/ITL 飙升，第 8 课）。
+排在它后面所有正在 <span class="inline">decode</span> 的请求<strong>全部卡住</strong>，每个人的 token 都吐不出来，延迟瞬间炸裂（TTFT/ITL 飙升，<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。
 <strong>分块预填充（chunked prefill）</strong>就是把这头鲸鱼<strong>切成固定大小的小块</strong>，分摊到好几拍里，
 每一拍只啃一小口、并和别人的 decode <strong>混在同一个批</strong>里跑。没有哪一拍是巨大的，所有人的 token 都还在稳定流动。
 注意一个常见的误解：分块要解决的<strong>不是“放不下”，而是“算不过来”</strong>——显存里也许有的是 KV 槽位，
@@ -349,24 +351,24 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
   一句话：<strong>把“大块 prefill”拆成“多拍小块”，再和 decode 混批，换全局延迟的平滑</strong>。
-  谁来切？正是上一课的 <span class="inline">PrefillAdder</span>（第 20 课）。它握着一个 <strong>token 预算</strong>
+  谁来切？正是上一课的 <span class="inline">PrefillAdder</span>（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）。它握着一个 <strong>token 预算</strong>
   （由服务器参数 <span class="mono">chunked_prefill_size</span> 设定每拍能吃多少 prefill token），
   在 <span class="mono">add_one_req</span> 里逐个尝试塞请求：能整段塞下就整段塞，<strong>塞不下就只切下能装的前半段</strong>，剩下的留到下一拍续上。
-  于是一个 32k 的 prompt 会被切成若干 chunk，分布在连续好几拍里——它的 KV 缓存（第 4 课）<strong>一块一块地填</strong>，
+  于是一个 32k 的 prompt 会被切成若干 chunk，分布在连续好几拍里——它的 KV 缓存（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）<strong>一块一块地填</strong>，
   只有当<strong>最后一块</strong>填完，这个请求才正式转入 decode、开始吐第一个 token。而这每一拍，调度器跑的都是<strong>混合批（mixed batch）</strong>：
-  里面既有“正在 prefill 某一块”的长请求，也有“正在 decode”的其他请求，事件循环（第 18 课）每拍照常推进。
+  里面既有“正在 prefill 某一块”的长请求，也有“正在 decode”的其他请求，事件循环（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>）每拍照常推进。
   再把镜头拉远：分块预填充和上一课的限流是同一枚硬币的两面——限流保证“别一拍吃太多”，分块保证“吃不下的也别整条噎着，切开慢慢来”。
   它把一个会制造延迟尖峰的极端情况，驯化成一串平稳的小步，这正是 SGLang 在<strong>长短请求混跑</strong>的真实流量里依然顺滑的关键。
 顺带一提，分块也为后面更激进的架构埋下伏笔：既然 prefill 和 decode 的负载特性如此不同，能不能干脆把它们拆到<strong>不同的实例</strong>上各自优化？
-那就是第 45 课要讲的 PD 分离。而在单实例内部，分块预填充是把这两种负载<strong>和平共处</strong>的最朴素也最实用的办法。
+那就是<a class="xref" href="45-pd-disaggregation.html">第 45 课</a>要讲的 PD 分离。而在单实例内部，分块预填充是把这两种负载<strong>和平共处</strong>的最朴素也最实用的办法。
 </div>
 
 <h2>问题：一头鲸鱼堵死整个泳池</h2>
 <p>
-先看不分块会发生什么。连续批处理（第 5 课）的美好前提是“每一拍都很快、批里大家轮流前进”。
+先看不分块会发生什么。连续批处理（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）的美好前提是“每一拍都很快、批里大家轮流前进”。
 可一旦队首挤进一个 32k token 的 prefill，而你让它<strong>一拍算完</strong>，这一拍的前向计算量就暴涨几十倍——
 GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求只能干等</strong>：它们本该每一拍吐一个 token，现在却要陪着这头鲸鱼一起卡住。
-对用户的直接观感就是：正在流式输出的回答<strong>突然顿住</strong>（ITL 尖峰），新请求的首字延迟也被拖长（TTFT 尖峰，第 8 课）。
+对用户的直接观感就是：正在流式输出的回答<strong>突然顿住</strong>（ITL 尖峰），新请求的首字延迟也被拖长（TTFT 尖峰，<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。
 一个超长请求，毁掉了一整批人的体验。这不是显存放不下的问题——KV 槽位也许够；这是<strong>“一拍算太多”</strong>的问题，
 是时间维度上的拥塞。这里值得多想一层：连续批处理之所以高效，靠的是“每一拍都短、批里大家齐步走”，
 一旦某一拍因为一个巨型 prefill 而变得奇长，整条流水线的节奏就被打乱——后面所有拍都要为这一拍的失衡买单。
@@ -375,7 +377,7 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 </p>
 
 <div class="cols">
-  <div class="col"><h4>❌ 一拍整段 prefill（尖峰）</h4><p>32k token 在<strong>单拍</strong>算完：这一步巨大无比，独占 GPU 几十毫秒。批里其他请求的 decode <strong>全部 stall</strong>，token 吐不出来。TTFT/ITL <strong>瞬间飙升</strong>（第 8 课），用户看到输出顿住。一头鲸鱼堵死整池。</p></div>
+  <div class="col"><h4>❌ 一拍整段 prefill（尖峰）</h4><p>32k token 在<strong>单拍</strong>算完：这一步巨大无比，独占 GPU 几十毫秒。批里其他请求的 decode <strong>全部 stall</strong>，token 吐不出来。TTFT/ITL <strong>瞬间飙升</strong>（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>），用户看到输出顿住。一头鲸鱼堵死整池。</p></div>
   <div class="col"><h4>✅ 分块 prefill（平滑）</h4><p>32k 被切成<strong>固定大小的 chunk</strong>，分摊到好几拍。每拍只算一个 chunk + <strong>混入大家的 decode</strong>，没有哪一拍巨大。所有人的 token <strong>持续流动</strong>，延迟平稳。多花几拍，换来<strong>全局顺滑</strong>与更好的达标吞吐。</p></div>
 </div>
 
@@ -429,14 +431,14 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 直到最后一块填完，它才脱离 prefill、转入 decode。这里有个容易忽略的细节：每一块都要<strong>按 page_size 向下对齐</strong>，
 因为 KV 缓存是按页（page）管理的（第 4/6 课），切在半页中间会破坏分页结构，所以宁可少切一点、也要切在页边界上。
 另一个细节是“前缀”的累积：第 2 拍开始，这个请求的 <span class="mono">prefix_indices</span> 已经包含了前面几块算好的 KV，
-于是它每拍真正要算的只是“新的一块”，而不是从头重算——这和 RadixAttention 的前缀复用（第 7 课）是同一种“算过的不再算”的思想。
+于是它每拍真正要算的只是“新的一块”，而不是从头重算——这和 RadixAttention 的前缀复用（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）是同一种“算过的不再算”的思想。
 下面这张图把一个 32k 的 prompt 在连续几拍里的切块过程画了出来。
 </p>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>第 1 拍：chunk #1</h4><p>取队首的 32k prompt，<span class="mono">input_tokens &gt; rem_chunk_tokens</span> → 只截 <span class="mono">trunc_len</span>（如 8k，按 page_size 对齐）。填好前 8k 的 KV，混着别人的 decode 一起跑。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>第 2 拍：chunk #2</h4><p>同一请求作为 <span class="mono">new_chunked_req</span> 回来，从第 8k 处接着切下一个 8k 块。又是一个有界小步，decode 照常流动。</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>第 3…N 拍：继续</h4><p>一块接一块把 KV 填满（第 4 课）。每一拍都不大，没有哪一步独占 GPU——尖峰被彻底摊平。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>第 3…N 拍：继续</h4><p>一块接一块把 KV 填满（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）。每一拍都不大，没有哪一步独占 GPU——尖峰被彻底摊平。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>最后一块：转 decode</h4><p>当剩余 token 一拍能装下，走普通路径整段塞完。此刻 prompt 全部 prefill 完毕，请求正式开始吐第一个 token。</p></div></div>
 </div>
 
@@ -479,7 +481,7 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
     <text x="400" y="212" text-anchor="middle" style="fill:var(--teal);font-size:11px;font-weight:700">分块把尖峰削平 · 平稳</text>
     <text x="96" y="242" class="mono" style="fill:var(--muted);font-size:10px">ITL ↑</text>
   </svg>
-  <div class="figcap"><b>图 2 · TTFT/ITL 抖动：切块前后</b> — 切块前其他请求的逐 token 延迟出现<strong>尖峰</strong>（一个大 prefill 把这一拍撑爆，第 8 课的 ITL/TTFT 飙升）；切块后每拍 prefill 有界，尖峰被<strong>削平</strong>，延迟曲线保持平稳。</div>
+  <div class="figcap"><b>图 2 · TTFT/ITL 抖动：切块前后</b> — 切块前其他请求的逐 token 延迟出现<strong>尖峰</strong>（一个大 prefill 把这一拍撑爆，<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>的 ITL/TTFT 飙升）；切块后每拍 prefill 有界，尖峰被<strong>削平</strong>，延迟曲线保持平稳。</div>
 </div>
 
 <h2>取舍：chunk 大小是那把旋钮</h2>
@@ -487,10 +489,10 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 分块不是免费的：它把一个 prefill 拆成多拍，<strong>总步数变多</strong>，那头鲸鱼自己的 TTFT 也被摊到好几拍、<strong>首字略慢</strong>。
 但换来的是<strong>所有人</strong>的延迟都平滑、达标吞吐（goodput-under-SLA）更高——在长短请求混跑的真实负载里，这笔买卖几乎总是值的。
 而 <span class="mono">chunked_prefill_size</span> 就是调这笔买卖的旋钮：<strong>切得越小</strong>，每拍 prefill 越轻、decode 越顺滑，但步数更多、长请求首字更慢、固定开销摊得更多；
-<strong>切得越大</strong>，步数更少、长请求更快收尾，但每拍更重、尖峰风险回升（退回第 8 课的吞吐/延迟权衡）。
+<strong>切得越大</strong>，步数更少、长请求更快收尾，但每拍更重、尖峰风险回升（退回<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>的吞吐/延迟权衡）。
 没有放之四海的最优值——它取决于你的延迟 SLA 和长短请求的比例。一个实用的心法是：<strong>先按你能接受的最坏单拍延迟反推 chunk 大小</strong>——
 你希望每一拍的 decode 顿挫不超过多少毫秒，就把 prefill 块控制在对应的 token 量级；再根据长请求占比微调。
-还要记得，chunk 太小也并非全是好处：步数变多意味着<strong>固定开销</strong>（每拍的组批、采样、内核启动等，第 21 课）被反复摊销，
+还要记得，chunk 太小也并非全是好处：步数变多意味着<strong>固定开销</strong>（每拍的组批、采样、内核启动等，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）被反复摊销，
 极端情况下调度本身的开销会反过来吃掉一部分收益。所以这把旋钮的最佳点，往往落在“足够小到不制造尖峰、又足够大到不浪费步数”的中间地带。下面这张表把旋钮的两端效果摆在一起。
 </p>
 
@@ -546,11 +548,11 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
-    <li><strong>要解决的问题</strong>：一个超长 prompt（如 32k）若在<strong>一拍里整段 prefill</strong>，会独占 GPU、让批里所有 decode 请求 <strong>stall</strong>，造成 TTFT/ITL 延迟尖峰（第 8 课）。一头鲸鱼堵死整池。</li>
+    <li><strong>要解决的问题</strong>：一个超长 prompt（如 32k）若在<strong>一拍里整段 prefill</strong>，会独占 GPU、让批里所有 decode 请求 <strong>stall</strong>，造成 TTFT/ITL 延迟尖峰（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。一头鲸鱼堵死整池。</li>
     <li><strong>分块的做法</strong>：把大 prefill 切成<strong>固定大小的 token 块</strong>（由 <span class="mono">chunked_prefill_size</span> 设定），分摊到<strong>多拍</strong>，并和别人的 decode <strong>混在同一个批</strong>里跑——没有哪一拍巨大，所有人的 token 持续流动。</li>
-    <li><strong>谁来切</strong>：<span class="inline">PrefillAdder</span>（第 20 课）在 <span class="mono">add_one_req</span> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<span class="mono">trunc_len</span> 按 page 对齐），记为 <span class="mono">new_chunked_req</span> 下一拍续；KV 一块块填（第 4 课），最后一块填完才转 decode。</li>
-    <li><strong>取舍与旋钮</strong>：分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，但换来<strong>全局延迟平滑</strong>与更高的达标吞吐。<span class="mono">chunked_prefill_size</span> 越小越顺滑但步数多，越大步数少但尖峰回升（第 8 课的权衡）。</li>
-    <li><strong>一句话收尾</strong>：别让一个长请求把一拍撑爆——把它切块、混着 decode 慢慢喂；用多花的几拍，换满桌人的顺滑。这也是后续 PD 分离（第 45 课）把 prefill 与 decode 彻底拆到不同实例的动机起点。</li>
+    <li><strong>谁来切</strong>：<span class="inline">PrefillAdder</span>（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）在 <span class="mono">add_one_req</span> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<span class="mono">trunc_len</span> 按 page 对齐），记为 <span class="mono">new_chunked_req</span> 下一拍续；KV 一块块填（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>），最后一块填完才转 decode。</li>
+    <li><strong>取舍与旋钮</strong>：分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，但换来<strong>全局延迟平滑</strong>与更高的达标吞吐。<span class="mono">chunked_prefill_size</span> 越小越顺滑但步数多，越大步数少但尖峰回升（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>的权衡）。</li>
+    <li><strong>一句话收尾</strong>：别让一个长请求把一拍撑爆——把它切块、混着 decode 慢慢喂；用多花的几拍，换满桌人的顺滑。这也是后续 PD 分离（<a class="xref" href="45-pd-disaggregation.html">第 45 课</a>）把 prefill 与 decode 彻底拆到不同实例的动机起点。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -560,7 +562,7 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
   <ol class="opts">
     <li>因为 32k token 的 KV 缓存一定放不进显存，必然 OOM</li>
     <li>因为调度器无法对超过 4k token 的请求排序</li>
-    <li>因为它若在<strong>一拍里整段 prefill</strong>，这一步的前向计算量暴涨、<strong>独占 GPU 几十毫秒</strong>，批里所有正在 decode 的请求<strong>全部 stall</strong>、token 吐不出来，于是 TTFT/ITL 延迟尖峰（第 8 课）——一头鲸鱼堵死整池</li>
+    <li>因为它若在<strong>一拍里整段 prefill</strong>，这一步的前向计算量暴涨、<strong>独占 GPU 几十毫秒</strong>，批里所有正在 decode 的请求<strong>全部 stall</strong>、token 吐不出来，于是 TTFT/ITL 延迟尖峰（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）——一头鲸鱼堵死整池</li>
     <li>因为长 prompt 会让采样温度失效，输出乱码</li>
   </ol>
   <details class="accordion">
@@ -584,7 +586,7 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 <div class="quiz">
   <div class="qn">3. <code>chunked_prefill_size</code> 这个旋钮调小或调大，分别意味着什么取舍？</div>
   <ol class="opts">
-    <li><strong>调小</strong>：每拍 prefill 更轻、decode 更顺滑，但<strong>总步数更多</strong>、长请求自己的首字更慢；<strong>调大</strong>：步数更少、长请求更快收尾，但每拍更重、<strong>尖峰风险回升</strong>（退回第 8 课吞吐/延迟权衡）</li>
+    <li><strong>调小</strong>：每拍 prefill 更轻、decode 更顺滑，但<strong>总步数更多</strong>、长请求自己的首字更慢；<strong>调大</strong>：步数更少、长请求更快收尾，但每拍更重、<strong>尖峰风险回升</strong>（退回<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>吞吐/延迟权衡）</li>
     <li>它只控制日志频率，对性能没有影响</li>
     <li>调小提升吞吐、调大降低吞吐，与延迟无关</li>
     <li>它决定 KV 缓存的页大小（page_size），越大越省显存</li>
@@ -597,15 +599,15 @@ GPU 被它独占几十毫秒，这期间批里<strong>其他所有 decode 请求
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“吃巨无霸大餐还要继续聊天”的类比，完整讲清分块预填充。请逐一覆盖：①<strong>问题</strong>——一个 32k prompt 若一拍整段 prefill，会独占 GPU、让批里所有 decode <strong>stall</strong>，造成 TTFT/ITL 尖峰（第 8 课）；②<strong>做法</strong>——<code>PrefillAdder</code>（第 20 课）在 <code>add_one_req</code> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<code>trunc_len</code> 按 page 对齐）、记为 <code>new_chunked_req</code> 下一拍续，KV 一块块填（第 4 课），最后一块才转 decode；③<strong>混合批</strong>——这一个 chunk 和别人的 decode 同批前向，事件循环（第 18 课）照常推进。</li>
-    <li>讨论分块预填充的<strong>取舍</strong>与它在系统里的位置。分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，却换来<strong>全局延迟平滑</strong>与更高的达标吞吐（goodput-under-SLA）——请说明为什么在长短请求混跑的真实负载里这笔买卖通常值得，<code>chunked_prefill_size</code> 偏小/偏大各自的代价（联系第 8 课），以及为什么把 prefill 与 decode 混在一拍里仍有张力，从而引出 PD 分离（第 45 课）把两者彻底拆到不同实例的动机。</li>
+    <li>用“吃巨无霸大餐还要继续聊天”的类比，完整讲清分块预填充。请逐一覆盖：①<strong>问题</strong>——一个 32k prompt 若一拍整段 prefill，会独占 GPU、让批里所有 decode <strong>stall</strong>，造成 TTFT/ITL 尖峰（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）；②<strong>做法</strong>——<code>PrefillAdder</code>（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）在 <code>add_one_req</code> 里执行每拍 token 预算，装不下就把请求<strong>钳到剩余预算</strong>（<code>trunc_len</code> 按 page 对齐）、记为 <code>new_chunked_req</code> 下一拍续，KV 一块块填（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>），最后一块才转 decode；③<strong>混合批</strong>——这一个 chunk 和别人的 decode 同批前向，事件循环（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>）照常推进。</li>
+    <li>讨论分块预填充的<strong>取舍</strong>与它在系统里的位置。分块<strong>多花几拍</strong>、长请求自己的 TTFT 被摊薄，却换来<strong>全局延迟平滑</strong>与更高的达标吞吐（goodput-under-SLA）——请说明为什么在长短请求混跑的真实负载里这笔买卖通常值得，<code>chunked_prefill_size</code> 偏小/偏大各自的代价（联系<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>），以及为什么把 prefill 与 decode 混在一拍里仍有张力，从而引出 PD 分离（<a class="xref" href="45-pd-disaggregation.html">第 45 课</a>）把两者彻底拆到不同实例的动机。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
 Last lesson we saw the scheduler's two-step move: order first, then throttle. This lesson zooms in on the trickiest throttling case: what happens when the head of the queue is a <strong>huge prompt</strong> (say a 32k-token document)?
-If you let it <strong>prefill entirely in ONE step</strong>, that step becomes a "whale"—it monopolizes the whole GPU for tens of milliseconds, and every other request that is <span class="inline">decoding</span> behind it <strong>stalls completely</strong>: nobody's tokens come out, and latency spikes (TTFT/ITL blow up, Lesson 8).
+If you let it <strong>prefill entirely in ONE step</strong>, that step becomes a "whale"—it monopolizes the whole GPU for tens of milliseconds, and every other request that is <span class="inline">decoding</span> behind it <strong>stalls completely</strong>: nobody's tokens come out, and latency spikes (TTFT/ITL blow up, <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>).
 <strong>Chunked prefill</strong> cuts that whale into <strong>fixed-size token chunks</strong>, spread over several steps, each step nibbling one small bite while <strong>mixed in the same batch</strong> with everyone else's decode. No step is enormous; everyone's tokens keep flowing.
 Remember one line: <strong>never let one long request blow up a step—chunk it and feed it slowly, mixed with decode</strong>.
 </p>
@@ -622,24 +624,24 @@ Remember one line: <strong>never let one long request blow up a step—chunk it 
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
   In one line: <strong>split a big prefill into many small per-step chunks, mix them with decode, and trade a few extra steps for globally smooth latency</strong>.
-  Who does the cutting? The very <span class="inline">PrefillAdder</span> from last lesson (Lesson 20). It holds a <strong>token budget</strong> (the server arg <span class="mono">chunked_prefill_size</span> sets how many prefill tokens fit per step) and, inside <span class="mono">add_one_req</span>, tries each request: if the whole thing fits, commit it; <strong>if it doesn't, slice off only the part that fits</strong> and leave the rest for the next step.
-  So a 32k prompt gets cut into several chunks across consecutive steps—its KV cache (Lesson 4) <strong>fills chunk by chunk</strong>, and only after the <strong>last chunk</strong> does that request switch into decode and emit its first token. And every such step runs a <strong>mixed batch</strong>: some requests prefilling a chunk, others decoding, with the event loop (Lesson 18) advancing as usual.
+  Who does the cutting? The very <span class="inline">PrefillAdder</span> from last lesson (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>). It holds a <strong>token budget</strong> (the server arg <span class="mono">chunked_prefill_size</span> sets how many prefill tokens fit per step) and, inside <span class="mono">add_one_req</span>, tries each request: if the whole thing fits, commit it; <strong>if it doesn't, slice off only the part that fits</strong> and leave the rest for the next step.
+  So a 32k prompt gets cut into several chunks across consecutive steps—its KV cache (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>) <strong>fills chunk by chunk</strong>, and only after the <strong>last chunk</strong> does that request switch into decode and emit its first token. And every such step runs a <strong>mixed batch</strong>: some requests prefilling a chunk, others decoding, with the event loop (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) advancing as usual.
   Pull back: chunked prefill and last lesson's throttling are two sides of one coin—throttling guarantees "don't eat too much in one step," chunking guarantees "what doesn't fit isn't choked down whole either; slice it and take it slow."
   It tames an extreme that would otherwise spike latency into a stream of steady small steps—the key to SGLang staying smooth under <strong>mixed long/short traffic</strong>.
 </div>
 
 <h2>The problem: one whale clogs the whole pool</h2>
 <p>
-First, what happens without chunking. Continuous batching (Lesson 5) rests on a happy premise: "every step is fast, and the batch advances together."
+First, what happens without chunking. Continuous batching (<a class="xref" href="05-continuous-batching.html">Lesson 5</a>) rests on a happy premise: "every step is fast, and the batch advances together."
 But the moment a 32k-token prefill jumps to the head and you make it <strong>finish in one step</strong>, that step's forward compute explodes tens of times over—
 the GPU is monopolized for tens of milliseconds, during which <strong>every other decode request in the batch just waits</strong>: they should emit one token per step, but now they stall alongside the whale.
-To the user this reads as a streaming answer that <strong>suddenly freezes</strong> (ITL spike), plus longer first-token latency for new requests (TTFT spike, Lesson 8).
+To the user this reads as a streaming answer that <strong>suddenly freezes</strong> (ITL spike), plus longer first-token latency for new requests (TTFT spike, <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>).
 One overlong request ruined an entire batch's experience. This is not a "won't fit in memory" problem—KV slots may be plenty; it is a <strong>"too much compute in one step"</strong> problem,
 congestion along the time axis. Chunked prefill exists precisely to flatten this "one big fish stops the whole pool" spike.
 </p>
 
 <div class="cols">
-  <div class="col"><h4>❌ One-step full prefill (spike)</h4><p>32k tokens finish in a <strong>single step</strong>: that step is enormous, monopolizing the GPU for tens of ms. Every other request's decode in the batch <strong>stalls</strong>, no tokens emitted. TTFT/ITL <strong>spike instantly</strong> (Lesson 8); users see output freeze. One whale clogs the pool.</p></div>
+  <div class="col"><h4>❌ One-step full prefill (spike)</h4><p>32k tokens finish in a <strong>single step</strong>: that step is enormous, monopolizing the GPU for tens of ms. Every other request's decode in the batch <strong>stalls</strong>, no tokens emitted. TTFT/ITL <strong>spike instantly</strong> (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>); users see output freeze. One whale clogs the pool.</p></div>
   <div class="col"><h4>✅ Chunked prefill (smooth)</h4><p>The 32k is cut into <strong>fixed-size chunks</strong> over several steps. Each step computes one chunk + is <strong>mixed with everyone's decode</strong>; no step is huge. Everyone's tokens <strong>keep flowing</strong>, latency steady. A few extra steps buy <strong>global smoothness</strong> and better goodput-under-SLA.</p></div>
 </div>
 
@@ -687,14 +689,14 @@ The mechanism is plain and effective: each step, <span class="inline">PrefillAdd
 When a request's pending <span class="mono">input_tokens</span> is <strong>less than or equal to</strong> the remaining chunk budget, the whole thing is committed at once via the non-chunked path;
 once it <strong>exceeds</strong> it, the chunked branch kicks in: take only <span class="mono">trunc_len</span> tokens (floored to <span class="mono">page_size</span> for page alignment),
 mark that slice as this step's extend range (<span class="mono">set_extend_range</span>), and leave the rest. The request is recorded as <span class="mono">new_chunked_req</span>,
-and next step it returns with its filled prefix and <strong>slices the next chunk from the cut point</strong>. Round after round, the prompt's KV cache (Lesson 4) accumulates chunk by chunk,
+and next step it returns with its filled prefix and <strong>slices the next chunk from the cut point</strong>. Round after round, the prompt's KV cache (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>) accumulates chunk by chunk,
 until the last chunk is filled and it finally leaves prefill and enters decode. The diagram below traces a 32k prompt being chunked across consecutive steps.
 </p>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Step 1: chunk #1</h4><p>Take the 32k prompt at the head; <span class="mono">input_tokens &gt; rem_chunk_tokens</span> → slice only <span class="mono">trunc_len</span> (e.g. 8k, page-aligned). Fill the first 8k of KV, running mixed with others' decode.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Step 2: chunk #2</h4><p>The same request returns as <span class="mono">new_chunked_req</span>, slicing the next 8k from offset 8k. Another bounded small step; decode keeps flowing.</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>Steps 3…N: continue</h4><p>Chunk after chunk fills the KV (Lesson 4). No step is large, none monopolizes the GPU—the spike is fully flattened.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Steps 3…N: continue</h4><p>Chunk after chunk fills the KV (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>). No step is large, none monopolizes the GPU—the spike is fully flattened.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Last chunk: enter decode</h4><p>When the remainder fits in one step, the non-chunked path commits it whole. The prompt is now fully prefilled, and the request emits its first token.</p></div></div>
 </div>
 
@@ -734,7 +736,7 @@ the rest are each request's <strong>decode</strong>. The chunk's size (the highl
     <text x="400" y="212" text-anchor="middle" style="fill:var(--teal);font-size:11px;font-weight:700">chunking caps the spike · smooth</text>
     <text x="96" y="242" class="mono" style="fill:var(--muted);font-size:10px">ITL ↑</text>
   </svg>
-  <div class="figcap"><b>Fig 2 · TTFT/ITL jitter: before vs after chunking</b> — before chunking other requests' inter-token latency <strong>spikes</strong> (one big prefill blows up the step, the ITL/TTFT spike of Lesson 8); after chunking each step's prefill is bounded, the spike is <strong>capped</strong>, and the curve stays smooth.</div>
+  <div class="figcap"><b>Fig 2 · TTFT/ITL jitter: before vs after chunking</b> — before chunking other requests' inter-token latency <strong>spikes</strong> (one big prefill blows up the step, the ITL/TTFT spike of <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>); after chunking each step's prefill is bounded, the spike is <strong>capped</strong>, and the curve stays smooth.</div>
 </div>
 
 <h2>The trade-off: chunk size is the knob</h2>
@@ -742,7 +744,7 @@ the rest are each request's <strong>decode</strong>. The chunk's size (the highl
 Chunking isn't free: it splits a prefill across steps, so <strong>total step count rises</strong>, and the whale's own TTFT is spread over several steps—its <strong>first byte is a bit slower</strong>.
 What you buy is smooth latency for <strong>everyone</strong> and higher goodput-under-SLA—in real mixed long/short workloads this is almost always worth it.
 And <span class="mono">chunked_prefill_size</span> is the knob: <strong>smaller</strong> means lighter prefill per step and smoother decode, but more steps, a slower whale first-byte, and more fixed overhead amortized;
-<strong>larger</strong> means fewer steps and a faster whale finish, but heavier steps and the spike risk creeping back (back to Lesson 8's throughput/latency trade-off).
+<strong>larger</strong> means fewer steps and a faster whale finish, but heavier steps and the spike risk creeping back (back to <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>'s throughput/latency trade-off).
 There's no universal optimum—it depends on your latency SLA and your long/short mix. The table lays the two ends side by side.
 </p>
 
@@ -795,11 +797,11 @@ A concrete example: take <span class="mono">--chunked-prefill-size 4096</span> (
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
-    <li><strong>The problem</strong>: a huge prompt (e.g. 32k) prefilled <strong>whole in one step</strong> monopolizes the GPU and <strong>stalls every decode</strong> in the batch, causing TTFT/ITL latency spikes (Lesson 8). One whale clogs the pool.</li>
+    <li><strong>The problem</strong>: a huge prompt (e.g. 32k) prefilled <strong>whole in one step</strong> monopolizes the GPU and <strong>stalls every decode</strong> in the batch, causing TTFT/ITL latency spikes (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>). One whale clogs the pool.</li>
     <li><strong>The fix</strong>: split the big prefill into <strong>fixed-size token chunks</strong> (set by <span class="mono">chunked_prefill_size</span>) across <strong>several steps</strong>, <strong>mixed in the same batch</strong> with others' decode—no step is huge, everyone's tokens keep flowing.</li>
-    <li><strong>Who cuts</strong>: <span class="inline">PrefillAdder</span> (Lesson 20) enforces the per-step token budget in <span class="mono">add_one_req</span>, clamping a non-fitting request to the remaining budget (<span class="mono">trunc_len</span>, page-aligned) and recording <span class="mono">new_chunked_req</span> for next step; KV fills chunk by chunk (Lesson 4), and only after the last chunk does it enter decode.</li>
-    <li><strong>Trade-off &amp; knob</strong>: chunking costs <strong>more steps</strong> and a thinner whale TTFT, buying <strong>smooth global latency</strong> and higher goodput-under-SLA. <span class="mono">chunked_prefill_size</span> smaller = smoother but more steps; larger = fewer steps but the spike returns (Lesson 8's trade-off).</li>
-    <li><strong>One-line close</strong>: never let one long request blow up a step—chunk it and feed it slowly, mixed with decode; spend a few extra steps to keep the whole table smooth. This is also the seed of the motivation for PD disaggregation (Lesson 45), which splits prefill and decode onto separate instances entirely.</li>
+    <li><strong>Who cuts</strong>: <span class="inline">PrefillAdder</span> (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) enforces the per-step token budget in <span class="mono">add_one_req</span>, clamping a non-fitting request to the remaining budget (<span class="mono">trunc_len</span>, page-aligned) and recording <span class="mono">new_chunked_req</span> for next step; KV fills chunk by chunk (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>), and only after the last chunk does it enter decode.</li>
+    <li><strong>Trade-off &amp; knob</strong>: chunking costs <strong>more steps</strong> and a thinner whale TTFT, buying <strong>smooth global latency</strong> and higher goodput-under-SLA. <span class="mono">chunked_prefill_size</span> smaller = smoother but more steps; larger = fewer steps but the spike returns (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>'s trade-off).</li>
+    <li><strong>One-line close</strong>: never let one long request blow up a step—chunk it and feed it slowly, mixed with decode; spend a few extra steps to keep the whole table smooth. This is also the seed of the motivation for PD disaggregation (<a class="xref" href="45-pd-disaggregation.html">Lesson 45</a>), which splits prefill and decode onto separate instances entirely.</li>
   </ul>
 </div>
 <div class="selftest">
@@ -809,7 +811,7 @@ A concrete example: take <span class="mono">--chunked-prefill-size 4096</span> (
   <ol class="opts">
     <li>Because a 32k-token KV cache can never fit in VRAM and must OOM</li>
     <li>Because the scheduler cannot order requests longer than 4k tokens</li>
-    <li>Because if it is <strong>prefilled whole in one step</strong>, that step's forward compute explodes and <strong>monopolizes the GPU for tens of ms</strong>; every decoding request in the batch <strong>stalls</strong>, no tokens emitted, so TTFT/ITL spike (Lesson 8)—one whale clogs the whole pool</li>
+    <li>Because if it is <strong>prefilled whole in one step</strong>, that step's forward compute explodes and <strong>monopolizes the GPU for tens of ms</strong>; every decoding request in the batch <strong>stalls</strong>, no tokens emitted, so TTFT/ITL spike (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>)—one whale clogs the whole pool</li>
     <li>Because a long prompt breaks sampling temperature, producing garbage output</li>
   </ol>
   <details class="accordion">
@@ -833,7 +835,7 @@ A concrete example: take <span class="mono">--chunked-prefill-size 4096</span> (
 <div class="quiz">
   <div class="qn">3. Tuning the <code>chunked_prefill_size</code> knob smaller vs larger means what trade-off?</div>
   <ol class="opts">
-    <li><strong>Smaller</strong>: lighter prefill per step and smoother decode, but <strong>more total steps</strong> and a slower whale first byte; <strong>larger</strong>: fewer steps and a faster whale finish, but heavier steps and <strong>the spike risk returns</strong> (back to Lesson 8's throughput/latency trade-off)</li>
+    <li><strong>Smaller</strong>: lighter prefill per step and smoother decode, but <strong>more total steps</strong> and a slower whale first byte; <strong>larger</strong>: fewer steps and a faster whale finish, but heavier steps and <strong>the spike risk returns</strong> (back to <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>'s throughput/latency trade-off)</li>
     <li>It only controls logging frequency and has no performance effect</li>
     <li>Smaller raises throughput, larger lowers it, with no latency effect</li>
     <li>It sets the KV cache page size, where larger saves more VRAM</li>
@@ -846,8 +848,8 @@ A concrete example: take <span class="mono">--chunked-prefill-size 4096</span> (
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'eating a giant meal while still chatting' analogy, fully explain chunked prefill. Cover each: (1) the <strong>problem</strong>—a 32k prompt prefilled whole in one step monopolizes the GPU and <strong>stalls</strong> every decode in the batch, causing TTFT/ITL spikes (Lesson 8); (2) the <strong>fix</strong>—<code>PrefillAdder</code> (Lesson 20) enforces the per-step token budget in <code>add_one_req</code>, clamping a non-fitting request to the remaining budget (<code>trunc_len</code>, page-aligned), recording <code>new_chunked_req</code> for next step, filling KV chunk by chunk (Lesson 4), entering decode only after the last chunk; (3) the <strong>mixed batch</strong>—that one chunk is forwarded alongside others' decode, the event loop (Lesson 18) advancing as usual.</li>
-    <li>Discuss chunked prefill's <strong>trade-off</strong> and its place in the system. Chunking costs <strong>a few extra steps</strong> and thins the whale's own TTFT, but buys <strong>smooth global latency</strong> and higher goodput-under-SLA—explain why this is usually worth it in real mixed long/short workloads, the costs of <code>chunked_prefill_size</code> being too small vs too large (tie to Lesson 8), and why mixing prefill and decode in one step still has tension, motivating PD disaggregation (Lesson 45) that splits the two onto separate instances entirely.</li>
+    <li>Using the 'eating a giant meal while still chatting' analogy, fully explain chunked prefill. Cover each: (1) the <strong>problem</strong>—a 32k prompt prefilled whole in one step monopolizes the GPU and <strong>stalls</strong> every decode in the batch, causing TTFT/ITL spikes (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>); (2) the <strong>fix</strong>—<code>PrefillAdder</code> (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) enforces the per-step token budget in <code>add_one_req</code>, clamping a non-fitting request to the remaining budget (<code>trunc_len</code>, page-aligned), recording <code>new_chunked_req</code> for next step, filling KV chunk by chunk (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>), entering decode only after the last chunk; (3) the <strong>mixed batch</strong>—that one chunk is forwarded alongside others' decode, the event loop (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) advancing as usual.</li>
+    <li>Discuss chunked prefill's <strong>trade-off</strong> and its place in the system. Chunking costs <strong>a few extra steps</strong> and thins the whale's own TTFT, but buys <strong>smooth global latency</strong> and higher goodput-under-SLA—explain why this is usually worth it in real mixed long/short workloads, the costs of <code>chunked_prefill_size</code> being too small vs too large (tie to <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>), and why mixing prefill and decode in one step still has tension, motivating PD disaggregation (<a class="xref" href="45-pd-disaggregation.html">Lesson 45</a>) that splits the two onto separate instances entirely.</li>
   </ul>
 </div>
 </div></div>

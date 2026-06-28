@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -326,7 +328,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p class="lead">这是第十一部分的最后一课，也是整份指南的一个漂亮收尾。我们要把目光从"大语言模型"挪开，看向另一类生成任务：<strong>扩散模型</strong>（diffusion models），也就是图像与视频生成。它住在 <span class="mono">sglang-diffusion</span> 子项目里，路径是 <span class="mono">python/sglang/multimodal_gen/</span>（注意是在 <span class="mono">python/sglang/</span> 之下，而不是 <span class="mono">python/sglang/srt/</span>）。扩散模型的计算范式和大语言模型完全不同，但它惊人地<strong>复用了你这一路学过的全部服务化肌肉</strong>。本课的落点就是一句话：<strong>一套引擎，两种范式</strong>。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div>
-<p>想象两位画家。第一位是<strong>口述者</strong>：他一个字一个字地讲故事，说完一个词，听到自己刚说的词，再决定下一个词——这就是自回归大语言模型，每次前向只吐一个 token，再把它喂回去（回顾第4课）。</p>
+<p>想象两位画家。第一位是<strong>口述者</strong>：他一个字一个字地讲故事，说完一个词，听到自己刚说的词，再决定下一个词——这就是自回归大语言模型，每次前向只吐一个 token，再把它喂回去（回顾<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）。</p>
 <p>第二位是<strong>显影师</strong>：他面前是一张布满雪花噪点的相纸，什么也看不清。他不是一笔一笔去画，而是把整张纸反复放进显影液里，每泡一次就<strong>去掉一点点噪声</strong>，让画面稍微清晰一些。泡上二三十次之后，一张完整的图像就从纯噪声里"浮现"出来。这位显影师从不回头听自己说了什么，他做的是对<strong>同一张潜空间画布</strong>反复精修——这正是扩散模型的工作方式：<strong>迭代去噪</strong>（iterative denoising）。</p>
 <p>两位画家用的画笔、颜料、画室其实是同一套——只是作画的<strong>节奏与方式</strong>不同。把这套共用的画室换成 SGLang 引擎，把两种作画方式换成自回归与扩散，你就抓住了本课的全部精髓。</p>
 </div>
@@ -377,10 +379,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p><span class="mono">PipelineConfig</span> 把这套结构<strong>声明式地</strong>固化下来：<span class="mono">task_type</span> 说明这是文生图还是图生视频，<span class="mono">dit_config</span>/<span class="mono">vae_config</span>/<span class="mono">text_encoder_configs</span> 分别描述三个零件，<span class="mono">dit_precision</span> 指定去噪器的计算精度。换一个扩散模型，往往只是换一份 <span class="mono">PipelineConfig</span>——上层服务化代码几乎不用动。这种"配置即管线"的设计，正是它能轻松接入 SGLang 既有引擎的前提。</p>
 
 <h2>三、真正的惊喜：它复用了你学过的一切</h2>
-<p>到这里你可能以为要学一套全新的系统，恰恰相反。SGLang 的扩散服务<strong>把你整本指南学到的服务化能力原样借了过来</strong>：底层用同一套优化过的 <span class="mono">sgl-kernel</span> 算子（第38课）；用一个高效的<strong>调度循环</strong>来组织请求；对那个形状固定的去噪步做 <strong>CUDA Graph 捕获</strong>（第27课），把每一步的内核启动开销压到极低；用<strong>量化</strong>（第35课）压缩 DiT 与编码器的显存；靠<strong>多硬件后端</strong>（第42课：NVIDIA / AMD / 昇腾 NPU / Apple / 摩尔线程）让同一份代码跑在不同芯片上；对外暴露一个 <strong>OpenAI 兼容的 API</strong>（第15课）；甚至支持 PD 风格的<strong>分离式</strong>部署。</p>
+<p>到这里你可能以为要学一套全新的系统，恰恰相反。SGLang 的扩散服务<strong>把你整本指南学到的服务化能力原样借了过来</strong>：底层用同一套优化过的 <span class="mono">sgl-kernel</span> 算子（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）；用一个高效的<strong>调度循环</strong>来组织请求；对那个形状固定的去噪步做 <strong>CUDA Graph 捕获</strong>（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>），把每一步的内核启动开销压到极低；用<strong>量化</strong>（<a class="xref" href="35-quantization.html">第35课</a>）压缩 DiT 与编码器的显存；靠<strong>多硬件后端</strong>（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>：NVIDIA / AMD / 昇腾 NPU / Apple / 摩尔线程）让同一份代码跑在不同芯片上；对外暴露一个 <strong>OpenAI 兼容的 API</strong>（<a class="xref" href="15-openai-anthropic-ollama-compat.html">第15课</a>）；甚至支持 PD 风格的<strong>分离式</strong>部署。</p>
 <p>在这套通用地基之上，再叠加扩散特有的优化。最有代表性的是 <strong>TeaCache</strong>：它会<strong>缓存某一去噪步的结果</strong>，当相邻步之间的变化足够小时（在累积的 L1 距离上设一个阈值），就<strong>跳过</strong>那些冗余的去噪步，直接复用缓存。因为扩散是固定 N 步的精修，越到后期每步带来的改变越小，跳过其中一部分几乎不损画质却能显著提速。这类技巧是"长在"通用引擎之上的，而不是另起一摊。</p>
 <p>这里值得再咀嚼一下 CUDA Graph 为什么对扩散特别合拍。大语言模型解码时，序列长度每步都在变，KV 缓存不断增长，捕获静态图要费不少心思去处理动态形状；而扩散的去噪步<strong>天生就是定形的</strong>——同一个 DiT、同一批潜变量、同一串算子，重复 N 次纹丝不动。把这一步捕获成 CUDA Graph 之后，每一步都只是"重放"一张录好的内核启动序列，把成百上千次零碎的 kernel launch 开销压到几乎为零。对一个要跑二三十步的去噪循环来说，这种省法会被<strong>放大 N 倍</strong>，收益非常可观。</p>
-<p>量化（第35课）在这里同样直接受用。DiT 往往是参数量很大的 Transformer，文本编码器也不小，把它们量化到更低精度，能显著压低显存占用、让更大的扩散模型在同一张卡上跑起来。多硬件后端（第42课）则意味着这条扩散管线不挑芯片：NVIDIA、AMD、昇腾 NPU、Apple、摩尔线程，同一份模型代码都能落地。再加上 OpenAI 兼容的 API（第15课），调用方甚至感觉不到背后是文本模型还是图像模型——接口是统一的，接入成本极低。这些能力没有一项是为扩散"专门重写"的，全是把现成的服务化肌肉<strong>借过来即用</strong>。</p>
+<p>量化（<a class="xref" href="35-quantization.html">第35课</a>）在这里同样直接受用。DiT 往往是参数量很大的 Transformer，文本编码器也不小，把它们量化到更低精度，能显著压低显存占用、让更大的扩散模型在同一张卡上跑起来。多硬件后端（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）则意味着这条扩散管线不挑芯片：NVIDIA、AMD、昇腾 NPU、Apple、摩尔线程，同一份模型代码都能落地。再加上 OpenAI 兼容的 API（<a class="xref" href="15-openai-anthropic-ollama-compat.html">第15课</a>），调用方甚至感觉不到背后是文本模型还是图像模型——接口是统一的，接入成本极低。这些能力没有一项是为扩散"专门重写"的，全是把现成的服务化肌肉<strong>借过来即用</strong>。</p>
 
 <h2>四、把两种范式并排看</h2>
 <p>同一套 SGLang 引擎，既服务"一个字一个字往外接"的自回归大语言模型，也服务"对一张潜空间画布反复显影"的扩散模型。算子、调度、显存、CUDA Graph、多硬件、API——这些都是共享的；不同的只是上层的生成范式。这正是 SGLang 设计哲学的体现：<strong>一切皆可插拔</strong>，新能力以最小代价复用既有地基。</p>
@@ -434,12 +436,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <table class="t">
   <tr><th>复用的 SGLang 部件</th><th>对扩散的好处</th></tr>
-  <tr><td>sgl-kernel 优化算子（第38课）</td><td>DiT / 编码器 / VAE 直接吃到高性能内核</td></tr>
+  <tr><td>sgl-kernel 优化算子（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）</td><td>DiT / 编码器 / VAE 直接吃到高性能内核</td></tr>
   <tr><td>高效调度循环</td><td>批量编排去噪请求，吞吐更高</td></tr>
-  <tr><td>CUDA Graph 捕获（第27课）</td><td>去噪步形状固定，捕获后每步启动开销极低</td></tr>
-  <tr><td>量化（第35课）</td><td>压缩 DiT 与编码器显存，跑得起更大模型</td></tr>
-  <tr><td>多硬件后端（第42课）</td><td>NVIDIA / AMD / 昇腾 / Apple / 摩尔线程通吃</td></tr>
-  <tr><td>OpenAI 兼容 API（第15课）</td><td>对外接口统一，接入成本极低</td></tr>
+  <tr><td>CUDA Graph 捕获（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）</td><td>去噪步形状固定，捕获后每步启动开销极低</td></tr>
+  <tr><td>量化（<a class="xref" href="35-quantization.html">第35课</a>）</td><td>压缩 DiT 与编码器显存，跑得起更大模型</td></tr>
+  <tr><td>多硬件后端（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）</td><td>NVIDIA / AMD / 昇腾 / Apple / 摩尔线程通吃</td></tr>
+  <tr><td>OpenAI 兼容 API（<a class="xref" href="15-openai-anthropic-ollama-compat.html">第15课</a>）</td><td>对外接口统一，接入成本极低</td></tr>
 </table>
 
 <div class="flow">
@@ -483,7 +485,7 @@ class TeaCacheContext:
 <li><strong>不同范式</strong>：自回归 LLM 每次前向吐一个 token 再喂回；扩散模型从纯噪声出发、迭代去噪 N 步，对同一个潜变量反复精修，无 token 反馈。</li>
 <li><strong>三个零件</strong>：文本编码器（把提示词变条件）+ DiT 去噪器（每步运行一次）+ VAE（潜空间 &lt;-&gt; 像素），由 <span class="mono">PipelineConfig</span> 统一描述。</li>
 <li><strong>无分类器引导</strong>：<span class="mono">should_use_guidance</span> / <span class="mono">embedded_cfg_scale</span> 把结果推向提示词。</li>
-<li><strong>一套引擎，两种范式</strong>：复用 sgl-kernel（第38课）、调度循环、CUDA Graph（第27课）、量化（第35课）、多硬件（第42课）、OpenAI API（第15课）乃至 PD 分离。</li>
+<li><strong>一套引擎，两种范式</strong>：复用 sgl-kernel（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）、调度循环、CUDA Graph（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）、量化（<a class="xref" href="35-quantization.html">第35课</a>）、多硬件（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）、OpenAI API（<a class="xref" href="15-openai-anthropic-ollama-compat.html">第15课</a>）乃至 PD 分离。</li>
 <li><strong>扩散特有优化</strong>：TeaCache 缓存去噪步结果，变化小于阈值时跳过冗余步，提速而几乎不损画质，是叠在通用引擎之上的加速层。</li>
 </ul>
 </div>
@@ -527,14 +529,14 @@ class TeaCacheContext:
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。扩散没有另起炉灶，而是借用同一套服务化地基：sgl-kernel（第38课）、调度循环、CUDA Graph（第27课）、量化（第35课）、多硬件（第42课）、OpenAI API（第15课）乃至 PD 分离。TeaCache 是叠在上面的扩散特有优化：缓存去噪步结果，变化足够小就跳过，提速而几乎不损画质。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。扩散没有另起炉灶，而是借用同一套服务化地基：sgl-kernel（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）、调度循环、CUDA Graph（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）、量化（<a class="xref" href="35-quantization.html">第35课</a>）、多硬件（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）、OpenAI API（<a class="xref" href="15-openai-anthropic-ollama-compat.html">第15课</a>）乃至 PD 分离。TeaCache 是叠在上面的扩散特有优化：缓存去噪步结果，变化足够小就跳过，提速而几乎不损画质。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用你自己的话讲清扩散模型的“从噪声走向图像”：为什么它是<strong>定长 N 步迭代去噪</strong>而不是自回归的 token 接龙；说明文本编码器、DiT 去噪器、VAE 三个零件各自的角色，以及无分类器引导如何把结果推向提示词。</li>
-    <li>解释“一套引擎，两种范式”：列出 SGLang 扩散服务复用了哪些你前面学过的部件（如第38课 sgl-kernel、第27课 CUDA Graph、第35课量化、第42课多硬件、第15课 OpenAI API），并说明为什么<strong>去噪步形状固定</strong>特别适合 CUDA Graph 捕获，以及 TeaCache 如何通过累积 L1 距离阈值跳过冗余步。</li>
+    <li>解释“一套引擎，两种范式”：列出 SGLang 扩散服务复用了哪些你前面学过的部件（如<a class="xref" href="38-sgl-kernel-overview.html">第38课</a> sgl-kernel、<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a> CUDA Graph、<a class="xref" href="35-quantization.html">第35课</a>量化、<a class="xref" href="42-multi-hardware-backends.html">第42课</a>多硬件、<a class="xref" href="15-openai-anthropic-ollama-compat.html">第15课</a> OpenAI API），并说明为什么<strong>去噪步形状固定</strong>特别适合 CUDA Graph 捕获，以及 TeaCache 如何通过累积 L1 距离阈值跳过冗余步。</li>
   </ul>
 </div>
 </div></div>
@@ -542,7 +544,7 @@ class TeaCacheContext:
 <p class="lead">This is the last lesson of Part 11, and a nice way to close the whole guide. We turn our eyes away from large language models toward a different generation task: <strong>diffusion models</strong> — image and video generation. It lives in the <span class="mono">sglang-diffusion</span> sub-project at <span class="mono">python/sglang/multimodal_gen/</span> (note: under <span class="mono">python/sglang/</span>, NOT <span class="mono">python/sglang/srt/</span>). Diffusion uses a compute pattern completely different from LLMs, yet it astonishingly <strong>reuses every bit of serving muscle you have built up along the way</strong>. The punchline of this lesson is one phrase: <strong>one stack, two paradigms</strong>.</p>
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div>
-<p>Picture two painters. The first is a <strong>narrator</strong>: he tells a story one word at a time, hears the word he just said, then decides the next — that's the autoregressive LLM, emitting one token per forward and feeding it back (recall Lesson 4).</p>
+<p>Picture two painters. The first is a <strong>narrator</strong>: he tells a story one word at a time, hears the word he just said, then decides the next — that's the autoregressive LLM, emitting one token per forward and feeding it back (recall <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</p>
 <p>The second is a <strong>darkroom developer</strong>: in front of him is photo paper covered in snowy noise, showing nothing. He doesn't draw stroke by stroke; he repeatedly dips the whole sheet into developer fluid, and each dip <strong>removes a little noise</strong>, making the picture slightly clearer. After twenty or thirty dips, a full image "emerges" out of pure noise. This developer never looks back at what he said; he keeps refining the <strong>same latent canvas</strong> over and over — exactly how diffusion works: <strong>iterative denoising</strong>.</p>
 <p>The two painters actually use the same brushes, paints and studio — only the <strong>rhythm and manner</strong> of painting differ. Replace that shared studio with the SGLang engine, and the two painting manners with autoregression and diffusion, and you've grasped the whole point of this lesson.</p>
 </div>
@@ -593,10 +595,10 @@ class TeaCacheContext:
 <p><span class="mono">PipelineConfig</span> freezes this structure <strong>declaratively</strong>: <span class="mono">task_type</span> says whether this is text-to-image or image-to-video, <span class="mono">dit_config</span>/<span class="mono">vae_config</span>/<span class="mono">text_encoder_configs</span> describe the three parts, and <span class="mono">dit_precision</span> sets the denoiser's compute precision. Swapping in a different diffusion model is often just swapping a <span class="mono">PipelineConfig</span> — the upper serving code barely changes. This "config as pipeline" design is precisely what lets it plug into SGLang's existing engine so easily.</p>
 
 <h2>3. The real surprise: it reuses everything you learned</h2>
-<p>You might expect to learn a brand-new system here; quite the opposite. SGLang's diffusion serving <strong>borrows, as-is, the serving capabilities you studied throughout the guide</strong>: the same optimized <span class="mono">sgl-kernel</span> ops underneath (Lesson 38); an efficient <strong>scheduler loop</strong> to organize requests; <strong>CUDA-graph capture</strong> (Lesson 27) over that fixed-shape denoise step to crush per-step launch overhead; <strong>quantization</strong> (Lesson 35) to compress the DiT and encoders in memory; <strong>multi-hardware backends</strong> (Lesson 42: NVIDIA / AMD / Ascend NPU / Apple / Moore Threads) so one codebase runs on different chips; an <strong>OpenAI-compatible API</strong> (Lesson 15) exposed externally; and even PD-style <strong>disaggregation</strong>.</p>
+<p>You might expect to learn a brand-new system here; quite the opposite. SGLang's diffusion serving <strong>borrows, as-is, the serving capabilities you studied throughout the guide</strong>: the same optimized <span class="mono">sgl-kernel</span> ops underneath (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>); an efficient <strong>scheduler loop</strong> to organize requests; <strong>CUDA-graph capture</strong> (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>) over that fixed-shape denoise step to crush per-step launch overhead; <strong>quantization</strong> (<a class="xref" href="35-quantization.html">Lesson 35</a>) to compress the DiT and encoders in memory; <strong>multi-hardware backends</strong> (<a class="xref" href="42-multi-hardware-backends.html">Lesson 42</a>: NVIDIA / AMD / Ascend NPU / Apple / Moore Threads) so one codebase runs on different chips; an <strong>OpenAI-compatible API</strong> (<a class="xref" href="15-openai-anthropic-ollama-compat.html">Lesson 15</a>) exposed externally; and even PD-style <strong>disaggregation</strong>.</p>
 <p>On top of this general foundation, diffusion-specific optimizations layer on. The most representative is <strong>TeaCache</strong>: it <strong>caches the result of a denoise step</strong>, and when the change between adjacent steps is small enough (a threshold on accumulated L1 distance) it <strong>skips</strong> those redundant denoise steps and reuses the cache. Because diffusion is a fixed N-step refinement, later steps change less and less, so skipping some barely hurts quality while speeding things up noticeably. Such tricks "grow on top of" the general engine rather than forming a separate stack.</p>
 <p>It's worth chewing on why CUDA graph fits diffusion so well. When an LLM decodes, the sequence length changes every step and the KV cache keeps growing, so capturing a static graph takes real effort to handle dynamic shapes; diffusion's denoise step, by contrast, is <strong>fixed-shape by nature</strong> — the same DiT, the same latents, the same op chain, repeated N times unchanged. Once that step is captured as a CUDA graph, each step merely "replays" a recorded launch sequence, crushing hundreds or thousands of tiny kernel-launch overheads to almost nothing. For a denoise loop that runs twenty or thirty steps, this saving is <strong>amplified N times</strong> — a substantial gain.</p>
-<p>Quantization (Lesson 35) pays off directly here too. The DiT is often a large-parameter Transformer, and the text encoders aren't small either; quantizing them to lower precision substantially cuts memory and lets bigger diffusion models run on the same card. Multi-hardware backends (Lesson 42) mean this pipeline isn't picky about chips: NVIDIA, AMD, Ascend NPU, Apple, Moore Threads — the same model code lands on all of them. Add the OpenAI-compatible API (Lesson 15) and callers can't even tell whether a text or image model is behind it — the interface is unified, integration is near-zero cost. None of these capabilities was "rewritten specially" for diffusion; they are all existing serving muscle <strong>borrowed and used as-is</strong>.</p>
+<p>Quantization (<a class="xref" href="35-quantization.html">Lesson 35</a>) pays off directly here too. The DiT is often a large-parameter Transformer, and the text encoders aren't small either; quantizing them to lower precision substantially cuts memory and lets bigger diffusion models run on the same card. Multi-hardware backends (<a class="xref" href="42-multi-hardware-backends.html">Lesson 42</a>) mean this pipeline isn't picky about chips: NVIDIA, AMD, Ascend NPU, Apple, Moore Threads — the same model code lands on all of them. Add the OpenAI-compatible API (<a class="xref" href="15-openai-anthropic-ollama-compat.html">Lesson 15</a>) and callers can't even tell whether a text or image model is behind it — the interface is unified, integration is near-zero cost. None of these capabilities was "rewritten specially" for diffusion; they are all existing serving muscle <strong>borrowed and used as-is</strong>.</p>
 
 <h2>4. The two paradigms side by side</h2>
 <p>The same SGLang engine serves both the autoregressive LLM that "chains one token at a time" and the diffusion model that "develops the same latent canvas repeatedly". Kernels, scheduling, memory, CUDA graph, multi-hardware, API — all shared; only the upper generation paradigm differs. This embodies SGLang's design philosophy: <strong>everything is pluggable</strong>, and new capabilities reuse the existing foundation at minimal cost.</p>
@@ -650,12 +652,12 @@ class TeaCacheContext:
 
 <table class="t">
   <tr><th>Reused SGLang piece</th><th>Benefit for diffusion</th></tr>
-  <tr><td>sgl-kernel optimized ops (Lesson 38)</td><td>DiT / encoders / VAE get high-performance kernels directly</td></tr>
+  <tr><td>sgl-kernel optimized ops (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>)</td><td>DiT / encoders / VAE get high-performance kernels directly</td></tr>
   <tr><td>Efficient scheduler loop</td><td>Batches denoise requests for higher throughput</td></tr>
-  <tr><td>CUDA-graph capture (Lesson 27)</td><td>Denoise step is fixed-shape; once captured, per-step launch cost is tiny</td></tr>
-  <tr><td>Quantization (Lesson 35)</td><td>Compresses DiT and encoder memory, fits larger models</td></tr>
-  <tr><td>Multi-hardware backends (Lesson 42)</td><td>NVIDIA / AMD / Ascend / Apple / Moore Threads all covered</td></tr>
-  <tr><td>OpenAI-compatible API (Lesson 15)</td><td>Unified external interface, near-zero integration cost</td></tr>
+  <tr><td>CUDA-graph capture (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>)</td><td>Denoise step is fixed-shape; once captured, per-step launch cost is tiny</td></tr>
+  <tr><td>Quantization (<a class="xref" href="35-quantization.html">Lesson 35</a>)</td><td>Compresses DiT and encoder memory, fits larger models</td></tr>
+  <tr><td>Multi-hardware backends (<a class="xref" href="42-multi-hardware-backends.html">Lesson 42</a>)</td><td>NVIDIA / AMD / Ascend / Apple / Moore Threads all covered</td></tr>
+  <tr><td>OpenAI-compatible API (<a class="xref" href="15-openai-anthropic-ollama-compat.html">Lesson 15</a>)</td><td>Unified external interface, near-zero integration cost</td></tr>
 </table>
 
 <div class="flow">
@@ -699,7 +701,7 @@ class TeaCacheContext:
 <li><strong>Different paradigm</strong>: an autoregressive LLM emits one token per forward and feeds it back; diffusion starts from pure noise and iteratively denoises N steps, refining the same latent, with no token feedback.</li>
 <li><strong>Three parts</strong>: text encoder(s) (prompt → conditioning) + the DiT denoiser (run once per step) + the VAE (latent &lt;-&gt; pixels), all described by <span class="mono">PipelineConfig</span>.</li>
 <li><strong>Classifier-free guidance</strong>: <span class="mono">should_use_guidance</span> / <span class="mono">embedded_cfg_scale</span> steer the result toward the prompt.</li>
-<li><strong>One stack, two paradigms</strong>: reuses sgl-kernel (Lesson 38), the scheduler loop, CUDA graph (Lesson 27), quantization (Lesson 35), multi-hardware (Lesson 42), the OpenAI API (Lesson 15), and even PD disaggregation.</li>
+<li><strong>One stack, two paradigms</strong>: reuses sgl-kernel (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>), the scheduler loop, CUDA graph (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>), quantization (<a class="xref" href="35-quantization.html">Lesson 35</a>), multi-hardware (<a class="xref" href="42-multi-hardware-backends.html">Lesson 42</a>), the OpenAI API (<a class="xref" href="15-openai-anthropic-ollama-compat.html">Lesson 15</a>), and even PD disaggregation.</li>
 <li><strong>Diffusion-specific trick</strong>: TeaCache caches a step's result and skips redundant steps when the change is below threshold, speeding up with almost no quality loss — an acceleration layer on top of the general engine.</li>
 </ul>
 </div>

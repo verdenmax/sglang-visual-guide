@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -323,18 +325,18 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <h1><span class="lang-zh">结构化输出与跳跃前进</span><span class="lang-en">Structured outputs &amp; jump-forward</span></h1>
   </div>
   <div class="lang-zh">
-<p class="lead">很多真实应用并不满足于模型"大致说对"，而是要求输出<strong>严格合法</strong>：必须是能被解析的 JSON、必须匹配某个正则、必须符合一套语法（grammar）。SGLang 用<strong>受限解码（constrained decoding）</strong>从根上保证这件事——它把约束编译成一台有限状态机（FSM），在每一步采样<strong>之前</strong>就把不合法的 token 从 logits（<span class="inline">第37课</span>）上抹成 <span class="mono">−∞</span>，于是不管采样器（<span class="inline">第28课</span>）怎么掷骰子，输出永远是良构的。本课把这条链路讲透，并介绍它最漂亮的优化：<strong>跳跃前进（jump-forward）</strong>。这也是第十部分的收官一课。</p>
+<p class="lead">很多真实应用并不满足于模型"大致说对"，而是要求输出<strong>严格合法</strong>：必须是能被解析的 JSON、必须匹配某个正则、必须符合一套语法（grammar）。SGLang 用<strong>受限解码（constrained decoding）</strong>从根上保证这件事——它把约束编译成一台有限状态机（FSM），在每一步采样<strong>之前</strong>就把不合法的 token 从 logits（<span class="inline"><a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a></span>）上抹成 <span class="mono">−∞</span>，于是不管采样器（<span class="inline"><a class="xref" href="28-sampler-and-sampling-params.html">第28课</a></span>）怎么掷骰子，输出永远是良构的。本课把这条链路讲透，并介绍它最漂亮的优化：<strong>跳跃前进（jump-forward）</strong>。这也是第十部分的收官一课。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div><p>想象你在机场填一张报关单。表格上每个空格都印好了边框与提示：姓名栏只能写字母，日期栏只能写数字，国籍栏只能从下拉列表里挑一项。哪怕你手再抖、笔再随意，也不可能把出生日期写进姓名栏——因为表格的"模具"在你落笔<strong>之前</strong>就限定了此处合法的选项。受限解码就是给模型套上这样一张"会发光的模具"：每生成一个 token 之前，它先算出"此刻哪些 token 是合法的"，把其余全部划掉变暗，模型只能在亮着的格子里挑。而跳跃前进则像表格里那些"系统已自动填好"的固定字段——既然某一段只有唯一可能的答案，何必再让你一笔一画地照抄一遍？直接替你填好，光标往后一跳即可。</p></div>
 
-<div class="card macro"><div class="tag">🌍 宏观理解</div><p>把这件事放回整条推理流水线来看：模型前向算出 logits（<span class="inline">第37课</span>），采样器据此挑 token（<span class="inline">第28课</span>）。受限解码不另起炉灶，而是<strong>恰好嵌在两者之间</strong>——在 logits 已出、采样未发生的那一瞬，往 logits 上盖一层"词表掩码（vocab mask）"，只放行能让输出继续合法的 token。正因为它改的是 logits 而不是改采样算法，所以它和贪心、温度、top-p、束搜索乃至投机解码（<span class="inline">第43课</span>）都能无缝叠加。掌握这一课，你就理解了 SGLang 如何在"自由生成"与"严格结构"之间取得既正确又高效的平衡。</p></div>
+<div class="card macro"><div class="tag">🌍 宏观理解</div><p>把这件事放回整条推理流水线来看：模型前向算出 logits（<span class="inline"><a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a></span>），采样器据此挑 token（<span class="inline"><a class="xref" href="28-sampler-and-sampling-params.html">第28课</a></span>）。受限解码不另起炉灶，而是<strong>恰好嵌在两者之间</strong>——在 logits 已出、采样未发生的那一瞬，往 logits 上盖一层"词表掩码（vocab mask）"，只放行能让输出继续合法的 token。正因为它改的是 logits 而不是改采样算法，所以它和贪心、温度、top-p、束搜索乃至投机解码（<span class="inline"><a class="xref" href="43-speculative-decoding-overview.html">第43课</a></span>）都能无缝叠加。掌握这一课，你就理解了 SGLang 如何在"自由生成"与"严格结构"之间取得既正确又高效的平衡。</p></div>
 
 <h2>为什么需要受限解码</h2>
 <p>大语言模型本质是一台概率机器：它对下一个 token 给出一整张概率分布，再由采样器抽取。这套机制擅长流畅表达，却<strong>天生不保证结构</strong>。如果你的下游是一个函数调用、一段需要 <span class="mono">json.loads</span> 的配置、或一个要喂进数据库的字段，模型偶尔漏个引号、多个逗号、把数字写成中文，整条管线就会崩。传统做法是"生成后校验、失败就重试"，但重试既慢又烧钱，而且并不能<strong>保证</strong>最终一定合法。设想一个三层嵌套的 JSON，模型在最后一个字段漏了个引号，整次生成全部作废、从头再来；若运气不好连续几次都在不同位置出错，延迟与成本会成倍膨胀，对在线服务尤其致命。</p>
 <p>受限解码换了一个思路：与其事后补救，不如<strong>从生成的每一步就杜绝非法</strong>。它要求用户先给出一份"形状说明"——可以是 JSON-Schema、一段正则表达式、或一份 EBNF 文法。SGLang 通过可插拔的语法后端（xgrammar / outlines / llguidance）把这份说明<strong>编译</strong>成一台有限状态机：FSM 的每个状态都精确知道"在当前位置，接下来哪些 token 是被允许的"。于是在每个解码步，SGLang 先问 FSM 要一张"允许集合"，据此构造词表掩码，把不在允许集合里的所有 token 的 logit 直接设为 <span class="mono">−∞</span>。被设成负无穷的 token 经过 softmax 后概率为零，采样器无论用什么策略都不可能选中它们。换言之，<strong>合法性不再是采样器的运气，而是掩码的铁律</strong>。</p>
 <p>这里有必要把"职责边界"讲清楚。语法后端并不决定<strong>该选哪一个</strong>合法 token——那仍然是采样器的活，由温度、top-p 等参数掌控；语法后端只决定<strong>哪些 token 有资格被纳入候选</strong>。正是这种关注点分离，让受限解码能够如此干净地与其它机制组合：它本质上是对候选集合的一道纯粹的"前置过滤"，丝毫不触碰挑选这一创造性动作。于是模型在文法允许自由的地方依旧自由表达，只在文法要求严格的地方被圈起来。也正因如此，同一个采样器、同一套温度与 top-p 配置，套上不同 schema 就能产出不同形状却同样合法的结果，无需为每种格式各写一套生成逻辑。</p>
 
-<div class="flow"><div class="node">logits（第37课）</div><div class="arrow">→</div><div class="node">词表掩码：FSM 只放行合法 token，其余设 −∞</div><div class="arrow">→</div><div class="node">采样器（第28课）只能采到合法 token</div><div class="arrow">→</div><div class="node">accept_token：FSM 前进一步</div></div>
+<div class="flow"><div class="node">logits（<a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a>）</div><div class="arrow">→</div><div class="node">词表掩码：FSM 只放行合法 token，其余设 −∞</div><div class="arrow">→</div><div class="node">采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第28课</a>）只能采到合法 token</div><div class="arrow">→</div><div class="node">accept_token：FSM 前进一步</div></div>
 
 <div class="fig">
   <svg viewBox="0 0 780 300" role="img" aria-label="受限解码的一步：FSM 当前状态算出词表掩码，把非法 token 的 logits 设为负无穷，采样只会落在合法 token 上">
@@ -391,7 +393,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>每请求一台 FSM：BaseGrammarObject</h2>
 <p>结构约束是<strong>逐请求</strong>的：不同请求可能带着不同的 schema，而且每个请求的解码进度各不相同。因此 SGLang 为每个请求维护一个属于它自己的语法对象，抽象基类就是 <span class="mono">BaseGrammarObject</span>。可以把它想成"这一条请求当前走到了 FSM 的哪个状态"的随身记录本，每生成一个 token 就翻一页。它对外暴露的接口非常精简，却覆盖了受限解码的全部需求。之所以采用"每请求一个对象"的设计，是因为受限解码的状态<strong>无法在请求之间共享</strong>：哪怕两条请求用的是同一份 schema，它们也可能停在 FSM 的不同状态上，需要各自独立的进度、各自独立的回退历史。把状态封装进对象，调度器就能在一个批次里同时驱动几十上百条处于不同进度的请求，互不干扰。</p>
-<p>第一组是<strong>推进</strong>：当采样器最终选定一个 token，调度器调用 <span class="mono">accept_token(token)</span>，让 FSM 根据这个 token 转移到下一个状态——下一步的"允许集合"也随之更新。第二组是<strong>掩码构造</strong>：<span class="mono">allocate_vocab_mask(...)</span> 先按词表大小、批大小、设备分配一块掩码缓冲区，<span class="mono">fill_vocab_mask(vocab_mask, idx)</span> 再把"此刻哪些 token 合法"标记进去（idx 指明这是批里的第几条请求）。这块掩码随后被叠加到 logits 上。第三组是<strong>回退</strong>：<span class="mono">rollback(k)</span> 让 FSM 倒退 k 步，这在两种场景下至关重要——一是需要回溯（backtracking）的语法，二是投机解码（<span class="inline">第43课</span>）里草稿模型一次提出多个候选 token，但其中部分被验证拒绝，那么 FSM 必须把"已经按这些被拒 token 前进过"的状态精确退回去。最后是<strong>终止判断</strong>：<span class="mono">is_terminated()</span> 检查 FSM 是否已抵达接受状态（accept state），即结构是否已经完整闭合，可以收尾。这四组接口看似简单，却恰好对应了一台 FSM 在解码过程中会经历的全部生命周期事件：前进、查询当前可行集、必要时倒带、以及判断是否抵达终点。掌握了它们，你就掌握了 SGLang 受限解码对外的全部契约。</p>
+<p>第一组是<strong>推进</strong>：当采样器最终选定一个 token，调度器调用 <span class="mono">accept_token(token)</span>，让 FSM 根据这个 token 转移到下一个状态——下一步的"允许集合"也随之更新。第二组是<strong>掩码构造</strong>：<span class="mono">allocate_vocab_mask(...)</span> 先按词表大小、批大小、设备分配一块掩码缓冲区，<span class="mono">fill_vocab_mask(vocab_mask, idx)</span> 再把"此刻哪些 token 合法"标记进去（idx 指明这是批里的第几条请求）。这块掩码随后被叠加到 logits 上。第三组是<strong>回退</strong>：<span class="mono">rollback(k)</span> 让 FSM 倒退 k 步，这在两种场景下至关重要——一是需要回溯（backtracking）的语法，二是投机解码（<span class="inline"><a class="xref" href="43-speculative-decoding-overview.html">第43课</a></span>）里草稿模型一次提出多个候选 token，但其中部分被验证拒绝，那么 FSM 必须把"已经按这些被拒 token 前进过"的状态精确退回去。最后是<strong>终止判断</strong>：<span class="mono">is_terminated()</span> 检查 FSM 是否已抵达接受状态（accept state），即结构是否已经完整闭合，可以收尾。这四组接口看似简单，却恰好对应了一台 FSM 在解码过程中会经历的全部生命周期事件：前进、查询当前可行集、必要时倒带、以及判断是否抵达终点。掌握了它们，你就掌握了 SGLang 受限解码对外的全部契约。</p>
 
 <div class="cellgroup"><div class="cell">S0 <span class="mono">{</span></div><div class="cell sc">S1 <span class="mono">"name"</span> 强制</div><div class="cell sc">S2 <span class="mono">:</span> 强制</div><div class="cell">S3 值：自由采样</div><div class="cell"><span class="mono">}</span> 接受</div></div>
 
@@ -470,10 +472,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>受限解码保证结构合法</strong>：把 JSON-Schema / 正则 / EBNF 编译成 FSM，在采样前用词表掩码把非法 token 的 logits 设为 −∞，从源头杜绝非法。</li>
-<li><strong>恰嵌在 logits 与采样器之间</strong>：改的是 logits（<span class="inline">第37课</span>）而非采样算法（<span class="inline">第28课</span>），因此与各种采样策略可叠加。</li>
+<li><strong>恰嵌在 logits 与采样器之间</strong>：改的是 logits（<span class="inline"><a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a></span>）而非采样算法（<span class="inline"><a class="xref" href="28-sampler-and-sampling-params.html">第28课</a></span>），因此与各种采样策略可叠加。</li>
 <li><strong>BaseGrammarObject 是每请求的 FSM</strong>：<span class="mono">accept_token</span> 推进、<span class="mono">fill_vocab_mask</span> 建掩码、<span class="mono">rollback</span> 回退、<span class="mono">is_terminated</span> 判终止。</li>
 <li><strong>跳跃前进省掉被钉死 token 的前向</strong>：压缩 FSM 用 <span class="mono">jump_forward_symbol</span> 直接吐出强制字符串，既更快又让模型更专注，质量更好，跨度越长收益越大。</li>
-<li><strong>回滚支撑投机解码</strong>：被拒草稿 token 需要 <span class="mono">rollback(k)</span> 精确还原 FSM 状态，保证后续掩码不被污染（<span class="inline">第43课</span>）。</li>
+<li><strong>回滚支撑投机解码</strong>：被拒草稿 token 需要 <span class="mono">rollback(k)</span> 精确还原 FSM 状态，保证后续掩码不被污染（<span class="inline"><a class="xref" href="43-speculative-decoding-overview.html">第43课</a></span>）。</li>
 </ul></div>
 
 <div class="card"><div class="tag">🏁 第十部分小结</div><p>第十部分围绕"如何把 SGLang 推向大规模、高性能"展开：投机解码用草稿+验证把多 token 一次落地，EAGLE 进一步用特征级草稿提升接受率；PD 分离把预填充与解码拆到不同实例，各自吃满算力与显存带宽；张量/流水线/数据/专家四种并行让超大模型横跨众多 GPU；EPLB 在 MoE 场景里动态均衡专家负载、消除热点；而本课的结构化输出与跳跃前进，则在保证输出严格合法的同时省去无谓前向。这些技术看似各管一摊，实则共同回答同一个问题——<strong>在不牺牲正确性的前提下，把每一分算力都用在刀刃上</strong>，从而把 SGLang 稳稳推到大规模、高性能的生产水位。至此，第十部分的拼图全部归位：从"算得更快"到"算得更省"，再到"算得既对又稳"，SGLang 用一组彼此咬合的机制，回应了把大模型搬上真实生产的全部核心挑战。</p></div>
@@ -482,14 +484,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="quiz">
   <div class="qn">1. 受限解码究竟在“哪一步、对什么”动手，才能保证输出永远合法？</div>
   <ol class="opts">
-    <li><strong>在采样之前，对 logits（第37课）盖一层词表掩码，把所有会破坏语法的 token 设为 −∞，于是采样器（第28课）无论怎么选都合法</strong></li>
+    <li><strong>在采样之前，对 logits（<a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a>）盖一层词表掩码，把所有会破坏语法的 token 设为 −∞，于是采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第28课</a>）无论怎么选都合法</strong></li>
     <li>在采样之后丢弃非法 token 并重试，直到碰巧得到合法结果</li>
     <li>对模型权重做微调，让它学会只输出 JSON</li>
     <li>修改采样算法本身，让 top-p 只在合法 token 上归一化</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。SGLang 把约束编译成 FSM，在每个解码步、<strong>采样之前</strong>向 FSM 要“允许集合”，据此构造词表掩码并把非法 token 的 logit 设为 <span class='mono'>−∞</span>（接第37课）。softmax 后这些 token 概率为零，采样器（第28课）无论用贪心还是 top-p 都选不到。因为改的是 logits 而非采样算法，故能与各种采样策略叠加。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。SGLang 把约束编译成 FSM，在每个解码步、<strong>采样之前</strong>向 FSM 要“允许集合”，据此构造词表掩码并把非法 token 的 logit 设为 <span class='mono'>−∞</span>（接<a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a>）。softmax 后这些 token 概率为零，采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第28课</a>）无论用贪心还是 top-p 都选不到。因为改的是 logits 而非采样算法，故能与各种采样策略叠加。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -506,7 +508,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. 为什么投机解码（第43课）需要语法对象提供 <span class='mono'>rollback(k)</span>？</div>
+  <div class="qn">3. 为什么投机解码（<a class="xref" href="43-speculative-decoding-overview.html">第43课</a>）需要语法对象提供 <span class='mono'>rollback(k)</span>？</div>
   <ol class="opts">
     <li>为了在温度过高时回退到贪心采样</li>
     <li>为了在生成结束后撤销整段输出并重新开始</li>
@@ -521,24 +523,24 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用你自己的话讲清受限解码为什么能<strong>保证</strong>输出合法而不只是“大概率合法”：把 JSON-Schema/正则/EBNF 编译成 FSM 后，<span class='mono'>fill_vocab_mask</span> 如何在每步采样前把非法 token 的 logit（第37课）设为 −∞，使采样器（第28课）无论策略如何都选不到；再说明这与“生成后校验+重试”相比的根本差别。</li>
+    <li>用你自己的话讲清受限解码为什么能<strong>保证</strong>输出合法而不只是“大概率合法”：把 JSON-Schema/正则/EBNF 编译成 FSM 后，<span class='mono'>fill_vocab_mask</span> 如何在每步采样前把非法 token 的 logit（<a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a>）设为 −∞，使采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第28课</a>）无论策略如何都选不到；再说明这与“生成后校验+重试”相比的根本差别。</li>
     <li>描述跳跃前进的完整收益与机制：压缩 FSM 如何识别“确定性跨度”，<span class='mono'>jump_forward_symbol(state)</span> 如何吐出被钉死的字符串并让 FSM 一次前跳从而省去模型前向；解释为什么它<strong>既更快又质量更好</strong>，并结合 <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> 说明整台每请求 FSM 如何把推进、掩码、跳跃、终止拼成一个闭环。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
-<p class="lead">Many real applications are not satisfied with a model being "roughly right"—they demand output that is <strong>strictly valid</strong>: it must be parseable JSON, must match a regex, or must follow a grammar. SGLang guarantees this at the root with <strong>constrained decoding</strong>: it compiles the constraint into a finite-state machine (FSM) and, <strong>before</strong> sampling at every step, sets the logits (<span class="inline">Lesson 37</span>) of every illegal token to <span class="mono">−∞</span>. So no matter how the sampler (<span class="inline">Lesson 28</span>) rolls the dice, the output is always well-formed. This lesson walks the whole pipeline and presents its most elegant optimization: <strong>jump-forward</strong>. It also closes Part 10.</p>
+<p class="lead">Many real applications are not satisfied with a model being "roughly right"—they demand output that is <strong>strictly valid</strong>: it must be parseable JSON, must match a regex, or must follow a grammar. SGLang guarantees this at the root with <strong>constrained decoding</strong>: it compiles the constraint into a finite-state machine (FSM) and, <strong>before</strong> sampling at every step, sets the logits (<span class="inline"><a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a></span>) of every illegal token to <span class="mono">−∞</span>. So no matter how the sampler (<span class="inline"><a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a></span>) rolls the dice, the output is always well-formed. This lesson walks the whole pipeline and presents its most elegant optimization: <strong>jump-forward</strong>. It also closes Part 10.</p>
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div><p>Picture filling out a customs form at the airport. Every box is pre-printed with borders and hints: the name box accepts only letters, the date box only digits, the nationality box only an option from a dropdown. No matter how shaky your hand, you simply cannot write a birth date into the name box—because the form's "mold" fixes the legal options <strong>before</strong> your pen touches paper. Constrained decoding fits the model with exactly such a "glowing mold": before producing each token it computes "which tokens are legal right now," dims out the rest, and the model may only pick from the lit boxes. Jump-forward is like those "auto-filled" fixed fields on the form—if a span has only one possible answer, why make you copy it character by character? Just fill it in and jump the cursor ahead.</p></div>
 
-<div class="card macro"><div class="tag">🌍 The big picture</div><p>Place this back in the inference pipeline: the forward pass produces logits (<span class="inline">Lesson 37</span>), and the sampler picks a token from them (<span class="inline">Lesson 28</span>). Constrained decoding does not reinvent anything—it sits <strong>exactly between the two</strong>. In the instant after logits exist but before sampling happens, it overlays a "vocab mask" on the logits, allowing only tokens that keep the output legal. Because it edits logits rather than the sampling algorithm, it stacks seamlessly with greedy, temperature, top-p, beam search, and even speculative decoding (<span class="inline">Lesson 43</span>). Master this lesson and you understand how SGLang balances "free generation" against "strict structure"—correctly and efficiently.</p></div>
+<div class="card macro"><div class="tag">🌍 The big picture</div><p>Place this back in the inference pipeline: the forward pass produces logits (<span class="inline"><a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a></span>), and the sampler picks a token from them (<span class="inline"><a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a></span>). Constrained decoding does not reinvent anything—it sits <strong>exactly between the two</strong>. In the instant after logits exist but before sampling happens, it overlays a "vocab mask" on the logits, allowing only tokens that keep the output legal. Because it edits logits rather than the sampling algorithm, it stacks seamlessly with greedy, temperature, top-p, beam search, and even speculative decoding (<span class="inline"><a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a></span>). Master this lesson and you understand how SGLang balances "free generation" against "strict structure"—correctly and efficiently.</p></div>
 
 <h2>Why constrained decoding is needed</h2>
 <p>A large language model is fundamentally a probability machine: it outputs a full distribution over the next token, and the sampler draws from it. This excels at fluent expression but <strong>guarantees nothing structurally</strong>. If your downstream is a function call, a config that must pass <span class="mono">json.loads</span>, or a field bound for a database, an occasional missing quote, an extra comma, or a number written as a word will break the entire pipeline. The traditional fix is "generate, validate, retry on failure," but retrying is slow and costly—and it still cannot <strong>guarantee</strong> the final result is valid. Imagine a three-level nested JSON where the model drops a quote in the very last field: the whole generation is voided and restarts from scratch; if you are unlucky enough to fail repeatedly at different spots, latency and cost balloon, which is especially fatal for online serving.</p>
 <p>Constrained decoding takes a different stance: rather than patching up afterward, <strong>forbid illegality at every step of generation</strong>. It asks the user for a "shape spec"—a JSON-Schema, a regular expression, or an EBNF grammar. Through a pluggable grammar backend (xgrammar / outlines / llguidance), SGLang <strong>compiles</strong> that spec into a finite-state machine: each FSM state knows precisely "at this position, which tokens are allowed." At each decode step SGLang asks the FSM for the "allowed set," builds a vocab mask from it, and sets the logit of every token outside the allowed set to <span class="mono">−∞</span>. After softmax those tokens have probability zero, so the sampler—whatever strategy it uses—can never pick them. In other words, <strong>validity is no longer the sampler's luck but the mask's iron law</strong>.</p>
 <p>It is worth stressing where the boundary of responsibility lies. The grammar backend does not decide <strong>which</strong> legal token to emit—that remains the sampler's job, governed by temperature, top-p, and the rest. The backend only decides <strong>which tokens are even allowed to be considered</strong>. This separation of concerns is precisely why constrained decoding composes so cleanly: it is a pure pre-filter on the candidate set, leaving the creative act of selection untouched. The model still expresses itself freely wherever the grammar permits freedom, and is merely fenced in wherever the grammar demands rigidity.</p>
 
-<div class="flow"><div class="node">logits (Lesson 37)</div><div class="arrow">→</div><div class="node">vocab mask: FSM allows only valid tokens, rest set to −∞</div><div class="arrow">→</div><div class="node">sampler (Lesson 28) can only pick a valid token</div><div class="arrow">→</div><div class="node">accept_token: FSM advances one step</div></div>
+<div class="flow"><div class="node">logits (<a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a>)</div><div class="arrow">→</div><div class="node">vocab mask: FSM allows only valid tokens, rest set to −∞</div><div class="arrow">→</div><div class="node">sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) can only pick a valid token</div><div class="arrow">→</div><div class="node">accept_token: FSM advances one step</div></div>
 
 <div class="fig">
   <svg viewBox="0 0 780 300" role="img" aria-label="one constrained-decode step: the FSM state computes a vocab mask, sets illegal token logits to negative infinity, so sampling only lands on a valid token">
@@ -595,7 +597,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>One FSM per request: BaseGrammarObject</h2>
 <p>Structural constraints are <strong>per-request</strong>: different requests may carry different schemas, and each request's decode progress differs. SGLang therefore keeps a grammar object that belongs to each request, with the abstract base class <span class="mono">BaseGrammarObject</span>. Think of it as a personal notebook recording "where this request currently stands in the FSM." Its interface is tiny yet covers everything constrained decoding needs. The "one object per request" design exists because constrained-decoding state <strong>cannot be shared across requests</strong>: even two requests using the same schema may sit at different FSM states, each needing its own progress and its own rollback history. Encapsulating state in an object lets the scheduler drive dozens or hundreds of requests at different progress points within one batch without interference.</p>
-<p>The first group is <strong>advancing</strong>: once the sampler finally chooses a token, the scheduler calls <span class="mono">accept_token(token)</span>, transitioning the FSM to the next state—and the next step's "allowed set" updates accordingly. The second group is <strong>mask construction</strong>: <span class="mono">allocate_vocab_mask(...)</span> first allocates a mask buffer sized by vocab, batch, and device, then <span class="mono">fill_vocab_mask(vocab_mask, idx)</span> marks "which tokens are legal now" (idx says which request in the batch). That mask is then added onto the logits. The third group is <strong>rollback</strong>: <span class="mono">rollback(k)</span> backs the FSM up k steps, which is crucial in two scenarios—grammars that need backtracking, and speculative decoding (<span class="inline">Lesson 43</span>), where the draft model proposes several candidate tokens at once but some are rejected by verification, so the FSM must precisely undo the states it advanced through for those rejected tokens. Finally, <strong>termination</strong>: <span class="mono">is_terminated()</span> checks whether the FSM has reached an accept state—whether the structure is fully closed and generation can wrap up. These four groups look simple but map exactly onto every lifecycle event an FSM goes through during decoding: advance, query the current feasible set, rewind when needed, and check whether the end has been reached. Master them and you have grasped the entire outward contract of SGLang's constrained decoding.</p>
+<p>The first group is <strong>advancing</strong>: once the sampler finally chooses a token, the scheduler calls <span class="mono">accept_token(token)</span>, transitioning the FSM to the next state—and the next step's "allowed set" updates accordingly. The second group is <strong>mask construction</strong>: <span class="mono">allocate_vocab_mask(...)</span> first allocates a mask buffer sized by vocab, batch, and device, then <span class="mono">fill_vocab_mask(vocab_mask, idx)</span> marks "which tokens are legal now" (idx says which request in the batch). That mask is then added onto the logits. The third group is <strong>rollback</strong>: <span class="mono">rollback(k)</span> backs the FSM up k steps, which is crucial in two scenarios—grammars that need backtracking, and speculative decoding (<span class="inline"><a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a></span>), where the draft model proposes several candidate tokens at once but some are rejected by verification, so the FSM must precisely undo the states it advanced through for those rejected tokens. Finally, <strong>termination</strong>: <span class="mono">is_terminated()</span> checks whether the FSM has reached an accept state—whether the structure is fully closed and generation can wrap up. These four groups look simple but map exactly onto every lifecycle event an FSM goes through during decoding: advance, query the current feasible set, rewind when needed, and check whether the end has been reached. Master them and you have grasped the entire outward contract of SGLang's constrained decoding.</p>
 
 <div class="cellgroup"><div class="cell">S0 <span class="mono">{</span></div><div class="cell sc">S1 <span class="mono">"name"</span> forced</div><div class="cell sc">S2 <span class="mono">:</span> forced</div><div class="cell">S3 value: free sampling</div><div class="cell"><span class="mono">}</span> accept</div></div>
 
@@ -674,10 +676,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Constrained decoding guarantees valid structure</strong>: compile JSON-Schema / regex / EBNF into an FSM and, before sampling, use a vocab mask to set illegal tokens' logits to −∞.</li>
-<li><strong>It sits exactly between logits and the sampler</strong>: it edits logits (<span class="inline">Lesson 37</span>), not the sampling algorithm (<span class="inline">Lesson 28</span>), so it stacks with any sampling strategy.</li>
+<li><strong>It sits exactly between logits and the sampler</strong>: it edits logits (<span class="inline"><a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a></span>), not the sampling algorithm (<span class="inline"><a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a></span>), so it stacks with any sampling strategy.</li>
 <li><strong>BaseGrammarObject is the per-request FSM</strong>: <span class="mono">accept_token</span> advances, <span class="mono">fill_vocab_mask</span> builds the mask, <span class="mono">rollback</span> backs up, <span class="mono">is_terminated</span> checks the accept state.</li>
 <li><strong>Jump-forward skips forced tokens' forwards</strong>: the compressed FSM uses <span class="mono">jump_forward_symbol</span> to emit the forced string directly—faster, and the model stays focused for better quality.</li>
-<li><strong>Rollback underpins speculative decoding</strong>: rejected draft tokens need <span class="mono">rollback(k)</span> to precisely restore the FSM state (<span class="inline">Lesson 43</span>).</li>
+<li><strong>Rollback underpins speculative decoding</strong>: rejected draft tokens need <span class="mono">rollback(k)</span> to precisely restore the FSM state (<span class="inline"><a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a></span>).</li>
 </ul></div>
 
 <div class="card"><div class="tag">🏁 Part 10 wrap-up</div><p>Part 10 centered on "how to push SGLang toward large scale and high performance": speculative decoding lands multiple tokens at once via draft+verify, and EAGLE further raises acceptance with feature-level drafting; PD disaggregation splits prefill and decode onto separate instances so each saturates compute and memory bandwidth; tensor/pipeline/data/expert parallelism lets giant models span many GPUs; EPLB dynamically balances expert load in MoE to erase hotspots; and this lesson's structured outputs with jump-forward guarantees strictly valid output while skipping pointless forwards. These techniques look like separate concerns but jointly answer one question—<strong>spend every bit of compute where it matters without sacrificing correctness</strong>—and thereby push SGLang steadily to a large-scale, high-performance production level. With that, Part 10's puzzle is fully assembled: from "compute faster" to "compute cheaper" to "compute both correctly and stably," SGLang answers, with a set of interlocking mechanisms, every core challenge of bringing large models into real production.</p></div>
@@ -686,14 +688,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="quiz">
   <div class="qn">1. Where exactly, and on what, does constrained decoding act to guarantee always-valid output?</div>
   <ol class="opts">
-    <li><strong>Before sampling, it overlays a vocab mask on the logits (Lesson 37), setting every grammar-breaking token to −∞, so whatever the sampler (Lesson 28) picks stays valid</strong></li>
+    <li><strong>Before sampling, it overlays a vocab mask on the logits (<a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a>), setting every grammar-breaking token to −∞, so whatever the sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) picks stays valid</strong></li>
     <li>After sampling, discard illegal tokens and retry until a valid result happens to appear</li>
     <li>Fine-tune the model weights so it learns to emit only JSON</li>
     <li>Rewrite the sampling algorithm so top-p normalizes only over legal tokens</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. SGLang compiles the constraint into an FSM and, at each decode step <strong>before sampling</strong>, asks the FSM for the allowed set, builds a vocab mask, and sets illegal tokens' logits to <span class='mono'>−∞</span> (Lesson 37). After softmax those probabilities are zero, so the sampler (Lesson 28)—greedy or top-p—cannot pick them. Editing logits rather than the sampler lets it stack with any sampling strategy.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. SGLang compiles the constraint into an FSM and, at each decode step <strong>before sampling</strong>, asks the FSM for the allowed set, builds a vocab mask, and sets illegal tokens' logits to <span class='mono'>−∞</span> (<a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a>). After softmax those probabilities are zero, so the sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>)—greedy or top-p—cannot pick them. Editing logits rather than the sampler lets it stack with any sampling strategy.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -710,7 +712,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. Why does speculative decoding (Lesson 43) need the grammar object's <span class='mono'>rollback(k)</span>?</div>
+  <div class="qn">3. Why does speculative decoding (<a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a>) need the grammar object's <span class='mono'>rollback(k)</span>?</div>
   <ol class="opts">
     <li>To fall back to greedy sampling when temperature is too high</li>
     <li>To undo the whole output after generation and restart</li>
@@ -725,7 +727,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>In your own words, explain why constrained decoding <strong>guarantees</strong> valid output rather than just "probably valid": after compiling JSON-Schema/regex/EBNF into an FSM, how <span class='mono'>fill_vocab_mask</span> sets illegal tokens' logits (Lesson 37) to −∞ before each sampling step so the sampler (Lesson 28) cannot pick them regardless of strategy; then contrast this with "generate then validate and retry."</li>
+    <li>In your own words, explain why constrained decoding <strong>guarantees</strong> valid output rather than just "probably valid": after compiling JSON-Schema/regex/EBNF into an FSM, how <span class='mono'>fill_vocab_mask</span> sets illegal tokens' logits (<a class="xref" href="37-logits-and-vocab-parallel.html">Lesson 37</a>) to −∞ before each sampling step so the sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) cannot pick them regardless of strategy; then contrast this with "generate then validate and retry."</li>
     <li>Describe jump-forward's full payoff and mechanism: how the compressed FSM identifies "deterministic spans," how <span class='mono'>jump_forward_symbol(state)</span> emits the nailed-down string and jumps the FSM ahead to skip model forwards; explain why it is <strong>both faster and higher quality</strong>, and use <span class='mono'>accept_token</span> / <span class='mono'>is_terminated</span> to show how the per-request FSM closes the loop of advance, mask, jump, and terminate.</li>
   </ul>
 </div>

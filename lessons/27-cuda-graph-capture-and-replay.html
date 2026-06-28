@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -340,13 +342,13 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   <div class="tag">🌍 宏观理解</div>
   CUDA Graph 把<strong>整条前向的内核序列及其依赖</strong>录成<strong>一张图</strong>，之后<strong>一次提交、整体重放</strong>，把成百上千次"CPU 逐个发起内核"压成"一次提交"，从此 CPU 不再是解码步里的瓶颈。
   SGLang 在<strong>启动时</strong>就为<strong>一组 batch 尺寸</strong>（如 1、2、4、8…直到 max）各录一张图（<span class="mono">BaseCudaGraphRunner.capture</span>）；运行时把真实 batch
-  <strong>向上 padding 到最近的已录桶</strong>，再重放那张图（<span class="mono">can_run_graph</span> + 执行，第 24 课）。因为解码形状规整、预填充长度多变，所以<strong>解码走图、预填充多走即时</strong>。
+  <strong>向上 padding 到最近的已录桶</strong>，再重放那张图（<span class="mono">can_run_graph</span> + 执行，<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）。因为解码形状规整、预填充长度多变，所以<strong>解码走图、预填充多走即时</strong>。
 </div>
 
 <h2>问题：一次解码前向，要发起几百个小内核</h2>
 <p>先把"开销"具体化。一层 Transformer 解码层并不是"一个大内核"，而是一连串小算子：输入归一化、Q/K/V 三个投影、把 K/V 写进缓存、注意力、输出投影 o_proj、又一次归一化、MLP 的 gate/up、激活、down……
 几十层叠下来，一次前向就是<strong>几百个内核排队上 GPU</strong>。每发起一个内核，CPU 都要做一套固定动作：准备参数、配置启动、塞进 CUDA 流——这套动作的耗时<strong>和内核算多大无关</strong>，是一笔<strong>固定的启动费</strong>。</p>
-<p>这笔费用在<strong>预填充</strong>里不显眼：一次要算几百上千个 token，每个内核本身就很重，启动费相对算量小到可以忽略。可到了<strong>解码</strong>（第 4 课），每条请求每步只算 <strong>1 个新 token</strong>，矩阵又瘦又小，<strong>每个内核都极短</strong>——
+<p>这笔费用在<strong>预填充</strong>里不显眼：一次要算几百上千个 token，每个内核本身就很重，启动费相对算量小到可以忽略。可到了<strong>解码</strong>（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>），每条请求每步只算 <strong>1 个新 token</strong>，矩阵又瘦又小，<strong>每个内核都极短</strong>——
 这时候"发起内核"的固定开销反而成了大头。最坏的情形是：GPU 把一个小内核几微秒就算完了，却要<strong>停下来等 CPU</strong> 把下一个内核排好递过来。算力明明闲着，整步时间却被一串"等 CPU"拖长。这就是 CUDA Graph 要消灭的敌人。</p>
 <p>换个角度量化一下这件事的严重性。假设一个模型有 32 层，每层粗算十来个小算子，一次前向就是<strong>三四百个内核</strong>；若每个内核的发起费是几微秒，单这一项累计起来就有上百微秒甚至毫秒级。而解码时单个内核的<strong>真实计算</strong>可能也只有几微秒——于是你会看到一条荒诞却真实的曲线：<strong>GPU 实际算的时间，可能还不如它等 CPU 发起内核的时间长</strong>。
 这也解释了一个常见的困惑：为什么有人把 batch 调小、把模型换小，吞吐不升反降？因为模型越小、batch 越小，<strong>每个内核越短</strong>，启动开销占比就越高，瓶颈彻底从"算力"挪到了"发起内核"这件纯 CPU 的杂事上。理解了这一点，你就明白 CUDA Graph 不是锦上添花的小优化，而是把解码从"被 CPU 拖着走"里解放出来的<strong>关键一招</strong>。</p>
@@ -406,7 +408,7 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   <div class="step"><div class="num">1</div><div class="sc"><h4>启动时·捕获</h4><p>让模型空跑前向，CUDA 把整条内核序列与依赖<strong>录成一张图</strong>（不真算）。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>为一组尺寸各录一张</h4><p>遍历 batch 尺寸桶 1/2/4/8/…/max，每档录一张图，连同<strong>静态缓冲</strong>一起留着。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>运行时·padding</h4><p>真实 batch 向上取整到<strong>最近的已录桶</strong>（<span class="mono">_pad_to_bucket</span>），张量补到该尺寸。</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>重放</h4><p><span class="mono">can_run_graph</span> 通过 → <strong>一次提交</strong>重放那张图（第 24 课），取出真实部分的 logits。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>重放</h4><p><span class="mono">can_run_graph</span> 通过 → <strong>一次提交</strong>重放那张图（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>），取出真实部分的 logits。</p></div></div>
 </div>
 
 <div class="fig">
@@ -472,16 +474,16 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
 <h2>约束：图为什么必须"静态"</h2>
 <p>能享受重放的红利，是有代价的：图要求<strong>静态的形状与地址</strong>。这条硬约束直接决定了 SGLang 的三个工程选择。第一，<strong>形状必须固定</strong>，所以要<strong>分桶 + padding</strong>，不能让 batch 自由变化。
 第二，<strong>地址必须固定</strong>，所以运行器预先开好一组<strong>静态输入/输出缓冲</strong>（上面代码里的 <span class="mono">buffers</span>），每步把真实数据<strong>拷进</strong>这些固定缓冲再重放，而不是每次新分配。
-第三，<strong>捕获区域内不能有依赖数据的控制流</strong>——图录的是一条固定路径，不能"这一步走 if、下一步走 else"。所以有些算子只能<strong>留在图外</strong>，或者用"分段/可断开（piecewise）"的图把动态算子<strong>切出去</strong>、其余部分照录（第 33 课讲注意力后端时会细说）。</p>
+第三，<strong>捕获区域内不能有依赖数据的控制流</strong>——图录的是一条固定路径，不能"这一步走 if、下一步走 else"。所以有些算子只能<strong>留在图外</strong>，或者用"分段/可断开（piecewise）"的图把动态算子<strong>切出去</strong>、其余部分照录（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>讲注意力后端时会细说）。</p>
 <p>把这三条连起来，就彻底解释了上一课那句"<strong>解码走图、预填充多走即时</strong>"：解码每步形状高度规整（batch 在一段时间内不变、序列每步只长 1），天然能套进固定的桶；预填充长度千变万化、一次要算几百上千个 token，几乎每批形状都不同，硬要为每种形状录图既不划算也录不过来，于是它更愿意走灵活的即时路径。</p>
 <p>第三条约束尤其值得多想一层。所谓"<strong>数据相关的控制流</strong>"，指的是<strong>要根据张量里的具体数值才能决定走哪条分支</strong>的逻辑——比如"如果这一步命中了某个缓存就走 A、否则走 B"。这种分支没法录进图，因为图是一条<strong>录死的直路</strong>，它不会在重放时临场判断。
-解决办法有两种：要么把这类动态算子<strong>挪到图外</strong>，让图只覆盖那段"无论数据如何、动作都一样"的稳定区间；要么用<strong>分段 / 可断开（piecewise）</strong>的图，把整条前向<strong>在动态算子处切成几段</strong>，每段各录一张稳定的子图，中间留出口给动态逻辑插手。后者让更多算子也能享受重放，但实现更复杂——第 33 课讲注意力后端时会看到，不同后端对"哪些能录进图"给出的答案并不一样，这正是 SGLang 把图运行器和注意力后端分层设计的原因之一。</p>
+解决办法有两种：要么把这类动态算子<strong>挪到图外</strong>，让图只覆盖那段"无论数据如何、动作都一样"的稳定区间；要么用<strong>分段 / 可断开（piecewise）</strong>的图，把整条前向<strong>在动态算子处切成几段</strong>，每段各录一张稳定的子图，中间留出口给动态逻辑插手。后者让更多算子也能享受重放，但实现更复杂——<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>讲注意力后端时会看到，不同后端对"哪些能录进图"给出的答案并不一样，这正是 SGLang 把图运行器和注意力后端分层设计的原因之一。</p>
 
 <table class="t">
   <tr><th>约束</th><th>为什么</th><th>SGLang 的应对</th></tr>
   <tr><td>形状必须静态</td><td>图绑定录制时的张量形状</td><td>batch 分桶 + 向上 padding</td></tr>
   <tr><td class="mono">地址必须静态</td><td>图绑定录制时的显存指针</td><td>预分配静态缓冲，每步拷入</td></tr>
-  <tr><td>无数据相关控制流</td><td>图是一条固定路径，不能 if/else</td><td>动态算子留图外 / 分段图（第 33 课）</td></tr>
+  <tr><td>无数据相关控制流</td><td>图是一条固定路径，不能 if/else</td><td>动态算子留图外 / 分段图（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）</td></tr>
   <tr><td>桶有上限 max</td><td>不能为任意大小录图</td><td>超过 max 的 batch 拒绝走图，转即时</td></tr>
 </table>
 
@@ -506,20 +508,20 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
 <p><strong>具体例子：</strong>设已捕获的桶为 <span class="mono">[1, 2, 4, 8, 16, …]</span>。来一个真实 batch=5：<span class="mono">bisect_left</span> 落在 <strong>8</strong> 上，于是 <strong>padding 到桶 8</strong>——多塞 <strong>3 行空请求</strong>去重放桶 8 的那张图，跑完只取前 5 行的 logits。注意这套机制只对<strong>解码</strong>奏效：解码每步形状固定（每条请求只算 <strong>1 个新 token</strong>），能稳稳落进某个桶；而<strong>预填充</strong>长度千变万化、几乎每批形状都不同，所以多走即时、不走图。</p>
 
 <h2>回报：解码吞吐大涨，且与重叠调度天作之合</h2>
-<p>消灭了每步几百次内核启动，<strong>解码吞吐通常有可观增益</strong>——尤其在小模型、短内核、大并发的场景，启动开销占比最高，收益也最明显。更妙的是它和<strong>重叠调度器（第 21 课）</strong>是<strong>天作之合</strong>：
+<p>消灭了每步几百次内核启动，<strong>解码吞吐通常有可观增益</strong>——尤其在小模型、短内核、大并发的场景，启动开销占比最高，收益也最明显。更妙的是它和<strong>重叠调度器（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）</strong>是<strong>天作之合</strong>：
 图重放期间，GPU 只管闷头跑这一整张图、几乎不回头找 CPU；与此同时 CPU 正好腾出手去<strong>调度下一步</strong>（采样、组下一个 batch）。两者一叠加，<strong>GPU 在重放、CPU 在排下一步</strong>，GPU 几乎不留空隙——这正是高吞吐推理引擎的核心节奏。</p>
 <p>当然也有成本，这是个真实的权衡：录很多档尺寸要花<strong>启动时间</strong>（每张图都要空跑一遍前向去录），也要吃<strong>显存</strong>（每张图都握着自己那份静态缓冲）。所以桶不是越多越好——太密则启动慢、占显存；太疏则 padding 浪费大。
-这条"<strong>启动成本/显存 ↔ 运行时省下的启动开销</strong>"的权衡，会在后面反复出现：第 33 课的分段图让动态算子也能部分享受重放，第 43 课的投机解码则要为"草稿+验证"这种更复杂的形状专门考虑怎么录图。把这一课记牢：<strong>CUDA Graph = 把"逐个发起内核"换成"一次重放整条前向"，用静态形状换掉启动开销</strong>。</p>
-<p>最后把这一课放回整条 GPU 侧流水线。第 24 课的 ModelRunner 是"决策→计算"的边界，它在解码时优先走的那条快路径，骨子里就是本课的图重放；第 25/26 课告诉你它手里的模型怎么加载、怎么写；而本课补上了"<strong>这台机器为什么跑得这么快</strong>"的答案——不是靠某个更聪明的算法，而是靠<strong>把 CPU 从"逐个发起内核"的苦役里彻底解放出来</strong>。
-顺着这条线再往下，第 33 课会讲注意力后端如何决定"哪些能录进图"，第 43 课的投机解码会把图重放推到更复杂的形状上。带着"<strong>图 = 录一次、重放整条、用静态换启动开销</strong>"这把钥匙，你会发现后面很多看似零散的性能优化，其实都在围绕同一个主题打转：<strong>别让 GPU 闲着，也别让 CPU 拖后腿</strong>。</p>
+这条"<strong>启动成本/显存 ↔ 运行时省下的启动开销</strong>"的权衡，会在后面反复出现：<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>的分段图让动态算子也能部分享受重放，<a class="xref" href="43-speculative-decoding-overview.html">第 43 课</a>的投机解码则要为"草稿+验证"这种更复杂的形状专门考虑怎么录图。把这一课记牢：<strong>CUDA Graph = 把"逐个发起内核"换成"一次重放整条前向"，用静态形状换掉启动开销</strong>。</p>
+<p>最后把这一课放回整条 GPU 侧流水线。<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>的 ModelRunner 是"决策→计算"的边界，它在解码时优先走的那条快路径，骨子里就是本课的图重放；第 25/26 课告诉你它手里的模型怎么加载、怎么写；而本课补上了"<strong>这台机器为什么跑得这么快</strong>"的答案——不是靠某个更聪明的算法，而是靠<strong>把 CPU 从"逐个发起内核"的苦役里彻底解放出来</strong>。
+顺着这条线再往下，<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>会讲注意力后端如何决定"哪些能录进图"，<a class="xref" href="43-speculative-decoding-overview.html">第 43 课</a>的投机解码会把图重放推到更复杂的形状上。带着"<strong>图 = 录一次、重放整条、用静态换启动开销</strong>"这把钥匙，你会发现后面很多看似零散的性能优化，其实都在围绕同一个主题打转：<strong>别让 GPU 闲着，也别让 CPU 拖后腿</strong>。</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <strong>① 敌人是启动开销：</strong>一次解码前向要发起几百个小内核，每次发起有固定 CPU 启动费；解码内核太短，这笔费用反而主导整步、GPU 干等 CPU。
   <strong>② 解法是录一次重放整条：</strong>CUDA Graph 把整条前向的内核序列录成一张图，运行时一次提交整体重放，把几百次发起压成一次，CPU 不再逐个递内核。
   <strong>③ 代价是静态：</strong>图绑定形状与地址，故需 batch 分桶 + padding（<span class="mono">_pad_to_bucket</span>）、预分配静态缓冲、捕获区内禁止数据相关控制流——这也是<strong>解码走图、预填充走即时</strong>的根因。
-  <strong>④ SGLang 怎么做：</strong>启动时 <span class="mono">BaseCudaGraphRunner.capture</span> 为一组尺寸（1/2/4/8/…/max）各录一张；运行时 padding 到最近桶后 <span class="mono">can_run_graph</span> + 重放（第 24 课）。
-  <strong>⑤ 回报与搭档：</strong>解码吞吐大涨，并与重叠调度器（第 21 课）天作之合——GPU 重放、CPU 排下一步，GPU 几乎不空转；代价是启动时间与显存（分段图见第 33 课，投机解码见第 43 课）。
+  <strong>④ SGLang 怎么做：</strong>启动时 <span class="mono">BaseCudaGraphRunner.capture</span> 为一组尺寸（1/2/4/8/…/max）各录一张；运行时 padding 到最近桶后 <span class="mono">can_run_graph</span> + 重放（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）。
+  <strong>⑤ 回报与搭档：</strong>解码吞吐大涨，并与重叠调度器（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）天作之合——GPU 重放、CPU 排下一步，GPU 几乎不空转；代价是启动时间与显存（分段图见<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>，投机解码见<a class="xref" href="43-speculative-decoding-overview.html">第 43 课</a>）。
 </div>
 <div class="selftest">
 <h2>🧪 自测 · 想一想为什么这么设计</h2>
@@ -550,7 +552,7 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. 为什么<strong>解码</strong>走 CUDA 图，而<strong>预填充</strong>大多不走？CUDA 图又如何与<strong>重叠调度器（第 21 课）</strong>配合？</div>
+  <div class="qn">3. 为什么<strong>解码</strong>走 CUDA 图，而<strong>预填充</strong>大多不走？CUDA 图又如何与<strong>重叠调度器（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）</strong>配合？</div>
   <ol class="opts">
     <li>解码必须在 CPU 上跑，所以用图；预填充在 GPU 上跑</li>
     <li>解码形状高度规整（batch 稳定、序列每步只长 1），天然能套固定桶；预填充长度多变、一次算几百上千 token、几乎每批形状不同，录图不划算。配合上：<strong>GPU 重放整张图时，CPU 正好腾手去调度下一步</strong>，两者叠加让 GPU 几乎不空转</li>
@@ -559,14 +561,14 @@ GPU 算完一个内核就干等着，等 CPU 把下一个内核递上去。CUDA 
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。图要求静态形状：解码规整、可分桶，预填充多变、不划算，这就是“解码走图、预填充走即时”的根因（第 24 课）。重叠调度（第 21 课）让 CPU 在 GPU 重放期间排下一步，两者天作之合——GPU 几乎不留空隙。解码并非在 CPU 跑，预填充也需要注意力，CPU/GPU 也不是跑同一个内核。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。图要求静态形状：解码规整、可分桶，预填充多变、不划算，这就是“解码走图、预填充走即时”的根因（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）。重叠调度（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）让 CPU 在 GPU 重放期间排下一步，两者天作之合——GPU 几乎不留空隙。解码并非在 CPU 跑，预填充也需要注意力，CPU/GPU 也不是跑同一个内核。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“自动钢琴纸卷 / 录好的宏”的类比，把 CUDA Graph 的捕获与重放从头讲透。请覆盖：①问题——一次解码前向要发起几百个小内核（每层 norm、q/k/v、注意力、o_proj、gate/up、down…），每次发起有<strong>固定 CPU 启动费</strong>，解码内核太短时这笔费用为何主导整步、GPU 为何干等 CPU；②解法——图如何把整条前向的内核序列与依赖<strong>录一次</strong>、再<strong>一次提交整体重放</strong>；③SGLang 的工程做法——启动时 <code>BaseCudaGraphRunner.capture</code> 为一组尺寸（1/2/4/8/…/max）各录一张，运行时用 <code>_pad_to_bucket</code> 向上取整到最近桶、<code>can_run_graph</code> 通过后重放（第 24 课）。</li>
-    <li>围绕“图必须静态”这条硬约束，说明它如何决定 SGLang 的设计，并解释由此带来的权衡。请说明：①静态形状 → <strong>batch 分桶 + padding</strong>；静态地址 → <strong>预分配静态缓冲、每步拷入</strong>；捕获区内<strong>禁止数据相关控制流</strong> → 动态算子留图外或用分段/可断开图（第 33 课）；②为什么这三条合起来正好解释“<strong>解码走图、预填充走即时</strong>”；③回报与代价——解码吞吐大涨、与重叠调度器（第 21 课）天作之合，但录很多档要花<strong>启动时间</strong>与<strong>显存</strong>（每张图握着自己的静态缓冲），桶太密太疏各有什么坏处；并联系投机解码（第 43 课）为何要为更复杂的形状专门考虑录图。</li>
+    <li>用“自动钢琴纸卷 / 录好的宏”的类比，把 CUDA Graph 的捕获与重放从头讲透。请覆盖：①问题——一次解码前向要发起几百个小内核（每层 norm、q/k/v、注意力、o_proj、gate/up、down…），每次发起有<strong>固定 CPU 启动费</strong>，解码内核太短时这笔费用为何主导整步、GPU 为何干等 CPU；②解法——图如何把整条前向的内核序列与依赖<strong>录一次</strong>、再<strong>一次提交整体重放</strong>；③SGLang 的工程做法——启动时 <code>BaseCudaGraphRunner.capture</code> 为一组尺寸（1/2/4/8/…/max）各录一张，运行时用 <code>_pad_to_bucket</code> 向上取整到最近桶、<code>can_run_graph</code> 通过后重放（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）。</li>
+    <li>围绕“图必须静态”这条硬约束，说明它如何决定 SGLang 的设计，并解释由此带来的权衡。请说明：①静态形状 → <strong>batch 分桶 + padding</strong>；静态地址 → <strong>预分配静态缓冲、每步拷入</strong>；捕获区内<strong>禁止数据相关控制流</strong> → 动态算子留图外或用分段/可断开图（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）；②为什么这三条合起来正好解释“<strong>解码走图、预填充走即时</strong>”；③回报与代价——解码吞吐大涨、与重叠调度器（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）天作之合，但录很多档要花<strong>启动时间</strong>与<strong>显存</strong>（每张图握着自己的静态缓冲），桶太密太疏各有什么坏处；并联系投机解码（<a class="xref" href="43-speculative-decoding-overview.html">第 43 课</a>）为何要为更复杂的形状专门考虑录图。</li>
   </ul>
 </div>
 </div></div>
@@ -588,13 +590,13 @@ the GPU finishes one kernel and then just waits for the CPU to hand it the next.
   <div class="tag">🌍 Big picture</div>
   A CUDA graph records the <strong>entire forward's kernel sequence and its dependencies</strong> into <strong>one graph</strong>, then <strong>replays it as a single submission</strong>, collapsing hundreds of "CPU launches a kernel" into "one submission".
   SGLang <strong>captures</strong> graphs <strong>at startup</strong> for a <strong>set of batch sizes</strong> (e.g. 1, 2, 4, 8, …, max) via <span class="mono">BaseCudaGraphRunner.capture</span>; at run time it <strong>pads the real batch up to the nearest captured bucket</strong>
-  and replays that graph (<span class="mono">can_run_graph</span> + execute, Lesson 24). Because decode shapes are regular and prefill lengths vary, <strong>decode is graphed, prefill mostly runs eager</strong>.
+  and replays that graph (<span class="mono">can_run_graph</span> + execute, <a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>). Because decode shapes are regular and prefill lengths vary, <strong>decode is graphed, prefill mostly runs eager</strong>.
 </div>
 
 <h2>The problem: one decode forward launches hundreds of tiny kernels</h2>
 <p>Let's make "overhead" concrete. A Transformer decoder layer is not "one big kernel" but a chain of small ops: input norm, the Q/K/V projections, writing K/V into the cache, attention, the o_proj output projection, another norm, the MLP gate/up, activation, down…
 Stack dozens of layers and one forward becomes <strong>hundreds of kernels queued onto the GPU</strong>. Each launch makes the CPU do a fixed routine: prepare args, configure the launch, enqueue into the CUDA stream — and that cost is <strong>independent of how big the kernel is</strong>; it is a <strong>fixed launch fee</strong>.</p>
-<p>This fee is invisible in <strong>prefill</strong>: it computes hundreds-to-thousands of tokens at once, each kernel is heavy, so the launch fee is negligible against the compute. But in <strong>decode</strong> (Lesson 4), each request computes just <strong>1 new token</strong> per step, the matrices are thin and small, so <strong>every kernel is extremely short</strong> —
+<p>This fee is invisible in <strong>prefill</strong>: it computes hundreds-to-thousands of tokens at once, each kernel is heavy, so the launch fee is negligible against the compute. But in <strong>decode</strong> (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>), each request computes just <strong>1 new token</strong> per step, the matrices are thin and small, so <strong>every kernel is extremely short</strong> —
 and now the fixed cost of "launching a kernel" becomes the dominant term. Worst case: the GPU finishes a tiny kernel in microseconds, then has to <strong>stop and wait for the CPU</strong> to enqueue the next one. The compute units sit idle while the step is stretched by a string of "wait for CPU". That is the enemy CUDA graphs eliminate.</p>
 
 <div class="cols">
@@ -650,7 +652,7 @@ at run time it takes the real batch, <strong>rounds it up to the nearest bucket<
   <div class="step"><div class="num">1</div><div class="sc"><h4>Startup · capture</h4><p>Run the forward once while CUDA <strong>records the whole kernel sequence and dependencies into a graph</strong> (no real compute).</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>One graph per size</h4><p>Iterate batch buckets 1/2/4/8/…/max, record a graph for each, kept alongside its <strong>static buffers</strong>.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Run time · pad</h4><p>Round the real batch up to the <strong>nearest captured bucket</strong> (<span class="mono">_pad_to_bucket</span>); pad tensors to that size.</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p><span class="mono">can_run_graph</span> passes → <strong>one submission</strong> replays that graph (Lesson 24); slice out the real rows' logits.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p><span class="mono">can_run_graph</span> passes → <strong>one submission</strong> replays that graph (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>); slice out the real rows' logits.</p></div></div>
 </div>
 
 <div class="fig">
@@ -716,14 +718,14 @@ at run time it takes the real batch, <strong>rounds it up to the nearest bucket<
 <h2>Constraints: why the graph must be "static"</h2>
 <p>The replay payoff has a price: the graph demands <strong>static shapes and addresses</strong>. This hard constraint directly drives three of SGLang's engineering choices. First, <strong>shapes must be fixed</strong>, hence <strong>bucketing + padding</strong> — the batch can't vary freely.
 Second, <strong>addresses must be fixed</strong>, so the runner pre-allocates a set of <strong>static input/output buffers</strong> (the <span class="mono">buffers</span> in the code above) and each step <strong>copies</strong> the real data into those fixed buffers before replay, instead of allocating anew.
-Third, <strong>no data-dependent control flow inside the captured region</strong> — a graph records one fixed path, it can't "take the if this step, the else next step". So some ops must <strong>stay outside</strong> the graph, or a "piecewise / breakable" graph <strong>splits out</strong> the dynamic ops and records the rest (covered in Lesson 33 on attention backends).</p>
+Third, <strong>no data-dependent control flow inside the captured region</strong> — a graph records one fixed path, it can't "take the if this step, the else next step". So some ops must <strong>stay outside</strong> the graph, or a "piecewise / breakable" graph <strong>splits out</strong> the dynamic ops and records the rest (covered in <a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a> on attention backends).</p>
 <p>Chain these three together and last lesson's line "<strong>decode is graphed, prefill runs eager</strong>" is fully explained: decode shapes are highly regular each step (batch steady for a while, sequence growing by 1), so they fit fixed buckets naturally; prefill lengths vary wildly, computing hundreds-to-thousands of tokens at once with a different shape almost every batch, so recording a graph per shape is neither worthwhile nor feasible — it prefers the flexible eager path.</p>
 
 <table class="t">
   <tr><th>Constraint</th><th>Why</th><th>SGLang's response</th></tr>
   <tr><td>Shapes must be static</td><td>Graph binds capture-time tensor shapes</td><td>Bucket the batch + pad up</td></tr>
   <tr><td class="mono">Addresses must be static</td><td>Graph binds capture-time memory pointers</td><td>Pre-allocate static buffers, copy in each step</td></tr>
-  <tr><td>No data-dependent control flow</td><td>A graph is one fixed path, no if/else</td><td>Dynamic ops outside / piecewise graph (Lesson 33)</td></tr>
+  <tr><td>No data-dependent control flow</td><td>A graph is one fixed path, no if/else</td><td>Dynamic ops outside / piecewise graph (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>)</td></tr>
   <tr><td>Buckets have a max</td><td>Can't record a graph for any size</td><td>Batch over max is rejected, falls back to eager</td></tr>
 </table>
 
@@ -748,18 +750,18 @@ Third, <strong>no data-dependent control flow inside the captured region</strong
 <p><strong>Concrete example:</strong> say the captured buckets are <span class="mono">[1, 2, 4, 8, 16, …]</span>. A real batch of 5 arrives: <span class="mono">bisect_left</span> lands on <strong>8</strong>, so it <strong>pads up to bucket 8</strong> — adding <strong>3 empty rows</strong> to replay the bucket-8 graph, then keeps only the first 5 rows' logits. This only helps <strong>decode</strong>: each decode step has a fixed shape (every request computes just <strong>1 new token</strong>), so it drops cleanly into a bucket; <strong>prefill</strong> lengths vary wildly with a different shape almost every batch, so it runs eager rather than graphed.</p>
 
 <h2>The payoff: big decode throughput, and a perfect match with the overlap scheduler</h2>
-<p>Having killed the hundreds of launches per step, <strong>decode throughput usually gains a lot</strong> — most of all on small models, short kernels, large concurrency, where launch overhead is the highest share. Even better, it is a <strong>perfect match for the overlap scheduler (Lesson 21)</strong>:
+<p>Having killed the hundreds of launches per step, <strong>decode throughput usually gains a lot</strong> — most of all on small models, short kernels, large concurrency, where launch overhead is the highest share. Even better, it is a <strong>perfect match for the overlap scheduler (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>)</strong>:
 while a graph replays, the GPU just powers through the whole graph and barely turns back to the CPU; meanwhile the CPU is freed to <strong>schedule the next step</strong> (sampling, building the next batch). Stack the two and <strong>the GPU replays while the CPU lines up the next step</strong>, leaving the GPU almost no idle gap — the core rhythm of a high-throughput inference engine.</p>
 <p>There is of course a cost, a real tradeoff: recording many sizes takes <strong>startup time</strong> (each graph requires running the forward once to record) and eats <strong>memory</strong> (each graph holds its own static buffers). So more buckets isn't strictly better — too dense and startup is slow and memory-hungry; too sparse and padding waste grows.
-This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" tradeoff recurs later: Lesson 33's piecewise graphs let dynamic ops partly enjoy replay, and Lesson 43's speculative decoding must specially consider how to capture the more complex "draft + verify" shapes. Remember this lesson: <strong>a CUDA graph swaps "launch kernels one by one" for "replay the whole forward in one shot", trading static shapes for gone launch overhead</strong>.</p>
+This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" tradeoff recurs later: <a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>'s piecewise graphs let dynamic ops partly enjoy replay, and <a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a>'s speculative decoding must specially consider how to capture the more complex "draft + verify" shapes. Remember this lesson: <strong>a CUDA graph swaps "launch kernels one by one" for "replay the whole forward in one shot", trading static shapes for gone launch overhead</strong>.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <strong>① The enemy is launch overhead:</strong> one decode forward launches hundreds of tiny kernels, each launch a fixed CPU fee; decode kernels are so short the fee dominates the step and the GPU waits on the CPU.
   <strong>② The fix is record-once-replay-whole:</strong> a CUDA graph records the entire forward's kernel sequence into one graph and replays it as a single submission, collapsing hundreds of launches into one.
   <strong>③ The price is static:</strong> the graph binds shape and address, so you need batch bucketing + padding (<span class="mono">_pad_to_bucket</span>), pre-allocated static buffers, and no data-dependent control flow in the captured region — the very reason <strong>decode is graphed, prefill runs eager</strong>.
-  <strong>④ How SGLang does it:</strong> at startup <span class="mono">BaseCudaGraphRunner.capture</span> records one graph per size (1/2/4/8/…/max); at run time it pads to the nearest bucket then <span class="mono">can_run_graph</span> + replay (Lesson 24).
-  <strong>⑤ Payoff &amp; partner:</strong> big decode throughput, and a perfect match with the overlap scheduler (Lesson 21) — GPU replays, CPU lines up the next step, GPU barely idles; the cost is startup time and memory (piecewise graphs in Lesson 33, speculative in Lesson 43).
+  <strong>④ How SGLang does it:</strong> at startup <span class="mono">BaseCudaGraphRunner.capture</span> records one graph per size (1/2/4/8/…/max); at run time it pads to the nearest bucket then <span class="mono">can_run_graph</span> + replay (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>).
+  <strong>⑤ Payoff &amp; partner:</strong> big decode throughput, and a perfect match with the overlap scheduler (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>) — GPU replays, CPU lines up the next step, GPU barely idles; the cost is startup time and memory (piecewise graphs in <a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>, speculative in <a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a>).
 </div>
 <div class="selftest">
 <h2>🧪 Self-test - think about the design</h2>
@@ -790,7 +792,7 @@ This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" 
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. Why is <strong>decode</strong> graphed while <strong>prefill</strong> mostly isn't, and how does the CUDA graph pair with the <strong>overlap scheduler (Lesson 21)</strong>?</div>
+  <div class="qn">3. Why is <strong>decode</strong> graphed while <strong>prefill</strong> mostly isn't, and how does the CUDA graph pair with the <strong>overlap scheduler (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>)</strong>?</div>
   <ol class="opts">
     <li>Decode must run on CPU so it uses a graph; prefill runs on GPU</li>
     <li>Decode shapes are highly regular (steady batch, sequence growing by 1), fitting fixed buckets naturally; prefill lengths vary, computing hundreds-to-thousands of tokens with a different shape almost every batch, so graphing isn't worthwhile. Pairing: <strong>while the GPU replays the whole graph, the CPU is freed to schedule the next step</strong>, so together the GPU barely idles</li>
@@ -799,14 +801,14 @@ This "<strong>startup cost / memory ↔ runtime launch overhead saved</strong>" 
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Graphs need static shapes: decode is regular and bucketable, prefill is varied and not worthwhile — the root reason for 'decode graphed, prefill eager' (Lesson 24). The overlap scheduler (Lesson 21) lets the CPU line up the next step while the GPU replays, a perfect match leaving almost no GPU idle. Decode doesn't run on CPU, prefill does need attention, and CPU/GPU don't run the same kernel.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Graphs need static shapes: decode is regular and bucketable, prefill is varied and not worthwhile — the root reason for 'decode graphed, prefill eager' (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>). The overlap scheduler (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>) lets the CPU line up the next step while the GPU replays, a perfect match leaving almost no GPU idle. Decode doesn't run on CPU, prefill does need attention, and CPU/GPU don't run the same kernel.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'player-piano roll / recorded macro' analogy, fully explain CUDA-graph capture and replay from scratch. Cover: (1) the problem — one decode forward launches hundreds of tiny kernels (per layer: norm, q/k/v, attention, o_proj, gate/up, down…), each with a <strong>fixed CPU launch fee</strong>, and why that fee dominates the step when decode kernels are short, leaving the GPU waiting on the CPU; (2) the fix — how a graph <strong>records</strong> the whole forward's kernel sequence and dependencies once and <strong>replays it as a single submission</strong>; (3) SGLang's engineering — at startup <code>BaseCudaGraphRunner.capture</code> records one graph per size (1/2/4/8/…/max), and at run time <code>_pad_to_bucket</code> rounds up to the nearest bucket and replays once <code>can_run_graph</code> passes (Lesson 24).</li>
-    <li>Centered on the hard constraint 'a graph must be static', explain how it shapes SGLang's design and the resulting tradeoffs. Cover: (1) static shapes → <strong>batch bucketing + padding</strong>; static addresses → <strong>pre-allocated static buffers copied into each step</strong>; <strong>no data-dependent control flow</strong> in the captured region → dynamic ops outside or a piecewise/breakable graph (Lesson 33); (2) why these three together explain '<strong>decode graphed, prefill eager</strong>'; (3) payoff vs cost — big decode throughput and a perfect match with the overlap scheduler (Lesson 21), but recording many sizes costs <strong>startup time</strong> and <strong>memory</strong> (each graph holds its own static buffers), and what goes wrong if buckets are too dense or too sparse; and relate to why speculative decoding (Lesson 43) must specially consider capturing more complex shapes.</li>
+    <li>Using the 'player-piano roll / recorded macro' analogy, fully explain CUDA-graph capture and replay from scratch. Cover: (1) the problem — one decode forward launches hundreds of tiny kernels (per layer: norm, q/k/v, attention, o_proj, gate/up, down…), each with a <strong>fixed CPU launch fee</strong>, and why that fee dominates the step when decode kernels are short, leaving the GPU waiting on the CPU; (2) the fix — how a graph <strong>records</strong> the whole forward's kernel sequence and dependencies once and <strong>replays it as a single submission</strong>; (3) SGLang's engineering — at startup <code>BaseCudaGraphRunner.capture</code> records one graph per size (1/2/4/8/…/max), and at run time <code>_pad_to_bucket</code> rounds up to the nearest bucket and replays once <code>can_run_graph</code> passes (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>).</li>
+    <li>Centered on the hard constraint 'a graph must be static', explain how it shapes SGLang's design and the resulting tradeoffs. Cover: (1) static shapes → <strong>batch bucketing + padding</strong>; static addresses → <strong>pre-allocated static buffers copied into each step</strong>; <strong>no data-dependent control flow</strong> in the captured region → dynamic ops outside or a piecewise/breakable graph (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>); (2) why these three together explain '<strong>decode graphed, prefill eager</strong>'; (3) payoff vs cost — big decode throughput and a perfect match with the overlap scheduler (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>), but recording many sizes costs <strong>startup time</strong> and <strong>memory</strong> (each graph holds its own static buffers), and what goes wrong if buckets are too dense or too sparse; and relate to why speculative decoding (<a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a>) must specially consider capturing more complex shapes.</li>
   </ul>
 </div>
 </div></div>

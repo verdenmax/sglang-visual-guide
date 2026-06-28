@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -324,7 +326,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead">
-从第 9 课到第 11 课，我们一直在<strong>写程序</strong>：用 DSL 描述意图（第 9 课）、让解释器把意图树跑起来（第 10 课）、用 fork/join 分叉并行（第 11 课）。
+从<a class="xref" href="09-structured-generation-language.html">第 9 课</a>到<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>，我们一直在<strong>写程序</strong>：用 DSL 描述意图（<a class="xref" href="09-structured-generation-language.html">第 9 课</a>）、让解释器把意图树跑起来（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）、用 fork/join 分叉并行（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）。
 但有一个问题一直被悄悄绕开——<strong>这些 <span class="inline">gen</span>、<span class="inline">select</span>、<span class="inline">fork</span> 最终到底是谁在执行？</strong>
 答案就是本课的主角：<strong>后端（Backend）</strong>。SGLang 的设计精髓在于：<strong>同一个前端程序，可以原封不动地跑在不同的后端上</strong>——
 本地的 SGLang 运行时、OpenAI、Anthropic、VertexAI……程序本身<strong>完全不知道</strong>自己跑在哪个后端。这一课收束 Part 3（前端），
@@ -347,7 +349,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   一句话：<span class="inline">BaseBackend</span> 是一层<strong>抽象接口</strong>，规定了"一个后端必须会做哪些事"——<span class="mono">generate</span>（生成）、<span class="mono">select</span>（在候选里选）、流式返回、role 消息处理等等。
   你的 DSL 程序只调用这些<strong>抽象方法</strong>，<strong>从不直接碰具体引擎</strong>。于是换后端只需一行 <span class="mono">set_default_backend(...)</span>：
   传入 <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> 就跑在<strong>本地 SGLang 运行时</strong>（第 13–17 课要搭的那个 <span class="mono">/generate</span> HTTP 服务），
-  传入 <span class="mono">OpenAI(...)</span> 就让<strong>同一个程序</strong>改打 OpenAI 的托管模型。但天下没有免费的午餐：<strong>本地运行时</strong>给你 RadixAttention 前缀缓存（第 7 课）、约束解码、快速批处理；
+  传入 <span class="mono">OpenAI(...)</span> 就让<strong>同一个程序</strong>改打 OpenAI 的托管模型。但天下没有免费的午餐：<strong>本地运行时</strong>给你 RadixAttention 前缀缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）、约束解码、快速批处理；
   <strong>托管后端</strong>换来的是<strong>可移植性</strong>，代价是<strong>丢掉前缀缓存与 fork 共享</strong>那些红利——那些模型是黑盒，缓存与否由服务商决定，约束解码也受限。
 </div>
 
@@ -374,7 +376,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>一、BaseBackend：让程序与引擎解耦的那道缝</h2>
-<p>回想第 10 课：解释器（StreamExecutor）逐个执行意图树上的表达式，遇到固定文字就直接拼接，遇到 <span class="mono">gen</span> / <span class="mono">select</span> 就<strong>向后端发起一次调用</strong>。
+<p>回想<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>：解释器（StreamExecutor）逐个执行意图树上的表达式，遇到固定文字就直接拼接，遇到 <span class="mono">gen</span> / <span class="mono">select</span> 就<strong>向后端发起一次调用</strong>。
 这里的"后端"，正是任何继承自 <span class="mono">BaseBackend</span> 的类。<span class="mono">BaseBackend</span> 把"<strong>一个能执行 SGLang 程序的引擎</strong>"抽象成一组方法：怎么生成 token、怎么在候选项里做 <span class="mono">select</span>、
 怎么流式吐字、怎么处理 system/user/assistant 这些 role。<strong>程序面对的永远是这层接口，而不是某个具体引擎</strong>。打个比方，这就像电源插座的国家标准：电器只管长一个标准插头，至于墙后接的是水电、火电还是核电，电器一概不问。这正是软件工程里最经典的"<strong>面向接口编程</strong>"：
 上层不依赖下层的实现细节，只依赖一份契约。于是同一棵意图树，今天可以跑在本地 GPU 上、明天可以跑在云端 API 上，<strong>程序一个字都不用改</strong>。
@@ -420,8 +422,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>二、RuntimeEndpoint：前端落到运行时的那个接缝</h2>
 <p>在所有后端里，<span class="mono">RuntimeEndpoint</span> 最关键——<strong>它就是 Part 3（前端）与 Part 4+（运行时）严丝合缝对接的那个接缝</strong>。
 它指向一个本地启动的 SGLang 服务（默认 <span class="mono">http://localhost:30000</span>），把程序里每一次 <span class="mono">gen</span> / <span class="mono">fork</span> 翻译成<strong>一次 POST /generate 的 HTTP 请求</strong>，
-发给我们将在<strong>第 13 课起</strong>逐层拆解的那台服务器——入口的 TokenizerManager（第 14 课）、大脑 Scheduler（第 18–23 课）、执行的 ModelRunner（第 24 课）。<strong>正因为请求落到了我们自己的运行时</strong>，
-第 7 课的 RadixAttention 前缀缓存、第 11 课 fork 的分支共享、以及约束解码，<strong>才真正生效</strong>：你 fork 出的 8 个分支共享同一段前缀，运行时只算一次——这件事只有在 <span class="mono">RuntimeEndpoint</span> 后端上才兑现得了。
+发给我们将在<strong><a class="xref" href="13-engine-and-http-server.html">第 13 课</a>起</strong>逐层拆解的那台服务器——入口的 TokenizerManager（<a class="xref" href="14-tokenizer-manager.html">第 14 课</a>）、大脑 Scheduler（第 18–23 课）、执行的 ModelRunner（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）。<strong>正因为请求落到了我们自己的运行时</strong>，
+<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的 RadixAttention 前缀缓存、<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a> fork 的分支共享、以及约束解码，<strong>才真正生效</strong>：你 fork 出的 8 个分支共享同一段前缀，运行时只算一次——这件事只有在 <span class="mono">RuntimeEndpoint</span> 后端上才兑现得了。
 一句 <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>，就把前端的全部表达力，焊接到了我们即将深入的那台引擎上。
 这也解释了一个常见困惑：为什么很多 SGLang 教程开头都要你先<strong>起一个本地服务器</strong>，再跑程序？因为只有先有了那台监听 <span class="mono">/generate</span> 的运行时，<span class="mono">RuntimeEndpoint</span> 才有地方把请求打过去。
 程序和服务器是<strong>两个进程</strong>：程序是客户端，运行时是服务端，中间隔着一条 HTTP 连接。把这条连接想象成一根管子——前端把意图塞进管子这头，运行时在另一头把 token 算出来再顺着管子流回。
@@ -434,7 +436,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="arrow">→</div>
   <div class="node"><div class="nt">POST /generate</div><div class="nd">HTTP 请求 · 第 13–17 课</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Scheduler</div><div class="nd">调度 + RadixAttention（第 7 课）</div></div>
+  <div class="node"><div class="nt">Scheduler</div><div class="nd">调度 + RadixAttention（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）</div></div>
 </div>
 
 <div class="codefile">
@@ -453,13 +455,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>三、本地运行时 vs 托管 API：你在交易什么</h2>
 <p>换后端不是免费的。<span class="mono">RuntimeEndpoint</span> 和 <span class="mono">OpenAI</span> 在程序里长得一模一样，但拿到手的<strong>能力天差地别</strong>。
-核心在于：<strong>本地运行时是你能看穿、能掌控的白盒</strong>，所以第 7 课的前缀缓存、第 11 课的 fork 共享、严格的约束解码（保证输出合法 JSON / 正则）统统可用；
+核心在于：<strong>本地运行时是你能看穿、能掌控的白盒</strong>，所以<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的前缀缓存、<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>的 fork 共享、严格的约束解码（保证输出合法 JSON / 正则）统统可用；
 而<strong>托管模型是黑盒</strong>——服务商或许内部也做缓存，但你<strong>无从声明、无法依赖</strong>，约束解码通常只能退化成"在提示里求它"。下面把这笔交易摆开。
 顺带提醒一个常被忽视的隐性成本：托管 API 是<strong>按 token 计费</strong>的，你 fork 出的每一个分支、每一次重试，都在真金白银地花钱；而本地运行时一旦 GPU 就绪，跑多少分支几乎是<strong>边际成本趋零</strong>的。
 所以"用 fork 做 best-of-32"这种在本地稀松平常的玩法，搬到托管后端上可能就<strong>贵得离谱</strong>。选后端从来不是单看"哪个模型聪明"，而要把<strong>性能、可控性、成本、运维负担</strong>放在一起权衡。</p>
 
 <div class="cols">
-  <div class="col"><h4>本地运行时（RuntimeEndpoint）</h4><p><strong>白盒、可掌控</strong>：吃满 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）、严格约束解码、快速批处理。代价是你得<strong>自己部署、自己管 GPU</strong>（第 13–17 课教你搭）。<strong>追求性能与可控，就用它。</strong></p></div>
+  <div class="col"><h4>本地运行时（RuntimeEndpoint）</h4><p><strong>白盒、可掌控</strong>：吃满 RadixAttention 前缀缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）、fork 分支共享（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）、严格约束解码、快速批处理。代价是你得<strong>自己部署、自己管 GPU</strong>（第 13–17 课教你搭）。<strong>追求性能与可控，就用它。</strong></p></div>
   <div class="col"><h4>托管 API（OpenAI / Anthropic …）</h4><p><strong>黑盒、可移植</strong>：一行换后端就能用上顶级闭源模型，无需自备 GPU。代价是<strong>丢掉前缀缓存与 fork 共享</strong>的确定性红利，约束解码受限，且<strong>按量计费</strong>。<strong>追求省心与可移植，就用它。</strong></p></div>
 </div>
 
@@ -502,15 +504,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <p>这几行就是<strong>前端通往运行时的那扇门</strong>：构造时先 <span class="mono">/get_model_info</span> 握手确认模型；<span class="mono">cache_prefix</span> 用 <span class="mono">max_new_tokens=0</span> 把共享前缀<strong>预热进缓存</strong>，
-正是 fork（第 11 课）省算力的底层机关；而 <span class="mono">generate</span> 则把程序里的每个 <span class="mono">gen</span> 老老实实翻成<strong>一次 POST /generate</strong>。
+正是 fork（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）省算力的底层机关；而 <span class="mono">generate</span> 则把程序里的每个 <span class="mono">gen</span> 老老实实翻成<strong>一次 POST /generate</strong>。
 读懂它，你就读懂了 Part 3 与 Part 4 的接缝——<strong>下一课起，我们就走进这个 <span class="mono">/generate</span> 背后的服务器</strong>，看 TokenizerManager、Scheduler、ModelRunner 如何把这一次 HTTP 请求，变成 GPU 上真正的 token。
-至此，前端三部曲——<strong>第 9 课怎么写、第 10 课怎么跑、第 11 课怎么分叉</strong>——就在这道后端接缝上画下句点；而它同时也是下一段旅程的起点：穿过 <span class="mono">RuntimeEndpoint</span> 这扇门，我们正式从"语言"走向"引擎"。</p>
+至此，前端三部曲——<strong><a class="xref" href="09-structured-generation-language.html">第 9 课</a>怎么写、<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>怎么跑、<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>怎么分叉</strong>——就在这道后端接缝上画下句点；而它同时也是下一段旅程的起点：穿过 <span class="mono">RuntimeEndpoint</span> 这扇门，我们正式从"语言"走向"引擎"。</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>统一接口</strong>：<span class="mono">BaseBackend</span> 是抽象层，规定 <span class="mono">generate/select</span>、流式、role 处理等契约。DSL 程序（第 9–11 课）只调抽象方法，<strong>不知道也不在乎</strong>自己跑在哪个后端——换后端只需一行 <span class="mono">set_default_backend(...)</span>。</li>
-    <li><strong>本地运行时</strong>：<span class="mono">RuntimeEndpoint("http://localhost:30000")</span> 把 <span class="mono">gen/fork</span> 翻成 <strong>POST /generate</strong>，打向第 13–17 课要搭的服务器。<strong>只有它</strong>能给你 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）、约束解码与快速批处理。</li>
+    <li><strong>本地运行时</strong>：<span class="mono">RuntimeEndpoint("http://localhost:30000")</span> 把 <span class="mono">gen/fork</span> 翻成 <strong>POST /generate</strong>，打向第 13–17 课要搭的服务器。<strong>只有它</strong>能给你 RadixAttention 前缀缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）、fork 分支共享（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）、约束解码与快速批处理。</li>
     <li><strong>托管后端</strong>：<span class="mono">OpenAI / Anthropic / VertexAI</span> 让同一程序改打闭源模型——可移植、免自建 GPU，但<strong>丢掉前缀缓存与 fork 共享</strong>（模型是黑盒），约束解码受限，且按量计费。</li>
     <li><strong>两个方向别混</strong>：① <strong>SGLang 程序 → OpenAI 后端</strong>（你的程序调 OpenAI）；② <strong>OpenAI 客户端 → SGLang 服务器</strong>（SGLang 服务器本身兼容 OpenAI API，任何 OpenAI 客户端改 base_url 即可接入你的私有部署）。</li>
     <li><strong>承上启下</strong>：<span class="mono">RuntimeEndpoint</span> 是 Part 3（前端）焊接 Part 4+（运行时）的接缝。源码见 <span class="mono">lang/backend/runtime_endpoint.py</span>，下一课起走进 <span class="mono">/generate</span> 背后的服务器。</li>
@@ -554,20 +556,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。本地运行时是白盒，吃满 RadixAttention 前缀缓存（第 7 课）、fork 分支共享（第 11 课）与严格约束解码；托管 API 是黑盒，这些确定性红利无从声明、无法依赖，约束解码受限，且按 token 计费。好处是可移植、免运维 GPU。程序本身一字不改（这正是 BaseBackend 抽象的价值），所以牺牲的不是可读性，而是运行时能力与成本结构。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。本地运行时是白盒，吃满 RadixAttention 前缀缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）、fork 分支共享（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）与严格约束解码；托管 API 是黑盒，这些确定性红利无从声明、无法依赖，约束解码受限，且按 token 计费。好处是可移植、免运维 GPU。程序本身一字不改（这正是 BaseBackend 抽象的价值），所以牺牲的不是可读性，而是运行时能力与成本结构。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用一两句话向同事解释“为什么同一个 SGLang 程序换后端只需改一行 <code>set_default_backend</code>”。请点出 <code>BaseBackend</code> 这层抽象接口的作用，以及程序为什么“不知道也不在乎”自己跑在哪个后端上。</li>
-    <li><code>RuntimeEndpoint</code> 被称为“Part 3（前端）与 Part 4+（运行时）对接的接缝”。请结合它把 <code>gen/fork</code> 翻成 <code>POST /generate</code> 的事实，说明：为什么只有这个后端能兑现 RadixAttention 前缀缓存（第 7 课）与 fork 分支共享（第 11 课），以及这次 HTTP 请求接下来会交给第 13–17 课的哪些组件处理？</li>
+    <li><code>RuntimeEndpoint</code> 被称为“Part 3（前端）与 Part 4+（运行时）对接的接缝”。请结合它把 <code>gen/fork</code> 翻成 <code>POST /generate</code> 的事实，说明：为什么只有这个后端能兑现 RadixAttention 前缀缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）与 fork 分支共享（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>），以及这次 HTTP 请求接下来会交给第 13–17 课的哪些组件处理？</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
-From Lesson 9 through Lesson 11 we have been <strong>writing programs</strong>: describing intent in the DSL (Lesson 9), letting the interpreter run the tree of intent (Lesson 10), forking parallel branches with fork/join (Lesson 11).
+From <a class="xref" href="09-structured-generation-language.html">Lesson 9</a> through <a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a> we have been <strong>writing programs</strong>: describing intent in the DSL (<a class="xref" href="09-structured-generation-language.html">Lesson 9</a>), letting the interpreter run the tree of intent (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>), forking parallel branches with fork/join (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>).
 But one question has been quietly dodged all along — <strong>who actually executes all these <span class="inline">gen</span>, <span class="inline">select</span>, <span class="inline">fork</span> calls?</strong>
 The answer is today's star: the <strong>Backend</strong>. The heart of SGLang's design is that <strong>the same front-end program runs unchanged on different backends</strong> —
 the local SGLang runtime, OpenAI, Anthropic, VertexAI… and the program itself <strong>has no idea</strong> which backend it runs on. This lesson closes Part 3 (the front-end)
@@ -588,7 +590,7 @@ and, through the <span class="mono">RuntimeEndpoint</span> local-runtime backend
   In one line: <span class="inline">BaseBackend</span> is an <strong>abstract interface</strong> that prescribes what a backend must be able to do — <span class="mono">generate</span>, <span class="mono">select</span> (pick among candidates), streaming, role handling, and so on.
   Your DSL program calls only these <strong>abstract methods</strong> and <strong>never touches a concrete engine directly</strong>. So switching backends is one line, <span class="mono">set_default_backend(...)</span>:
   pass <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> to run on the <strong>local SGLang runtime</strong> (the <span class="mono">/generate</span> HTTP server we build in Lessons 13–17),
-  pass <span class="mono">OpenAI(...)</span> and the <strong>same program</strong> targets OpenAI's hosted models instead. But there is no free lunch: the <strong>local runtime</strong> gives you RadixAttention prefix caching (Lesson 7), constrained decoding, fast batching;
+  pass <span class="mono">OpenAI(...)</span> and the <strong>same program</strong> targets OpenAI's hosted models instead. But there is no free lunch: the <strong>local runtime</strong> gives you RadixAttention prefix caching (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), constrained decoding, fast batching;
   a <strong>hosted backend</strong> buys you <strong>portability</strong> at the cost of <strong>losing prefix-cache and fork-sharing</strong> benefits — those models are black boxes, caching is the provider's call, and constrained decoding is limited.
 </div>
 
@@ -615,7 +617,7 @@ and, through the <span class="mono">RuntimeEndpoint</span> local-runtime backend
 </div>
 
 <h2>1. BaseBackend: the seam that decouples program from engine</h2>
-<p>Recall Lesson 10: the interpreter (StreamExecutor) executes the expressions of the intent tree one by one — fixed text is appended, and a <span class="mono">gen</span> / <span class="mono">select</span> <strong>issues a call to the backend</strong>.
+<p>Recall <a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>: the interpreter (StreamExecutor) executes the expressions of the intent tree one by one — fixed text is appended, and a <span class="mono">gen</span> / <span class="mono">select</span> <strong>issues a call to the backend</strong>.
 That "backend" is any class inheriting from <span class="mono">BaseBackend</span>. <span class="mono">BaseBackend</span> abstracts "<strong>an engine that can execute an SGLang program</strong>" into a set of methods: how to generate tokens, how to <span class="mono">select</span> among candidates,
 how to stream, how to handle system/user/assistant roles. <strong>The program always faces this interface, never a specific engine</strong>. This is the classic "<strong>program to an interface</strong>":
 the upper layer depends on a contract, not on the lower layer's implementation. So the same intent tree can run on local GPUs today and a cloud API tomorrow, <strong>with not one character changed</strong>.</p>
@@ -658,8 +660,8 @@ the upper layer depends on a contract, not on the lower layer's implementation. 
 <h2>2. RuntimeEndpoint: the seam where the front-end lands on the runtime</h2>
 <p>Among all backends, <span class="mono">RuntimeEndpoint</span> matters most — <strong>it is the seam where Part 3 (front-end) snaps precisely onto Part 4+ (runtime)</strong>.
 It points at a locally launched SGLang server (default <span class="mono">http://localhost:30000</span>) and translates every <span class="mono">gen</span> / <span class="mono">fork</span> in the program into <strong>a POST /generate HTTP request</strong>,
-sent to the server we dissect layer by layer <strong>from Lesson 13 onward</strong> — the TokenizerManager at the door (Lesson 14), the Scheduler as the brain (Lessons 18–23), the ModelRunner doing the forward (Lesson 24). <strong>Precisely because the request lands on our own runtime</strong>,
-the RadixAttention prefix cache (Lesson 7), fork's branch sharing (Lesson 11), and constrained decoding <strong>actually take effect</strong>: the 8 branches you fork share one prefix and the runtime computes it once — something only the <span class="mono">RuntimeEndpoint</span> backend can deliver.
+sent to the server we dissect layer by layer <strong>from <a class="xref" href="13-engine-and-http-server.html">Lesson 13</a> onward</strong> — the TokenizerManager at the door (<a class="xref" href="14-tokenizer-manager.html">Lesson 14</a>), the Scheduler as the brain (Lessons 18–23), the ModelRunner doing the forward (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>). <strong>Precisely because the request lands on our own runtime</strong>,
+the RadixAttention prefix cache (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), fork's branch sharing (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), and constrained decoding <strong>actually take effect</strong>: the 8 branches you fork share one prefix and the runtime computes it once — something only the <span class="mono">RuntimeEndpoint</span> backend can deliver.
 One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localhost:30000"))</span>, welds the front-end's full expressiveness onto the very engine we are about to open up.</p>
 
 <div class="flow">
@@ -669,7 +671,7 @@ One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localho
   <div class="arrow">→</div>
   <div class="node"><div class="nt">POST /generate</div><div class="nd">HTTP request · Lessons 13–17</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Scheduler</div><div class="nd">schedule + RadixAttention (Lesson 7)</div></div>
+  <div class="node"><div class="nt">Scheduler</div><div class="nd">schedule + RadixAttention (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>)</div></div>
 </div>
 
 <div class="codefile">
@@ -688,11 +690,11 @@ One line, <span class="mono">set_default_backend(RuntimeEndpoint("http://localho
 
 <h2>3. Local runtime vs hosted API: what are you trading?</h2>
 <p>Switching backends is not free. <span class="mono">RuntimeEndpoint</span> and <span class="mono">OpenAI</span> look identical in the program, but the <strong>capabilities you get differ vastly</strong>.
-The crux: <strong>the local runtime is a white box you can see through and control</strong>, so the prefix cache (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding (guaranteeing valid JSON / regex output) are all available;
+The crux: <strong>the local runtime is a white box you can see through and control</strong>, so the prefix cache (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), fork sharing (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), and strict constrained decoding (guaranteeing valid JSON / regex output) are all available;
 while a <strong>hosted model is a black box</strong> — the provider may cache internally, but you <strong>cannot declare or rely on it</strong>, and constrained decoding usually degrades to "begging for it in the prompt." Here is the trade laid out.</p>
 
 <div class="cols">
-  <div class="col"><h4>Local runtime (RuntimeEndpoint)</h4><p><strong>White box, controllable</strong>: full RadixAttention prefix cache (Lesson 7), fork branch sharing (Lesson 11), strict constrained decoding, fast batching. The cost: you must <strong>deploy and manage GPUs yourself</strong> (Lessons 13–17 teach you). <strong>For performance and control, use this.</strong></p></div>
+  <div class="col"><h4>Local runtime (RuntimeEndpoint)</h4><p><strong>White box, controllable</strong>: full RadixAttention prefix cache (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), fork branch sharing (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), strict constrained decoding, fast batching. The cost: you must <strong>deploy and manage GPUs yourself</strong> (Lessons 13–17 teach you). <strong>For performance and control, use this.</strong></p></div>
   <div class="col"><h4>Hosted API (OpenAI / Anthropic …)</h4><p><strong>Black box, portable</strong>: one line switches to a top closed model, no GPUs needed. The cost: you <strong>lose the deterministic prefix-cache and fork-sharing</strong> benefits, constrained decoding is limited, and you <strong>pay per token</strong>. <strong>For convenience and portability, use this.</strong></p></div>
 </div>
 
@@ -732,14 +734,14 @@ without rewriting a single line of client code for SGLang. One "compatibility," 
 </div>
 
 <p>These few lines are <strong>the door from front-end to runtime</strong>: the constructor handshakes via <span class="mono">/get_model_info</span> to confirm the model; <span class="mono">cache_prefix</span> uses <span class="mono">max_new_tokens=0</span> to <strong>pre-warm the shared prefix into the cache</strong>,
-the very mechanism behind fork's compute savings (Lesson 11); and <span class="mono">generate</span> faithfully translates each <span class="mono">gen</span> in the program into <strong>one POST /generate</strong>.
+the very mechanism behind fork's compute savings (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>); and <span class="mono">generate</span> faithfully translates each <span class="mono">gen</span> in the program into <strong>one POST /generate</strong>.
 Understand this and you understand the seam between Part 3 and Part 4 — <strong>from the next lesson on, we step into the server behind that <span class="mono">/generate</span></strong>, watching TokenizerManager, Scheduler, and ModelRunner turn this one HTTP request into real tokens on the GPU.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>One interface</strong>: <span class="mono">BaseBackend</span> is the abstract layer prescribing the contract — <span class="mono">generate/select</span>, streaming, role handling. The DSL program (Lessons 9–11) calls only abstract methods and <strong>neither knows nor cares</strong> which backend runs it — switching is one line, <span class="mono">set_default_backend(...)</span>.</li>
-    <li><strong>Local runtime</strong>: <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> translates <span class="mono">gen/fork</span> into <strong>POST /generate</strong> to the server built in Lessons 13–17. <strong>Only it</strong> gives you RadixAttention prefix cache (Lesson 7), fork branch sharing (Lesson 11), constrained decoding, and fast batching.</li>
+    <li><strong>Local runtime</strong>: <span class="mono">RuntimeEndpoint("http://localhost:30000")</span> translates <span class="mono">gen/fork</span> into <strong>POST /generate</strong> to the server built in Lessons 13–17. <strong>Only it</strong> gives you RadixAttention prefix cache (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), fork branch sharing (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), constrained decoding, and fast batching.</li>
     <li><strong>Hosted backends</strong>: <span class="mono">OpenAI / Anthropic / VertexAI</span> point the same program at closed models — portable, no self-hosted GPU, but you <strong>lose prefix-cache and fork-sharing</strong> (black-box model), constrained decoding is limited, and you pay per token.</li>
     <li><strong>Two directions, don't mix</strong>: ① <strong>SGLang program → OpenAI backend</strong> (your program calls OpenAI); ② <strong>OpenAI client → SGLang server</strong> (the SGLang server is itself OpenAI-compatible; any OpenAI client plugs into your private deployment by changing base_url).</li>
     <li><strong>Bridge forward</strong>: <span class="mono">RuntimeEndpoint</span> is the seam welding Part 3 (front-end) onto Part 4+ (runtime). Source in <span class="mono">lang/backend/runtime_endpoint.py</span>; from the next lesson we step into the server behind <span class="mono">/generate</span>.</li>
@@ -783,14 +785,14 @@ Understand this and you understand the seam between Part 3 and Part 4 — <stron
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The local runtime is a white box delivering full RadixAttention prefix caching (Lesson 7), fork sharing (Lesson 11), and strict constrained decoding; a hosted API is a black box where those deterministic benefits cannot be declared or relied upon, constrained decoding is limited, and you pay per token. The upside is portability and no GPU ops. The program itself is unchanged (the whole point of the BaseBackend abstraction), so what you trade is runtime capability and cost structure, not readability.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The local runtime is a white box delivering full RadixAttention prefix caching (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), fork sharing (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), and strict constrained decoding; a hosted API is a black box where those deterministic benefits cannot be declared or relied upon, constrained decoding is limited, and you pay per token. The upside is portability and no GPU ops. The program itself is unchanged (the whole point of the BaseBackend abstraction), so what you trade is runtime capability and cost structure, not readability.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>In a sentence or two, explain to a colleague why switching backends for the same SGLang program takes only one line, <code>set_default_backend</code>. Point out the role of the <code>BaseBackend</code> abstract interface and why the program 'neither knows nor cares' which backend runs it.</li>
-    <li><code>RuntimeEndpoint</code> is called 'the seam joining Part 3 (front-end) to Part 4+ (runtime).' Using the fact that it translates <code>gen/fork</code> into <code>POST /generate</code>, explain why only this backend can deliver RadixAttention prefix caching (Lesson 7) and fork branch sharing (Lesson 11), and which components from Lessons 13–17 will handle that HTTP request next.</li>
+    <li><code>RuntimeEndpoint</code> is called 'the seam joining Part 3 (front-end) to Part 4+ (runtime).' Using the fact that it translates <code>gen/fork</code> into <code>POST /generate</code>, explain why only this backend can deliver RadixAttention prefix caching (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) and fork branch sharing (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), and which components from Lessons 13–17 will handle that HTTP request next.</li>
   </ul>
 </div>
 </div></div>

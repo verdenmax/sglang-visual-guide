@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -348,7 +350,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>痛点：连续预留为什么烧显存</h2>
-<p>回到第 4 课：每条请求的 KV 缓存随着生成<strong>越长越大</strong>，但你<strong>事先并不知道</strong>它最终会生成多少 token。
+<p>回到<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>：每条请求的 KV 缓存随着生成<strong>越长越大</strong>，但你<strong>事先并不知道</strong>它最终会生成多少 token。
 最朴素的做法是<strong>按"最大长度"给每条请求预留一整块连续显存</strong>——比如上限 2048，就先占满 2048 个 token 的 KV 空间。
 这种"<strong>连续预留</strong>"看似省事，却同时踩中两种经典的内存碎片，把宝贵的 HBM 大把浪费掉。</p>
 
@@ -359,7 +361,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   新请求要一整块<strong>连续</strong>显存，可剩下的全是<strong>东一小段西一小段</strong>的缝隙，<strong>加起来够、却拼不成一整块</strong>，只能眼睁睁闲置——这叫<strong>外部碎片</strong>。</p></div>
 </div>
 
-<p>两种碎片叠加，后果很直接：<strong>显存明明没用满，却已经塞不下新请求了</strong>。而在第 5 课我们说过，<strong>并发请求数（批大小）</strong>
+<p>两种碎片叠加，后果很直接：<strong>显存明明没用满，却已经塞不下新请求了</strong>。而在<a class="xref" href="05-continuous-batching.html">第 5 课</a>我们说过，<strong>并发请求数（批大小）</strong>
 是吞吐的命门——批越大、权重读取的固定开销摊得越薄。连续预留把显存白白烧在空槽和缝隙上，<strong>等于直接砍掉了你能同时跑的请求数</strong>，
 吞吐天花板被死死压低。所以"怎么放 KV"不是细节，而是<strong>决定并发上限的大事</strong>。</p>
 
@@ -494,7 +496,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>SGLang 里的落地：分页分配器与 req_to_token</h2>
 <p>在 SGLang 里，这套机制由一个<strong>分页的 token→KV 分配器</strong>承担：它管理着整池 KV 槽位，但<strong>以"页"为最小分配单位</strong>派发。
-配合第 4 课讲过的 KV 池，还有一张 <span class="inline">req_to_token</span> 映射，记录<strong>每条请求的 token → 物理槽位</strong>——
+配合<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>讲过的 KV 池，还有一张 <span class="inline">req_to_token</span> 映射，记录<strong>每条请求的 token → 物理槽位</strong>——
 它就是上面那张"页表"在代码里的化身。下面这段就是分页分配器的骨架，<strong>alloc 按页摘、free 按页还</strong>，全程以 <span class="mono">page_size</span> 为粒度：</p>
 
 <div class="codefile">
@@ -536,28 +538,28 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>读懂这段就抓住了分页的精髓：<strong>显存不再按"请求"整片预留，而是按"页"零售。</strong>
 <span class="inline">alloc</span> 从 <span class="mono">free_pages</span> 里<strong>摘走</strong>几页、把页号乘 <span class="mono">page_size</span>
 再加页内偏移<strong>展开成 token 槽位索引</strong>；<span class="inline">free</span> 在请求结束时把那些索引<strong>除以 page_size 去重得到页号、整批还回</strong>。
-注意类的注释那句"输出始终 page 对齐"——这保证了页与页之间<strong>干净对齐、好回收</strong>，正是连续批处理（第 5 课）能"完成即释放、随到随补"的物理基础。</p>
+注意类的注释那句"输出始终 page 对齐"——这保证了页与页之间<strong>干净对齐、好回收</strong>，正是连续批处理（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）能"完成即释放、随到随补"的物理基础。</p>
 
-<h2>为什么这是第 7 课的跳板</h2>
+<h2>为什么这是<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的跳板</h2>
 <p>分页最深远的意义，不止于省显存。一旦 KV 被切成<strong>固定大小、由页表索引的物理块</strong>，一件神奇的事就成为可能：
 <strong>不同请求的页表，可以指向同一个物理块</strong>。设想两条请求开头是同一段 system prompt——它们前几页的 KV <strong>逐字节相同</strong>，
-那为什么要各存一份？让两张页表<strong>都指向那同一批物理页</strong>不就行了？这正是<strong>第 7 课 RadixAttention 前缀共享</strong>要做的事。</p>
+那为什么要各存一份？让两张页表<strong>都指向那同一批物理页</strong>不就行了？这正是<strong><a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention 前缀共享</strong>要做的事。</p>
 
 <div class="flow">
   <div class="node hl"><div class="nt">固定页 + 页表</div><div class="nd">本课：按页索引、物理可分散</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">页可被多请求指向</div><div class="nd">页表间接层带来的自由</div></div>
   <div class="arrow">→</div>
-  <div class="node hl"><div class="nt">共享前缀 KV</div><div class="nd">第 7 课 RadixAttention</div></div>
+  <div class="node hl"><div class="nt">共享前缀 KV</div><div class="nd"><a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention</div></div>
 </div>
 
 <p>这层"<strong>多张页表指向同一块</strong>"的能力，正是间接寻址送给我们的红利。回想老派的连续预留：每条请求的 KV 是一整片私有显存，
 想共享也无从下手——你没法让两块连续区"部分重叠"。而分页把 KV 拆成独立的小块、用页表牵线之后，<strong>共享就退化成"两张表写同一个块号"这么简单</strong>。
-第 7 课会进一步用一棵<strong>基数树（radix tree）</strong>把所有请求的前缀组织起来，自动发现"谁和谁开头相同"，再让它们的页表复用同一批物理页——
-不仅省显存，<strong>相同前缀的 prefill 计算也只做一次</strong>。可以说，没有本课的分页地基，第 7 课的前缀共享根本无从谈起。</p>
+<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>会进一步用一棵<strong>基数树（radix tree）</strong>把所有请求的前缀组织起来，自动发现"谁和谁开头相同"，再让它们的页表复用同一批物理页——
+不仅省显存，<strong>相同前缀的 prefill 计算也只做一次</strong>。可以说，没有本课的分页地基，<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的前缀共享根本无从谈起。</p>
 
-<p>把这一课放回 Part 2 主线：第 4 课建好 KV 池、按槽位独立管理；第 5 课靠连续批处理把批喂满；本课用<strong>分页</strong>把每个槽位<strong>装得更紧、碎片更少</strong>，
-解开"连续预留"对并发的枷锁；第 7 课则顺着页表这层间接，把"<strong>能否复用别人的 KV</strong>"变成现实。再往后，KV 缓存的更多内幕、
+<p>把这一课放回 Part 2 主线：<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>建好 KV 池、按槽位独立管理；<a class="xref" href="05-continuous-batching.html">第 5 课</a>靠连续批处理把批喂满；本课用<strong>分页</strong>把每个槽位<strong>装得更紧、碎片更少</strong>，
+解开"连续预留"对并发的枷锁；<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>则顺着页表这层间接，把"<strong>能否复用别人的 KV</strong>"变成现实。再往后，KV 缓存的更多内幕、
 以及把 KV 在显存/内存/磁盘间分层的 HiCache，会在<strong>第 29–32 课</strong>展开。带着"<strong>固定页、页表索引、按需分配、用完即还</strong>"这十二个字往下读，
 你会发现 SGLang 的内存系统几乎都建在这块地基上。</p>
 
@@ -567,8 +569,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <li><strong>痛点</strong>：给每条请求按最大长度预留一整块<strong>连续</strong>显存，会同时产生<strong>内部碎片</strong>（多数请求到不了最大长度，空槽锁死）和<strong>外部碎片</strong>（释放的缝隙拼不成连续块），把 HBM 大把烧掉、<strong>压低并发上限</strong>。</li>
     <li><strong>PagedAttention</strong>：把 KV 切成<strong>固定大小的页</strong>，用一张<strong>页表</strong>把<strong>逻辑位置 → 物理块号</strong>映射起来（即操作系统虚拟内存 / 分页）。<strong>按需领页、用完即还</strong>，物理块<strong>无需连续</strong>，碎片几近消失。</li>
     <li><strong>为何能非连续</strong>：注意力算子<strong>先查页表、再 gather</strong> 物理块里的 K/V，所以页放在哪都行——这是消灭外部碎片的根本。</li>
-    <li><strong>在 SGLang 里</strong>：<span class="mono">PagedTokenToKVPoolAllocator</span> 以 <span class="mono">page_size</span> 为粒度 <span class="mono">alloc</span>/<span class="mono">free</span>，配合 <span class="mono">req_to_token</span> 记录每条请求的 token→槽位（即页表，承接第 4 课 KV 池）。</li>
-    <li><strong>取舍 & 前瞻</strong>：page_size 小则碎片少但查表开销大，大则反之。分页让<strong>不同请求的页表指向同一物理块</strong>成为可能——这正是<strong>第 7 课 RadixAttention</strong> 前缀共享的跳板；KV 内幕与 HiCache 见<strong>第 29–32 课</strong>。</li>
+    <li><strong>在 SGLang 里</strong>：<span class="mono">PagedTokenToKVPoolAllocator</span> 以 <span class="mono">page_size</span> 为粒度 <span class="mono">alloc</span>/<span class="mono">free</span>，配合 <span class="mono">req_to_token</span> 记录每条请求的 token→槽位（即页表，承接<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a> KV 池）。</li>
+    <li><strong>取舍 & 前瞻</strong>：page_size 小则碎片少但查表开销大，大则反之。分页让<strong>不同请求的页表指向同一物理块</strong>成为可能——这正是<strong><a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention</strong> 前缀共享的跳板；KV 内幕与 HiCache 见<strong>第 29–32 课</strong>。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -596,11 +598,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。分页的核心是“固定页 + 页表”这层间接映射，正如操作系统虚拟内存。注意力不按连续地址直取，而是先查页表拿到物理块号、再 gather，所以物理块爱放哪放哪——这正是消灭外部碎片、并允许按需增长的根本。硬件不会自动整理碎片；各请求的页通常是各自独立的（除非第 7 课的前缀共享显式让页表指向同一块）。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。分页的核心是“固定页 + 页表”这层间接映射，正如操作系统虚拟内存。注意力不按连续地址直取，而是先查页表拿到物理块号、再 gather，所以物理块爱放哪放哪——这正是消灭外部碎片、并允许按需增长的根本。硬件不会自动整理碎片；各请求的页通常是各自独立的（除非<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的前缀共享显式让页表指向同一块）。</div></div></div>
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. 分页为第 7 课的 RadixAttention 前缀共享铺了什么路？</div>
+  <div class="qn">3. 分页为<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的 RadixAttention 前缀共享铺了什么路？</div>
   <ol class="opts">
     <li>分页让每条请求都强制使用同一个固定前缀</li>
     <li>分页把前缀缓存搬到了 CPU 内存里</li>
@@ -609,7 +611,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。分页的页表间接层带来一个自由：多张页表可以指向同一物理块。若两条请求开头是逐字节相同的前缀，它们前几页的 KV 完全一样，与其各存一份，不如让两张页表都指向那同一批物理页——这就是 RadixAttention（第 7 课）前缀共享的物理基础。它不靠压缩、不强制统一前缀，也与是否搬到 CPU（HiCache 见第 29–32 课）无关。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。分页的页表间接层带来一个自由：多张页表可以指向同一物理块。若两条请求开头是逐字节相同的前缀，它们前几页的 KV 完全一样，与其各存一份，不如让两张页表都指向那同一批物理页——这就是 RadixAttention（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）前缀共享的物理基础。它不靠压缩、不强制统一前缀，也与是否搬到 CPU（HiCache 见第 29–32 课）无关。</div></div></div>
   </details>
 </div>
 <div class="card spark">
@@ -651,7 +653,7 @@ so HBM packs <strong>tighter, with near-zero fragmentation</strong>.
 </div>
 
 <h2>The pain: why contiguous reservation burns HBM</h2>
-<p>Back to Lesson 4: each request's KV cache <strong>grows as it generates</strong>, but you <strong>don't know in advance</strong> how many tokens
+<p>Back to <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>: each request's KV cache <strong>grows as it generates</strong>, but you <strong>don't know in advance</strong> how many tokens
 it will produce. The naive approach is to <strong>reserve one contiguous block of HBM per request, sized for the max length</strong> — cap of 2048
 means grabbing KV space for 2048 tokens up front. This "<strong>contiguous reservation</strong>" looks convenient but hits two classic fragmentation
 problems at once, wasting precious HBM.</p>
@@ -665,7 +667,7 @@ problems at once, wasting precious HBM.</p>
   un-assemblable into one block</strong>, so it idles. That's <strong>external fragmentation</strong>.</p></div>
 </div>
 
-<p>Stack the two and the consequence is blunt: <strong>HBM isn't even full, yet a new request no longer fits</strong>. And as Lesson 5 said, the number
+<p>Stack the two and the consequence is blunt: <strong>HBM isn't even full, yet a new request no longer fits</strong>. And as <a class="xref" href="05-continuous-batching.html">Lesson 5</a> said, the number
 of <strong>concurrent requests (batch size)</strong> is the throughput lifeline — bigger batches amortize the fixed weight-read cost thinner. Contiguous
 reservation burns HBM on empty slots and gaps, which <strong>directly cuts how many requests you can run at once</strong>, pressing the throughput ceiling
 down hard. So "how you lay out KV" isn't a detail — it's <strong>what sets the concurrency limit</strong>.</p>
@@ -793,7 +795,7 @@ Common values are <span class="mono">1, 16, 32</span> and the like, decided by m
 
 <h2>In SGLang: the paged allocator and req_to_token</h2>
 <p>In SGLang this mechanism is carried by a <strong>paged token→KV allocator</strong>: it manages a whole pool of KV slots but hands them out <strong>with the "page" as the
-minimum unit</strong>. Paired with the KV pool from Lesson 4, a <span class="inline">req_to_token</span> map records <strong>each request's token → physical slot</strong> — the
+minimum unit</strong>. Paired with the KV pool from <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>, a <span class="inline">req_to_token</span> map records <strong>each request's token → physical slot</strong> — the
 in-code incarnation of that "page table." Below is the allocator's skeleton: <strong>alloc takes pages, free returns pages</strong>, all at <span class="mono">page_size</span> granularity:</p>
 
 <div class="codefile">
@@ -836,24 +838,24 @@ in-code incarnation of that "page table." Below is the allocator's skeleton: <st
 <span class="inline">alloc</span> <strong>takes</strong> some pages off <span class="mono">free_pages</span>, then multiplies page ids by <span class="mono">page_size</span> and adds the
 in-page offset to <strong>expand into token slot indices</strong>; <span class="inline">free</span> divides those indices by page_size, dedups to page ids, and
 <strong>returns them in one batch</strong> when the request ends. Note the class comment "output is page-aligned" — it guarantees pages stay <strong>cleanly aligned and easy to
-reclaim</strong>, the physical basis for continuous batching's (Lesson 5) "free on finish, fill on arrival."</p>
+reclaim</strong>, the physical basis for continuous batching's (<a class="xref" href="05-continuous-batching.html">Lesson 5</a>) "free on finish, fill on arrival."</p>
 
-<h2>Why this is the springboard to Lesson 7</h2>
+<h2>Why this is the springboard to <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a></h2>
 <p>Paging's deepest significance isn't just saving HBM. Once KV is cut into <strong>fixed-size, page-table-indexed physical blocks</strong>, something magical becomes possible:
 <strong>different requests' page tables can point at the same physical block</strong>. Imagine two requests starting with the same system prompt — their first few pages of KV are
 <strong>byte-for-byte identical</strong>, so why store two copies? Just let both page tables <strong>point at that same set of physical pages</strong>. That's exactly what
-<strong>Lesson 7's RadixAttention prefix sharing</strong> does.</p>
+<strong><a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>'s RadixAttention prefix sharing</strong> does.</p>
 
 <div class="flow">
   <div class="node hl"><div class="nt">Fixed pages + page table</div><div class="nd">This lesson: indexed by page, physically scattered</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">A page can be pointed at by many requests</div><div class="nd">freedom from the page-table indirection</div></div>
   <div class="arrow">→</div>
-  <div class="node hl"><div class="nt">Share prefix KV</div><div class="nd">Lesson 7 RadixAttention</div></div>
+  <div class="node hl"><div class="nt">Share prefix KV</div><div class="nd"><a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a> RadixAttention</div></div>
 </div>
 
-<p>Place this lesson back on Part 2's throughline: Lesson 4 built the KV pool with per-slot management; Lesson 5 kept the batch full via continuous batching; this lesson uses
-<strong>paging</strong> to pack each slot <strong>tighter with less fragmentation</strong>, unshackling concurrency from "contiguous reservation"; Lesson 7 then follows the page-table
+<p>Place this lesson back on Part 2's throughline: <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a> built the KV pool with per-slot management; <a class="xref" href="05-continuous-batching.html">Lesson 5</a> kept the batch full via continuous batching; this lesson uses
+<strong>paging</strong> to pack each slot <strong>tighter with less fragmentation</strong>, unshackling concurrency from "contiguous reservation"; <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a> then follows the page-table
 indirection to make "<strong>can I reuse someone else's KV</strong>" real. Further on, more KV-cache internals and HiCache — tiering KV across HBM/host/disk — unfold in
 <strong>Lessons 29–32</strong>. Read on holding twelve words — "<strong>fixed pages, page-table indexed, allocate on demand, free when done</strong>" — and you'll see SGLang's
 memory system is built almost entirely on this foundation.</p>
@@ -864,8 +866,8 @@ memory system is built almost entirely on this foundation.</p>
     <li><strong>The pain</strong>: reserving one <strong>contiguous</strong> HBM block per request sized for the max length causes both <strong>internal fragmentation</strong> (most requests never reach max, empty slots locked) and <strong>external fragmentation</strong> (freed gaps can't combine into a contiguous block), burning HBM and <strong>capping concurrency</strong>.</li>
     <li><strong>PagedAttention</strong>: slice KV into <strong>fixed-size pages</strong> and use a <strong>page table</strong> to map <strong>logical position → physical block id</strong> (OS virtual memory / paging). <strong>Allocate on demand, free when done</strong>; physical blocks <strong>need not be contiguous</strong>, so fragmentation nearly vanishes.</li>
     <li><strong>Why non-contiguous works</strong>: the attention kernel <strong>consults the page table, then gathers</strong> K/V from physical blocks, so a page can sit anywhere — the root of killing external fragmentation.</li>
-    <li><strong>In SGLang</strong>: <span class="mono">PagedTokenToKVPoolAllocator</span> does <span class="mono">alloc</span>/<span class="mono">free</span> at <span class="mono">page_size</span> granularity, with <span class="mono">req_to_token</span> recording each request's token→slot (the page table, building on Lesson 4's KV pool).</li>
-    <li><strong>Tradeoff &amp; forward look</strong>: small page_size means less fragmentation but more lookup overhead, large means the reverse. Paging makes <strong>different requests' page tables point at the same physical block</strong> possible — the springboard for <strong>Lesson 7's RadixAttention</strong> prefix sharing; KV internals and HiCache in <strong>Lessons 29–32</strong>.</li>
+    <li><strong>In SGLang</strong>: <span class="mono">PagedTokenToKVPoolAllocator</span> does <span class="mono">alloc</span>/<span class="mono">free</span> at <span class="mono">page_size</span> granularity, with <span class="mono">req_to_token</span> recording each request's token→slot (the page table, building on <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>'s KV pool).</li>
+    <li><strong>Tradeoff &amp; forward look</strong>: small page_size means less fragmentation but more lookup overhead, large means the reverse. Paging makes <strong>different requests' page tables point at the same physical block</strong> possible — the springboard for <strong><a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>'s RadixAttention</strong> prefix sharing; KV internals and HiCache in <strong>Lessons 29–32</strong>.</li>
   </ul>
 </div>
 <div class="selftest">
@@ -893,11 +895,11 @@ memory system is built almost entirely on this foundation.</p>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Paging's core is the 'fixed pages + page table' indirection, just like OS virtual memory. Attention doesn't fetch by contiguous address; it consults the table for the physical block id, then gathers — so blocks can go anywhere, which is what kills external fragmentation and enables on-demand growth. Hardware does not auto-defragment; each request's pages are normally independent (unless Lesson 7's prefix sharing explicitly points page tables at the same block).</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Paging's core is the 'fixed pages + page table' indirection, just like OS virtual memory. Attention doesn't fetch by contiguous address; it consults the table for the physical block id, then gathers — so blocks can go anywhere, which is what kills external fragmentation and enables on-demand growth. Hardware does not auto-defragment; each request's pages are normally independent (unless <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>'s prefix sharing explicitly points page tables at the same block).</div></div></div>
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. How does paging pave the way for Lesson 7's RadixAttention prefix sharing?</div>
+  <div class="qn">3. How does paging pave the way for <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>'s RadixAttention prefix sharing?</div>
   <ol class="opts">
     <li>Paging forces every request to use the same fixed prefix</li>
     <li>Paging moves the prefix cache into CPU memory</li>
@@ -906,7 +908,7 @@ memory system is built almost entirely on this foundation.</p>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The page-table indirection grants one freedom: many page tables can point at the same physical block. If two requests share a byte-identical prefix, their first pages of KV are identical, so instead of two copies you let both page tables point at the same physical pages — the physical basis for RadixAttention (Lesson 7) prefix sharing. It relies on neither compression nor forcing a common prefix, and is unrelated to moving to CPU (HiCache, Lessons 29–32).</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The page-table indirection grants one freedom: many page tables can point at the same physical block. If two requests share a byte-identical prefix, their first pages of KV are identical, so instead of two copies you let both page tables point at the same physical pages — the physical basis for RadixAttention (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) prefix sharing. It relies on neither compression nor forcing a common prefix, and is unrelated to moving to CPU (HiCache, Lessons 29–32).</div></div></div>
   </details>
 </div>
 <div class="card spark">

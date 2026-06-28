@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -330,11 +332,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>SGLang 的平台抽象就是这个转换头。上层的调度器、模型、各种层就像你的手机充电线，永远不变；底层的芯片就像各国插座，五花八门。<span class="mono">SRTPlatform</span> 这层抽象负责把"具体芯片的能力"翻译成"上层统一的接口"。换芯片，只换转换头，不换手机。更妙的是，这个类比还能解释"能力标志"：有的国家电压是 220V、有的是 110V，聪明的转换头会先"问一句"当前插座支持什么，再决定怎么供电——这正对应上层先问"<span class="mono">supports_fp8</span> 吗""<span class="mono">support_cuda_graph</span> 吗"，再决定走哪条执行路径。</p></div>
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
-<p>从单张显卡到跨越多种硬件的大型集群，SGLang 想做到"一处引擎、处处可跑"。要实现这一点，关键是把"<strong>与硬件无关</strong>"的部分和"<strong>每芯片专属</strong>"的部分彻底分开。调度器（第18课）、模型（第26课）、绝大多数层都不知道、也不需要知道脚下是哪块芯片；真正需要"按芯片替换"的只有内核（第38课 AOT / 第39课 JIT）、注意力后端（第33课）和少数平台钩子。把"专属"的那一小撮东西圈得越小，能"通用"复用的代码就越多，移植新硬件的成本也就越低。这正是本指南反复强调的"<strong>一切皆可插拔</strong>"主题（设计主题前瞻见第62课）：注意力是插拔的、内核是插拔的、并行策略是插拔的，而本课告诉你，连"脚下的芯片"本身也是插拔的。</p></div>
+<p>从单张显卡到跨越多种硬件的大型集群，SGLang 想做到"一处引擎、处处可跑"。要实现这一点，关键是把"<strong>与硬件无关</strong>"的部分和"<strong>每芯片专属</strong>"的部分彻底分开。调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）、模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）、绝大多数层都不知道、也不需要知道脚下是哪块芯片；真正需要"按芯片替换"的只有内核（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a> AOT / <a class="xref" href="39-jit-kernel.html">第39课</a> JIT）、注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）和少数平台钩子。把"专属"的那一小撮东西圈得越小，能"通用"复用的代码就越多，移植新硬件的成本也就越低。这正是本指南反复强调的"<strong>一切皆可插拔</strong>"主题（设计主题前瞻见<a class="xref" href="62-everything-is-pluggable.html">第62课</a>）：注意力是插拔的、内核是插拔的、并行策略是插拔的，而本课告诉你，连"脚下的芯片"本身也是插拔的。</p></div>
 
 <h2>一、平台抽象：一个基类，每种芯片一个子类</h2>
 <p>平台抽象的核心是一个基类 <span class="mono">SRTPlatform</span>，定义在 <span class="mono">srt/platforms/interface.py</span> 里。它本身不直接干活，而是声明了一组"每种芯片都得回答"的问题——这些问题以三种形式出现：<strong>工厂方法</strong>、<strong>能力标志</strong>和<strong>生命周期钩子</strong>。你可以把这个基类理解成一张"考卷"：每块新芯片想接入 SGLang，就得把这张考卷答完；答卷的方式，就是子类化这个基类并覆盖其中的方法。基类里很多方法干脆直接抛出 <span class="mono">NotImplementedError</span>，等于在说"这道题没有标准答案，必须由具体芯片自己填"。</p>
-<p><strong>工厂方法</strong>负责"造出"针对当前芯片的组件。比如 <span class="mono">get_default_attention_backend()</span> 返回这块芯片该用哪一族注意力内核（第33课讲过 FlashAttention、FlashInfer、Triton 等后端，不同芯片支持的后端并不相同）；<span class="mono">get_graph_runner_cls()</span> 返回 CUDA Graph 的运行器类（第27课讲过把整个前向过程录制成图来消除逐次启动的开销）。不同芯片在这两个方法里返回不同的实现，而上层只管调用、不管返回的究竟是哪一个具体类——这正是"工厂"二字的含义：上层拿到的是一个统一约定的产品，至于产品在哪条流水线上造出来的，它并不关心。</p>
+<p><strong>工厂方法</strong>负责"造出"针对当前芯片的组件。比如 <span class="mono">get_default_attention_backend()</span> 返回这块芯片该用哪一族注意力内核（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>讲过 FlashAttention、FlashInfer、Triton 等后端，不同芯片支持的后端并不相同）；<span class="mono">get_graph_runner_cls()</span> 返回 CUDA Graph 的运行器类（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>讲过把整个前向过程录制成图来消除逐次启动的开销）。不同芯片在这两个方法里返回不同的实现，而上层只管调用、不管返回的究竟是哪一个具体类——这正是"工厂"二字的含义：上层拿到的是一个统一约定的产品，至于产品在哪条流水线上造出来的，它并不关心。</p>
 <p><strong>能力标志</strong>是一组布尔判断，让上层可以问"这块芯片能不能做某件事"。例如 <span class="mono">supports_fp8</span>（能不能跑 FP8 量化）、<span class="mono">support_cuda_graph</span>（能不能用 CUDA Graph）、<span class="mono">support_piecewise_cuda_graph</span>（能不能用分段式 CUDA Graph）。上层据此自适应：如果某块芯片不支持 CUDA Graph，就优雅地退回到逐算子执行，而不是直接崩溃。能力标志的妙处在于，它把"芯片差异"收敛成了一句句简单的提问，上层不必为每块芯片散落一堆 <span class="mono">if 芯片型号 == …</span> 的硬编码分支，而是统一地问"你支持 X 吗"，让代码既干净又好扩展。</p>
 <p><strong>生命周期钩子</strong>则是在引擎启动时让芯片"插一脚"调整默认配置。<span class="mono">apply_server_args_defaults()</span> 就是这样一个钩子：每种芯片可以在这里设置自己合适的默认参数，比如某些芯片默认关闭某个尚不稳定的特性，或者把某个并行度调到对自己最友好的值。还有一个 <span class="mono">supported_quantization</span> 列表，声明这块芯片支持哪些量化格式。这些钩子让"按芯片定制默认行为"有了一个规整的落脚点，而不是把特判逻辑塞得到处都是。把这三件套合在一起看，你会发现它们对应着一块芯片接入引擎时要回答的三类问题：<strong>"该用什么组件？"</strong>（工厂方法）、<strong>"你能做什么？"</strong>（能力标志）、<strong>"启动时要不要调点默认值？"</strong>（生命周期钩子）。任何一块新芯片，只要把这三类问题答清楚，就算正式"上户口"了。</p>
 
@@ -344,14 +346,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>把这两棵树连起来看，一次请求在引擎里的"芯片之旅"就清楚了：引擎启动时，先根据当前环境选出对应的 <span class="mono">SRTPlatform</span> 子类（比如检测到 NVIDIA 就用 <span class="mono">CudaSRTPlatform</span>），由它的 <span class="mono">apply_server_args_defaults()</span> 钩子把默认参数调到对这块芯片最合适的状态；接着上层向它索要注意力后端和图运行器，工厂方法据此交回对应的实现；运行中，每当上层拿不准"这块芯片能不能用某个加速路径"，就查一查能力标志。整个过程里，调度器和模型自始至终只面对统一接口，从不直接 import 任何具体芯片的模块——这正是"上层与硬件无关"在代码层面的具体体现。</p>
 
 <h2>三、关键洞察：上层与硬件无关</h2>
-<p>本课最重要的一句话是：<strong>上层是硬件无关（hardware-agnostic）的</strong>。调度器（第18课）决定谁先跑、谁后跑、怎么拼批；模型（第26课）定义网络结构、各层怎么连；绝大多数层只关心张量进、张量出。它们统统不知道脚下是哪块芯片，也不需要知道。真正"按芯片替换"的东西被压缩到了很小的范围内：内核（第38课 AOT 预编译 / 第39课 JIT 即时编译）、注意力后端（第33课），以及前面讲的那些平台钩子。这个范围越小，移植的代价就越低，复用的价值就越高。</p>
+<p>本课最重要的一句话是：<strong>上层是硬件无关（hardware-agnostic）的</strong>。调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）决定谁先跑、谁后跑、怎么拼批；模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）定义网络结构、各层怎么连；绝大多数层只关心张量进、张量出。它们统统不知道脚下是哪块芯片，也不需要知道。真正"按芯片替换"的东西被压缩到了很小的范围内：内核（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a> AOT 预编译 / <a class="xref" href="39-jit-kernel.html">第39课</a> JIT 即时编译）、注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>），以及前面讲的那些平台钩子。这个范围越小，移植的代价就越低，复用的价值就越高。</p>
 <p>这种分层之所以重要，是因为它把"移植到新硬件"这件听起来很吓人的大事，变成了"只实现一个新的 <span class="mono">SRTPlatform</span> 子类，再配一套新内核"的小事。上层成千上万行的调度与模型代码可以原封不动地复用，连测试都不必重写。能力标志在这里起到了润滑剂的作用：上层不必为每块芯片写一长串 if-else 分支，而是统一地问"<span class="mono">support_cuda_graph</span> 吗？"，得到否定回答就走兜底路径。可以说，"上层与硬件无关"不是一句口号，而是被 <span class="mono">SRTPlatform</span> 这层抽象、连同两棵目录树一起，实打实地用工程手段兑现了的承诺。也正因如此，同一个团队既能在一张消费级显卡上做实验，又能把同一套引擎推上跨越多种芯片的大型生产集群，而中间几乎不用改上层逻辑。</p>
 <p>反过来想，如果没有这层抽象，会发生什么？每加一种芯片，调度器里就要多一处分支，模型里又要多一处特判，时间一长，代码会被各种"<span class="mono">if 是某某芯片</span>"的补丁撑得臃肿不堪，谁也不敢动。平台抽象的价值，恰恰在于它把这些本会四处蔓延的差异，全部收拢到 <span class="mono">platforms/</span> 与 <span class="mono">hardware_backend/</span> 两棵树里：差异被"圈养"在固定的位置，上层因而保持干净。这就是工程上常说的"<strong>关注点分离</strong>"——让会变化的部分和保持稳定的部分各归各位，是大型系统能够长期演进、不断接纳新硬件的根本前提。</p>
 
 <div class="layers">
-<div class="layer">🧠 调度器（第18课）· 模型（第26课）· 各种层 —— 与硬件无关，不知道脚下是哪块芯片</div>
+<div class="layer">🧠 调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）· 模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）· 各种层 —— 与硬件无关，不知道脚下是哪块芯片</div>
 <div class="layer">🔌 SRTPlatform 抽象层 —— 工厂方法 + 能力标志 + 生命周期钩子（按芯片翻译）</div>
-<div class="layer">⚙️ 每芯片内核：注意力后端（第33课）· AOT 内核（第38课）· JIT 内核（第39课）—— 按芯片替换</div>
+<div class="layer">⚙️ 每芯片内核：注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）· AOT 内核（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）· JIT 内核（<a class="xref" href="39-jit-kernel.html">第39课</a>）—— 按芯片替换</div>
 </div>
 
 <div class="fig">
@@ -434,8 +436,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <div class="cols">
-<div class="col"><strong>✅ 可移植（一份代码到处跑）</strong><br/>调度器（第18课）、模型（第26课）、绝大多数层、输入输出（IO）流程。它们与硬件无关，换芯片时原样复用。</div>
-<div class="col"><strong>🔧 每芯片专属（必须替换）</strong><br/>各类内核（第38课 / 第39课）、注意力后端（第33课）、平台钩子（工厂方法、能力标志、<span class="mono">apply_server_args_defaults</span>）。移植新硬件主要就是补齐这部分。</div>
+<div class="col"><strong>✅ 可移植（一份代码到处跑）</strong><br/>调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）、模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）、绝大多数层、输入输出（IO）流程。它们与硬件无关，换芯片时原样复用。</div>
+<div class="col"><strong>🔧 每芯片专属（必须替换）</strong><br/>各类内核（<a class="xref" href="38-sgl-kernel-overview.html">第38课</a> / <a class="xref" href="39-jit-kernel.html">第39课</a>）、注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）、平台钩子（工厂方法、能力标志、<span class="mono">apply_server_args_defaults</span>）。移植新硬件主要就是补齐这部分。</div>
 </div>
 
 <div class="flow">
@@ -477,18 +479,18 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
         return True</pre></div>
 
 <div class="card"><div class="tag">🧩 具体例子</div><ul>
-<li><strong>移植到新加速器</strong>：只需新增一个 <span class="mono">SRTPlatform</span> 子类并配上它的内核，<strong>完全不动</strong>调度器（第18课）与模型（第26课）。</li>
+<li><strong>移植到新加速器</strong>：只需新增一个 <span class="mono">SRTPlatform</span> 子类并配上它的内核，<strong>完全不动</strong>调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）与模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）。</li>
 <li><strong>某块芯片不支持 CUDA Graph</strong>：它的 <span class="mono">support_cuda_graph()</span> 直接返回 <span class="mono">False</span>，引擎就跳过图捕获、退回逐算子执行，照样跑通。</li>
 </ul></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>平台抽象</strong>让一套引擎跑遍多种芯片：基类 <span class="mono">SRTPlatform</span>（在 <span class="mono">srt/platforms/interface.py</span>）声明每芯片的工厂方法、能力标志和生命周期钩子。</li>
-<li><strong>工厂方法</strong>如 <span class="mono">get_default_attention_backend()</span>（第33课注意力内核）、<span class="mono">get_graph_runner_cls()</span>（第27课 CUDA Graph 运行器）；<strong>钩子</strong>如 <span class="mono">apply_server_args_defaults()</span>，还有 <span class="mono">supported_quantization</span> 列表声明支持的量化格式。</li>
+<li><strong>工厂方法</strong>如 <span class="mono">get_default_attention_backend()</span>（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>注意力内核）、<span class="mono">get_graph_runner_cls()</span>（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a> CUDA Graph 运行器）；<strong>钩子</strong>如 <span class="mono">apply_server_args_defaults()</span>，还有 <span class="mono">supported_quantization</span> 列表声明支持的量化格式。</li>
 <li>每种芯片<strong>子类化</strong>基类：<span class="mono">CudaSRTPlatform</span>（NVIDIA）、ROCm（AMD）等；另一棵 <span class="mono">srt/hardware_backend/</span> 树按 <span class="mono">cpu/gpu/npu/xpu/musa/mlx</span> 组织各设备后端，两棵树一"决策"一"执行"。</li>
-<li><strong>上层与硬件无关</strong>：调度器（第18课）、模型（第26课）、多数层都不知道芯片；只有内核（第38/39课）、注意力后端（第33课）和平台钩子被按芯片替换，移植新硬件主要就是补齐这一小撮。</li>
+<li><strong>上层与硬件无关</strong>：调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）、模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）、多数层都不知道芯片；只有内核（第38/39课）、注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）和平台钩子被按芯片替换，移植新硬件主要就是补齐这一小撮。</li>
 <li><strong>能力标志</strong>（<span class="mono">supports_fp8</span>、<span class="mono">support_cuda_graph</span>、<span class="mono">support_piecewise_cuda_graph</span>）让上层询问"这块芯片能做 X 吗"并自适应（如不支持 CUDA Graph 就兜底退回逐算子执行），而不必散落一堆按型号特判的分支。</li>
 <li>谷歌 TPU 不在这棵树里，而是经由独立的 sglang-jax 项目支持——多硬件不等于所有硬件都挤进同一套代码。</li>
-<li>这是"从单卡到大型集群、跨越多种硬件"的工程基础，也是本指南"<strong>一切皆可插拔</strong>"主题的体现（设计主题前瞻第62课）。</li>
+<li>这是"从单卡到大型集群、跨越多种硬件"的工程基础，也是本指南"<strong>一切皆可插拔</strong>"主题的体现（设计主题前瞻<a class="xref" href="62-everything-is-pluggable.html">第62课</a>）。</li>
 </ul></div>
 
 <div class="card"><div class="tag">🏁 第九部分收官</div><p>到这里，第九部分"内核与硬件"就讲完了。我们从最贴近金属的 AOT 与 JIT 内核出发（第38、39课），看过量化与通信内核，又把 CUDA Graph、注意力后端这些性能利器串联起来，最后用本课的平台抽象把它们收拢成一句话：<strong>把"每芯片专属"的那一小撮东西隔离好，上层就能与硬件无关地复用</strong>。这正是 SGLang 能从单张显卡一路扩展到跨越多种硬件的大型集群的根本原因。带着这套"分层与插拔"的视角，你会在后面的部分里一次次重逢同样的设计哲学。</p></div>
@@ -510,9 +512,9 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <div class="quiz">
   <div class="qn">2. 在 SGLang 里，下面哪一项是<strong>每芯片专属、必须替换</strong>的，而不是可移植的？</div>
   <ol class="opts">
-    <li>模型结构（第26课）</li>
-    <li><strong>内核（第38/39课）、注意力后端（第33课）与平台钩子</strong></li>
-    <li>调度器（第18课）</li>
+    <li>模型结构（<a class="xref" href="26-writing-a-model.html">第26课</a>）</li>
+    <li><strong>内核（第38/39课）、注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）与平台钩子</strong></li>
+    <li>调度器（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）</li>
     <li>输入输出（IO）流程</li>
   </ol>
   <details class="accordion">
@@ -536,8 +538,8 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“旅行充电器 + 转换头”的类比，解释 <span class='mono'>SRTPlatform</span> 这层平台抽象如何让上层（调度器第18课、模型第26课）保持<strong>硬件无关</strong>：说明工厂方法（如 <span class='mono'>get_default_attention_backend()</span>、<span class='mono'>get_graph_runner_cls()</span>）与生命周期钩子（<span class='mono'>apply_server_args_defaults()</span>）各自把“具体芯片的能力”翻译成什么统一接口，以及为什么这能把“移植新硬件”从大事变成小事。</li>
-    <li>结合 <span class='mono'>srt/platforms/</span> 与 <span class='mono'>srt/hardware_backend/</span> 两棵树，说明 SGLang 支持的硬件谱系（NVIDIA、AMD、昇腾 NPU、Intel XPU、摩尔线程 MUSA、苹果 MLX、CPU）是如何组织的；并解释“把每芯片专属的那一小撮（内核第38/39课、注意力后端第33课、平台钩子）隔离好，上层就能复用”为何是“从单卡到跨硬件大型集群”的工程基础（呼应第62课“一切皆可插拔”主题）。</li>
+    <li>用“旅行充电器 + 转换头”的类比，解释 <span class='mono'>SRTPlatform</span> 这层平台抽象如何让上层（调度器<a class="xref" href="18-scheduler-event-loop.html">第18课</a>、模型<a class="xref" href="26-writing-a-model.html">第26课</a>）保持<strong>硬件无关</strong>：说明工厂方法（如 <span class='mono'>get_default_attention_backend()</span>、<span class='mono'>get_graph_runner_cls()</span>）与生命周期钩子（<span class='mono'>apply_server_args_defaults()</span>）各自把“具体芯片的能力”翻译成什么统一接口，以及为什么这能把“移植新硬件”从大事变成小事。</li>
+    <li>结合 <span class='mono'>srt/platforms/</span> 与 <span class='mono'>srt/hardware_backend/</span> 两棵树，说明 SGLang 支持的硬件谱系（NVIDIA、AMD、昇腾 NPU、Intel XPU、摩尔线程 MUSA、苹果 MLX、CPU）是如何组织的；并解释“把每芯片专属的那一小撮（内核第38/39课、注意力后端<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>、平台钩子）隔离好，上层就能复用”为何是“从单卡到跨硬件大型集群”的工程基础（呼应<a class="xref" href="62-everything-is-pluggable.html">第62课</a>“一切皆可插拔”主题）。</li>
   </ul>
 </div>
 </div></div>
@@ -549,11 +551,11 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <p>SGLang's platform abstraction is exactly that adapter head. The upper scheduler, model, and various modules are like your phone cable, never changing; the chips below are like the assorted sockets. The <span class="mono">SRTPlatform</span> abstraction translates "this specific chip's capabilities" into "a uniform interface for the upper tiers." Swap the chip, swap only the adapter head — not the phone.</p></div>
 
 <div class="card macro"><div class="tag">🌍 The big picture</div>
-<p>From a single GPU to large clusters spanning many kinds of hardware, SGLang aims for "one engine, runs everywhere." The key to this is cleanly separating the part that is "<strong>hardware-agnostic</strong>" from the part that is "<strong>per-chip</strong>." The scheduler (Lesson 18), the model (Lesson 26), and most modules don't know — and don't need to know — which chip is underneath; the only things that truly need "swapping per chip" are the kernels (Lesson 38 AOT / Lesson 39 JIT), the attention backend (Lesson 33), and a few platform hooks. This is precisely the guide's recurring "<strong>everything is pluggable</strong>" theme (design-theme forward-ref Lesson 62).</p></div>
+<p>From a single GPU to large clusters spanning many kinds of hardware, SGLang aims for "one engine, runs everywhere." The key to this is cleanly separating the part that is "<strong>hardware-agnostic</strong>" from the part that is "<strong>per-chip</strong>." The scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>), the model (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>), and most modules don't know — and don't need to know — which chip is underneath; the only things that truly need "swapping per chip" are the kernels (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> AOT / <a class="xref" href="39-jit-kernel.html">Lesson 39</a> JIT), the attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), and a few platform hooks. This is precisely the guide's recurring "<strong>everything is pluggable</strong>" theme (design-theme forward-ref <a class="xref" href="62-everything-is-pluggable.html">Lesson 62</a>).</p></div>
 
 <h2>1. The platform abstraction: one base class, one subclass per chip</h2>
 <p>The core of the platform abstraction is a base class <span class="mono">SRTPlatform</span>, defined in <span class="mono">srt/platforms/interface.py</span>. It does no work directly; instead it declares a set of questions "every chip must answer" — and these questions take three forms: <strong>factory methods</strong>, <strong>capability flags</strong>, and <strong>lifecycle hooks</strong>.</p>
-<p><strong>Factory methods</strong> are responsible for "building" the components for the current chip. For example, <span class="mono">get_default_attention_backend()</span> returns which family of attention kernels this chip should use (Lesson 33 covered backends like FlashAttention, FlashInfer, Triton); <span class="mono">get_graph_runner_cls()</span> returns the CUDA-graph runner class (Lesson 27 covered recording the whole forward pass into a graph to eliminate launch overhead). Different chips return different implementations in these two methods, while the upper tiers just call them, indifferent to which one comes back.</p>
+<p><strong>Factory methods</strong> are responsible for "building" the components for the current chip. For example, <span class="mono">get_default_attention_backend()</span> returns which family of attention kernels this chip should use (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a> covered backends like FlashAttention, FlashInfer, Triton); <span class="mono">get_graph_runner_cls()</span> returns the CUDA-graph runner class (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a> covered recording the whole forward pass into a graph to eliminate launch overhead). Different chips return different implementations in these two methods, while the upper tiers just call them, indifferent to which one comes back.</p>
 <p><strong>Capability flags</strong> are a set of boolean judgments that let upper tiers ask "can this chip do a certain thing." For instance <span class="mono">supports_fp8</span> (can it run FP8 quantization), <span class="mono">support_cuda_graph</span> (can it use CUDA Graph), <span class="mono">support_piecewise_cuda_graph</span> (can it use piecewise CUDA Graph). Upper tiers adapt accordingly: if some chip doesn't support CUDA Graph, they gracefully fall back to per-operator execution instead of crashing outright.</p>
 <p><strong>Lifecycle hooks</strong> let a chip "step in" at engine startup to adjust defaults. <span class="mono">apply_server_args_defaults()</span> is such a hook: each chip can set its own suitable default flags here (e.g. some chips disable a feature by default). There is also a <span class="mono">supported_quantization</span> list declaring which quantization formats this chip supports.</p>
 
@@ -562,13 +564,13 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <p>The second is <span class="mono">srt/hardware_backend/</span>, which organizes a set of backend directories by device: <span class="mono">cpu/ gpu/ npu/ xpu/ musa/ mlx/</span>. They cover NVIDIA and AMD GPUs, Huawei Ascend NPUs, Intel XPUs, Moore Threads MUSA, Apple MLX, and plain CPU. Note that Google TPU is not in this tree, but is served via a separate sglang-jax project.</p>
 
 <h2>3. Key insight: the upper tiers are hardware-agnostic</h2>
-<p>The most important sentence of this lesson is: <strong>the upper tiers are hardware-agnostic</strong>. The scheduler (Lesson 18) decides who runs first and who runs later; the model (Lesson 26) defines the network structure; most modules only care about tensors in, tensors out. None of them know which chip is underneath, nor do they need to. The things that truly get "swapped per chip" are compressed into a very small scope: the kernels (Lesson 38 AOT precompiled / Lesson 39 JIT just-in-time), the attention backend (Lesson 33), and the platform hooks.</p>
+<p>The most important sentence of this lesson is: <strong>the upper tiers are hardware-agnostic</strong>. The scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) decides who runs first and who runs later; the model (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>) defines the network structure; most modules only care about tensors in, tensors out. None of them know which chip is underneath, nor do they need to. The things that truly get "swapped per chip" are compressed into a very small scope: the kernels (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> AOT precompiled / <a class="xref" href="39-jit-kernel.html">Lesson 39</a> JIT just-in-time), the attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), and the platform hooks.</p>
 <p>This layering matters because it turns "porting to new hardware," a huge undertaking, into "just implement a new <span class="mono">SRTPlatform</span> subclass plus a set of new kernels," a small one. The thousands of lines of upper scheduling and model code can be reused untouched. Capability flags act as the lubricant here: upper tiers needn't write an if-else branch for every chip, but instead uniformly ask "<span class="mono">support_cuda_graph</span>?" and take the fallback path on a "no."</p>
 
 <div class="layers">
-<div class="layer">🧠 Scheduler (Lesson 18) · Model (Lesson 26) · various modules — hardware-agnostic, unaware of which chip is underneath</div>
+<div class="layer">🧠 Scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) · Model (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>) · various modules — hardware-agnostic, unaware of which chip is underneath</div>
 <div class="layer">🔌 SRTPlatform abstraction layer — factory methods + capability flags + lifecycle hooks (translating per chip)</div>
-<div class="layer">⚙️ Per-chip kernels: attention backend (Lesson 33) · AOT kernels (Lesson 38) · JIT kernels (Lesson 39) — swapped per chip</div>
+<div class="layer">⚙️ Per-chip kernels: attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) · AOT kernels (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>) · JIT kernels (<a class="xref" href="39-jit-kernel.html">Lesson 39</a>) — swapped per chip</div>
 </div>
 
 <div class="fig">
@@ -651,8 +653,8 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 </div>
 
 <div class="cols">
-<div class="col"><strong>✅ Portable (one codebase runs everywhere)</strong><br/>The scheduler (Lesson 18), the model (Lesson 26), most modules, and the input/output (IO) pipeline. They are hardware-agnostic and reused as-is when chips change.</div>
-<div class="col"><strong>🔧 Per-chip (must be swapped)</strong><br/>The various kernels (Lesson 38 / Lesson 39), the attention backend (Lesson 33), and the platform hooks (factory methods, capability flags, <span class="mono">apply_server_args_defaults</span>). Porting new hardware is mainly filling in this part.</div>
+<div class="col"><strong>✅ Portable (one codebase runs everywhere)</strong><br/>The scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>), the model (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>), most modules, and the input/output (IO) pipeline. They are hardware-agnostic and reused as-is when chips change.</div>
+<div class="col"><strong>🔧 Per-chip (must be swapped)</strong><br/>The various kernels (<a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> / <a class="xref" href="39-jit-kernel.html">Lesson 39</a>), the attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), and the platform hooks (factory methods, capability flags, <span class="mono">apply_server_args_defaults</span>). Porting new hardware is mainly filling in this part.</div>
 </div>
 
 <div class="flow">
@@ -694,18 +696,18 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
         return True</pre></div>
 
 <div class="card"><div class="tag">🧩 Concrete examples</div><ul>
-<li><strong>Porting to a new accelerator</strong>: just add one <span class="mono">SRTPlatform</span> subclass plus its kernels — <strong>without touching</strong> the scheduler (Lesson 18) or the model (Lesson 26).</li>
+<li><strong>Porting to a new accelerator</strong>: just add one <span class="mono">SRTPlatform</span> subclass plus its kernels — <strong>without touching</strong> the scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) or the model (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>).</li>
 <li><strong>A chip without CUDA-graph support</strong>: its <span class="mono">support_cuda_graph()</span> simply returns <span class="mono">False</span>, so the engine skips graph capture and falls back to per-operator execution, still running fine.</li>
 </ul></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li>The <strong>platform abstraction</strong> lets one engine run on many chips: the base class <span class="mono">SRTPlatform</span> (in <span class="mono">srt/platforms/interface.py</span>) declares per-chip factory methods, capability flags, and lifecycle hooks.</li>
-<li><strong>Factory methods</strong> like <span class="mono">get_default_attention_backend()</span> (Lesson 33 attention kernels), <span class="mono">get_graph_runner_cls()</span> (Lesson 27 CUDA-graph runner); <strong>hooks</strong> like <span class="mono">apply_server_args_defaults()</span>.</li>
+<li><strong>Factory methods</strong> like <span class="mono">get_default_attention_backend()</span> (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a> attention kernels), <span class="mono">get_graph_runner_cls()</span> (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a> CUDA-graph runner); <strong>hooks</strong> like <span class="mono">apply_server_args_defaults()</span>.</li>
 <li>Each chip <strong>subclasses</strong> the base: <span class="mono">CudaSRTPlatform</span> (NVIDIA), ROCm (AMD), etc.; another tree <span class="mono">srt/hardware_backend/</span> organizes per-device backends by <span class="mono">cpu/gpu/npu/xpu/musa/mlx</span>.</li>
-<li>The <strong>upper tiers are hardware-agnostic</strong>: the scheduler (Lesson 18), model (Lesson 26), and most modules don't know the chip; only the kernels (Lessons 38/39), attention backend (Lesson 33), and platform hooks are swapped per chip.</li>
+<li>The <strong>upper tiers are hardware-agnostic</strong>: the scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>), model (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>), and most modules don't know the chip; only the kernels (Lessons 38/39), attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), and platform hooks are swapped per chip.</li>
 <li><strong>Capability flags</strong> (<span class="mono">supports_fp8</span>, <span class="mono">support_cuda_graph</span>, <span class="mono">support_piecewise_cuda_graph</span>) let upper tiers ask "can this chip do X" and adapt (e.g. fall back when CUDA graph isn't available).</li>
 <li>Google TPU is not in this tree but is served via a separate sglang-jax project — many-hardware doesn't mean cramming every chip into one codebase.</li>
-<li>This is the engineering basis for "single GPU to large clusters across many kinds of hardware," and an embodiment of the guide's "<strong>everything is pluggable</strong>" theme (design-theme forward-ref Lesson 62).</li>
+<li>This is the engineering basis for "single GPU to large clusters across many kinds of hardware," and an embodiment of the guide's "<strong>everything is pluggable</strong>" theme (design-theme forward-ref <a class="xref" href="62-everything-is-pluggable.html">Lesson 62</a>).</li>
 </ul></div>
 
 <div class="card"><div class="tag">🏁 Part 9 wrap-up</div><p>And that wraps up Part 9, "Kernels &amp; Hardware." We started from the AOT and JIT kernels closest to the metal (Lessons 38, 39), looked at quantization and communication kernels, then strung together performance levers like CUDA Graph and the attention backend, and finally used this lesson's platform abstraction to gather them into one sentence: <strong>isolate the small handful of things that are per-chip well, and the upper tiers can be reused in a hardware-agnostic way</strong>. This is exactly why SGLang can scale from a single GPU all the way to large clusters spanning many kinds of hardware.</p></div>
@@ -727,9 +729,9 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <div class="quiz">
   <div class="qn">2. In SGLang, which of the following is <strong>per-chip and must be swapped</strong>, rather than portable?</div>
   <ol class="opts">
-    <li>The model structure (Lesson 26)</li>
-    <li><strong>The kernels (Lessons 38/39), the attention backend (Lesson 33), and the platform hooks</strong></li>
-    <li>The scheduler (Lesson 18)</li>
+    <li>The model structure (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>)</li>
+    <li><strong>The kernels (Lessons 38/39), the attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), and the platform hooks</strong></li>
+    <li>The scheduler (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>)</li>
     <li>The input/output (IO) flow</li>
   </ol>
   <details class="accordion">
@@ -753,8 +755,8 @@ class CudaSRTPlatform(CudaDeviceMixin, SRTPlatform):     # default in-tree NVIDI
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'travel charger + adapter head' analogy, explain how the <span class='mono'>SRTPlatform</span> platform-abstraction layer keeps the upper layers (scheduler Lesson 18, model Lesson 26) <strong>hardware-agnostic</strong>: spell out what uniform interface the factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>, <span class='mono'>get_graph_runner_cls()</span>) and the lifecycle hook (<span class='mono'>apply_server_args_defaults()</span>) each translate 'a specific chip's capability' into, and why this turns 'porting new hardware' from a big job into a small one.</li>
-    <li>Using the two trees <span class='mono'>srt/platforms/</span> and <span class='mono'>srt/hardware_backend/</span>, describe how SGLang's hardware lineup (NVIDIA, AMD, Ascend NPU, Intel XPU, Moore Threads MUSA, Apple MLX, CPU) is organized; then explain why 'isolating the small handful that is per-chip (kernels Lessons 38/39, attention backend Lesson 33, platform hooks) so the upper layers can be reused' is the engineering basis for 'single GPU to cross-hardware large clusters' (echoing Lesson 62's 'everything is pluggable' theme).</li>
+    <li>Using the 'travel charger + adapter head' analogy, explain how the <span class='mono'>SRTPlatform</span> platform-abstraction layer keeps the upper layers (scheduler <a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>, model <a class="xref" href="26-writing-a-model.html">Lesson 26</a>) <strong>hardware-agnostic</strong>: spell out what uniform interface the factory methods (e.g. <span class='mono'>get_default_attention_backend()</span>, <span class='mono'>get_graph_runner_cls()</span>) and the lifecycle hook (<span class='mono'>apply_server_args_defaults()</span>) each translate 'a specific chip's capability' into, and why this turns 'porting new hardware' from a big job into a small one.</li>
+    <li>Using the two trees <span class='mono'>srt/platforms/</span> and <span class='mono'>srt/hardware_backend/</span>, describe how SGLang's hardware lineup (NVIDIA, AMD, Ascend NPU, Intel XPU, Moore Threads MUSA, Apple MLX, CPU) is organized; then explain why 'isolating the small handful that is per-chip (kernels Lessons 38/39, attention backend <a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>, platform hooks) so the upper layers can be reused' is the engineering basis for 'single GPU to cross-hardware large clusters' (echoing <a class="xref" href="62-everything-is-pluggable.html">Lesson 62</a>'s 'everything is pluggable' theme).</li>
   </ul>
 </div>
 </div></div>

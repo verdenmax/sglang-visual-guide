@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -332,8 +334,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>为什么要先单独讲它？因为 TokenizerManager 是<strong>外部文本世界</strong>与<strong>内部 token 世界</strong>的翻译官，
 也是<strong>异步并发的总枢纽</strong>。你发来的是一串字符串，引擎内部认的却是一串 token id；几百条请求同时涌入，
-谁的回包该交还给谁——这些都由它统筹。看懂这扇前门怎么运转，后面第 16 课的 io_struct 消息、第 17 课的反分词与流式回传、
-第 18 课的调度器才能串成一条完整的链路。</p>
+谁的回包该交还给谁——这些都由它统筹。看懂这扇前门怎么运转，后面<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>的 io_struct 消息、<a class="xref" href="17-detokenizer-and-streaming.html">第 17 课</a>的反分词与流式回传、
+<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>的调度器才能串成一条完整的链路。</p>
 
 <p>把这层关系想透很重要：它意味着<strong>整个运行时只有一个“说人话”的地方</strong>。再往后，所有组件——调度器、各种注意力后端、KV 缓存管理器——
 都只跟 token id 打交道，谁也不需要懂 UTF-8、不需要懂哪个子词该怎么拼。TokenizerManager 把这层“语言学负担”一次性挡在最外层，
@@ -358,10 +360,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">🌍 宏观理解</div>
   TokenizerManager 活在<strong>主进程</strong>，是 CPU 侧的异步协调中心。它的核心方法 <span class="mono">generate_request</span>
   是一个 <span class="mono">async</span> 协程：拿到请求后，先把文本<strong>分词</strong>成 token id（纯 CPU 的字符串工作），
-  构造好<strong>采样参数</strong>，打包成一个带唯一 <span class="mono">rid</span> 的 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课），
+  构造好<strong>采样参数</strong>，打包成一个带唯一 <span class="mono">rid</span> 的 <span class="mono">TokenizedGenerateReqInput</span>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>），
   通过 <strong>ZMQ</strong> 发给调度器子进程；随后<strong>登记一份按 rid 索引的异步状态</strong>，并 <span class="mono">await</span>
-  从反分词器（第 17 课）流回来的输出，逐段 <span class="mono">yield</span> 给调用方（HTTP 的 SSE 或 Engine）。
-  之所以把分词/反分词与 GPU 循环<strong>隔在不同进程</strong>，是为了让 CPU 与 GPU <strong>重叠</strong>起来（零开销思想，第 21 课）。
+  从反分词器（<a class="xref" href="17-detokenizer-and-streaming.html">第 17 课</a>）流回来的输出，逐段 <span class="mono">yield</span> 给调用方（HTTP 的 SSE 或 Engine）。
+  之所以把分词/反分词与 GPU 循环<strong>隔在不同进程</strong>，是为了让 CPU 与 GPU <strong>重叠</strong>起来（零开销思想，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）。
 </div>
 
 <div class="fig">
@@ -406,7 +408,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 而中文 <span class="mono">"很快"</span> 通常是 2 个 token。同一段文字到底是几个 token，取决于模型自带的词表与 BPE 合并规则——这正是 TokenizerManager 在前门替你算好的第一件事。</p>
 
 <h2>它在哪个进程？为什么是 CPU 的活</h2>
-<p>回忆第 2 课的<strong>三进程模型</strong>：分词在主进程，调度+前向在调度器子进程，反分词在反分词器子进程。
+<p>回忆<a class="xref" href="02-project-map.html">第 2 课</a>的<strong>三进程模型</strong>：分词在主进程，调度+前向在调度器子进程，反分词在反分词器子进程。
 TokenizerManager 就坐在<strong>主进程</strong>这一格——和 HTTP server / Engine 同进程，<strong>不</strong>在 GPU 子进程里。
 这不是随手的安排，而是刻意的<strong>进程边界</strong>设计。</p>
 
@@ -414,7 +416,7 @@ TokenizerManager 就坐在<strong>主进程</strong>这一格——和 HTTP serv
 全是 CPU 在忙，和 GPU 的矩阵乘法毫无关系。如果把这些活塞进 GPU 子进程，CPU 在分词时 GPU 只能干等，
 反之亦然，两边互相拖累、串行排队。把 GPU 循环单独关进一个进程、让 TokenizerManager 在主进程做 CPU 侧的预处理，
 两者就能<strong>真正并行重叠</strong>：GPU 正在为上一批做前向时，CPU 已经在给下一批分词了。
-这正是 SGLang “零开销调度”（第 21 课）的根基，而 TokenizerManager ↔ 调度器之间那一跳，就是 <strong>ZMQ/IPC 的接缝</strong>。</p>
+这正是 SGLang “零开销调度”（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）的根基，而 TokenizerManager ↔ 调度器之间那一跳，就是 <strong>ZMQ/IPC 的接缝</strong>。</p>
 
 <p>这条进程边界还带来一个常被忽视的好处：<strong>容错与隔离</strong>。GPU 子进程一旦因为显存溢出（OOM）或 CUDA 错误而崩溃，
 主进程里的 TokenizerManager 仍然活着，能感知到子进程异常并对外报错、清理挂起的请求状态，而不是整个服务一起静默死掉。
@@ -423,13 +425,13 @@ TokenizerManager 就坐在<strong>主进程</strong>这一格——和 HTTP serv
 
 <div class="cols">
   <div class="col"><h4>主进程 · TokenizerManager</h4><p>CPU 侧前门：<strong>分词</strong>、建采样参数、打包 <span class="mono">TokenizedGenerateReqInput</span>、按 <span class="mono">rid</span> 登记异步状态、<span class="mono">await</span> 回包。<strong>不碰 GPU</strong>，纯 Python 字符串与协程调度。</p></div>
-  <div class="col"><h4>子进程 · Scheduler + GPU</h4><p>收到已分词的请求后做<strong>连续批处理</strong>与前向（第 18 课），吃显存、跑 kernel。它<strong>只认 token id</strong>，从不直接接触原始文本，专心喂饱 GPU。</p></div>
+  <div class="col"><h4>子进程 · Scheduler + GPU</h4><p>收到已分词的请求后做<strong>连续批处理</strong>与前向（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>），吃显存、跑 kernel。它<strong>只认 token id</strong>，从不直接接触原始文本，专心喂饱 GPU。</p></div>
 </div>
 
 <p>这里还藏着一个常被忽略的细节：拆进程不仅是为了重叠算力，也是为了绕开 Python 的<strong>全局解释器锁（GIL）</strong>。
 如果分词、调度、反分词都挤在同一进程的不同线程里，它们会因为抢同一把 GIL 而<strong>事实上串行</strong>，多核优势荡然无存。
 拆成独立进程后，每个进程有自己的解释器与 GIL，三者才能在多核 CPU 上<strong>真正并行</strong>，再用 ZMQ 把消息异步串成流水线。
-所以 TokenizerManager 待在主进程、调度器待在子进程，既是<strong>职责分离</strong>，也是<strong>性能必需</strong>——这一点在第 2 课与第 21 课会反复出现。</p>
+所以 TokenizerManager 待在主进程、调度器待在子进程，既是<strong>职责分离</strong>，也是<strong>性能必需</strong>——这一点在<a class="xref" href="02-project-map.html">第 2 课</a>与<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>会反复出现。</p>
 
 <h2>generate_request：一条请求的旅程</h2>
 <p>当一条请求到来，<span class="mono">generate_request</span> 这个 <span class="mono">async</span> 协程把它一步步推下去：
@@ -451,7 +453,7 @@ TokenizerManager 先把这些情况统一成内部规范的形状，再分支处
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>分词 tokenize</h4><p><span class="mono">_tokenize_one_request</span> 把文本喂给 tokenizer，得到 <span class="mono">input_ids</span>（纯 CPU 工作，刻意留在 GPU 进程之外）。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>建采样参数</h4><p>把 <span class="mono">temperature / top_p / max_new_tokens</span> 等收成一个 <span class="mono">SamplingParams</span>，并 <span class="mono">normalize / verify</span> 校验。</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>打包 + 贴 rid</h4><p>构造 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课），带上唯一请求号 <span class="mono">rid</span>，作为跨进程的“身份证”。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>打包 + 贴 rid</h4><p>构造 <span class="mono">TokenizedGenerateReqInput</span>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>），带上唯一请求号 <span class="mono">rid</span>，作为跨进程的“身份证”。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>ZMQ 发送</h4><p><span class="mono">_send_one_request</span> 把这个对象经 <strong>ZMQ socket</strong> 投递给调度器子进程，主进程不再阻塞等待。</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>登记并 await</h4><p>在 <span class="mono">rid_to_state</span> 里登记一份异步状态，<span class="mono">await</span> 反分词器流回的输出，逐段 <span class="mono">yield</span> 给调用方。</p></div></div>
 </div>
@@ -519,7 +521,7 @@ TokenizerManager 凭 <span class="mono">rid</span> 把每段输出<strong>准确
 
 <p>注意这条回路的<strong>闭环</strong>形状：请求从 TokenizerManager 出发，绕过调度器与反分词器，最后<strong>又回到</strong> TokenizerManager。
 也就是说，TokenizerManager 既是<strong>入口</strong>也是<strong>出口</strong>——它把请求送出去，也负责把结果收回来交还给调用方。
-反分词器（第 17 课）之所以把结果发回 TokenizerManager 而不是直接回给客户端，正是因为只有 TokenizerManager 那张 <span class="mono">rid_to_state</span>
+反分词器（<a class="xref" href="17-detokenizer-and-streaming.html">第 17 课</a>）之所以把结果发回 TokenizerManager 而不是直接回给客户端，正是因为只有 TokenizerManager 那张 <span class="mono">rid_to_state</span>
 表知道“这个 rid 对应的是哪个正在 <span class="mono">await</span> 的协程、该怎么 <span class="mono">yield</span> 给上层的 HTTP SSE 或 Engine 调用者”。
 这把“谁在等结果”的状态<strong>集中在前门一处</strong>，是这套异步架构能简洁运转的关键。</p>
 
@@ -560,9 +562,9 @@ TokenizerManager 凭 <span class="mono">rid</span> 把每段输出<strong>准确
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>前门 / 主进程</strong>：TokenizerManager 是运行时的前门，跑在<strong>主进程</strong>（与 HTTP server / Engine 同进程），<strong>不</strong>在 GPU 子进程里。</li>
-    <li><strong>五步主干</strong>：<span class="mono">generate_request</span> 协程——分词 → 建采样参数 → 打包带 <span class="mono">rid</span> 的 <span class="mono">TokenizedGenerateReqInput</span>（第 16 课）→ 经 <strong>ZMQ</strong> 发给调度器 → <span class="mono">await</span> 回包并逐段 <span class="mono">yield</span>。</li>
-    <li><strong>rid 的作用</strong>：唯一请求号是跨进程身份证；几百条并发请求乱序回包，靠 <span class="mono">rid_to_state</span> 投回正确的等待协程（第 17 课流式回传）。</li>
-    <li><strong>为什么 CPU 上分词</strong>：分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，第 21 课）。</li>
+    <li><strong>五步主干</strong>：<span class="mono">generate_request</span> 协程——分词 → 建采样参数 → 打包带 <span class="mono">rid</span> 的 <span class="mono">TokenizedGenerateReqInput</span>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>）→ 经 <strong>ZMQ</strong> 发给调度器 → <span class="mono">await</span> 回包并逐段 <span class="mono">yield</span>。</li>
+    <li><strong>rid 的作用</strong>：唯一请求号是跨进程身份证；几百条并发请求乱序回包，靠 <span class="mono">rid_to_state</span> 投回正确的等待协程（<a class="xref" href="17-detokenizer-and-streaming.html">第 17 课</a>流式回传）。</li>
+    <li><strong>为什么 CPU 上分词</strong>：分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）。</li>
     <li><strong>还负责</strong>：请求 <span class="mono">abort</span> 与多模态图像/音频预处理；它是异步并发的总枢纽，自身从不接触 GPU。</li>
   </ul>
 </div>
@@ -571,14 +573,14 @@ TokenizerManager 凭 <span class="mono">rid</span> 把每段输出<strong>准确
 <div class="quiz">
   <div class="qn">1. TokenizerManager 运行在哪个进程？为什么这样安排？</div>
   <ol class="opts">
-    <li>跑在<strong>主进程</strong>（和 HTTP server / Engine 同进程），<strong>不</strong>在 GPU 子进程里——因为分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，第 21 课）</li>
+    <li>跑在<strong>主进程</strong>（和 HTTP server / Engine 同进程），<strong>不</strong>在 GPU 子进程里——因为分词/反分词是 CPU 密集的字符串工作，隔在 GPU 进程之外才能让 CPU 与 GPU <strong>重叠</strong>（零开销，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）</li>
     <li>跑在 GPU 子进程里，和 Scheduler 一起做前向计算</li>
     <li>它没有自己的进程，只是 Scheduler 里的一个函数</li>
     <li>每条请求各起一个独立进程，用完即销毁</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。TokenizerManager 是运行时的前门，坐在主进程做 CPU 侧预处理，绝不碰 GPU。把 GPU 循环单独关进子进程后，CPU 在给下一批分词的同时，GPU 正在为上一批做前向，两者真正并行——这正是第 21 课“零开销调度”的根基，而它与调度器之间那一跳是 ZMQ/IPC 接缝。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。TokenizerManager 是运行时的前门，坐在主进程做 CPU 侧预处理，绝不碰 GPU。把 GPU 循环单独关进子进程后，CPU 在给下一批分词的同时，GPU 正在为上一批做前向，两者真正并行——这正是<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>“零开销调度”的根基，而它与调度器之间那一跳是 ZMQ/IPC 接缝。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -591,7 +593,7 @@ TokenizerManager 凭 <span class="mono">rid</span> 把每段输出<strong>准确
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。请求发出后主进程不阻塞，而是把 <code>rid → 协程状态</code> 记进 <code>rid_to_state</code>。回包乱序交错地流回时，唯有靠唯一的 <code>rid</code> 才能对号入座，把输出交还给正确的等待协程（第 17 课流式回传）。没有 rid，几百条并发请求的回包就会张冠李戴。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。请求发出后主进程不阻塞，而是把 <code>rid → 协程状态</code> 记进 <code>rid_to_state</code>。回包乱序交错地流回时，唯有靠唯一的 <code>rid</code> 才能对号入座，把输出交还给正确的等待协程（<a class="xref" href="17-detokenizer-and-streaming.html">第 17 课</a>流式回传）。没有 rid，几百条并发请求的回包就会张冠李戴。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -599,19 +601,19 @@ TokenizerManager 凭 <span class="mono">rid</span> 把每段输出<strong>准确
   <ol class="opts">
     <li>一个 HTTP 请求对象，交给调度器解析</li>
     <li>模型权重和 KV 缓存指针</li>
-    <li>一个已分词、带唯一 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（含 token id 与采样参数，第 16 课）——调度器只认 token，从不直接接触原始文本</li>
+    <li>一个已分词、带唯一 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（含 token id 与采样参数，<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>）——调度器只认 token，从不直接接触原始文本</li>
     <li>原始 prompt 文本字符串，让调度器自己去分词</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。TokenizerManager 先 <code>_tokenize_one_request</code> 得到 token id、构造并校验 <code>SamplingParams</code>，再打包成带 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（第 16 课的 io_struct 消息），用 <code>_send_one_request</code> 经 ZMQ socket 投给调度器。文本→token 的翻译在主进程就做完了，GPU 子进程因此只需面对 token，专心计算。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。TokenizerManager 先 <code>_tokenize_one_request</code> 得到 token id、构造并校验 <code>SamplingParams</code>，再打包成带 <code>rid</code> 的 <code>TokenizedGenerateReqInput</code>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>的 io_struct 消息），用 <code>_send_one_request</code> 经 ZMQ socket 投给调度器。文本→token 的翻译在主进程就做完了，GPU 子进程因此只需面对 token，专心计算。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用“酒店前台接待员”的类比，向同事解释 TokenizerManager 的职责。请讲清楚：它把口语需求翻译成什么（token id + 参数 + 预订号 rid），为什么自己从不“进后厨”（不碰 GPU），以及它如何同时招呼几十位客人还不把回包交错。</li>
-    <li>假设有人提议把分词直接搬进 GPU 子进程、省掉 TokenizerManager 与调度器之间的 ZMQ 一跳。请从 CPU/GPU 重叠（第 21 课）、GIL、以及主进程 vs 子进程职责分离的角度，论证这样做会损失什么。</li>
+    <li>假设有人提议把分词直接搬进 GPU 子进程、省掉 TokenizerManager 与调度器之间的 ZMQ 一跳。请从 CPU/GPU 重叠（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）、GIL、以及主进程 vs 子进程职责分离的角度，论证这样做会损失什么。</li>
   </ul>
 </div>
 </div></div>
@@ -626,8 +628,8 @@ registered here before being sent on to the scheduler.
 
 <p>Why give it its own lesson? Because the TokenizerManager is the translator between the outside <strong>text world</strong> and the inner
 <strong>token world</strong>, and the <strong>async concurrency hub</strong>. You send a string; the engine speaks token ids. Hundreds of
-requests pour in at once — whose reply goes back to whom is its job to coordinate. Understanding this front door is what lets Lesson 16's
-io_struct messages, Lesson 17's detokenize/streaming, and Lesson 18's scheduler chain into one coherent flow.</p>
+requests pour in at once — whose reply goes back to whom is its job to coordinate. Understanding this front door is what lets <a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>'s
+io_struct messages, <a class="xref" href="17-detokenizer-and-streaming.html">Lesson 17</a>'s detokenize/streaming, and <a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>'s scheduler chain into one coherent flow.</p>
 
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
@@ -644,10 +646,10 @@ io_struct messages, Lesson 17's detokenize/streaming, and Lesson 18's scheduler 
   The TokenizerManager lives in the <strong>main process</strong> as the CPU-side async coordinator. Its core method
   <span class="mono">generate_request</span> is an <span class="mono">async</span> coroutine: it <strong>tokenizes</strong> the text into token ids
   (pure CPU string work), builds the <strong>sampling params</strong>, packs everything into a <span class="mono">TokenizedGenerateReqInput</span>
-  (Lesson 16) carrying a unique <span class="mono">rid</span>, and sends it over <strong>ZMQ</strong> to the scheduler subprocess. It then
+  (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) carrying a unique <span class="mono">rid</span>, and sends it over <strong>ZMQ</strong> to the scheduler subprocess. It then
   <strong>registers a per-request async state keyed by rid</strong> and <span class="mono">await</span>s the outputs streaming back from the
-  detokenizer (Lesson 17), <span class="mono">yield</span>ing them to the caller (HTTP SSE or the Engine). Isolating tokenize/detokenize from the
-  GPU loop in separate processes is what lets CPU and GPU <strong>overlap</strong> (the zero-overhead idea, Lesson 21).
+  detokenizer (<a class="xref" href="17-detokenizer-and-streaming.html">Lesson 17</a>), <span class="mono">yield</span>ing them to the caller (HTTP SSE or the Engine). Isolating tokenize/detokenize from the
+  GPU loop in separate processes is what lets CPU and GPU <strong>overlap</strong> (the zero-overhead idea, <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>).
 </div>
 
 <div class="fig">
@@ -693,7 +695,7 @@ io_struct messages, Lesson 17's detokenize/streaming, and Lesson 18's scheduler 
 becomes depends on the model's own vocab and BPE merge rules — exactly the first thing the TokenizerManager computes for you at the front door.</p>
 
 <h2>Which process? Why is it CPU work</h2>
-<p>Recall Lesson 2's <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
+<p>Recall <a class="xref" href="02-project-map.html">Lesson 2</a>'s <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
 detokenize in the detokenizer subprocess. The TokenizerManager sits in the <strong>main process</strong> slot — same process as the HTTP
 server / Engine, <strong>not</strong> in the GPU subprocess. This is a deliberate <strong>process-boundary</strong> design, not an accident.</p>
 
@@ -701,12 +703,12 @@ server / Engine, <strong>not</strong> in the GPU subprocess. This is a deliberat
 all CPU, nothing to do with GPU matmuls. If you crammed them into the GPU subprocess, the GPU would idle while the CPU tokenizes and vice
 versa — the two would serialize and drag each other down. By locking the GPU loop in its own process and letting the TokenizerManager do the
 CPU-side preprocessing in the main process, the two can <strong>truly overlap</strong>: while the GPU forwards the previous batch, the CPU is
-already tokenizing the next. This is the foundation of SGLang's zero-overhead scheduling (Lesson 21), and the TokenizerManager ↔ scheduler
+already tokenizing the next. This is the foundation of SGLang's zero-overhead scheduling (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>), and the TokenizerManager ↔ scheduler
 hop is exactly the <strong>ZMQ/IPC seam</strong>.</p>
 
 <div class="cols">
   <div class="col"><h4>Main process · TokenizerManager</h4><p>CPU-side front door: <strong>tokenize</strong>, build sampling params, pack a <span class="mono">TokenizedGenerateReqInput</span>, register async state by <span class="mono">rid</span>, <span class="mono">await</span> replies. <strong>Never touches the GPU</strong> — pure Python strings and coroutine scheduling.</p></div>
-  <div class="col"><h4>Subprocess · Scheduler + GPU</h4><p>Given already-tokenized requests, it does <strong>continuous batching</strong> and forward passes (Lesson 18), burning VRAM and kernels. It <strong>only speaks token ids</strong>, never sees raw text, focused on keeping the GPU fed.</p></div>
+  <div class="col"><h4>Subprocess · Scheduler + GPU</h4><p>Given already-tokenized requests, it does <strong>continuous batching</strong> and forward passes (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>), burning VRAM and kernels. It <strong>only speaks token ids</strong>, never sees raw text, focused on keeping the GPU fed.</p></div>
 </div>
 
 <h2>generate_request: a request's journey</h2>
@@ -718,7 +720,7 @@ hop is exactly the <strong>ZMQ/IPC seam</strong>.</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>tokenize</h4><p><span class="mono">_tokenize_one_request</span> feeds text to the tokenizer, yielding <span class="mono">input_ids</span> (pure CPU work, deliberately kept off the GPU process).</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>build sampling params</h4><p>Collect <span class="mono">temperature / top_p / max_new_tokens</span> into a <span class="mono">SamplingParams</span>, then <span class="mono">normalize / verify</span> it.</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>pack + stamp rid</h4><p>Build a <span class="mono">TokenizedGenerateReqInput</span> (Lesson 16) carrying a unique <span class="mono">rid</span> — the cross-process "ID card".</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>pack + stamp rid</h4><p>Build a <span class="mono">TokenizedGenerateReqInput</span> (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) carrying a unique <span class="mono">rid</span> — the cross-process "ID card".</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>ZMQ send</h4><p><span class="mono">_send_one_request</span> dispatches the object over a <strong>ZMQ socket</strong> to the scheduler subprocess; the main process does not block.</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>register and await</h4><p>Register an async state in <span class="mono">rid_to_state</span>, <span class="mono">await</span> the outputs streaming back from the detokenizer, and <span class="mono">yield</span> them to the caller.</p></div></div>
 </div>
@@ -821,9 +823,9 @@ compute</strong>. Below is the real skeleton of <span class="mono">generate_requ
   <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>Front door / main process</strong>: the TokenizerManager is the runtime's front door, running in the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> in the GPU subprocess.</li>
-    <li><strong>Five-step trunk</strong>: the <span class="mono">generate_request</span> coroutine — tokenize → build sampling params → pack a <span class="mono">TokenizedGenerateReqInput</span> with a <span class="mono">rid</span> (Lesson 16) → send over <strong>ZMQ</strong> to the scheduler → <span class="mono">await</span> replies and <span class="mono">yield</span> them.</li>
-    <li><strong>What the rid is for</strong>: the unique request id is the cross-process ID card; with hundreds of concurrent, out-of-order replies, <span class="mono">rid_to_state</span> routes each back to the right awaiting coroutine (streaming, Lesson 17).</li>
-    <li><strong>Why tokenize on CPU</strong>: tokenize/detokenize are CPU-bound string work; keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21).</li>
+    <li><strong>Five-step trunk</strong>: the <span class="mono">generate_request</span> coroutine — tokenize → build sampling params → pack a <span class="mono">TokenizedGenerateReqInput</span> with a <span class="mono">rid</span> (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) → send over <strong>ZMQ</strong> to the scheduler → <span class="mono">await</span> replies and <span class="mono">yield</span> them.</li>
+    <li><strong>What the rid is for</strong>: the unique request id is the cross-process ID card; with hundreds of concurrent, out-of-order replies, <span class="mono">rid_to_state</span> routes each back to the right awaiting coroutine (streaming, <a class="xref" href="17-detokenizer-and-streaming.html">Lesson 17</a>).</li>
+    <li><strong>Why tokenize on CPU</strong>: tokenize/detokenize are CPU-bound string work; keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>).</li>
     <li><strong>Also owns</strong>: request <span class="mono">abort</span> and multimodal image/audio preprocessing; it is the async concurrency hub and itself never touches the GPU.</li>
   </ul>
 </div>
@@ -832,14 +834,14 @@ compute</strong>. Below is the real skeleton of <span class="mono">generate_requ
 <div class="quiz">
   <div class="qn">1. Which process does the TokenizerManager run in, and why?</div>
   <ol class="opts">
-    <li>In the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> the GPU subprocess — because tokenize/detokenize are CPU-bound string work, and keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, Lesson 21)</li>
+    <li>In the <strong>main process</strong> (with the HTTP server / Engine), <strong>not</strong> the GPU subprocess — because tokenize/detokenize are CPU-bound string work, and keeping them off the GPU process lets CPU and GPU <strong>overlap</strong> (zero-overhead, <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>)</li>
     <li>In the GPU subprocess, doing forward passes alongside the Scheduler</li>
     <li>It has no process of its own — just a function inside the Scheduler</li>
     <li>A fresh process per request, destroyed after use</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The TokenizerManager is the runtime's front door, doing CPU-side preprocessing in the main process and never touching the GPU. With the GPU loop locked in its own subprocess, the CPU tokenizes the next batch while the GPU forwards the previous one — true overlap, the foundation of Lesson 21's zero-overhead scheduling. The hop to the scheduler is the ZMQ/IPC seam.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The TokenizerManager is the runtime's front door, doing CPU-side preprocessing in the main process and never touching the GPU. With the GPU loop locked in its own subprocess, the CPU tokenizes the next batch while the GPU forwards the previous one — true overlap, the foundation of <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>'s zero-overhead scheduling. The hop to the scheduler is the ZMQ/IPC seam.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -852,7 +854,7 @@ compute</strong>. Below is the real skeleton of <span class="mono">generate_requ
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. After sending, the main process does not block — it records <code>rid → coroutine state</code> in <code>rid_to_state</code>. As replies stream back interleaved, only the unique <code>rid</code> can match each chunk to the correct awaiting coroutine (streaming, Lesson 17). Without it, hundreds of concurrent replies would go to the wrong callers.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. After sending, the main process does not block — it records <code>rid → coroutine state</code> in <code>rid_to_state</code>. As replies stream back interleaved, only the unique <code>rid</code> can match each chunk to the correct awaiting coroutine (streaming, <a class="xref" href="17-detokenizer-and-streaming.html">Lesson 17</a>). Without it, hundreds of concurrent replies would go to the wrong callers.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -860,19 +862,19 @@ compute</strong>. Below is the real skeleton of <span class="mono">generate_requ
   <ol class="opts">
     <li>An HTTP request object for the scheduler to parse</li>
     <li>Model weights and KV-cache pointers</li>
-    <li>A tokenized <code>TokenizedGenerateReqInput</code> with a unique <code>rid</code> (token ids + sampling params, Lesson 16) — the scheduler only speaks tokens and never sees raw text</li>
+    <li>A tokenized <code>TokenizedGenerateReqInput</code> with a unique <code>rid</code> (token ids + sampling params, <a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) — the scheduler only speaks tokens and never sees raw text</li>
     <li>The raw prompt text string, leaving the scheduler to tokenize</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The TokenizerManager first runs <code>_tokenize_one_request</code> to get token ids, builds and verifies <code>SamplingParams</code>, then packs a <code>TokenizedGenerateReqInput</code> with a <code>rid</code> (Lesson 16's io_struct message) and dispatches it via <code>_send_one_request</code> over a ZMQ socket. The text→token translation is done in the main process, so the GPU subprocess only faces tokens and just computes.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The TokenizerManager first runs <code>_tokenize_one_request</code> to get token ids, builds and verifies <code>SamplingParams</code>, then packs a <code>TokenizedGenerateReqInput</code> with a <code>rid</code> (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>'s io_struct message) and dispatches it via <code>_send_one_request</code> over a ZMQ socket. The text→token translation is done in the main process, so the GPU subprocess only faces tokens and just computes.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>Using the 'hotel front-desk receptionist' analogy, explain the TokenizerManager's job to a colleague. Make clear: what it translates spoken needs into (token ids + params + a booking number rid), why it never 'enters the kitchen' (never touches the GPU), and how it juggles dozens of guests without mixing up replies.</li>
-    <li>Suppose someone proposes moving tokenization into the GPU subprocess to drop the ZMQ hop between the TokenizerManager and the scheduler. Argue what would be lost, from the angles of CPU/GPU overlap (Lesson 21), the GIL, and the main-process vs subprocess separation of duties.</li>
+    <li>Suppose someone proposes moving tokenization into the GPU subprocess to drop the ZMQ hop between the TokenizerManager and the scheduler. Argue what would be lost, from the angles of CPU/GPU overlap (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>), the GIL, and the main-process vs subprocess separation of duties.</li>
   </ul>
 </div>
 </div></div>

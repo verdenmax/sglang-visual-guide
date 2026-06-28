@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -333,7 +335,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
 <p>RL 后训练（PPO、GRPO 等）每一轮迭代分两半：<strong>策略模型生成大量样本</strong>（rollout，正是 SGLang 擅长的高吞吐批量生成），然后<strong>训练器给样本打分</strong>（reward）并算出梯度去<strong>更新策略权重</strong>。关键约束是：<strong>下一轮 rollout 必须用刚更新的权重跑</strong>，所以 rollout 引擎的权重每个训练步都在变。</p>
-<p>SGLang 把"服务器"和"RL rollout worker"做成<strong>同一个进程</strong>，只多挂一个权重同步钩子：本地同卡用 <span class="mono">update_weights_from_tensor</span>，跨卡训练器用 <span class="mono">update_weights_from_distributed</span> 通过进程组（<strong>第46课</strong> GroupCoordinator）把权重<strong>流式</strong>传进来。这就是 SGLang 成为众多 RL 框架首选 rollout 后端的原因。</p>
+<p>SGLang 把"服务器"和"RL rollout worker"做成<strong>同一个进程</strong>，只多挂一个权重同步钩子：本地同卡用 <span class="mono">update_weights_from_tensor</span>，跨卡训练器用 <span class="mono">update_weights_from_distributed</span> 通过进程组（<strong><a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a></strong> GroupCoordinator）把权重<strong>流式</strong>传进来。这就是 SGLang 成为众多 RL 框架首选 rollout 后端的原因。</p>
 <p>记住这条主线：<strong>生成靠 SGLang、训练靠训练器、衔接靠权重同步</strong>。本课要回答三个问题——闭环为什么必须同步权重、为什么不能靠重启来同步、以及怎样把同步做得足够快（原地写入 + 打包搬运）。把这三点想透，你就理解了 RL 训练里推理引擎扮演的真实角色。</p>
 </div>
 
@@ -378,9 +380,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>二、为什么不能每步重启服务器</h2>
-<p>最朴素的想法是：训练器存一个新的 checkpoint，SGLang 服务器<strong>重启</strong>一下、把新 checkpoint 重新加载进来不就行了？问题在于一次"冷启动"代价极大：要<strong>重新读权重文件</strong>（第25课的权重加载流程）、<strong>重新预热</strong>、<strong>重新捕获 CUDA Graph</strong>、重建 KV 缓存池。这些一次性开销动辄几十秒甚至上分钟，而 RL 训练动辄成千上万步——每步都重启，光启动时间就会<strong>压倒</strong>真正的计算时间，完全不可接受。这里尤其要强调 CUDA Graph 的重新捕获：它需要把整个前向过程录制一遍，本身就要跑若干次预热前向，代价不菲；而 KV 缓存池则要按显存大小重新规划、重新分配，这些都是只有"启动时"才做一次的重活，决不该被塞进训练内循环里反复执行。</p>
+<p>最朴素的想法是：训练器存一个新的 checkpoint，SGLang 服务器<strong>重启</strong>一下、把新 checkpoint 重新加载进来不就行了？问题在于一次"冷启动"代价极大：要<strong>重新读权重文件</strong>（<a class="xref" href="25-model-loading-and-weights.html">第25课</a>的权重加载流程）、<strong>重新预热</strong>、<strong>重新捕获 CUDA Graph</strong>、重建 KV 缓存池。这些一次性开销动辄几十秒甚至上分钟，而 RL 训练动辄成千上万步——每步都重启，光启动时间就会<strong>压倒</strong>真正的计算时间，完全不可接受。这里尤其要强调 CUDA Graph 的重新捕获：它需要把整个前向过程录制一遍，本身就要跑若干次预热前向，代价不菲；而 KV 缓存池则要按显存大小重新规划、重新分配，这些都是只有"启动时"才做一次的重活，决不该被塞进训练内循环里反复执行。</p>
 <p>SGLang 的答案是<strong>原地权重更新（in-place weight update）</strong>：进程不重启，CUDA Graph 不重新捕获，KV 池原地保留，只把<strong>模型参数这块显存</strong>里的数值换成新训练好的张量。<span class="mono">update_weights_from_tensor(named_tensors, load_format=…)</span> 直接把新张量写进运行中模型的对应参数上，毫秒级完成，下一轮 rollout 立刻可用。这里的关键洞察是：模型的"骨架"——计算图的结构、算子的排布、KV 池的内存布局——在训练全程<strong>从不改变</strong>，真正变的只有参数张量里的<strong>数值</strong>。既然结构不变，就完全没必要把昂贵的结构性初始化（图捕获、内存规划）重做一遍，只需把数值就地刷新即可。这是一种典型的"只改该改的、别动不该动的"工程取舍。</p>
-<p>这正是 SGLang 把<strong>同一个进程</strong>同时当"serving 服务器"和"RL rollout worker"用的底气：两者代码几乎一模一样，差别只是 rollout 模式多挂了一个<strong>权重同步钩子</strong>。同样的"换权重"思路在第50课也见过——LoRA 也是在换权重，只不过它换的是<strong>很小的 adapter</strong>，而 RL 这里换的是<strong>整套主干权重</strong>。换句话说，serving 与 rollout 之间没有架构鸿沟，一个面向终端用户提供推理，一个面向训练器循环喂样本，复用的是同一套连续批处理、同一套 CUDA Graph、同一套 KV 管理，这种复用让 RL 框架几乎零成本地接入 SGLang 的全部推理优化。</p>
+<p>这正是 SGLang 把<strong>同一个进程</strong>同时当"serving 服务器"和"RL rollout worker"用的底气：两者代码几乎一模一样，差别只是 rollout 模式多挂了一个<strong>权重同步钩子</strong>。同样的"换权重"思路在<a class="xref" href="50-multi-lora-batching.html">第50课</a>也见过——LoRA 也是在换权重，只不过它换的是<strong>很小的 adapter</strong>，而 RL 这里换的是<strong>整套主干权重</strong>。换句话说，serving 与 rollout 之间没有架构鸿沟，一个面向终端用户提供推理，一个面向训练器循环喂样本，复用的是同一套连续批处理、同一套 CUDA Graph、同一套 KV 管理，这种复用让 RL 框架几乎零成本地接入 SGLang 的全部推理优化。</p>
 
 <div class="cols">
 <div class="col"><strong>❌ 每步重启服务器</strong><br>重载 checkpoint → 重新预热 → 重新捕获 CUDA Graph → 重建 KV 池。一次性开销几十秒～分钟级，乘以上万训练步 = 启动时间压垮计算时间，<span class="mono">不可接受</span>。</div>
@@ -388,20 +390,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>三、三种权重同步入口：本地、跨卡、打包</h2>
-<p>权重从训练器到 rollout 引擎，路径取决于它们的物理位置。如果训练器和推理在<strong>同一组 GPU</strong>上（共置，co-locate），新张量已经在显存里，直接用 <span class="mono">update_weights_from_tensor</span> 把 <span class="mono">named_tensors</span> 原地写进参数即可。如果训练器在<strong>另一批 GPU</strong>上（分离部署），就要用 <span class="mono">update_weights_from_distributed</span>，借助第46课的 <span class="mono">GroupCoordinator</span> 进程组，把权重从训练 rank <strong>流式</strong>传到推理 rank。所谓"流式"，是指不必等整个模型搬完才开始用，而是边传边收、按通信原语（broadcast 等）一层层把参数推过去，既省内存峰值又能与计算重叠。</p>
+<p>权重从训练器到 rollout 引擎，路径取决于它们的物理位置。如果训练器和推理在<strong>同一组 GPU</strong>上（共置，co-locate），新张量已经在显存里，直接用 <span class="mono">update_weights_from_tensor</span> 把 <span class="mono">named_tensors</span> 原地写进参数即可。如果训练器在<strong>另一批 GPU</strong>上（分离部署），就要用 <span class="mono">update_weights_from_distributed</span>，借助<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>的 <span class="mono">GroupCoordinator</span> 进程组，把权重从训练 rank <strong>流式</strong>传到推理 rank。所谓"流式"，是指不必等整个模型搬完才开始用，而是边传边收、按通信原语（broadcast 等）一层层把参数推过去，既省内存峰值又能与计算重叠。</p>
 <p>但不管哪条路，都有一个共同的性能陷阱：一个大模型有<strong>成千上万个</strong>命名张量，如果一个一个地搬，每个张量都要单独发起一次拷贝/传输，<strong>启动与传输开销</strong>会被乘上几千倍，慢得离谱。这就是 <span class="mono">load_format="flattened_bucket"</span> 要解决的问题。可以这样体会：哪怕单个张量只要 1 微秒的发起开销，乘以上万个就是几十毫秒，而这还只是"发起"，真正的数据还没动；在 RL 里这笔账每个训练步都要重算一遍，日积月累就成了不可忽视的浪费。</p>
 <p>所以选型很清晰：<strong>同卡共置</strong>用 from_tensor；<strong>跨卡分离</strong>用 from_distributed；<strong>张量太多想省开销</strong>就叠加 flattened_bucket 打包路径。三者并不互斥，flattened_bucket 是作为 <span class="mono">load_format</span> 选项叠加在前两者之上的。实际工程里，训练框架会根据自己的部署拓扑选择路径：把训练与推理塞进同一组卡能省去跨机通信，但要小心两者争抢显存；把训练器单独放一批卡上则更灵活、扩展性更好，代价是每步都要走进程组把权重流过去。无论哪种，目标都一致——让权重同步既正确又不拖慢训练节奏。</p>
 
 <table class="t">
 <tr><th>入口 / 方式</th><th>适用场景</th><th>怎么搬</th></tr>
 <tr><td><span class="mono">update_weights_from_tensor</span></td><td>训练器与推理<strong>同卡共置</strong>，新张量已在本地显存</td><td>直接把 named_tensors 原地写进运行中模型的参数</td></tr>
-<tr><td><span class="mono">update_weights_from_distributed</span></td><td>训练器在<strong>另一批 GPU</strong>，分离部署</td><td>经第46课进程组把权重从训练 rank <strong>流式</strong>传进推理 rank</td></tr>
+<tr><td><span class="mono">update_weights_from_distributed</span></td><td>训练器在<strong>另一批 GPU</strong>，分离部署</td><td>经<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>进程组把权重从训练 rank <strong>流式</strong>传进推理 rank</td></tr>
 <tr><td><span class="mono">load_format="flattened_bucket"</span></td><td>张量数量庞大，想把<strong>逐张量开销</strong>降到最低</td><td>多张量打包成一块连续 buffer，<strong>整体一次</strong>传输/拷贝</td></tr>
 </table>
 
 <h2>四、FlattenedTensorBucket：把千张量压成一次拷贝</h2>
 <p>逐个搬张量为什么慢？因为每次拷贝/传输都有<strong>固定的发起开销</strong>（kernel launch、通信握手等），张量越多、这个开销被放大得越厉害，哪怕每个张量本身很小。一个数十亿参数的大模型，命名张量动辄成千上万个，逐个搬就意味着成千上万次内核启动或通信握手，固定开销累加起来甚至远超真正传数据的时间。<span class="mono">FlattenedTensorBucket</span> 的思路是把<strong>很多命名张量先拼（flatten）成一整块连续 buffer</strong>，<strong>只传输/拷贝一次</strong>，到了引擎侧再按记录的形状/偏移把<strong>各个张量重建</strong>出来，逐张量的开销因此被摊薄到几乎为零。重建时之所以能严丝合缝地还原，是因为打包时已经把每个张量的名字、形状、数据类型和在大 buffer 里的偏移都记录在案，到岸侧照着这份"清单"切片即可。值得一提的是，重建出来的张量与原始 buffer 往往<strong>共享同一块底层显存</strong>（视图切片而非再拷贝），所以"重建"这一步几乎不花额外时间，真正的成本只在那一次整体搬运上。</p>
-<p>这种"打包搬运 + 到岸重建"是分布式权重同步里非常实用的优化，尤其在 RL 这种<strong>每步都要全量同步权重</strong>的场景，省下的开销直接转化为更高的训练吞吐。打个比方：逐张量搬运像是把一仓库货物一件一件分别开车送，每趟车都要起步、上路、停车；而打包搬运则是把货物先码进一个集装箱，一趟整柜运过去，到了再拆箱归位——固定成本只付一次。把它和前面的拼图连起来：第13/14课是引擎入口，第25课是权重加载，第46课是进程组通信，第50课是 LoRA 的小幅换权重，本课则是 RL 全量换权重——它们共享同一套底层机制。理解了这条主线，就能看清 SGLang 不只是"快的推理库"，更是一个能被训练循环无缝复用的执行引擎：同一份代码、同一套优化，既服务在线用户，也服务训练器，差别只在那个轻巧的权重同步钩子。这种"一鱼两吃"的设计，正是它在 RL 生态里被广泛采用的根本原因。后续<strong>第59-63课</strong>会继续展开这些设计主题。</p>
+<p>这种"打包搬运 + 到岸重建"是分布式权重同步里非常实用的优化，尤其在 RL 这种<strong>每步都要全量同步权重</strong>的场景，省下的开销直接转化为更高的训练吞吐。打个比方：逐张量搬运像是把一仓库货物一件一件分别开车送，每趟车都要起步、上路、停车；而打包搬运则是把货物先码进一个集装箱，一趟整柜运过去，到了再拆箱归位——固定成本只付一次。把它和前面的拼图连起来：第13/14课是引擎入口，<a class="xref" href="25-model-loading-and-weights.html">第25课</a>是权重加载，<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>是进程组通信，<a class="xref" href="50-multi-lora-batching.html">第50课</a>是 LoRA 的小幅换权重，本课则是 RL 全量换权重——它们共享同一套底层机制。理解了这条主线，就能看清 SGLang 不只是"快的推理库"，更是一个能被训练循环无缝复用的执行引擎：同一份代码、同一套优化，既服务在线用户，也服务训练器，差别只在那个轻巧的权重同步钩子。这种"一鱼两吃"的设计，正是它在 RL 生态里被广泛采用的根本原因。后续<strong>第59-63课</strong>会继续展开这些设计主题。</p>
 
 <div class="flow">
 <div class="node">成千上万个命名张量</div>
@@ -482,7 +484,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <li>RL 后训练每轮迭代 = <strong>rollout 生成</strong>（SGLang 高吞吐采样）+ <strong>训练器打分算梯度更新权重</strong>，且下一轮 rollout 必须用<strong>刚更新的权重</strong>。</li>
 <li>每步<strong>重启服务器</strong>（重载 checkpoint、重新预热、重捕 CUDA Graph）会让启动时间压垮计算，<strong>不可接受</strong>。</li>
 <li><span class="mono">update_weights_from_tensor</span> 做<strong>原地热更新</strong>：CUDA Graph 与 KV 池不动，只把新张量写进模型参数。</li>
-<li>训练器在别的 GPU 上时用 <span class="mono">update_weights_from_distributed</span>，经第46课<strong>进程组</strong>流式传权重。</li>
+<li>训练器在别的 GPU 上时用 <span class="mono">update_weights_from_distributed</span>，经<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a><strong>进程组</strong>流式传权重。</li>
 <li><span class="mono">load_format="flattened_bucket"</span> 用 <span class="mono">FlattenedTensorBucket</span> 把千张量<strong>打包成一块 buffer、整体一次搬运</strong>，再到岸重建，大幅降低逐张量开销。</li>
 <li>同一个 SGLang 进程<strong>既是 serving 服务器、又是 RL rollout worker</strong>，只差这个权重同步钩子，这也是它成为热门 rollout 后端的原因。</li>
 <li>一句话串起来：<strong>生成靠 SGLang、训练靠训练器、衔接靠权重同步</strong>；同步要又快又对，靠的就是原地写入加打包搬运这两手。</li>
@@ -520,20 +522,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="qn">3. <span class='mono'>update_weights_from_tensor</span> 与 <span class='mono'>update_weights_from_distributed</span> 的区别，以及 <span class='mono'>load_format="flattened_bucket"</span> 解决什么？</div>
   <ol class="opts">
     <li>from_distributed 只能传一个张量，flattened_bucket 用于压缩精度</li>
-    <li><strong>from_tensor 用于<strong>同卡共置</strong>（张量已在本地显存，直接原地写）；from_distributed 用于训练器在<strong>别的 GPU</strong>，经第46课进程组<strong>流式</strong>传权重；flattened_bucket 把<strong>成千张量打包成一块 buffer 整体一次搬运</strong>再到岸重建，降低逐张量开销</strong></li>
+    <li><strong>from_tensor 用于<strong>同卡共置</strong>（张量已在本地显存，直接原地写）；from_distributed 用于训练器在<strong>别的 GPU</strong>，经<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>进程组<strong>流式</strong>传权重；flattened_bucket 把<strong>成千张量打包成一块 buffer 整体一次搬运</strong>再到岸重建，降低逐张量开销</strong></li>
     <li>两者完全相同，flattened_bucket 只是改个日志格式</li>
     <li>from_tensor 必须重启进程，flattened_bucket 用于切分 KV 缓存</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。共置同卡时新张量已在显存，from_tensor 直接原地写；分离部署时 from_distributed 经 GroupCoordinator（第46课）把权重从训练 rank 流式传进推理 rank。大模型有上万命名张量，逐个搬会把发起开销放大几千倍，flattened_bucket 用 <span class='mono'>FlattenedTensorBucket</span> 拼成一块连续 buffer、整体一次传输/拷贝、再到岸重建，作为 <span class='mono'>load_format</span> 叠加在前两者之上。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。共置同卡时新张量已在显存，from_tensor 直接原地写；分离部署时 from_distributed 经 GroupCoordinator（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>）把权重从训练 rank 流式传进推理 rank。大模型有上万命名张量，逐个搬会把发起开销放大几千倍，flattened_bucket 用 <span class='mono'>FlattenedTensorBucket</span> 拼成一块连续 buffer、整体一次传输/拷贝、再到岸重建，作为 <span class='mono'>load_format</span> 叠加在前两者之上。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用你自己的话讲清 RL 的“rollout↔训练”闭环：策略模型生成样本（rollout，正是 SGLang 擅长的批量生成）、训练器打分算梯度更新权重，为什么下一轮 rollout 必须用<strong>刚更新的权重</strong>；再说明为何每步<strong>重启服务器</strong>（重载 checkpoint、重新预热、重捕 CUDA Graph）不可接受，而 <span class='mono'>update_weights_from_tensor</span> 的原地热更新让 CUDA Graph 与 KV 池原地不动。</li>
-    <li>对比三种权重同步路径并说明 <span class='mono'>FlattenedTensorBucket</span> 的价值：<span class='mono'>update_weights_from_tensor</span>（同卡共置）、<span class='mono'>update_weights_from_distributed</span>（跨卡经第46课进程组流式传）、<span class='mono'>load_format="flattened_bucket"</span>（把上万命名张量打包成一块 buffer 整体一次搬运再重建）。再把它和第50课 LoRA 换权重做对比——同样是换权重，但 RL 换的是整个主干、LoRA 只换小 adapter，并说明为何同一个 SGLang 进程能既当服务器又当 rollout worker。</li>
+    <li>对比三种权重同步路径并说明 <span class='mono'>FlattenedTensorBucket</span> 的价值：<span class='mono'>update_weights_from_tensor</span>（同卡共置）、<span class='mono'>update_weights_from_distributed</span>（跨卡经<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>进程组流式传）、<span class='mono'>load_format="flattened_bucket"</span>（把上万命名张量打包成一块 buffer 整体一次搬运再重建）。再把它和<a class="xref" href="50-multi-lora-batching.html">第50课</a> LoRA 换权重做对比——同样是换权重，但 RL 换的是整个主干、LoRA 只换小 adapter，并说明为何同一个 SGLang 进程能既当服务器又当 rollout worker。</li>
   </ul>
 </div>
 </div></div>
@@ -547,7 +549,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro"><div class="tag">🌍 The big picture</div>
 <p>Each iteration of RL post-training (PPO, GRPO, etc.) has two halves: the <strong>policy model generates many samples</strong> (the rollout — exactly the fast batched generation SGLang excels at), then the <strong>trainer scores the samples</strong> (reward) and computes a gradient that <strong>updates the policy weights</strong>. The crux: the <strong>next rollout must run with the just-updated weights</strong>, so the rollout engine's weights change every training step.</p>
-<p>SGLang makes the "server" and the "RL rollout worker" the <strong>same process</strong>, differing only by a weight-sync hook: same-GPU co-location uses <span class="mono">update_weights_from_tensor</span>, while a trainer on other GPUs uses <span class="mono">update_weights_from_distributed</span> to <strong>stream</strong> weights in over a process group (<strong>Lesson 46</strong>'s GroupCoordinator). This is why SGLang is a popular rollout backend for RL frameworks.</p>
+<p>SGLang makes the "server" and the "RL rollout worker" the <strong>same process</strong>, differing only by a weight-sync hook: same-GPU co-location uses <span class="mono">update_weights_from_tensor</span>, while a trainer on other GPUs uses <span class="mono">update_weights_from_distributed</span> to <strong>stream</strong> weights in over a process group (<strong><a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a></strong>'s GroupCoordinator). This is why SGLang is a popular rollout backend for RL frameworks.</p>
 </div>
 
 <h2>1. The RL loop: rollout and training alternating</h2>
@@ -591,9 +593,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>2. Why we can't restart the server every step</h2>
-<p>The naïve idea: have the trainer save a new checkpoint and just <strong>restart</strong> the SGLang server to reload it. The problem is a "cold start" is hugely expensive: it must <strong>re-read the weight files</strong> (Lesson 25's weight-loading flow), <strong>re-warm</strong>, <strong>re-capture CUDA graphs</strong>, and rebuild the KV pools. These one-time costs are tens of seconds to minutes, while RL training runs thousands to tens of thousands of steps — restarting each step means startup time would <strong>dominate</strong> actual compute, which is unacceptable.</p>
+<p>The naïve idea: have the trainer save a new checkpoint and just <strong>restart</strong> the SGLang server to reload it. The problem is a "cold start" is hugely expensive: it must <strong>re-read the weight files</strong> (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>'s weight-loading flow), <strong>re-warm</strong>, <strong>re-capture CUDA graphs</strong>, and rebuild the KV pools. These one-time costs are tens of seconds to minutes, while RL training runs thousands to tens of thousands of steps — restarting each step means startup time would <strong>dominate</strong> actual compute, which is unacceptable.</p>
 <p>SGLang's answer is the <strong>in-place weight update</strong>: the process never restarts, CUDA graphs aren't re-captured, KV pools stay in place, and only the values in the <strong>model-parameter memory</strong> get swapped for the freshly-trained tensors. <span class="mono">update_weights_from_tensor(named_tensors, load_format=…)</span> writes the new tensors straight onto the running model's matching parameters in milliseconds, ready for the next rollout immediately.</p>
-<p>This is exactly what lets SGLang use <strong>one process</strong> as both the "serving server" and the "RL rollout worker": the code is nearly identical, the only difference being that rollout mode bolts on a <strong>weight-sync hook</strong>. We saw the same "swap the weights" idea in Lesson 50 — LoRA also swaps weights, except it swaps a <strong>tiny adapter</strong>, whereas RL here swaps the <strong>full backbone weights</strong>.</p>
+<p>This is exactly what lets SGLang use <strong>one process</strong> as both the "serving server" and the "RL rollout worker": the code is nearly identical, the only difference being that rollout mode bolts on a <strong>weight-sync hook</strong>. We saw the same "swap the weights" idea in <a class="xref" href="50-multi-lora-batching.html">Lesson 50</a> — LoRA also swaps weights, except it swaps a <strong>tiny adapter</strong>, whereas RL here swaps the <strong>full backbone weights</strong>.</p>
 
 <div class="cols">
 <div class="col"><strong>❌ Restart the server every step</strong><br>Reload checkpoint → re-warm → re-capture CUDA graphs → rebuild KV pools. One-time cost of tens of seconds to minutes, times tens of thousands of steps = startup time crushes compute, <span class="mono">unacceptable</span>.</div>
@@ -601,20 +603,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>3. Three weight-sync entry points: local, cross-GPU, packed</h2>
-<p>The path from trainer to rollout engine depends on their physical location. If trainer and inference live on the <strong>same set of GPUs</strong> (co-located), the new tensors are already in memory, so just use <span class="mono">update_weights_from_tensor</span> to write the <span class="mono">named_tensors</span> in place onto the parameters. If the trainer lives on <strong>other GPUs</strong> (disaggregated), use <span class="mono">update_weights_from_distributed</span>, which leverages Lesson 46's <span class="mono">GroupCoordinator</span> process group to <strong>stream</strong> the weights from the trainer ranks into the inference ranks.</p>
+<p>The path from trainer to rollout engine depends on their physical location. If trainer and inference live on the <strong>same set of GPUs</strong> (co-located), the new tensors are already in memory, so just use <span class="mono">update_weights_from_tensor</span> to write the <span class="mono">named_tensors</span> in place onto the parameters. If the trainer lives on <strong>other GPUs</strong> (disaggregated), use <span class="mono">update_weights_from_distributed</span>, which leverages <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>'s <span class="mono">GroupCoordinator</span> process group to <strong>stream</strong> the weights from the trainer ranks into the inference ranks.</p>
 <p>But either way there is a shared performance trap: a large model has <strong>thousands</strong> of named tensors, and if you move them one at a time, each tensor triggers a separate copy/transfer, so the <strong>launch and transfer overhead</strong> gets multiplied thousands of times — absurdly slow. That is exactly what <span class="mono">load_format="flattened_bucket"</span> is there to solve.</p>
 <p>So selection is clear: <strong>same-GPU co-location</strong> uses from_tensor; <strong>cross-GPU disaggregation</strong> uses from_distributed; <strong>too many tensors, want to cut overhead</strong> adds the flattened_bucket packing path. They are not mutually exclusive — flattened_bucket is a <span class="mono">load_format</span> option layered on top of the first two.</p>
 
 <table class="t">
 <tr><th>Entry / mode</th><th>When to use</th><th>How it moves</th></tr>
 <tr><td><span class="mono">update_weights_from_tensor</span></td><td>Trainer and inference <strong>co-located on the same GPUs</strong>, new tensors already in local memory</td><td>Write named_tensors in place onto the running model's parameters</td></tr>
-<tr><td><span class="mono">update_weights_from_distributed</span></td><td>Trainer on <strong>other GPUs</strong>, disaggregated deployment</td><td><strong>Stream</strong> weights from trainer ranks into inference ranks via Lesson 46's process group</td></tr>
+<tr><td><span class="mono">update_weights_from_distributed</span></td><td>Trainer on <strong>other GPUs</strong>, disaggregated deployment</td><td><strong>Stream</strong> weights from trainer ranks into inference ranks via <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>'s process group</td></tr>
 <tr><td><span class="mono">load_format="flattened_bucket"</span></td><td>Huge number of tensors, want to minimize <strong>per-tensor overhead</strong></td><td>Pack many tensors into one contiguous buffer, transfer/copy <strong>once as a whole</strong></td></tr>
 </table>
 
 <h2>4. FlattenedTensorBucket: collapsing thousands of tensors into one copy</h2>
 <p>Why is moving tensors one by one slow? Because every copy/transfer has a <strong>fixed launch cost</strong> (kernel launch, comm handshake, etc.), and the more tensors there are the more that cost is amplified, even if each tensor is tiny. <span class="mono">FlattenedTensorBucket</span>'s idea is to first <strong>flatten many named tensors into one contiguous buffer</strong>, <strong>transfer/copy it only once</strong>, then <strong>reconstruct the individual tensors</strong> on the engine side from the recorded shapes/offsets — so the per-tensor overhead is amortized down to almost nothing.</p>
-<p>This "pack-and-ship + reconstruct-on-arrival" is a very practical optimization in distributed weight sync, especially in RL where <strong>full weights are synced every step</strong>; the overhead saved turns directly into higher training throughput. Tie the pieces together: Lessons 13/14 are the engine entrypoints, Lesson 25 is weight loading, Lesson 46 is process-group communication, Lesson 50 is LoRA's small weight swap, and this lesson is RL's full weight swap — they share the same underlying machinery. Lessons <strong>59-63</strong> will keep expanding these design themes.</p>
+<p>This "pack-and-ship + reconstruct-on-arrival" is a very practical optimization in distributed weight sync, especially in RL where <strong>full weights are synced every step</strong>; the overhead saved turns directly into higher training throughput. Tie the pieces together: Lessons 13/14 are the engine entrypoints, <a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a> is weight loading, <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> is process-group communication, <a class="xref" href="50-multi-lora-batching.html">Lesson 50</a> is LoRA's small weight swap, and this lesson is RL's full weight swap — they share the same underlying machinery. Lessons <strong>59-63</strong> will keep expanding these design themes.</p>
 
 <div class="flow">
 <div class="node">Thousands of named tensors</div>
@@ -695,7 +697,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <li>Each RL post-training iteration = <strong>rollout generation</strong> (high-throughput SGLang sampling) + <strong>trainer scoring, gradient, weight update</strong>, and the next rollout must run with the <strong>just-updated weights</strong>.</li>
 <li><strong>Restarting the server</strong> every step (reload checkpoint, re-warm, re-capture CUDA graphs) lets startup time crush compute — <strong>unacceptable</strong>.</li>
 <li><span class="mono">update_weights_from_tensor</span> does an <strong>in-place hot update</strong>: CUDA graphs and KV pools stay put, only the new tensors are written into the model parameters.</li>
-<li>When the trainer lives on other GPUs, <span class="mono">update_weights_from_distributed</span> <strong>streams</strong> the weights over Lesson 46's <strong>process group</strong>.</li>
+<li>When the trainer lives on other GPUs, <span class="mono">update_weights_from_distributed</span> <strong>streams</strong> the weights over <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>'s <strong>process group</strong>.</li>
 <li><span class="mono">load_format="flattened_bucket"</span> uses <span class="mono">FlattenedTensorBucket</span> to <strong>pack thousands of tensors into one buffer and move them once</strong>, then reconstruct on arrival, slashing per-tensor overhead.</li>
 <li>One SGLang process is <strong>both the serving server and the RL rollout worker</strong>, differing only by this weight-sync hook — which is why it's a popular rollout backend.</li>
 <li>In one line: <strong>generation by SGLang, training by the trainer, glued by weight sync</strong>; making that sync fast and correct rests on in-place writes plus packed transfer.</li>
@@ -733,7 +735,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="qn">3. What's the difference between <span class='mono'>update_weights_from_tensor</span> and <span class='mono'>update_weights_from_distributed</span>, and what does <span class='mono'>load_format="flattened_bucket"</span> solve?</div>
   <ol class="opts">
     <li>from_distributed can only move one tensor, and flattened_bucket is for quantization</li>
-    <li><strong>from_tensor is for <strong>same-GPU co-location</strong> (tensors already in local memory, written in place); from_distributed is for a trainer on <strong>other GPUs</strong>, <strong>streaming</strong> weights over Lesson 46's process group; flattened_bucket <strong>packs thousands of tensors into one buffer moved once</strong> and reconstructs on arrival, cutting per-tensor overhead</strong></li>
+    <li><strong>from_tensor is for <strong>same-GPU co-location</strong> (tensors already in local memory, written in place); from_distributed is for a trainer on <strong>other GPUs</strong>, <strong>streaming</strong> weights over <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>'s process group; flattened_bucket <strong>packs thousands of tensors into one buffer moved once</strong> and reconstructs on arrival, cutting per-tensor overhead</strong></li>
     <li>They are identical, and flattened_bucket merely changes a log format</li>
     <li>from_tensor must restart the process, and flattened_bucket is for splitting the KV cache</li>
   </ol>
@@ -746,7 +748,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>In your own words, explain the RL "rollout↔training" loop: the policy model generates samples (rollout, exactly SGLang's batched generation), the trainer scores, computes a gradient and updates weights, and why the next rollout must use the <strong>just-updated weights</strong>; then explain why <strong>restarting the server</strong> each step (reload checkpoint, re-warm, re-capture CUDA graphs) is unacceptable while <span class='mono'>update_weights_from_tensor</span>'s in-place hot update keeps CUDA graphs and KV pools in place.</li>
-    <li>Contrast the three weight-sync paths and explain the value of <span class='mono'>FlattenedTensorBucket</span>: <span class='mono'>update_weights_from_tensor</span> (same-GPU co-location), <span class='mono'>update_weights_from_distributed</span> (cross-GPU streaming over Lesson 46's process group), and <span class='mono'>load_format="flattened_bucket"</span> (pack thousands of named tensors into one buffer moved once then reconstructed). Then contrast with Lesson 50's LoRA weight swap — both swap weights, but RL swaps the whole backbone while LoRA swaps only a small adapter — and explain why one SGLang process can be both the server and the rollout worker.</li>
+    <li>Contrast the three weight-sync paths and explain the value of <span class='mono'>FlattenedTensorBucket</span>: <span class='mono'>update_weights_from_tensor</span> (same-GPU co-location), <span class='mono'>update_weights_from_distributed</span> (cross-GPU streaming over <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>'s process group), and <span class='mono'>load_format="flattened_bucket"</span> (pack thousands of named tensors into one buffer moved once then reconstructed). Then contrast with <a class="xref" href="50-multi-lora-batching.html">Lesson 50</a>'s LoRA weight swap — both swap weights, but RL swaps the whole backbone while LoRA swaps only a small adapter — and explain why one SGLang process can be both the server and the rollout worker.</li>
   </ul>
 </div>
 </div></div>

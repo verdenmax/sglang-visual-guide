@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -345,7 +347,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   你用 <span class="inline">s += sgl.user("…")</span> 往里<strong>拼提示词</strong>，用 <span class="inline">gen(...)</span> 插入<strong>生成槽</strong>，
   两次 gen 之间可以写<strong>任意 if / for / 普通 Python</strong>。这带来三重红利：① <strong>结构与控制流</strong>都在 Python 里、清晰可调试；
   ② <strong>约束解码</strong>（select、regex、json）让输出<strong>可靠可解析</strong>；③ 运行时<strong>自动复用共享前缀的 KV</strong>
-  （第 7 课 RadixAttention），多步程序天然省算力。说到底，<strong>SGLang 把"调模型"从"发网络请求"升级成了"写程序"</strong>——
+  （<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention），多步程序天然省算力。说到底，<strong>SGLang 把"调模型"从"发网络请求"升级成了"写程序"</strong>——
   你像写普通函数那样组织提示词、控制流和约束，框架则在背后把效率与可靠性<strong>一并兜住</strong>。
 </div>
 
@@ -430,7 +432,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="cols">
   <div class="col"><h4>SGLang DSL：你写什么</h4><p>一个 <span class="mono">@sgl.function</span>，里面是<strong>普通 Python 控制流 + gen/select 空位</strong>。
   你声明"<strong>这里要填一段</strong>、那里<strong>从这几个里选</strong>"，用 <span class="mono">s["name"]</span> 取结果。<strong>结构、约束、多步逻辑</strong>都在你眼前。</p></div>
-  <div class="col"><h4>裸 API：框架替你自动做什么</h4><p>① 多次调用间<strong>共享前缀的 KV 自动复用</strong>（第 7 课），无需你手动缓存；
+  <div class="col"><h4>裸 API：框架替你自动做什么</h4><p>① 多次调用间<strong>共享前缀的 KV 自动复用</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>），无需你手动缓存；
   ② <strong>约束解码</strong>保证 select/json 输出合法；③ 调度、连续批处理、分页全在<strong>运行时</strong>透明发生。手搓 API 这些<strong>全得自己来</strong>。</p></div>
 </div>
 
@@ -474,13 +476,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>第三重红利最隐蔽也最值钱：<strong>当你把程序"结构化"地写出来，框架就能看见结构、据此自动优化</strong>。多个请求若<strong>共享同一段前缀</strong>
 （同一个 system 提示、同一段少样本示例），运行时会<strong>只算一次前缀、复用它的 KV</strong>；一个函数 <span class="mono">fork</span> 出多个分支时
-（第 11 课），各分支也<strong>共享父节点的前缀缓存</strong>。换句话说，<strong>"写成结构化程序"本身，就是在给运行时喂优化线索</strong>——
+（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>），各分支也<strong>共享父节点的前缀缓存</strong>。换句话说，<strong>"写成结构化程序"本身，就是在给运行时喂优化线索</strong>——
 这是裸 API 那种"一发一收、互相看不见"的调用方式永远拿不到的。</p>
 
 <p>这一点值得再咀嚼一下。裸 API 的世界里，每次调用都是<strong>一座孤岛</strong>：服务端收到一串文本、吐出一串文本，<strong>既不知道这串文本和上一次的有何关联，
 也不知道接下来还会不会复用</strong>。哪怕你连发一万条<strong>开头完全相同</strong>的请求（比如同一段冗长的 system 提示），服务端也只能<strong>把那段前缀一遍遍重新计算</strong>，
 白白烧掉算力。而 SGLang 把整段多步逻辑<strong>表达成一个程序、一棵树</strong>之后，框架就拥有了"<strong>上帝视角</strong>"：它能在执行前看出"<strong>这十几个请求开头那段是一样的</strong>"、
-"<strong>这几个分支是从同一个父状态长出来的</strong>"，于是<strong>把公共前缀的 KV 缓存只算一次、让大家共用</strong>。第 7 课的 RadixAttention 正是这套自动前缀复用的引擎，
+"<strong>这几个分支是从同一个父状态长出来的</strong>"，于是<strong>把公共前缀的 KV 缓存只算一次、让大家共用</strong>。<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的 RadixAttention 正是这套自动前缀复用的引擎，
 而本课的"<strong>结构化写法</strong>"，就是把这台引擎<strong>喂饱所需信息</strong>的前端。<strong>你写得越结构化，框架能省的就越多</strong>——这是声明式 DSL 独有的复利。</p>
 
 <div class="cellgroup">
@@ -493,7 +495,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>源码一瞥：gen 其实是个"延迟节点"</h2>
 <p>有意思的是，<span class="mono">gen(...)</span> 被调用时<strong>并不会立刻去请求模型</strong>——它只是<strong>构造并返回一个 IR 节点</strong>
 （<span class="mono">SglGen</span>，或带 choices 时的 <span class="mono">SglSelect</span>），描述"<strong>这里要生成什么、带什么约束</strong>"。
-真正的执行交给<strong>解释器</strong>（第 10 课）：它顺着这些节点跑、按需调用后端（第 12 课）。下面是 <span class="mono">lang/api.py</span> 里 <span class="mono">gen</span> 的真实片段：</p>
+真正的执行交给<strong>解释器</strong>（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）：它顺着这些节点跑、按需调用后端（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>）。下面是 <span class="mono">lang/api.py</span> 里 <span class="mono">gen</span> 的真实片段：</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/api.py ::gen</span><span class="ln">gen：构造一个生成 IR 节点</span></div>
@@ -529,13 +531,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>读懂这段，你就抓住了 SGLang 前端的灵魂：<strong>你写的程序不是"立即执行的代码"，而是一棵"待执行的意图树"</strong>。
 正因为是树、是声明式的，框架才能<strong>在执行前看清全局结构</strong>——哪些前缀共享、哪些分支能并行、哪些输出要约束——
-再交给解释器（第 10 课）、fork/join（第 11 课）、后端（第 12 课）逐层兑现。带着"<strong>函数即程序、gen 即空位、结构即优化线索</strong>"
+再交给解释器（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）、fork/join（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）、后端（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>）逐层兑现。带着"<strong>函数即程序、gen 即空位、结构即优化线索</strong>"
 这三句话往下读，后面三课会把这棵意图树<strong>怎么跑起来、怎么并行、怎么落到引擎</strong>讲透。</p>
 
 <p>最后把本课放回 Part 3 的主线：这一部分讲的是 SGLang 的<strong>前端语言</strong>，而本课是它的<strong>地基与门面</strong>——先认清"<strong>一个程序到底长什么样、由哪些原语搭成、为什么这样设计</strong>"。
-你已经看到，一段多步对话被<strong>写成一个带命名空位的 Python 函数</strong>之后，既清晰好读，又给了运行时<strong>自动优化的抓手</strong>。接下来第 10 课会揭开<strong>解释器与 tracer</strong>，
-讲清这棵意图树<strong>究竟是怎么被一步步执行的</strong>；第 11 课讲 <strong>fork/join</strong>，把"一个父状态分叉出多个分支、再合并"映射到 RadixAttention 的前缀共享上；
-第 12 课讲<strong>后端接口与 OpenAI 兼容</strong>，把这门语言<strong>真正接到引擎</strong>上。读完这四课，你就能从"写一个 SGLang 程序"一路看到"它在 GPU 上高效跑起来"的完整链路。</p>
+你已经看到，一段多步对话被<strong>写成一个带命名空位的 Python 函数</strong>之后，既清晰好读，又给了运行时<strong>自动优化的抓手</strong>。接下来<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>会揭开<strong>解释器与 tracer</strong>，
+讲清这棵意图树<strong>究竟是怎么被一步步执行的</strong>；<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>讲 <strong>fork/join</strong>，把"一个父状态分叉出多个分支、再合并"映射到 RadixAttention 的前缀共享上；
+<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>讲<strong>后端接口与 OpenAI 兼容</strong>，把这门语言<strong>真正接到引擎</strong>上。读完这四课，你就能从"写一个 SGLang 程序"一路看到"它在 GPU 上高效跑起来"的完整链路。</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
@@ -543,8 +545,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <li><strong>SGLang 是项目的同名起点</strong>：Structured Generation Language——一门把"调大模型"写成<strong>普通 Python 程序</strong>的前端 DSL。</li>
     <li><strong>程序形态</strong>：<span class="mono">@sgl.function</span> 装饰、首参为状态 <span class="mono">s</span>；用 <span class="mono">s += sgl.user(…)</span> 拼提示，用 <span class="mono">gen(name,…)</span> 挖生成槽，用 <span class="mono">s["name"]</span> 取结果。<strong>多个 gen = 多步 LLM 程序</strong>，其间可写任意 if/for。</li>
     <li><strong>核心原语</strong>：<span class="mono">gen</span>（自由填空）、<span class="mono">select</span>（受限多选，约束解码）、<span class="mono">system/user/assistant</span>（role）、<span class="mono">image</span>（多模态）。源码里带 <span class="mono">choices</span> 的 gen 直接返回 <span class="mono">SglSelect</span>。</li>
-    <li><strong>为何用 DSL</strong>：① 控制流与结构都在 Python；② 约束解码保证输出可靠；③ 运行时<strong>自动复用共享前缀 KV</strong>（第 7 课 RadixAttention）——结构化程序天然给框架喂优化线索。</li>
-    <li><strong>本质</strong>：gen 不立即执行，而是构造 IR 节点，组成一棵<strong>待执行意图树</strong>，交给解释器（第 10 课）、fork/join（第 11 课）、后端（第 12 课）逐层兑现。</li>
+    <li><strong>为何用 DSL</strong>：① 控制流与结构都在 Python；② 约束解码保证输出可靠；③ 运行时<strong>自动复用共享前缀 KV</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention）——结构化程序天然给框架喂优化线索。</li>
+    <li><strong>本质</strong>：gen 不立即执行，而是构造 IR 节点，组成一棵<strong>待执行意图树</strong>，交给解释器（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）、fork/join（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）、后端（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>）逐层兑现。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -572,7 +574,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。DSL 的三重红利：① 结构与控制流都在 Python，可读可调试；② select/regex/json 等约束解码让输出合法可解析；③ 框架看见结构后，能自动复用共享前缀的 KV（第 7 课 RadixAttention）、fork/join 共享父前缀（第 11 课）。这些在裸 API 里全靠自己拼字符串、解析、管历史、手动缓存。其余选项与事实不符。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。DSL 的三重红利：① 结构与控制流都在 Python，可读可调试；② select/regex/json 等约束解码让输出合法可解析；③ 框架看见结构后，能自动复用共享前缀的 KV（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention）、fork/join 共享父前缀（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）。这些在裸 API 里全靠自己拼字符串、解析、管历史、手动缓存。其余选项与事实不符。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -585,7 +587,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。gen 不立即执行，而是构造 IR 节点，组成一棵“待执行意图树”。正因是声明式的树，框架在执行前就能看见全局结构：哪些请求共享同一 system 提示或少样本前缀、哪些 fork 分支共享父节点前缀。于是运行时只对共享前缀算一次、复用其 KV（第 7 课）。这正是结构化写法相对裸 API 的独有红利。其余选项都与机制不符。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。gen 不立即执行，而是构造 IR 节点，组成一棵“待执行意图树”。正因是声明式的树，框架在执行前就能看见全局结构：哪些请求共享同一 system 提示或少样本前缀、哪些 fork 分支共享父节点前缀。于是运行时只对共享前缀算一次、复用其 KV（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）。这正是结构化写法相对裸 API 的独有红利。其余选项都与机制不符。</div></div></div>
   </details>
 </div>
 <div class="card spark">
@@ -623,7 +625,7 @@ the project's <strong>namesake origin</strong> and its core shape — an ordinar
   insert <strong>generation slots</strong> with <span class="inline">gen(...)</span>, with <strong>arbitrary if / for / plain Python</strong>
   between two gens. This buys three things: ① <strong>structure and control flow</strong> live in Python — clear and debuggable;
   ② <strong>constrained decoding</strong> (select, regex, json) makes outputs <strong>reliable and parseable</strong>; ③ the runtime
-  <strong>automatically reuses KV across shared prefixes</strong> (Lesson 7, RadixAttention).
+  <strong>automatically reuses KV across shared prefixes</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention).
 </div>
 
 <h2>What an SGLang program looks like</h2>
@@ -699,7 +701,7 @@ runtime</strong>, so you write only "<strong>what to do</strong>" and leave "<st
 <div class="cols">
   <div class="col"><h4>SGLang DSL: what you write</h4><p>One <span class="mono">@sgl.function</span> with <strong>plain Python control flow + gen/select slots</strong>.
   You declare "<strong>fill here</strong>, choose from these there," and read with <span class="mono">s["name"]</span>. <strong>Structure, constraints, multi-step logic</strong> are all in plain sight.</p></div>
-  <div class="col"><h4>Raw API: what the framework auto-does</h4><p>① <strong>KV across shared prefixes is reused automatically</strong> (Lesson 7), no manual caching;
+  <div class="col"><h4>Raw API: what the framework auto-does</h4><p>① <strong>KV across shared prefixes is reused automatically</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), no manual caching;
   ② <strong>constrained decoding</strong> guarantees valid select/json output; ③ scheduling, continuous batching, paging all happen transparently in the <strong>runtime</strong>. With a raw API you'd do <strong>all of it yourself</strong>.</p></div>
 </div>
 
@@ -743,7 +745,7 @@ runtime</strong>, so you write only "<strong>what to do</strong>" and leave "<st
 
 <p>The third benefit is the subtlest and most valuable: <strong>when you write the program structurally, the framework can see the structure and
 optimize from it</strong>. If multiple requests <strong>share a prefix</strong> (same system prompt, same few-shot examples), the runtime
-<strong>computes the prefix once and reuses its KV</strong>; when one function <span class="mono">fork</span>s into branches (Lesson 11), the branches
+<strong>computes the prefix once and reuses its KV</strong>; when one function <span class="mono">fork</span>s into branches (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), the branches
 <strong>share the parent's prefix cache</strong>. In other words, <strong>writing a structured program is itself feeding optimization hints to the
 runtime</strong> — something the raw-API style of "fire one, read one, blind to each other" can never obtain.</p>
 
@@ -757,7 +759,7 @@ runtime</strong> — something the raw-API style of "fire one, read one, blind t
 <h2>A peek at the source: gen is a "deferred node"</h2>
 <p>Interestingly, calling <span class="mono">gen(...)</span> <strong>does not immediately hit the model</strong> — it just <strong>constructs and returns an IR
 node</strong> (<span class="mono">SglGen</span>, or <span class="mono">SglSelect</span> when given choices) describing "<strong>what to generate here, with what
-constraints</strong>." Actual execution is left to the <strong>interpreter</strong> (Lesson 10), which walks these nodes and calls the backend (Lesson 12)
+constraints</strong>." Actual execution is left to the <strong>interpreter</strong> (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>), which walks these nodes and calls the backend (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>)
 as needed. Here is the real snippet of <span class="mono">gen</span> from <span class="mono">lang/api.py</span>:</p>
 
 <div class="codefile">
@@ -794,8 +796,8 @@ as needed. Here is the real snippet of <span class="mono">gen</span> from <span 
 
 <p>Grasp this and you have the soul of the SGLang front end: <strong>the program you write is not "code that runs immediately" but a "tree of intent
 to be executed."</strong> Precisely because it is a declarative tree, the framework can <strong>see the whole structure before execution</strong> — which
-prefixes are shared, which branches can run in parallel, which outputs need constraints — and hand it to the interpreter (Lesson 10), fork/join
-(Lesson 11), and backends (Lesson 12) to realize layer by layer. Carry "<strong>function is a program, gen is a blank, structure is an optimization
+prefixes are shared, which branches can run in parallel, which outputs need constraints — and hand it to the interpreter (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>), fork/join
+(<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), and backends (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>) to realize layer by layer. Carry "<strong>function is a program, gen is a blank, structure is an optimization
 hint</strong>" forward, and the next three lessons will show how this intent tree <strong>runs, parallelizes, and lands on the engine</strong>.</p>
 
 <div class="card key">
@@ -804,8 +806,8 @@ hint</strong>" forward, and the next three lessons will show how this intent tre
     <li><strong>SGLang is the project's namesake origin</strong>: Structured Generation Language — a front-end DSL for writing "calling an LLM" as an <strong>ordinary Python program</strong>.</li>
     <li><strong>Program shape</strong>: decorated with <span class="mono">@sgl.function</span>, first arg is state <span class="mono">s</span>; build prompts with <span class="mono">s += sgl.user(…)</span>, dig generation slots with <span class="mono">gen(name,…)</span>, read with <span class="mono">s["name"]</span>. <strong>Multiple gens = a multi-call LLM program</strong> with arbitrary if/for in between.</li>
     <li><strong>Core primitives</strong>: <span class="mono">gen</span> (free fill-in), <span class="mono">select</span> (constrained choice / decoding), <span class="mono">system/user/assistant</span> (roles), <span class="mono">image</span> (multimodal). In the source a gen with <span class="mono">choices</span> returns <span class="mono">SglSelect</span>.</li>
-    <li><strong>Why a DSL</strong>: ① control flow and structure live in Python; ② constrained decoding guarantees reliable output; ③ the runtime <strong>auto-reuses shared-prefix KV</strong> (Lesson 7, RadixAttention) — a structured program naturally feeds optimization hints to the framework.</li>
-    <li><strong>Essence</strong>: gen doesn't execute immediately; it builds an IR node, and the nodes form a <strong>tree of intent</strong> realized by the interpreter (Lesson 10), fork/join (Lesson 11), and backends (Lesson 12).</li>
+    <li><strong>Why a DSL</strong>: ① control flow and structure live in Python; ② constrained decoding guarantees reliable output; ③ the runtime <strong>auto-reuses shared-prefix KV</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention) — a structured program naturally feeds optimization hints to the framework.</li>
+    <li><strong>Essence</strong>: gen doesn't execute immediately; it builds an IR node, and the nodes form a <strong>tree of intent</strong> realized by the interpreter (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>), fork/join (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>), and backends (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>).</li>
   </ul>
 </div>
 <div class="selftest">
@@ -833,7 +835,7 @@ hint</strong>" forward, and the next three lessons will show how this intent tre
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The DSL buys three things: ① structure and control flow in Python (readable, debuggable); ② constrained decoding (select/regex/json) for valid, parseable output; ③ once the framework sees the structure, it auto-reuses shared-prefix KV (Lesson 7, RadixAttention) and shares parent prefixes across fork/join (Lesson 11). With a raw API you do all the string-building, parsing, history management, and caching yourself. The others are false.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The DSL buys three things: ① structure and control flow in Python (readable, debuggable); ② constrained decoding (select/regex/json) for valid, parseable output; ③ once the framework sees the structure, it auto-reuses shared-prefix KV (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention) and shares parent prefixes across fork/join (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>). With a raw API you do all the string-building, parsing, history management, and caching yourself. The others are false.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -846,7 +848,7 @@ hint</strong>" forward, and the next three lessons will show how this intent tre
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. gen doesn't execute immediately; it builds an IR node, and the nodes form a declarative 'tree of intent.' Because it's a tree, the framework sees the global structure before execution: which requests share a system prompt or few-shot prefix, which fork branches share the parent prefix. So the runtime computes a shared prefix once and reuses its KV (Lesson 7). That is the structured style's unique edge over a raw API. The others misstate the mechanism.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. gen doesn't execute immediately; it builds an IR node, and the nodes form a declarative 'tree of intent.' Because it's a tree, the framework sees the global structure before execution: which requests share a system prompt or few-shot prefix, which fork branches share the parent prefix. So the runtime computes a shared prefix once and reuses its KV (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>). That is the structured style's unique edge over a raw API. The others misstate the mechanism.</div></div></div>
   </details>
 </div>
 <div class="card spark">

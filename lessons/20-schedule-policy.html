@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -329,9 +331,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 答案藏在两个角色里——<span class="inline">SchedulePolicy</span> 负责<strong>排序</strong>（决定先后），
 <span class="inline">PrefillAdder</span> 负责<strong>限流</strong>（决定多少）。前者让“开头已经在缓存里”的请求插队，几乎白捡一份吞吐；
 后者拿着 token 预算和显存预算两把尺子，往这一拍的 prefill 批里一个一个塞，直到塞不下为止。
-调度器和缓存（第 7 课）就是这样<strong>协同设计</strong>的——这正是 SGLang 在真实流量下又快又省的秘密。
+调度器和缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）就是这样<strong>协同设计</strong>的——这正是 SGLang 在真实流量下又快又省的秘密。
 把这一课记牢一句话：<strong>先排序、再限流，排序为了喂饱缓存，限流为了不撑爆显存</strong>。这两步合起来，
-就是事件循环（第 18 课）里 <span class="inline">get_next_batch_to_run</span> 每一拍真正在做的“拍板”动作，也是整台引擎吞吐与延迟平衡的关键所在。
+就是事件循环（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>）里 <span class="inline">get_next_batch_to_run</span> 每一拍真正在做的“拍板”动作，也是整台引擎吞吐与延迟平衡的关键所在。
 </p>
 
 <div class="card analogy">
@@ -348,15 +350,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  一句话：<strong>策略决定顺序，预算决定数量</strong>。<span class="inline">get_next_batch_to_run</span>（第 18 课）每拍先调
+  一句话：<strong>策略决定顺序，预算决定数量</strong>。<span class="inline">get_next_batch_to_run</span>（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>）每拍先调
   <span class="inline">SchedulePolicy.calc_priority</span> 把<strong>等待队列就地排序</strong>，再交给 <span class="inline">PrefillAdder</span>
   在<strong>双预算</strong>下逐个 <span class="inline">add_one_req</span>，能塞则塞（必要时<strong>切块 chunk</strong>），塞满即止。
   排序的核心模式是<strong>缓存感知的 LPM</strong>：优先让 prompt 前缀已落在 RadixAttention 缓存里的请求先跑——
-  接纳它们几乎是“免费”的，因为那段注意力早算过了（第 7 课）。这一步直接抬高缓存命中率，而命中率正是 SGLang 真实速度的来源。
-  与此同时，调度器每拍都在<strong>“多接新 prefill”与“只推老 decode”之间权衡</strong>：前者增吞吐却抬高在跑请求的延迟，后者保延迟（第 8 课）。
+  接纳它们几乎是“免费”的，因为那段注意力早算过了（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）。这一步直接抬高缓存命中率，而命中率正是 SGLang 真实速度的来源。
+  与此同时，调度器每拍都在<strong>“多接新 prefill”与“只推老 decode”之间权衡</strong>：前者增吞吐却抬高在跑请求的延迟，后者保延迟（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。
   策略，就是这场天平每一拍的砝码。再把镜头拉远一点：这一课的两个角色，恰好对应一个朴素却深刻的工程直觉——
   <strong>系统的快，一半来自“把对的活排在前面”，一半来自“别一口吃成胖子”</strong>。排序解决前者，预算解决后者。
-  前面我们讲过的连续批处理（第 5 课）让批永远满载、RadixAttention（第 7 课）让共享前缀只算一次，
+  前面我们讲过的连续批处理（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）让批永远满载、RadixAttention（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）让共享前缀只算一次，
   而调度策略正是把这两件利器<strong>真正用起来</strong>的那只手：没有缓存感知排序，再好的缓存也喂不饱；没有双预算限流，再大的显存也会被一个超长请求撑爆。
 </div>
 
@@ -365,7 +367,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <span class="inline">SchedulePolicy</span> 把“先后”抽象成 <span class="mono">calc_priority</span> 一次调用：它就地<strong>重排等待队列</strong>。
 模式由工作负载决定——很多请求共享前缀时，<strong>缓存感知</strong>最划算；要公平简单，<strong>FCFS</strong>；要尊重业务优先级，<strong>priority</strong>。
 注意一个工程细节：当队列特别长（&gt;128）时，昂贵的前缀匹配会临时退回 FCFS，避免排序本身成为瓶颈。
-为什么排序如此关键？因为在连续批处理（第 5 课）里，每一拍能接纳的新请求名额有限，谁排在队首谁就先享受这有限的名额；
+为什么排序如此关键？因为在连续批处理（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）里，每一拍能接纳的新请求名额有限，谁排在队首谁就先享受这有限的名额；
 而把“前缀已缓存”的请求顶到队首，等于让缓存命中的红利<strong>尽早兑现</strong>——这是一笔几乎不花算力就能拿到的吞吐。
 反过来，如果排序时无视缓存，热点前缀的请求散落在队尾，命中红利就被白白拖延甚至漏掉。所以排序的本质，
 不是“对谁更公平”，而是“怎样让这一拍跑得最划算”。这也解释了为什么 SGLang 把缓存感知作为默认追求，
@@ -382,7 +384,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>能塞几个：PrefillAdder 在双预算下组批</h2>
 <p>
 排好序后，<span class="inline">PrefillAdder</span> 拿着两把尺子往这一拍的 prefill 批里塞请求：
-<strong>token 预算</strong>（<span class="mono">rem_total_tokens / rem_input_tokens</span>，别让这一步 prefill 太大，连着第 22 课的分块预填充），
+<strong>token 预算</strong>（<span class="mono">rem_total_tokens / rem_input_tokens</span>，别让这一步 prefill 太大，连着<a class="xref" href="22-chunked-prefill.html">第 22 课</a>的分块预填充），
 和<strong>显存预算</strong>（KV 池要有足够空闲槽，第 4/30 课——绝不接纳一个放不下的请求）。
 这里要厘清两者的“计量单位”：token 预算数的是<strong>这一拍要算多少个 token</strong>，它直接决定前向计算的规模与耗时；
 显存预算数的是<strong>这一拍要占多少个 KV 槽</strong>，它决定能不能把这些 token 的中间状态存下来。一个管“算得过来”，一个管“放得下”，
@@ -392,14 +394,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 这两把尺子缺一不可：只看 token 预算，可能算力够却没有 KV 槽存放它的缓存，结果接进来也跑不动；只看显存预算，
 可能槽位够却一拍吃进一个超长 prompt，把这一步 prefill 撑得过大、拖慢所有人。<span class="mono">_update_prefill_budget</span> 每接一个就同步扣减两个预算，
 保证“接纳”和“实际占用”始终对齐，绝不乐观超额。值得强调的是切块的妙处：当一个超长 prompt 装不进剩余 token 预算时，
-它不会被整条拒绝，而是只塞进能装下的前半段、剩下的下一拍续上（第 22 课），这样既不堵死循环，也不让长请求饿死。
+它不会被整条拒绝，而是只塞进能装下的前半段、剩下的下一拍续上（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>），这样既不堵死循环，也不让长请求饿死。
 </p>
 
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>取队首请求</h4><p>从已排序的等待队列拿下一条，算出它要吃多少 token：<span class="mono">cand_extend_input_len + max_new + page_size</span>。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>查 token 预算</h4><p>若 <span class="mono">total_tokens ≥ rem_total_tokens</span> 直接 <span class="mono">NO_TOKEN</span>；这把尺子限制单拍 prefill 的总量。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>查显存 / 槽位</h4><p>KV 池剩余不足（含 SWA 等约束）同样拒绝——绝不超额接纳一个放不下的请求。</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>整段或切块塞入</h4><p>预算够则整段加入 <span class="mono">can_run_list</span>；只够一半就 <strong>chunk</strong>，下一拍续上（第 22 课）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>整段或切块塞入</h4><p>预算够则整段加入 <span class="mono">can_run_list</span>；只够一半就 <strong>chunk</strong>，下一拍续上（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）。</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>更新预算，回到 1</h4><p><span class="mono">_update_prefill_budget</span> 扣减两个预算，循环直到塞满或队列空——这一拍的批就定了。</p></div></div>
 </div>
 
@@ -579,11 +581,11 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>策略排序 + 预算限流是两件事</strong>：<span class="mono">SchedulePolicy.calc_priority</span> 决定<strong>谁先跑</strong>（就地重排等待队列），<span class="mono">PrefillAdder</span> 决定<strong>塞几个</strong>（双预算下逐个 add_one_req）。</li>
-    <li><strong>三种模式各有所长</strong>：<span class="mono">LPM</span>（缓存感知）优化<strong>命中率</strong>、让前缀已缓存的请求插队（第 7 课）；<span class="mono">FCFS</span> 优化<strong>公平</strong>、简单可预测；<span class="mono">priority</span> 尊重业务优先级。负载多共享前缀时选 LPM。</li>
-    <li><strong>PrefillAdder 的两把尺子</strong>：<strong>token 预算</strong>（单拍 prefill 不过大，连第 22 课分块预填充）+ <strong>显存预算</strong>（KV 池有空闲槽，第 4/30 课）；任一耗尽即停，必要时<strong>切块</strong>。</li>
+    <li><strong>三种模式各有所长</strong>：<span class="mono">LPM</span>（缓存感知）优化<strong>命中率</strong>、让前缀已缓存的请求插队（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）；<span class="mono">FCFS</span> 优化<strong>公平</strong>、简单可预测；<span class="mono">priority</span> 尊重业务优先级。负载多共享前缀时选 LPM。</li>
+    <li><strong>PrefillAdder 的两把尺子</strong>：<strong>token 预算</strong>（单拍 prefill 不过大，连<a class="xref" href="22-chunked-prefill.html">第 22 课</a>分块预填充）+ <strong>显存预算</strong>（KV 池有空闲槽，第 4/30 课）；任一耗尽即停，必要时<strong>切块</strong>。</li>
     <li><strong>prefill 与 decode 的接纳张力</strong>：每拍要在“多接新 prefill 增吞吐、抬延迟”与“只推老 decode 保延迟”之间权衡（第 18/8 课），策略就是这场天平的砝码。</li>
     <li><strong>调度器与缓存协同设计</strong>：缓存感知排序直接抬高 RadixAttention 命中率，而命中率正是 SGLang 真实流量提速的根——排序的目标不是抽象公平，而是把缓存喂饱。一存一取、协同配合，缺任何一半命中率都上不去。</li>
-    <li><strong>记住一句话收尾</strong>：先排序、再限流；排序为了喂饱缓存、兑现命中红利，限流为了既满载又不撑爆显存。这一拍由谁组成、有多大，就此拍板，然后交给前向（第 24 课）去算。</li>
+    <li><strong>记住一句话收尾</strong>：先排序、再限流；排序为了喂饱缓存、兑现命中红利，限流为了既满载又不撑爆显存。这一拍由谁组成、有多大，就此拍板，然后交给前向（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）去算。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -598,7 +600,7 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。LPM 让“开头已缓存”的请求插队，相同前缀只算一次，直接抬高 RadixAttention 命中率，这是真实流量提速的来源（第 7 课）；FCFS 不看缓存、只按到达顺序，换来的是公平、简单与可预测的延迟。队列过长时 LPM 还会临时退回 FCFS 以免排序成瓶颈。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。LPM 让“开头已缓存”的请求插队，相同前缀只算一次，直接抬高 RadixAttention 命中率，这是真实流量提速的来源（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）；FCFS 不看缓存、只按到达顺序，换来的是公平、简单与可预测的延迟。队列过长时 LPM 还会临时退回 FCFS 以免排序成瓶颈。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -611,7 +613,7 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<code>add_one_req</code> 算出 <code>total_tokens = cand_extend_input_len + max_new + page_size</code>，若 <code>≥ rem_total_tokens</code> 就 <code>NO_TOKEN</code>；同时检查 KV 池空闲槽（第 4/30 课）。token 预算限制单拍 prefill 规模（第 22 课分块），显存预算保证放得下——两把尺子任一满即停手。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。<code>add_one_req</code> 算出 <code>total_tokens = cand_extend_input_len + max_new + page_size</code>，若 <code>≥ rem_total_tokens</code> 就 <code>NO_TOKEN</code>；同时检查 KV 池空闲槽（第 4/30 课）。token 预算限制单拍 prefill 规模（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>分块），显存预算保证放得下——两把尺子任一满即停手。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -631,7 +633,7 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用“聪明领位员（host / bouncer）”的类比讲清调度策略的两个动作：<strong>排序</strong>（<code>SchedulePolicy.calc_priority</code> 怎样按 LPM / FCFS / priority 就地重排等待队列）与<strong>限流</strong>（<code>PrefillAdder</code> 怎样在 token + 显存双预算下逐个 <code>add_one_req</code>、必要时切块）。再说明为什么“缓存感知排序”会直接抬高 RadixAttention 命中率，从而体现调度器与缓存的<strong>协同设计</strong>。</li>
-    <li>顺着这一课往后想：若你的线上流量里成千上万请求共享同一段超长系统提示，你会选 LPM 还是 FCFS？为什么？再结合 <code>PrefillAdder</code> 的双预算，说明一个超长 prompt 如何被 token 预算与<strong>分块预填充（第 22 课）</strong>挡住、避免它独占一拍把 decode 全堵死，并联系 KV 池容量（第 4/30 课）与吞吐 / 延迟（第 8 课）的权衡。</li>
+    <li>顺着这一课往后想：若你的线上流量里成千上万请求共享同一段超长系统提示，你会选 LPM 还是 FCFS？为什么？再结合 <code>PrefillAdder</code> 的双预算，说明一个超长 prompt 如何被 token 预算与<strong>分块预填充（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）</strong>挡住、避免它独占一拍把 decode 全堵死，并联系 KV 池容量（第 4/30 课）与吞吐 / 延迟（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）的权衡。</li>
   </ul>
 </div>
 </div></div>
@@ -642,7 +644,7 @@ This lesson answers the two most critical questions of every step: with so many 
 The answers live in two roles—<span class="inline">SchedulePolicy</span> does the <strong>ordering</strong> (who first),
 <span class="inline">PrefillAdder</span> does the <strong>throttling</strong> (how many). The former lets requests whose prefix is already in cache jump the line, harvesting nearly-free throughput;
 the latter holds two yardsticks—a token budget and a memory budget—and stuffs requests into this step's prefill batch one by one until nothing more fits.
-The scheduler and the cache (Lesson 7) are <strong>co-designed</strong> this way—the secret behind SGLang being fast and cheap under real traffic.
+The scheduler and the cache (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) are <strong>co-designed</strong> this way—the secret behind SGLang being fast and cheap under real traffic.
 </p>
 
 <div class="card analogy">
@@ -656,12 +658,12 @@ The scheduler and the cache (Lesson 7) are <strong>co-designed</strong> this way
 
 <div class="card macro">
   <div class="tag">🌍 The big picture</div>
-  In one line: <strong>policy decides order, budget decides count</strong>. <span class="inline">get_next_batch_to_run</span> (Lesson 18) each beat first calls
+  In one line: <strong>policy decides order, budget decides count</strong>. <span class="inline">get_next_batch_to_run</span> (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) each beat first calls
   <span class="inline">SchedulePolicy.calc_priority</span> to <strong>reorder the waiting queue in place</strong>, then hands off to <span class="inline">PrefillAdder</span>
   to <span class="inline">add_one_req</span> one by one under a <strong>double budget</strong>, admitting where it fits (<strong>chunking</strong> if needed) and stopping when full.
   The core ordering mode is <strong>cache-aware LPM</strong>: prefer requests whose prompt prefix already sits in the RadixAttention cache—
-  admitting them is nearly "free" because that attention was already computed (Lesson 7). This step directly raises the cache hit rate, and hit rate is where SGLang's real speed comes from.
-  Meanwhile the scheduler each beat <strong>balances "admit new prefills" vs "just decode"</strong>: the former grows throughput but raises latency for running decodes, the latter keeps latency low (Lesson 8).
+  admitting them is nearly "free" because that attention was already computed (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>). This step directly raises the cache hit rate, and hit rate is where SGLang's real speed comes from.
+  Meanwhile the scheduler each beat <strong>balances "admit new prefills" vs "just decode"</strong>: the former grows throughput but raises latency for running decodes, the latter keeps latency low (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>).
   The policy is the weight on this scale, beat after beat.
 </div>
 
@@ -682,7 +684,7 @@ Note one engineering detail: when the queue is very long (&gt;128), the expensiv
 <h2>How many fit: PrefillAdder builds a batch under a double budget</h2>
 <p>
 Once ordered, <span class="inline">PrefillAdder</span> holds two yardsticks and stuffs requests into this beat's prefill batch:
-a <strong>token budget</strong> (<span class="mono">rem_total_tokens / rem_input_tokens</span>, keep this prefill step from getting too big—tied to chunked prefill, Lesson 22),
+a <strong>token budget</strong> (<span class="mono">rem_total_tokens / rem_input_tokens</span>, keep this prefill step from getting too big—tied to chunked prefill, <a class="xref" href="22-chunked-prefill.html">Lesson 22</a>),
 and a <strong>memory budget</strong> (enough free KV-pool slots, Lessons 4/30—never admit a request you can't fit).
 <span class="mono">add_one_req</span> tries each in turn: add it whole if it fits, otherwise <strong>chunk</strong> it; once either budget is exhausted it returns <span class="mono">NO_TOKEN / OTHER</span> and stops.
 </p>
@@ -691,7 +693,7 @@ and a <strong>memory budget</strong> (enough free KV-pool slots, Lessons 4/30—
   <div class="step"><div class="num">1</div><div class="sc"><h4>Take the head request</h4><p>Pull the next req off the sorted waiting queue and compute its token need: <span class="mono">cand_extend_input_len + max_new + page_size</span>.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Check the token budget</h4><p>If <span class="mono">total_tokens ≥ rem_total_tokens</span>, return <span class="mono">NO_TOKEN</span>; this yardstick caps the total prefill per beat.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Check memory / slots</h4><p>Insufficient KV-pool room (incl. SWA constraints) also rejects—never over-admit a request that can't fit.</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>Add whole or chunk</h4><p>If the budget allows, add the whole req to <span class="mono">can_run_list</span>; if only half fits, <strong>chunk</strong> it and continue next beat (Lesson 22).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Add whole or chunk</h4><p>If the budget allows, add the whole req to <span class="mono">can_run_list</span>; if only half fits, <strong>chunk</strong> it and continue next beat (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>).</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>Update budget, back to 1</h4><p><span class="mono">_update_prefill_budget</span> deducts both budgets; loop until full or the queue empties—this beat's batch is then fixed.</p></div></div>
 </div>
 
@@ -858,8 +860,8 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>Policy ordering and budget throttling are two things</strong>: <span class="mono">SchedulePolicy.calc_priority</span> decides <strong>who runs first</strong> (reorders the waiting queue in place), <span class="mono">PrefillAdder</span> decides <strong>how many fit</strong> (add_one_req under a double budget).</li>
-    <li><strong>Three modes, each with a strength</strong>: <span class="mono">LPM</span> (cache-aware) optimizes <strong>hit rate</strong> by bumping prefix-cached reqs ahead (Lesson 7); <span class="mono">FCFS</span> optimizes <strong>fairness</strong>, simple and predictable; <span class="mono">priority</span> honors business priority. Pick LPM when the workload shares prefixes.</li>
-    <li><strong>PrefillAdder's two yardsticks</strong>: a <strong>token budget</strong> (keep a beat's prefill from getting too big, tied to chunked prefill in Lesson 22) + a <strong>memory budget</strong> (free KV-pool slots, Lessons 4/30); stop when either is exhausted, <strong>chunk</strong> if needed.</li>
+    <li><strong>Three modes, each with a strength</strong>: <span class="mono">LPM</span> (cache-aware) optimizes <strong>hit rate</strong> by bumping prefix-cached reqs ahead (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>); <span class="mono">FCFS</span> optimizes <strong>fairness</strong>, simple and predictable; <span class="mono">priority</span> honors business priority. Pick LPM when the workload shares prefixes.</li>
+    <li><strong>PrefillAdder's two yardsticks</strong>: a <strong>token budget</strong> (keep a beat's prefill from getting too big, tied to chunked prefill in <a class="xref" href="22-chunked-prefill.html">Lesson 22</a>) + a <strong>memory budget</strong> (free KV-pool slots, Lessons 4/30); stop when either is exhausted, <strong>chunk</strong> if needed.</li>
     <li><strong>The prefill-vs-decode admission tension</strong>: each beat balances "admit new prefills to grow throughput but raise latency" vs "just decode to keep latency low" (Lessons 18/8); the policy is the weight on this scale.</li>
     <li><strong>Scheduler and cache are co-designed</strong>: cache-aware ordering directly raises the RadixAttention hit rate, and that hit rate is the root of SGLang's real-traffic speedup—ordering's goal is not abstract fairness but feeding the cache full.</li>
   </ul>
@@ -876,7 +878,7 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. LPM lets cached-opening requests jump ahead so a shared prefix is computed once, directly raising the RadixAttention hit rate—the source of real-traffic speedups (Lesson 7); FCFS ignores the cache and goes by arrival, buying fairness, simplicity and predictable latency. On long queues LPM even falls back to FCFS so sorting never becomes the bottleneck.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. LPM lets cached-opening requests jump ahead so a shared prefix is computed once, directly raising the RadixAttention hit rate—the source of real-traffic speedups (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>); FCFS ignores the cache and goes by arrival, buying fairness, simplicity and predictable latency. On long queues LPM even falls back to FCFS so sorting never becomes the bottleneck.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -889,7 +891,7 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <code>add_one_req</code> computes <code>total_tokens = cand_extend_input_len + max_new + page_size</code>; if <code>≥ rem_total_tokens</code> it returns <code>NO_TOKEN</code>, and it also checks free KV-pool slots (Lessons 4/30). The token budget caps the per-beat prefill size (chunking, Lesson 22), the memory budget guarantees it fits—whichever yardstick fills first stops admission.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. <code>add_one_req</code> computes <code>total_tokens = cand_extend_input_len + max_new + page_size</code>; if <code>≥ rem_total_tokens</code> it returns <code>NO_TOKEN</code>, and it also checks free KV-pool slots (Lessons 4/30). The token budget caps the per-beat prefill size (chunking, <a class="xref" href="22-chunked-prefill.html">Lesson 22</a>), the memory budget guarantees it fits—whichever yardstick fills first stops admission.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -909,7 +911,7 @@ total_tokens = cand_extend_input_len + max_new + self.page_size
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>Using the 'smart host / bouncer' analogy, explain the two actions of the schedule policy: <strong>ordering</strong> (how <code>SchedulePolicy.calc_priority</code> reorders the waiting queue in place by LPM / FCFS / priority) and <strong>throttling</strong> (how <code>PrefillAdder</code> calls <code>add_one_req</code> one by one under the token + memory double budget, chunking when needed). Then explain why cache-aware ordering directly raises the RadixAttention hit rate, illustrating the scheduler-cache <strong>co-design</strong>.</li>
-    <li>Thinking forward: if your production traffic has thousands of requests sharing one very long system prompt, would you pick LPM or FCFS, and why? Then, using <code>PrefillAdder</code>'s double budget, explain how a very long prompt is held back by the token budget and <strong>chunked prefill (Lesson 22)</strong>—so it can't monopolize a beat and clog all decodes—connecting it to KV-pool capacity (Lessons 4/30) and the throughput/latency trade-off (Lesson 8).</li>
+    <li>Thinking forward: if your production traffic has thousands of requests sharing one very long system prompt, would you pick LPM or FCFS, and why? Then, using <code>PrefillAdder</code>'s double budget, explain how a very long prompt is held back by the token budget and <strong>chunked prefill (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>)</strong>—so it can't monopolize a beat and clog all decodes—connecting it to KV-pool capacity (Lessons 4/30) and the throughput/latency trade-off (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>).</li>
   </ul>
 </div>
 </div></div>

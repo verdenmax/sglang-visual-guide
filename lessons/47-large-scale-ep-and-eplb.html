@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -323,7 +325,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <h1><span class="lang-zh">大规模 EP 与 EPLB</span><span class="lang-en">Large-scale EP &amp; EPLB</span></h1>
   </div>
   <div class="lang-zh">
-<p class="lead">在第34课我们认识了 MoE：路由器为每个 token 挑选 top-k 个专家；在第46课我们看到专家并行（EP）把成百上千个专家分散到许多张 GPU 上。但真实流量并不是均匀的——有的专家天天爆满，有的几乎闲置。本课要讲的，就是当 EP 遇到"忙闲不均"时会发生什么，以及 SGLang 用 <span class="mono">EPLBManager</span>（专家并行负载均衡器）如何把这块"塞车"的瓶颈拉平。</p>
+<p class="lead">在<a class="xref" href="34-moe-layer.html">第34课</a>我们认识了 MoE：路由器为每个 token 挑选 top-k 个专家；在<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>我们看到专家并行（EP）把成百上千个专家分散到许多张 GPU 上。但真实流量并不是均匀的——有的专家天天爆满，有的几乎闲置。本课要讲的，就是当 EP 遇到"忙闲不均"时会发生什么，以及 SGLang 用 <span class="mono">EPLBManager</span>（专家并行负载均衡器）如何把这块"塞车"的瓶颈拉平。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div>
 <p>想象一座大型连锁餐厅有 256 个窗口（专家），分布在 8 个厨房（GPU）里，每个厨房放 32 个窗口。顾客（token）进门后，门口的引导员（路由器）按菜品把每位顾客指派给最合适的 top-k 个窗口。问题是：网红爆款"麻辣烫窗口"门口排起长龙，而"白粥窗口"几乎没人。偏偏餐厅有个铁规矩——<strong>所有厨房必须同时上齐菜，最慢的那个厨房没出完，全场都得干等</strong>。于是只要某个厨房里挤着一个爆款窗口，其余 7 个厨房的厨师全都袖手旁观，整体吞吐被这一个热点活活拖垮。</p>
@@ -333,7 +335,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
 <p>EP 解决的是"专家太多放不下一张卡"的容量问题，但它本身不解决"负载倾斜"的效率问题。EP 的一步 all-to-all 是一道同步墙：<strong>必须等最忙的那张卡算完，这一步才能结束</strong>。只要负载倾斜，少数热点专家所在的 GPU 就成为木桶最短的那块板，其它 GPU 白白空转。EPLB 的核心思想是：负载不是固定的，但可以被<strong>测量</strong>和<strong>重新放置</strong>。它周期性地量出每个专家收到多少 token，再解一个新的"专家→GPU"摆放方案把负载摊平——必要时复制热门专家。对 DeepSeek 这种几百专家规模的 MoE 服务，这一步不是锦上添花，而是能不能跑得起来的关键。</p>
-<p>把这三课串起来看会更清楚：第34课讲的是 MoE 与 FusedMoE 路由——"一个 token 该交给哪些专家"；第46课讲的是 EP 与 all-to-all——"专家放在不同 GPU 上、token 该怎么跨卡传送"；本课要补上的，是"当传送的负载不均时，怎么把它重新摊平"。三者层层递进：有了 MoE 才有专家，有了 EP 才需要跨卡，有了倾斜才需要均衡。EPLB 站在最上层，把前两课搭好的舞台真正用满。理解了这条线，你就明白为什么大规模 MoE 推理是"路由 + 并行 + 均衡"三件事缺一不可的系统工程。</p>
+<p>把这三课串起来看会更清楚：<a class="xref" href="34-moe-layer.html">第34课</a>讲的是 MoE 与 FusedMoE 路由——"一个 token 该交给哪些专家"；<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>讲的是 EP 与 all-to-all——"专家放在不同 GPU 上、token 该怎么跨卡传送"；本课要补上的，是"当传送的负载不均时，怎么把它重新摊平"。三者层层递进：有了 MoE 才有专家，有了 EP 才需要跨卡，有了倾斜才需要均衡。EPLB 站在最上层，把前两课搭好的舞台真正用满。理解了这条线，你就明白为什么大规模 MoE 推理是"路由 + 并行 + 均衡"三件事缺一不可的系统工程。</p>
 </div>
 
 <h2>为什么 EP 的负载天然倾斜？</h2>
@@ -456,8 +458,8 @@ class ExpertLocationMetadata:
         ...</pre></div>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
-<li>MoE 路由天然倾斜：少数热点专家被大量 token 选中，长尾分布是固有特性（接第34课 FusedMoE 路由）。</li>
-<li>EP 的 all-to-all 是同步墙：整步耗时由<strong>最忙的 rank</strong>决定，热点专家所在 GPU 拖垮全场（接第46课 EP/all-to-all）。</li>
+<li>MoE 路由天然倾斜：少数热点专家被大量 token 选中，长尾分布是固有特性（接<a class="xref" href="34-moe-layer.html">第34课</a> FusedMoE 路由）。</li>
+<li>EP 的 all-to-all 是同步墙：整步耗时由<strong>最忙的 rank</strong>决定，热点专家所在 GPU 拖垮全场（接<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a> EP/all-to-all）。</li>
 <li><strong>EPLB</strong> 周期性<strong>测量</strong>每专家负载，再<strong>重排</strong>专家→GPU 放置把负载摊平，必要时<strong>复制热门专家</strong>分流。</li>
 <li>SGLang 的 <span class="mono">EPLBManager</span>：<span class="mono">on_forward_pass_end()</span> 每步累加统计，<span class="mono">rebalance()</span> 周期性解新放置并更新 <span class="mono">expert_location</span>。</li>
 <li>这是 DeepSeek 级 MoE 服务跑得起来的关键；其"可插拔、为规模而设计"的思路在第61/62课会继续展开。</li>
@@ -474,7 +476,7 @@ class ExpertLocationMetadata:
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。EP 的一步 all-to-all 是一道<strong>集合同步</strong>（接第46课）：所有 rank 必须在同一屏障会合，整步墙时间由<strong>最忙的 rank</strong>决定。MoE 路由天然倾斜（接第34课），热点专家被大量 token 选中，若它们集中在某几张卡，这些卡每步处理的 token 远超平均，其余 GPU 空转。裸 EP 因此浪费算力。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。EP 的一步 all-to-all 是一道<strong>集合同步</strong>（接<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>）：所有 rank 必须在同一屏障会合，整步墙时间由<strong>最忙的 rank</strong>决定。MoE 路由天然倾斜（接<a class="xref" href="34-moe-layer.html">第34课</a>），热点专家被大量 token 选中，若它们集中在某几张卡，这些卡每步处理的 token 远超平均，其余 GPU 空转。裸 EP 因此浪费算力。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -506,13 +508,13 @@ class ExpertLocationMetadata:
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用你自己的话解释为什么裸 EP 会浪费算力：MoE 路由的长尾分布（第34课）如何制造热点专家，而 EP 的 all-to-all 同步墙（第46课）如何让整步耗时由最忙的 rank 决定；再说明为什么仅仅“把专家在 GPU 间换位置”不足以解决问题，而必须<strong>复制热门专家</strong>才能把一个不可分割的热点切成可并行的多份。</li>
+    <li>用你自己的话解释为什么裸 EP 会浪费算力：MoE 路由的长尾分布（<a class="xref" href="34-moe-layer.html">第34课</a>）如何制造热点专家，而 EP 的 all-to-all 同步墙（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>）如何让整步耗时由最忙的 rank 决定；再说明为什么仅仅“把专家在 GPU 间换位置”不足以解决问题，而必须<strong>复制热门专家</strong>才能把一个不可分割的热点切成可并行的多份。</li>
     <li>描述 <span class='mono'>EPLBManager</span> 的完整循环：<span class='mono'>on_forward_pass_end()</span> 如何经由专家分布记录器累加每专家负载、<span class='mono'>rebalance()</span> 如何周期性求解新的专家→GPU 放置并写回 <span class='mono'>expert_location</span>、后续步骤如何按这张新地图路由；解释为什么把“高频轻量的采集”与“低频较重的重排”解耦很关键，并前瞻第61/62课“可插拔、为规模而设计”的主题。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
-<p class="lead">In Lesson 34 we met MoE: the router picks top-k experts for each token; in Lesson 46 we saw expert parallelism (EP) spread hundreds of experts across many GPUs. But real traffic is not uniform—some experts are slammed every day, others sit nearly idle. This lesson is about what happens when EP meets that imbalance, and how SGLang's <span class="mono">EPLBManager</span> (Expert-Parallel Load Balancer) flattens that traffic-jam bottleneck.</p>
+<p class="lead">In <a class="xref" href="34-moe-layer.html">Lesson 34</a> we met MoE: the router picks top-k experts for each token; in <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> we saw expert parallelism (EP) spread hundreds of experts across many GPUs. But real traffic is not uniform—some experts are slammed every day, others sit nearly idle. This lesson is about what happens when EP meets that imbalance, and how SGLang's <span class="mono">EPLBManager</span> (Expert-Parallel Load Balancer) flattens that traffic-jam bottleneck.</p>
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div>
 <p>Picture a huge restaurant chain with 256 counters (experts) spread across 8 kitchens (GPUs), 32 counters per kitchen. Customers (tokens) walk in and a host (the router) assigns each to the most suitable top-k counters by dish. The problem: the viral "spicy hotpot" counter has a line out the door, while the "plain congee" counter sees almost no one. And the restaurant has an iron rule—<strong>all kitchens must serve their dishes at the same time; until the slowest kitchen is done, the whole floor waits</strong>. So if one kitchen happens to hold a viral counter, the cooks in the other 7 kitchens stand idle, and overall throughput is dragged down by that single hotspot.</p>
@@ -522,7 +524,7 @@ class ExpertLocationMetadata:
 
 <div class="card macro"><div class="tag">🌍 The big picture</div>
 <p>EP solves the capacity problem—too many experts to fit on one card—but it does not by itself solve the efficiency problem of load skew. EP's per-step all-to-all is a synchronization wall: <strong>the step cannot finish until the busiest card finishes</strong>. Whenever load is skewed, the GPUs holding the few hot experts become the shortest stave of the barrel, and the other GPUs spin idle. EPLB's core idea is that load is not fixed—it can be <strong>measured</strong> and <strong>re-placed</strong>. It periodically measures how many tokens each expert received, then solves a new expert→GPU placement that flattens the load—replicating hot experts when needed. For DeepSeek-scale MoE serving with hundreds of experts, this is not a nice-to-have; it is what makes serving feasible at all.</p>
-<p>Stringing the three lessons together makes it clearer: Lesson 34 is about MoE and FusedMoE routing—"which experts should a token go to"; Lesson 46 is about EP and all-to-all—"experts live on different GPUs, so how do tokens travel across cards"; this lesson adds the missing piece—"when the transported load is uneven, how do we flatten it back out." The three build on each other: MoE gives us experts, EP makes cross-card transport necessary, and skew makes balancing necessary. EPLB sits at the top, finally making full use of the stage the first two lessons set up. Grasp this line and you see why large-scale MoE inference is a systems effort where routing + parallelism + balancing are all indispensable.</p>
+<p>Stringing the three lessons together makes it clearer: <a class="xref" href="34-moe-layer.html">Lesson 34</a> is about MoE and FusedMoE routing—"which experts should a token go to"; <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> is about EP and all-to-all—"experts live on different GPUs, so how do tokens travel across cards"; this lesson adds the missing piece—"when the transported load is uneven, how do we flatten it back out." The three build on each other: MoE gives us experts, EP makes cross-card transport necessary, and skew makes balancing necessary. EPLB sits at the top, finally making full use of the stage the first two lessons set up. Grasp this line and you see why large-scale MoE inference is a systems effort where routing + parallelism + balancing are all indispensable.</p>
 </div>
 
 <h2>Why is EP load inherently skewed?</h2>
@@ -645,8 +647,8 @@ class ExpertLocationMetadata:
         ...</pre></div>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
-<li>MoE routing is inherently skewed: a few hot experts are chosen by many tokens; the long-tail distribution is intrinsic (ties to Lesson 34 FusedMoE routing).</li>
-<li>EP's all-to-all is a sync wall: the step time is set by the <strong>busiest rank</strong>, and the GPU holding hot experts drags down the whole floor (ties to Lesson 46 EP/all-to-all).</li>
+<li>MoE routing is inherently skewed: a few hot experts are chosen by many tokens; the long-tail distribution is intrinsic (ties to <a class="xref" href="34-moe-layer.html">Lesson 34</a> FusedMoE routing).</li>
+<li>EP's all-to-all is a sync wall: the step time is set by the <strong>busiest rank</strong>, and the GPU holding hot experts drags down the whole floor (ties to <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> EP/all-to-all).</li>
 <li><strong>EPLB</strong> periodically <strong>measures</strong> per-expert load, then <strong>rebalances</strong> the expert→GPU placement to flatten load, <strong>replicating hot experts</strong> to split traffic when needed.</li>
 <li>SGLang's <span class="mono">EPLBManager</span>: <span class="mono">on_forward_pass_end()</span> accumulates stats each step; <span class="mono">rebalance()</span> periodically solves a new placement and updates <span class="mono">expert_location</span>.</li>
 <li>This is what makes DeepSeek-scale MoE serving feasible; its "pluggable, designed-for-scale" themes continue in Lessons 61/62.</li>
@@ -663,7 +665,7 @@ class ExpertLocationMetadata:
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. EP's per-step all-to-all is a <strong>collective synchronization</strong> (ties to Lesson 46): all ranks must meet at the same barrier, so the step's wall time is set by the <strong>busiest rank</strong>. MoE routing is inherently skewed (Lesson 34); hot experts are chosen by many tokens, and if they cluster on a few cards, those cards process far more tokens per step than average while the rest spin idle. Raw EP thus wastes compute.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. EP's per-step all-to-all is a <strong>collective synchronization</strong> (ties to <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>): all ranks must meet at the same barrier, so the step's wall time is set by the <strong>busiest rank</strong>. MoE routing is inherently skewed (<a class="xref" href="34-moe-layer.html">Lesson 34</a>); hot experts are chosen by many tokens, and if they cluster on a few cards, those cards process far more tokens per step than average while the rest spin idle. Raw EP thus wastes compute.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -695,7 +697,7 @@ class ExpertLocationMetadata:
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>In your own words, explain why raw EP wastes compute: how MoE routing's long-tail distribution (Lesson 34) creates hot experts, and how EP's all-to-all sync wall (Lesson 46) makes the step time depend on the busiest rank; then explain why merely "swapping experts between GPUs" is not enough and why <strong>replicating hot experts</strong> is necessary to cut an indivisible hotspot into parallelizable copies.</li>
+    <li>In your own words, explain why raw EP wastes compute: how MoE routing's long-tail distribution (<a class="xref" href="34-moe-layer.html">Lesson 34</a>) creates hot experts, and how EP's all-to-all sync wall (<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>) makes the step time depend on the busiest rank; then explain why merely "swapping experts between GPUs" is not enough and why <strong>replicating hot experts</strong> is necessary to cut an indivisible hotspot into parallelizable copies.</li>
     <li>Describe the full <span class='mono'>EPLBManager</span> loop: how <span class='mono'>on_forward_pass_end()</span> accumulates per-expert load via the expert-distribution recorder, how <span class='mono'>rebalance()</span> periodically solves a new expert→GPU placement and writes it back to <span class='mono'>expert_location</span>, and how subsequent steps route against this new map; explain why decoupling "high-frequency lightweight collection" from "low-frequency heavier rebalancing" is essential, and forward-ref Lessons 61/62's "pluggable, designed-for-scale" themes.</li>
   </ul>
 </div>

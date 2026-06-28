@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -341,9 +343,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
   一句话：<strong>同一个意图树，既能"执行"也能"分析"</strong>。<strong>解释模式</strong>是常规路径——<span class="inline">StreamExecutor</span> 接过函数，
-  <strong>逐个表达式</strong>地驱动：遇到固定文字就拼进状态，遇到 <strong>gen / select</strong> 就<strong>调用后端</strong>（第 12 课），把模型吐出的内容<strong>流式</strong>接到文本末尾，并存进命名变量；
+  <strong>逐个表达式</strong>地驱动：遇到固定文字就拼进状态，遇到 <strong>gen / select</strong> 就<strong>调用后端</strong>（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>），把模型吐出的内容<strong>流式</strong>接到文本末尾，并存进命名变量；
   两次 gen 之间的 <strong>if / for 就是普通 Python</strong>，照常运行。<strong>追踪模式</strong>是编译/分析路径——<span class="inline">trace_program</span> 用一个<strong>假后端</strong>把函数<strong>符号化</strong>走一遍，
-  <strong>完全不碰模型</strong>，只为搞清<strong>程序的结构</strong>，并<strong>抽出开头那段恒定的前缀</strong>（static prefix），交给运行时<strong>预计算、缓存、共享</strong>（呼应第 7 课 RadixAttention）。
+  <strong>完全不碰模型</strong>，只为搞清<strong>程序的结构</strong>，并<strong>抽出开头那段恒定的前缀</strong>（static prefix），交给运行时<strong>预计算、缓存、共享</strong>（呼应<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention）。
   <strong>一个回答"现在产出什么"，一个回答"这程序长什么形状"</strong>——这就是解释器与 tracer 的分工。
 </div>
 
@@ -394,7 +396,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>这里有个容易被忽略但很重要的细节：StreamExecutor 把活儿放在<strong>后台线程</strong>里跑。为什么要这样？因为这给了解释器<strong>"并发"的可能</strong>——当两个 gen <strong>彼此没有数据依赖</strong>
 （第二个 gen 不需要读第一个 gen 的结果）时，执行器可以<strong>同时把它们都提交给后端</strong>，而不必傻等第一个算完再算第二个。你函数里写的 <span class="mono">s += …</span> 之所以不会立刻阻塞，
 正是因为它只是<strong>把表达式投进队列</strong>，真正的等待发生在你<strong>读取结果</strong>（<span class="mono">s["name"]</span>）的那一刻——这时如果结果还没好，才会<strong>阻塞等待对应的事件</strong>。
-这套"<strong>提交即返回、读取才等待</strong>"的设计，正是第 11 课 fork/join 能把多分支真正<strong>并行跑起来</strong>的地基。</p>
+这套"<strong>提交即返回、读取才等待</strong>"的设计，正是<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a> fork/join 能把多分支真正<strong>并行跑起来</strong>的地基。</p>
 
 <div class="fig">
   <svg viewBox="0 0 760 300" role="img" aria-label="并行执行 fork 分支：StreamExecutor 运行中，fork 把数据流分成 3 条并发分支（并行车道），每条都调用后端，并共享同一段父前缀">
@@ -427,7 +429,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">程序</span><span class="name">@sgl.function 函数</span></div><div class="ld">你写的意图树：role 消息 + <span class="mono">gen/select</span> 槽 + 普通 Python 控制流。被调用时交给执行器。</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">驱动</span><span class="name">StreamExecutor</span></div><div class="ld">后台线程逐个 <span class="mono">_execute</span> 表达式：固定文字直接拼接，<span class="mono">gen/select</span> 则向后端发起调用。</div></div>
-  <div class="layer l-main"><div class="lh"><span class="badge">执行</span><span class="name">Backend（第 12 课）</span></div><div class="ld">真正产出 token 的地方：本地运行时或 OpenAI 兼容接口；<span class="mono">gen</span> 可<strong>流式</strong>返回。</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">执行</span><span class="name">Backend（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>）</span></div><div class="ld">真正产出 token 的地方：本地运行时或 OpenAI 兼容接口；<span class="mono">gen</span> 可<strong>流式</strong>返回。</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">状态</span><span class="name">ProgramState s</span></div><div class="ld">累积 <span class="mono">text_</span>（完整文本/前缀）、<span class="mono">messages_</span>（role 消息）、<span class="mono">variables</span>（命名结果，<span class="mono">s["name"]</span> 从这里取）。</div></div>
 </div>
 
@@ -435,7 +437,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>追踪是另一条路。<span class="inline">trace_program</span> / <span class="inline">extract_prefix_by_tracing</span> 会建一个 <strong>TracerProgramState</strong> 和一个<strong>假后端（BaseBackend）</strong>，
 然后<strong>符号化</strong>地把你的函数走一遍——<strong>它根本不调用模型</strong>。它要的不是"答案"，而是<strong>程序的骨架</strong>：依次出现了哪些固定文字、哪些 gen、哪些 select、哪里 fork。
 最有用的产物是<strong>静态前缀（static prefix）</strong>：从头开始、<strong>直到第一个依赖模型输出的地方为止</strong>，那一整段<strong>恒定不变的开头提示</strong>。源码里就是把开头连续的 <span class="mono">SglConstantText</span> 拼起来，
-<strong>一遇到 gen 这种"要真算才知道"的节点就停</strong>。抽出这段前缀，运行时就能<strong>只算一次、反复复用它的 KV</strong>（第 7 课），或据此<strong>编译/优化</strong>整个程序。</p>
+<strong>一遇到 gen 这种"要真算才知道"的节点就停</strong>。抽出这段前缀，运行时就能<strong>只算一次、反复复用它的 KV</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>），或据此<strong>编译/优化</strong>整个程序。</p>
 
 <p>为什么"<strong>遇到 gen 就停</strong>"是必须的？因为静态前缀的全部价值，在于它<strong>对每一次调用都一模一样</strong>——只有这样，运行时才敢把它<strong>算一次然后到处复用</strong>。
 而 gen 的输出是<strong>模型现场生成</strong>的，每次都可能不同，一旦把它算进前缀，前缀就<strong>不再恒定</strong>、复用也就无从谈起。所以 tracer 像一个<strong>谨慎的侦察兵</strong>：
@@ -443,7 +445,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 当符号化走到一个<strong>无法在不调用模型时确定</strong>的位置，追踪就<strong>体面地停下</strong>，把已经看清的结构与前缀<strong>交出来</strong>即可。</p>
 
 <div class="cols">
-  <div class="col"><h4>解释（interpret）· 常规路径</h4><p><strong>现在就执行</strong>。由 <span class="mono">StreamExecutor</span> 逐步驱动，<strong>真的调用后端</strong>生成每个 gen，可<strong>流式</strong>输出；<strong>会改变状态</strong>——text_、variables 一步步长出来。无数据依赖时还能<strong>并发跑多个 gen</strong>（为第 11 课 fork/join 铺路）。<strong>目的：产出结果。</strong></p></div>
+  <div class="col"><h4>解释（interpret）· 常规路径</h4><p><strong>现在就执行</strong>。由 <span class="mono">StreamExecutor</span> 逐步驱动，<strong>真的调用后端</strong>生成每个 gen，可<strong>流式</strong>输出；<strong>会改变状态</strong>——text_、variables 一步步长出来。无数据依赖时还能<strong>并发跑多个 gen</strong>（为<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a> fork/join 铺路）。<strong>目的：产出结果。</strong></p></div>
   <div class="col"><h4>追踪（trace）· 编译/分析路径</h4><p><strong>先看懂形状</strong>。由 <span class="mono">trace_program</span> 用假后端<strong>符号化</strong>走一遍，<strong>完全不碰模型</strong>、不产出真实 token；只<strong>发现结构、抽出静态前缀</strong>，遇到依赖模型结果的节点<strong>就停</strong>。<strong>目的：理解 + 预计算共享前缀，便于缓存与优化。</strong></p></div>
 </div>
 
@@ -454,7 +456,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>再换个角度想：解释和追踪其实是<strong>同一棵意图树的两种"读法"</strong>。同一段程序，解释器把它当成"<strong>要立刻照办的指令</strong>"，一条条执行、一步步落实；
 而 tracer 把它当成"<strong>有待研究的图纸</strong>"，只看走向、不动真格。正因为 SGLang 程序是<strong>声明式</strong>的（gen 不立即执行，只构造 IR 节点），框架才有底气在<strong>真正开跑之前</strong>，
 先用追踪把它<strong>端详一遍</strong>：哪段开头是恒定的、哪些请求会撞上同一段前缀、哪些分支可以并行。这种"<strong>先看后跑</strong>"的能力，是裸 API 那种"<strong>发一条、收一条、彼此看不见</strong>"的写法<strong>永远拿不到</strong>的——
-这也正好接上了第 9 课的结论：<strong>把程序写成结构化的意图树，本身就是在给运行时喂优化线索</strong>。</p>
+这也正好接上了<a class="xref" href="09-structured-generation-language.html">第 9 课</a>的结论：<strong>把程序写成结构化的意图树，本身就是在给运行时喂优化线索</strong>。</p>
 
 <table class="t">
   <tr><th>维度</th><th>解释 interpret</th><th>追踪 trace</th></tr>
@@ -473,7 +475,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>把状态想成"<strong>一条不断生长的对话录</strong>"会很贴切：你每拼一句提示，<span class="mono">text_</span> 就<strong>长一截</strong>、<span class="mono">messages_</span> 就<strong>多一条</strong>；
 每让模型填一个空，结果既<strong>接到 text_ 末尾</strong>（成为后续生成的上下文），又<strong>单独按名字存一份</strong>到 variables（方便你随手取用）。这就是为什么同一段程序里，
-<strong>越往后的 gen，看到的前缀越长</strong>——因为前面所有的提示与回答都已经<strong>沉淀在 text_ 里</strong>了。理解了这一点，你就明白第 7 课的前缀复用为何如此自然：
+<strong>越往后的 gen，看到的前缀越长</strong>——因为前面所有的提示与回答都已经<strong>沉淀在 text_ 里</strong>了。理解了这一点，你就明白<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的前缀复用为何如此自然：
 多步程序、多轮对话本就<strong>共享着越来越长的开头</strong>，运行时只要把这段共享前缀的 KV<strong>缓存下来</strong>，后续每一步都能<strong>少算一大截</strong>。</p>
 
 <div class="cellgroup">
@@ -528,8 +530,8 @@ worker 取出后 <span class="mono">_execute</span>，其中 <span class="mono">
 
 <p>读懂这段，你就抓住了解释器的灵魂：<strong>它是一个"逐表达式消费、把结果不断累积进状态"的循环</strong>。固定文字直接拼接，gen/select 打后端、再写回 text_ 与 variables——
 状态就是这样<strong>一步步长大</strong>的。而 tracer 走的是同一棵树，却把"打后端"<strong>换成了符号占位</strong>，于是能在<strong>不花一分算力</strong>的前提下看清结构、抽出前缀。
-带着"<strong>解释 = 执行并累积状态；追踪 = 符号化看形状、抽前缀</strong>"这条主线往下走：第 11 课会讲解释器如何在<strong>无数据依赖</strong>时把多个分支 <strong>fork/join 并发</strong>跑，
-并让它们<strong>共享父前缀的 KV</strong>（第 7 课）；第 12 课则揭开 gen 真正落地的那一层——<strong>后端接口与 OpenAI 兼容</strong>。</p>
+带着"<strong>解释 = 执行并累积状态；追踪 = 符号化看形状、抽前缀</strong>"这条主线往下走：<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>会讲解释器如何在<strong>无数据依赖</strong>时把多个分支 <strong>fork/join 并发</strong>跑，
+并让它们<strong>共享父前缀的 KV</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）；<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>则揭开 gen 真正落地的那一层——<strong>后端接口与 OpenAI 兼容</strong>。</p>
 
 <p>一句话收束：<strong>解释器与 tracer，是同一门语言的"执行器"与"读心术"</strong>。前者让你的程序<strong>此刻就产出结果</strong>，后者让框架<strong>提前看懂程序的形状</strong>，
 把"<strong>不变的开头</strong>"挑出来缓存复用。两者合在一起，才让 SGLang 既<strong>好写好读</strong>，又<strong>跑得又快又省</strong>——这正是"结构化生成语言"四个字的底气所在。</p>
@@ -538,11 +540,11 @@ worker 取出后 <span class="mono">_execute</span>，其中 <span class="mono">
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>一棵树，两种跑法</strong>：同一个 <span class="mono">@sgl.function</span> 意图树，既能被<strong>解释</strong>（执行）也能被<strong>追踪</strong>（分析）。</li>
-    <li><strong>解释 = StreamExecutor</strong>：后台线程<strong>逐表达式 _execute</strong>，固定文字拼进 text_，<span class="mono">gen/select</span> <strong>调用后端</strong>（第 12 课），结果<strong>流式</strong>接到 text_ 并存进 <span class="mono">variables[name]</span>；两次 gen 间是普通 Python。</li>
+    <li><strong>解释 = StreamExecutor</strong>：后台线程<strong>逐表达式 _execute</strong>，固定文字拼进 text_，<span class="mono">gen/select</span> <strong>调用后端</strong>（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>），结果<strong>流式</strong>接到 text_ 并存进 <span class="mono">variables[name]</span>；两次 gen 间是普通 Python。</li>
     <li><strong>追踪 = trace_program</strong>：用<strong>假后端符号化</strong>走一遍，<strong>不调用模型</strong>，发现结构并<strong>抽出静态前缀</strong>（开头恒定那段，遇 gen 即停），供运行时<strong>预计算/缓存/共享</strong>。</li>
-    <li><strong>为什么要两种</strong>：解释回答"<strong>现在产出什么</strong>"；追踪回答"<strong>这程序长什么形状</strong>"——抽出共享前缀让运行时<strong>只算一次、复用 KV</strong>（第 7 课 RadixAttention），并支撑编译与优化。</li>
+    <li><strong>为什么要两种</strong>：解释回答"<strong>现在产出什么</strong>"；追踪回答"<strong>这程序长什么形状</strong>"——抽出共享前缀让运行时<strong>只算一次、复用 KV</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention），并支撑编译与优化。</li>
     <li><strong>ProgramState s 持有什么</strong>：<span class="mono">text_</span>（完整文本/前缀）、<span class="mono">messages_</span>（role 消息）、<span class="mono">variables</span>（命名结果，<span class="mono">s["name"]</span> 即从这里取）。</li>
-    <li><strong>承上启下</strong>：DSL 原语（第 9 课）→ 解释/追踪（本课）→ fork/join 并发（第 11 课）→ 后端落地（第 12 课）。一句话：解释器负责把程序跑出结果，tracer 负责提前读懂程序的形状。</li>
+    <li><strong>承上启下</strong>：DSL 原语（<a class="xref" href="09-structured-generation-language.html">第 9 课</a>）→ 解释/追踪（本课）→ fork/join 并发（<a class="xref" href="11-fork-join-and-prefix-sharing.html">第 11 课</a>）→ 后端落地（<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>）。一句话：解释器负责把程序跑出结果，tracer 负责提前读懂程序的形状。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -570,7 +572,7 @@ worker 取出后 <span class="mono">_execute</span>，其中 <span class="mono">
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。追踪的目的是“先看懂形状”：用假后端符号化走一遍，遇到依赖模型结果的节点就停，于是能在零算力下发现结构、抽出开头那段恒定的静态前缀。运行时据此只对共享前缀算一次注意力、复用其 KV（第 7 课 RadixAttention），还能据此编译/优化。这与压权重、缓存答案、调温度都无关。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。追踪的目的是“先看懂形状”：用假后端符号化走一遍，遇到依赖模型结果的节点就停，于是能在零算力下发现结构、抽出开头那段恒定的静态前缀。运行时据此只对共享前缀算一次注意力、复用其 KV（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention），还能据此编译/优化。这与压权重、缓存答案、调温度都无关。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -590,7 +592,7 @@ worker 取出后 <span class="mono">_execute</span>，其中 <span class="mono">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用自己的话描述：当你调用一个含两个 <code>gen</code> 的 <code>@sgl.function</code> 时，StreamExecutor 从被调用到产出最终文本，依次发生了什么？请点明每个 gen 如何打后端、结果如何写回 <code>text_</code> 与 <code>variables</code>，以及 <code>s["name"]</code> 是从哪里取值的。</li>
-    <li>假设你的服务里有一万条请求都以同一段很长的系统提示 + few-shot 模板开头。请论证：为什么先对程序做一次“追踪”抽出静态前缀，会对运行时的吞吐有帮助？它和第 7 课的 RadixAttention 前缀复用是怎么衔接的？追踪到哪里会停下、为什么？</li>
+    <li>假设你的服务里有一万条请求都以同一段很长的系统提示 + few-shot 模板开头。请论证：为什么先对程序做一次“追踪”抽出静态前缀，会对运行时的吞吐有帮助？它和<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的 RadixAttention 前缀复用是怎么衔接的？追踪到哪里会停下、为什么？</li>
   </ul>
 </div>
 </div></div>
@@ -615,9 +617,9 @@ Grasp these two modes and you hold the main axis of the SGLang front end — <st
 <div class="card macro">
   <div class="tag">🌍 The big picture</div>
   In one line: <strong>the same tree of intent can be "executed" or "analyzed."</strong> <strong>Interpret</strong> is the normal path — <span class="inline">StreamExecutor</span> takes the function and
-  drives it <strong>expression by expression</strong>: fixed text is appended to the state; a <strong>gen / select</strong> <strong>calls the backend</strong> (Lesson 12), streaming the model's output onto the text and into a named variable;
+  drives it <strong>expression by expression</strong>: fixed text is appended to the state; a <strong>gen / select</strong> <strong>calls the backend</strong> (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>), streaming the model's output onto the text and into a named variable;
   the <strong>if / for between two gens is plain Python</strong> that runs normally. <strong>Trace</strong> is the compile/analysis path — <span class="inline">trace_program</span> walks the function <strong>symbolically with a dummy backend</strong>,
-  <strong>never touching the model</strong>, just to learn the program's <strong>structure</strong> and <strong>extract the constant leading prompt</strong> (the static prefix), which the runtime can <strong>precompute, cache, and share</strong> (echoing Lesson 7, RadixAttention).
+  <strong>never touching the model</strong>, just to learn the program's <strong>structure</strong> and <strong>extract the constant leading prompt</strong> (the static prefix), which the runtime can <strong>precompute, cache, and share</strong> (echoing <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention).
   <strong>One answers "what to produce now," the other answers "what shape is this program"</strong> — that is the division of labor between interpreter and tracer.
 </div>
 
@@ -696,7 +698,7 @@ The key idea: <strong>interpreting is "produce as you go"</strong> — text and 
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">Program</span><span class="name">@sgl.function</span></div><div class="ld">Your tree of intent: role messages + <span class="mono">gen/select</span> slots + plain Python control flow. On call, handed to the executor.</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">Driver</span><span class="name">StreamExecutor</span></div><div class="ld">A background thread <span class="mono">_execute</span>s each expression: fixed text is appended, <span class="mono">gen/select</span> calls the backend.</div></div>
-  <div class="layer l-main"><div class="lh"><span class="badge">Execute</span><span class="name">Backend (Lesson 12)</span></div><div class="ld">Where tokens are actually produced: local runtime or OpenAI-compatible API; <span class="mono">gen</span> can return <strong>streaming</strong>.</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">Execute</span><span class="name">Backend (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>)</span></div><div class="ld">Where tokens are actually produced: local runtime or OpenAI-compatible API; <span class="mono">gen</span> can return <strong>streaming</strong>.</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">State</span><span class="name">ProgramState s</span></div><div class="ld">Accumulates <span class="mono">text_</span> (full text/prefix), <span class="mono">messages_</span> (role messages), <span class="mono">variables</span> (named results, read via <span class="mono">s["name"]</span>).</div></div>
 </div>
 
@@ -704,10 +706,10 @@ The key idea: <strong>interpreting is "produce as you go"</strong> — text and 
 <p>Trace is the other road. <span class="inline">trace_program</span> / <span class="inline">extract_prefix_by_tracing</span> builds a <strong>TracerProgramState</strong> and a <strong>dummy backend (BaseBackend)</strong>,
 then walks your function <strong>symbolically</strong> — <strong>it never calls the model</strong>. It wants not "answers" but the program's <strong>skeleton</strong>: which fixed texts, gens, selects, and forks appear in order.
 The most useful product is the <strong>static prefix</strong>: from the start <strong>up to the first place that depends on a model output</strong>, that whole stretch of <strong>constant leading prompt</strong>. In the source it concatenates the leading run of <span class="mono">SglConstantText</span> and
-<strong>stops at the first gen-like node that "only a real run could know."</strong> Extract that prefix and the runtime can <strong>compute it once and reuse its KV</strong> (Lesson 7), or <strong>compile/optimize</strong> the whole program from it.</p>
+<strong>stops at the first gen-like node that "only a real run could know."</strong> Extract that prefix and the runtime can <strong>compute it once and reuse its KV</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), or <strong>compile/optimize</strong> the whole program from it.</p>
 
 <div class="cols">
-  <div class="col"><h4>Interpret · the normal path</h4><p><strong>Execute now.</strong> Driven step by step by <span class="mono">StreamExecutor</span>, it <strong>really calls the backend</strong> for each gen and can <strong>stream</strong>; it <strong>mutates state</strong> — text_ and variables grow. With no data dependency it can even <strong>run several gens concurrently</strong> (paving the way for Lesson 11 fork/join). <strong>Goal: produce results.</strong></p></div>
+  <div class="col"><h4>Interpret · the normal path</h4><p><strong>Execute now.</strong> Driven step by step by <span class="mono">StreamExecutor</span>, it <strong>really calls the backend</strong> for each gen and can <strong>stream</strong>; it <strong>mutates state</strong> — text_ and variables grow. With no data dependency it can even <strong>run several gens concurrently</strong> (paving the way for <a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a> fork/join). <strong>Goal: produce results.</strong></p></div>
   <div class="col"><h4>Trace · the compile/analysis path</h4><p><strong>Understand the shape first.</strong> Driven by <span class="mono">trace_program</span> with a dummy backend, it walks <strong>symbolically</strong>, <strong>never touching the model</strong> and producing no real tokens; it only <strong>discovers structure and extracts the static prefix</strong>, <strong>stopping</strong> at any node that depends on a model result. <strong>Goal: understand + precompute shared prefixes for caching and optimization.</strong></p></div>
 </div>
 
@@ -782,18 +784,18 @@ the worker pops it and <span class="mono">_execute</span>s, and <span class="mon
 
 <p>Read this and you grasp the interpreter's soul: <strong>it is a loop that "consumes expressions one by one and keeps accumulating results into state."</strong> Fixed text is appended; gen/select hits the backend and writes back into text_ and variables —
 that's how state <strong>grows step by step</strong>. The tracer walks the same tree but <strong>swaps "hit the backend" for a symbolic placeholder</strong>, so it can see the structure and extract the prefix <strong>without spending a single FLOP</strong>.
-Carry "<strong>interpret = execute and accumulate state; trace = symbolically read the shape and extract the prefix</strong>" forward: Lesson 11 shows how the interpreter runs branches <strong>fork/join concurrently</strong> when there's no data dependency
-and lets them <strong>share the parent prefix's KV</strong> (Lesson 7); Lesson 12 unveils where gen actually lands — the <strong>backend interface and OpenAI compatibility.</strong></p>
+Carry "<strong>interpret = execute and accumulate state; trace = symbolically read the shape and extract the prefix</strong>" forward: <a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a> shows how the interpreter runs branches <strong>fork/join concurrently</strong> when there's no data dependency
+and lets them <strong>share the parent prefix's KV</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>); <a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a> unveils where gen actually lands — the <strong>backend interface and OpenAI compatibility.</strong></p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>One tree, two ways to run</strong>: the same <span class="mono">@sgl.function</span> tree can be <strong>interpreted</strong> (executed) or <strong>traced</strong> (analyzed).</li>
-    <li><strong>Interpret = StreamExecutor</strong>: a background thread <strong>_executes per expression</strong>; fixed text is appended to text_, <span class="mono">gen/select</span> <strong>calls the backend</strong> (Lesson 12), results <strong>stream</strong> onto text_ and into <span class="mono">variables[name]</span>; between two gens is plain Python.</li>
+    <li><strong>Interpret = StreamExecutor</strong>: a background thread <strong>_executes per expression</strong>; fixed text is appended to text_, <span class="mono">gen/select</span> <strong>calls the backend</strong> (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>), results <strong>stream</strong> onto text_ and into <span class="mono">variables[name]</span>; between two gens is plain Python.</li>
     <li><strong>Trace = trace_program</strong>: a <strong>symbolic walk with a dummy backend</strong>, <strong>never calling the model</strong>, discovering structure and <strong>extracting the static prefix</strong> (the constant leading run, stopping at the first gen), for the runtime to <strong>precompute/cache/share</strong>.</li>
-    <li><strong>Why two modes</strong>: interpret answers "<strong>what to produce now</strong>"; trace answers "<strong>what shape is this program</strong>" — extracting the shared prefix lets the runtime <strong>compute it once and reuse the KV</strong> (Lesson 7, RadixAttention) and enables compilation/optimization.</li>
+    <li><strong>Why two modes</strong>: interpret answers "<strong>what to produce now</strong>"; trace answers "<strong>what shape is this program</strong>" — extracting the shared prefix lets the runtime <strong>compute it once and reuse the KV</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention) and enables compilation/optimization.</li>
     <li><strong>What ProgramState s holds</strong>: <span class="mono">text_</span> (full text/prefix), <span class="mono">messages_</span> (role messages), <span class="mono">variables</span> (named results, read via <span class="mono">s["name"]</span>).</li>
-    <li><strong>Where it fits</strong>: DSL primitives (Lesson 9) → interpret/trace (this lesson) → fork/join concurrency (Lesson 11) → backend landing (Lesson 12).</li>
+    <li><strong>Where it fits</strong>: DSL primitives (<a class="xref" href="09-structured-generation-language.html">Lesson 9</a>) → interpret/trace (this lesson) → fork/join concurrency (<a class="xref" href="11-fork-join-and-prefix-sharing.html">Lesson 11</a>) → backend landing (<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a>).</li>
   </ul>
 </div>
 <div class="selftest">
@@ -821,7 +823,7 @@ and lets them <strong>share the parent prefix's KV</strong> (Lesson 7); Lesson 1
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Trace aims to 'understand the shape first': a symbolic walk with a dummy backend that stops at any node depending on a model result, so it discovers structure and extracts the constant leading static prefix at zero compute. The runtime then computes attention for that shared prefix once and reuses its KV (Lesson 7, RadixAttention), and can compile/optimize from it. It has nothing to do with compressing weights, caching answers, or temperature.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Trace aims to 'understand the shape first': a symbolic walk with a dummy backend that stops at any node depending on a model result, so it discovers structure and extracts the constant leading static prefix at zero compute. The runtime then computes attention for that shared prefix once and reuses its KV (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention), and can compile/optimize from it. It has nothing to do with compressing weights, caching answers, or temperature.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -841,7 +843,7 @@ and lets them <strong>share the parent prefix's KV</strong> (Lesson 7); Lesson 1
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>In your own words, describe what StreamExecutor does — from being called to producing the final text — when you invoke an <code>@sgl.function</code> with two <code>gen</code>s. Point out how each gen hits the backend, how results are written back into <code>text_</code> and <code>variables</code>, and where <code>s["name"]</code> reads from.</li>
-    <li>Suppose your service has ten thousand requests all starting with the same long system prompt + few-shot template. Argue why running a 'trace' once to extract the static prefix helps the runtime's throughput. How does it connect to Lesson 7's RadixAttention prefix reuse? Where does tracing stop, and why?</li>
+    <li>Suppose your service has ten thousand requests all starting with the same long system prompt + few-shot template. Argue why running a 'trace' once to extract the static prefix helps the runtime's throughput. How does it connect to <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>'s RadixAttention prefix reuse? Where does tracing stop, and why?</li>
   </ul>
 </div>
 </div></div>

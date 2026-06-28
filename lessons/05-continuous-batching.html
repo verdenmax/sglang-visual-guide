@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -508,7 +510,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>为什么它能赢：回到"访存密集"</h2>
-<p>连续批处理之所以是<strong>吞吐的核武器</strong>，根子要接回第 4 课。decode 是<strong>访存密集</strong>的：每生成一个 token，
+<p>连续批处理之所以是<strong>吞吐的核武器</strong>，根子要接回<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>。decode 是<strong>访存密集</strong>的：每生成一个 token，
 都要把<strong>整个模型的权重</strong>从显存读一遍，但真正的矩阵乘法只服务<strong>一个</strong> token，算力被严重浪费。
 而权重读取这件事，<strong>不管批里有 1 条还是 100 条请求，代价几乎一样</strong>——读一次权重，可以同时给一批请求做前向。
 于是<strong>把请求"摞"在一起</strong>，就等于把"读权重"这笔固定开销<strong>摊薄到了每条请求头上</strong>：批越大、摊得越薄、单位算力产出的有效 token 越多。</p>
@@ -519,7 +521,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 这也是为什么连续批处理常被视为现代推理引擎<strong>提升吞吐最重要的单项技术</strong>——它不改模型、不掉精度，纯靠"组批方式"就把利用率拉满。</p>
 
 <h2>SGLang 里的实现：每轮调用 get_next_batch_to_run</h2>
-<p>在 SGLang 的运行时里，调度器（第 18 课的事件循环会细讲）<strong>每一轮迭代都调用一次</strong>
+<p>在 SGLang 的运行时里，调度器（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>的事件循环会细讲）<strong>每一轮迭代都调用一次</strong>
 <span class="inline">get_next_batch_to_run()</span>，由它来"<strong>为这一步组队</strong>"。这个方法先把上一步已完成的请求过滤出去、
 把新到的 prefill 合并进在跑的批，然后做一个关键判断：<strong>有没有 prefill 活要干？有就先返回一个 prefill 批；没有，就组一个 decode 批。</strong>
 正是这一句"每步都重新决定批是什么"，把连续批处理落到了代码里。</p>
@@ -560,7 +562,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>读懂这段就抓住了连续批处理的灵魂：<strong>批不是一个静态对象，而是每一步被重新计算出来的结果</strong>。
 完成的请求在过滤阶段离场、释放 KV 槽，等待的请求在 <span class="inline">get_new_batch_prefill</span> 阶段被接纳——
-循环每转一圈，批就被刷新一次。"谁先上、上多少"由<strong>调度策略</strong>（第 20 课）决定，而<strong>prefill 和 decode 谁优先</strong>的取舍，
+循环每转一圈，批就被刷新一次。"谁先上、上多少"由<strong>调度策略</strong>（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）决定，而<strong>prefill 和 decode 谁优先</strong>的取舍，
 也正是在这里拍板的。</p>
 
 <h2>代价与权衡：天下没有免费的午餐</h2>
@@ -570,17 +572,17 @@ GPU 反而会在等 CPU 组队时空转，得不偿失。这就引出了 SGLang 
 
 <div class="cols">
   <div class="col"><h4>调度必须"零开销"</h4><p>既然每步都要重组批，调度逻辑就成了<strong>热路径</strong>。SGLang 用
-  <strong>零开销重叠调度器</strong>（第 21 课）把 CPU 的组批开销<strong>藏进 GPU 上一步的计算时间里</strong>，
+  <strong>零开销重叠调度器</strong>（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）把 CPU 的组批开销<strong>藏进 GPU 上一步的计算时间里</strong>，
   让 GPU 永不为调度空等——这正是连续批处理能真正兑现吞吐红利的前提。</p></div>
   <div class="col"><h4>长 prompt 不能堵住队列</h4><p>如果某条请求的 prompt 极长，它的 prefill 会<strong>霸占一整步</strong>、
-  把正在 decode 的请求全卡住，破坏批次的流动。SGLang 用<strong>分块预填充</strong>（第 22 课）把长 prefill
+  把正在 decode 的请求全卡住，破坏批次的流动。SGLang 用<strong>分块预填充</strong>（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）把长 prefill
   <strong>切成小块</strong>，穿插进 decode 步里，保持批次顺滑。</p></div>
 </div>
 
-<p>把这一课放回 Part 2 的主线：第 4 课告诉我们 decode 访存密集、KV 缓存按槽位独立管理；本课正是<strong>把这两个性质变现</strong>——
+<p>把这一课放回 Part 2 的主线：<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>告诉我们 decode 访存密集、KV 缓存按槽位独立管理；本课正是<strong>把这两个性质变现</strong>——
 因为访存密集，所以拼批划算；因为 KV 按槽独立，所以完成的请求能中途离场、立刻释放显存。连续批处理因此成为引擎吞吐的
-<strong>第一引擎</strong>。接下来第 6 课会讲分页让 KV 槽位<strong>装得更紧、碎片更少</strong>，第 7 课讲 RadixAttention 让不同请求<strong>共享前缀缓存</strong>，
-而第 8 课会把这些招式统一放到"<strong>吞吐 vs 延迟</strong>"的天平上称一称。带着"批要永远满、调度要够便宜"这两把尺子往下读，
+<strong>第一引擎</strong>。接下来<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>会讲分页让 KV 槽位<strong>装得更紧、碎片更少</strong>，<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>讲 RadixAttention 让不同请求<strong>共享前缀缓存</strong>，
+而<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>会把这些招式统一放到"<strong>吞吐 vs 延迟</strong>"的天平上称一称。带着"批要永远满、调度要够便宜"这两把尺子往下读，
 后面每一个调度与内存设计，你都能一眼看出它在为连续批处理"保驾护航"。</p>
 
 <div class="card key">
@@ -590,7 +592,7 @@ GPU 反而会在等 CPU 组队时空转，得不偿失。这就引出了 SGLang 
     <li><strong>连续批处理</strong>：又叫迭代级 / 在途批处理，<strong>每个 decode 步重新组批</strong>。完成的请求当场离场并释放 KV 槽，等待的下一步即加入，批次<strong>始终满载</strong>。</li>
     <li><strong>为什么赢</strong>：decode 访存密集，读一次权重可服务一整批；连续批处理保证"批永远满"，把权重读取的固定开销<strong>持续摊薄</strong>到每条请求。</li>
     <li><strong>在 SGLang 里</strong>：调度循环每轮调用 <span class="mono">get_next_batch_to_run()</span>——有 prefill 活先做 prefill，否则组一个 decode 批。</li>
-    <li><strong>代价</strong>：每步账务更重 ⇒ 调度必须便宜（第 21 课零开销重叠调度器），长 prompt 要切块（第 22 课分块预填充）。前置依赖：KV 槽位（第 4 课）。</li>
+    <li><strong>代价</strong>：每步账务更重 ⇒ 调度必须便宜（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>零开销重叠调度器），长 prompt 要切块（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>分块预填充）。前置依赖：KV 槽位（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -618,7 +620,7 @@ GPU 反而会在等 CPU 组队时空转，得不偿失。这就引出了 SGLang 
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。第 4 课讲过：KV 缓存放进一个大显存池、按行/槽位分配，一条请求的 K/V 跟别人互不纠缠。正因如此，请求一结束，它那几行槽位就能立即回收、分给下一个等待者，不必等整批结束或重排——这正是连续批处理能“满载流动”的物理前提。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>讲过：KV 缓存放进一个大显存池、按行/槽位分配，一条请求的 K/V 跟别人互不纠缠。正因如此，请求一结束，它那几行槽位就能立即回收、分给下一个等待者，不必等整批结束或重排——这正是连续批处理能“满载流动”的物理前提。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -631,14 +633,14 @@ GPU 反而会在等 CPU 组队时空转，得不偿失。这就引出了 SGLang 
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。连续批处理把组批逻辑放进了热路径——每步都要做账务。若 CPU 这部分太慢，GPU 就会在等 CPU 组队时空转，吞吐红利被吃掉。这正是 SGLang 用零开销重叠调度器（第 21 课）把组批开销藏进上一步 GPU 计算时间的原因；长 prompt 还要靠分块预填充（第 22 课）避免堵塞。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。连续批处理把组批逻辑放进了热路径——每步都要做账务。若 CPU 这部分太慢，GPU 就会在等 CPU 组队时空转，吞吐红利被吃掉。这正是 SGLang 用零开销重叠调度器（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）把组批开销藏进上一步 GPU 计算时间的原因；长 prompt 还要靠分块预填充（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）避免堵塞。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>假设一个批里有 8 条请求，生成长度分别是 5、5、6、500、5、5、6、5 个 token。用静态批处理 vs 连续批处理分别跑，估算两种方式下“有效 token / 总槽位·步数”的利用率差距，说说浪费到底发生在哪里。</li>
-    <li>连续批处理在每步都问“有没有 prefill 活要先做？没有再做 decode”。如果一直优先 prefill，会怎样影响正在 decode 的请求的延迟？反过来一直优先 decode 又会怎样？这把你引向了第 20 课的什么取舍？</li>
+    <li>连续批处理在每步都问“有没有 prefill 活要先做？没有再做 decode”。如果一直优先 prefill，会怎样影响正在 decode 的请求的延迟？反过来一直优先 decode 又会怎样？这把你引向了<a class="xref" href="20-schedule-policy.html">第 20 课</a>的什么取舍？</li>
   </ul>
 </div>
 </div></div>
@@ -825,7 +827,7 @@ consecutive steps: the finished (✓) are replaced by newcomers (★), so the ba
 </div>
 
 <h2>Why it wins: back to "memory-bound"</h2>
-<p>Continuous batching is a <strong>throughput weapon</strong>, and the root reason traces back to Lesson 4. decode is
+<p>Continuous batching is a <strong>throughput weapon</strong>, and the root reason traces back to <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>. decode is
 <strong>memory-bound</strong>: to produce one token you read the <strong>entire model's weights</strong> from HBM, yet the actual
 matmul serves just <strong>one</strong> token — compute is badly underused. And reading the weights <strong>costs about the same
 whether the batch holds 1 request or 100</strong> — one weight read can forward a whole batch at once. So <strong>stacking requests
@@ -840,7 +842,7 @@ while continuous batching approaches full load. That's why it's widely seen as t
 in modern inference engines — it changes no model and loses no accuracy, lifting utilization purely by <em>how</em> it batches.</p>
 
 <h2>In SGLang: calling get_next_batch_to_run every round</h2>
-<p>In SGLang's runtime, the scheduler (its event loop is detailed in Lesson 18) calls
+<p>In SGLang's runtime, the scheduler (its event loop is detailed in <a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) calls
 <span class="inline">get_next_batch_to_run()</span> <strong>once per iteration</strong> to "<strong>form the batch for this step</strong>."
 The method first filters out requests that finished last step and merges newly arrived prefill into the running batch, then makes a key
 decision: <strong>is there prefill work? If so, return a prefill batch; otherwise, build a decode batch.</strong> That one "decide the
@@ -883,7 +885,7 @@ batch afresh each step" is exactly how continuous batching lands in code.</p>
 <p>Read this and you grasp the soul of continuous batching: <strong>the batch is not a static object but a result recomputed every step</strong>.
 Finished requests leave during the filter phase and free their KV slots; waiting requests are admitted in the
 <span class="inline">get_new_batch_prefill</span> phase — each loop refreshes the batch. <strong>Who joins, and how many</strong> is decided
-by the <strong>schedule policy</strong> (Lesson 20), and the <strong>prefill-vs-decode priority</strong> tradeoff is settled right here too.</p>
+by the <strong>schedule policy</strong> (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>), and the <strong>prefill-vs-decode priority</strong> tradeoff is settled right here too.</p>
 
 <h2>The cost and tradeoff: no free lunch</h2>
 <p>Continuous batching maxes out utilization, but the price is <strong>more "bookkeeping" every step</strong>: filtering the finished,
@@ -893,19 +895,19 @@ defeating the purpose. That motivates two key SGLang follow-ups:</p>
 
 <div class="cols">
   <div class="col"><h4>Scheduling must be "zero-overhead"</h4><p>Since the batch is re-formed every step, the scheduling logic is on the
-  <strong>hot path</strong>. SGLang's <strong>zero-overhead overlap scheduler</strong> (Lesson 21) <strong>hides the CPU batch-forming cost
+  <strong>hot path</strong>. SGLang's <strong>zero-overhead overlap scheduler</strong> (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>) <strong>hides the CPU batch-forming cost
   inside the previous step's GPU compute</strong>, so the GPU never idles on scheduling — the prerequisite for actually cashing in the
   throughput dividend.</p></div>
   <div class="col"><h4>Long prompts mustn't clog the queue</h4><p>If a request's prompt is extremely long, its prefill can <strong>hog a whole
-  step</strong> and stall every decoding request, breaking the batch's flow. SGLang's <strong>chunked prefill</strong> (Lesson 22) <strong>slices
+  step</strong> and stall every decoding request, breaking the batch's flow. SGLang's <strong>chunked prefill</strong> (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>) <strong>slices
   a long prefill into chunks</strong>, interleaving them with decode steps to keep the batch smooth.</p></div>
 </div>
 
-<p>Place this lesson back on Part 2's throughline: Lesson 4 taught that decode is memory-bound and the KV cache is managed independently
+<p>Place this lesson back on Part 2's throughline: <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a> taught that decode is memory-bound and the KV cache is managed independently
 per slot; this lesson <strong>cashes both properties in</strong> — because decode is memory-bound, batching pays; because KV is per-slot
 independent, a finished request can leave mid-flight and free HBM at once. Continuous batching thus becomes the engine's <strong>first
-throughput engine</strong>. Next, Lesson 6 packs KV slots <strong>tighter with less fragmentation</strong> via paging, Lesson 7 lets requests
-<strong>share prefix cache</strong> with RadixAttention, and Lesson 8 weighs all of this on the <strong>throughput vs latency</strong> scale.
+throughput engine</strong>. Next, <a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a> packs KV slots <strong>tighter with less fragmentation</strong> via paging, <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a> lets requests
+<strong>share prefix cache</strong> with RadixAttention, and <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a> weighs all of this on the <strong>throughput vs latency</strong> scale.
 Read on with two rulers — "keep the batch full" and "keep scheduling cheap" — and you'll see how every later scheduling and memory design
 exists to safeguard continuous batching.</p>
 
@@ -916,7 +918,7 @@ exists to safeguard continuous batching.</p>
     <li><strong>Continuous batching</strong>: a.k.a. iteration-level / in-flight batching, <strong>re-forms the batch every decode step</strong>. Finished requests leave on the spot and free KV slots; waiting ones join next step; the batch stays <strong>full</strong>.</li>
     <li><strong>Why it wins</strong>: decode is memory-bound, one weight read serves a whole batch; continuous batching keeps the batch full, <strong>continuously amortizing</strong> the fixed weight-read cost across every request.</li>
     <li><strong>In SGLang</strong>: the scheduler loop calls <span class="mono">get_next_batch_to_run()</span> each round — prefill first if there's prefill work, else build a decode batch.</li>
-    <li><strong>Cost</strong>: heavier per-step bookkeeping ⇒ scheduling must be cheap (Lesson 21 zero-overhead overlap scheduler), long prompts must be chunked (Lesson 22 chunked prefill). Prereq: KV slots (Lesson 4).</li>
+    <li><strong>Cost</strong>: heavier per-step bookkeeping ⇒ scheduling must be cheap (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a> zero-overhead overlap scheduler), long prompts must be chunked (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a> chunked prefill). Prereq: KV slots (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</li>
   </ul>
 </div>
 <div class="selftest">
@@ -944,7 +946,7 @@ exists to safeguard continuous batching.</p>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Lesson 4 showed the KV cache lives in a big HBM pool, allocated by row/slot, with one request's K/V not entangled with others'. So the moment a request ends, its slots are reclaimed and given to the next waiter — no waiting for the whole batch, no reshuffle. That's the physical prerequisite for the batch to flow at full load.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a> showed the KV cache lives in a big HBM pool, allocated by row/slot, with one request's K/V not entangled with others'. So the moment a request ends, its slots are reclaimed and given to the next waiter — no waiting for the whole batch, no reshuffle. That's the physical prerequisite for the batch to flow at full load.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -957,14 +959,14 @@ exists to safeguard continuous batching.</p>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Continuous batching puts batch-forming on the hot path — bookkeeping every step. If that CPU work is slow, the GPU idles waiting for the batch, eating the throughput dividend. That's why SGLang's zero-overhead overlap scheduler (Lesson 21) hides the batch-forming cost inside the previous step's GPU compute, and chunked prefill (Lesson 22) keeps long prompts from clogging the queue.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Continuous batching puts batch-forming on the hot path — bookkeeping every step. If that CPU work is slow, the GPU idles waiting for the batch, eating the throughput dividend. That's why SGLang's zero-overhead overlap scheduler (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>) hides the batch-forming cost inside the previous step's GPU compute, and chunked prefill (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>) keeps long prompts from clogging the queue.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>Suppose a batch holds 8 requests with output lengths 5, 5, 6, 500, 5, 5, 6, 5 tokens. Run it with static vs continuous batching and estimate the 'useful tokens / (slots × steps)' utilization gap; explain where exactly the waste occurs.</li>
-    <li>Continuous batching asks each step 'is there prefill work to do first? if not, do decode.' If prefill is always prioritized, how does that affect the latency of already-decoding requests? And if decode is always prioritized? Which tradeoff in Lesson 20 does this lead you to?</li>
+    <li>Continuous batching asks each step 'is there prefill work to do first? if not, do decode.' If prefill is always prioritized, how does that affect the latency of already-decoding requests? And if decode is always prioritized? Which tradeoff in <a class="xref" href="20-schedule-policy.html">Lesson 20</a> does this lead you to?</li>
   </ul>
 </div>
 </div></div>

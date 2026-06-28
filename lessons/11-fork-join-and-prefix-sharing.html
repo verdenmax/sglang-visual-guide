@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -324,9 +326,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead">
-上一课（第 10 课）我们看清了解释器<strong>如何把一棵意图树一步步跑起来</strong>。但真正让 SGLang 与众不同的，是它能让一个程序
+上一课（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）我们看清了解释器<strong>如何把一棵意图树一步步跑起来</strong>。但真正让 SGLang 与众不同的，是它能让一个程序
 <strong>从当前状态分叉出多个并行分支</strong>——这就是 <span class="inline">s.fork(n)</span>。而本课最该记住的一句话是：
-<strong>前端的 fork 和运行时的 RadixAttention（第 7 课）其实是同一个想法的两半</strong>。fork 让你在<strong>程序里声明"这里要分叉"</strong>，
+<strong>前端的 fork 和运行时的 RadixAttention（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）其实是同一个想法的两半</strong>。fork 让你在<strong>程序里声明"这里要分叉"</strong>，
 RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次、给所有分支复用</strong>。一个负责<strong>说出结构</strong>，一个负责<strong>把结构变现成省下来的算力</strong>。
 理解了这层对应，你才算真正读懂了 SGLang 这个名字里"<strong>结构化（Structured）</strong>"三个字的分量：所谓结构化，不只是为了好读，更是为了让运行时<strong>看得见结构、据此省下算力</strong>。
 </p>
@@ -344,7 +346,7 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
   <div class="tag">🌍 宏观理解</div>
   一句话：<span class="inline">s.fork(n)</span> 从<strong>当前状态</strong>克隆出 <strong>n 个并行续写分支</strong>，每个分支都<strong>继承到目前为止建好的同一段提示前缀</strong>，
   然后各自独立往下生成（比如采样 n 个不同答案，或并行回答 n 个子问题）；<strong>join / gather</strong> 再把每个分支<strong>新产生的命名变量收集回父状态</strong>，供你比较、投票或汇总。
-  它之所以强大，<strong>不是因为"省事"，而是因为省算力</strong>：既然 n 个分支共享完全相同的前缀，RadixAttention 就<strong>把这段前缀的 KV 只算一次、让所有分支共用</strong>（第 7 课）。
+  它之所以强大，<strong>不是因为"省事"，而是因为省算力</strong>：既然 n 个分支共享完全相同的前缀，RadixAttention 就<strong>把这段前缀的 KV 只算一次、让所有分支共用</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）。
   于是从一段长前缀 fork 出 8 个分支，代价约等于"<strong>1 段前缀 + 8 段很短的后缀</strong>"，而不是"<strong>8 段完整提示</strong>"。fork 因此不只是个便利函数，<strong>它就是"前缀共享"在编程模型里的样子</strong>：你用一行代码声明意图，框架替你把"少算 7 份前缀"这笔账<strong>悄悄结清</strong>。
 </div>
 
@@ -358,7 +360,7 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>建好共享前缀</h4><p>先往 <span class="mono">s</span> 里拼好 system + few-shot + 问题——这段<strong>所有分支都将共享</strong>，是 fork 之所以省算力的根。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>s.fork(n)：原地分叉</h4><p>从当前状态克隆出 <strong>n 个并行子状态</strong>，每个都继承<strong>同一段前缀</strong>；返回一个 <span class="mono">ProgramStateGroup</span>。</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>各分支独立生成</h4><p>每个分支 <span class="mono">forks[i] += gen("answer")</span> 各写各的；无数据依赖的分支可<strong>并发执行</strong>（解释器，第 10 课）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>各分支独立生成</h4><p>每个分支 <span class="mono">forks[i] += gen("answer")</span> 各写各的；无数据依赖的分支可<strong>并发执行</strong>（解释器，<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>join：把答案收回父状态</h4><p><span class="mono">forks.join()</span> 把各分支<strong>新产生的变量</strong>聚合回 <span class="mono">s</span>，于是 <span class="mono">s["answer"]</span> 成为 n 个结果的列表，可比较 / 投票 / 汇总。</p></div></div>
 </div>
 
@@ -388,16 +390,16 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
 <p>举个具体的数：系统设定 + few-shot + 问题一共约 <strong>2000 个 token</strong> 的前缀，<span class="mono">s.fork(3)</span> 后每个分支只续写约 <strong>100 个 token</strong>。串行跑 3 次要算 <span class="mono">3×2000 + 3×100 ≈ 6300</span> 个 token；用 fork 只算 <span class="mono">2000 + 3×100 ≈ 2300</span> 个——<strong>省下约 4000 个前缀 token 的重复计算</strong>。</p>
 
 <h2>核心：fork 与 RadixAttention 是一个想法的两半</h2>
-<p>这是全课<strong>最该划重点</strong>的地方。第 7 课讲过：RadixAttention 把所有请求的前缀<strong>组织成一棵基数树（radix tree）</strong>，<strong>公共前缀只存一份 KV、被多个请求共享</strong>。
+<p>这是全课<strong>最该划重点</strong>的地方。<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>讲过：RadixAttention 把所有请求的前缀<strong>组织成一棵基数树（radix tree）</strong>，<strong>公共前缀只存一份 KV、被多个请求共享</strong>。
 而 fork 做的事，恰好就是<strong>在程序里主动制造出"一段公共前缀 + 多条不同后缀"的形状</strong>。换句话说：<strong>fork 是"声明端"，RadixAttention 是"兑现端"</strong>。
 你在 DSL 里写下 <span class="mono">s.fork(8)</span>，等于明明白白告诉运行时："<strong>这 8 个分支的开头是完全一样的</strong>"；运行时收到这个信号，就把那段共享前缀的注意力<strong>只算一次</strong>，
 8 个分支<strong>共用同一份前缀 KV</strong>，各自只为自己那段短后缀新增计算。没有 fork 的声明，运行时也能靠 RadixAttention 去<strong>事后发现</strong>前缀相同；但有了 fork，这种共享是<strong>结构上明示、零猜测</strong>的。</p>
 
-<p>不妨把这层关系再说透一点。第 9 课讲过 SGLang 是"<strong>把调模型写成程序</strong>"，第 10 课讲过这程序其实是一棵<strong>意图树</strong>。fork 在这棵树上做的，是<strong>从某个节点长出 n 条平行的枝</strong>——而这恰好<strong>同构</strong>于 RadixAttention 维护的那棵前缀基数树：父节点是共享前缀，子节点是各分支的不同后缀。
+<p>不妨把这层关系再说透一点。<a class="xref" href="09-structured-generation-language.html">第 9 课</a>讲过 SGLang 是"<strong>把调模型写成程序</strong>"，<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>讲过这程序其实是一棵<strong>意图树</strong>。fork 在这棵树上做的，是<strong>从某个节点长出 n 条平行的枝</strong>——而这恰好<strong>同构</strong>于 RadixAttention 维护的那棵前缀基数树：父节点是共享前缀，子节点是各分支的不同后缀。
 所以你在前端写下的<strong>程序结构</strong>，几乎可以<strong>一一对应</strong>到运行时缓存里那棵树的形状。<strong>程序怎么分叉，KV 缓存就怎么共享</strong>——这就是"结构化"能换来效率的根本原因：你越是把"哪里共享、哪里发散"<strong>显式写清楚</strong>，框架能复用的就越多、要重算的就越少。这也是为什么 fork 不该被当成普通的"开几个线程"，它<strong>携带的是语义信息</strong>，告诉运行时"这几条枝同根"。</p>
 
 <div class="cellgroup">
-  <div class="cg-cap"><b>共享前缀只算一次，分支各加短后缀</b>：高亮格子是 fork 出的所有分支<strong>共用的同一段前缀 KV</strong>（第 7 课 RadixAttention 复用），白格子才是各分支自己新算的部分</div>
+  <div class="cg-cap"><b>共享前缀只算一次，分支各加短后缀</b>：高亮格子是 fork 出的所有分支<strong>共用的同一段前缀 KV</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention 复用），白格子才是各分支自己新算的部分</div>
   <div class="cells"><span class="lab">分支 0</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 A</span></div>
   <div class="cells"><span class="lab">分支 1</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 B</span></div>
   <div class="cells"><span class="lab">分支 2</span><span class="cell hl">系统</span><span class="cell hl">少样本</span><span class="cell hl">问题</span><span class="sep">→</span><span class="cell">答案 C</span></div>
@@ -432,11 +434,11 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
 <h2>串行循环 vs fork：代价差在哪</h2>
 <p>"best-of-n"这类需求，最朴素的写法是<strong>写个 for 循环跑 n 次</strong>：每次都把<strong>完整的提示</strong>重新发一遍。问题在于，这 n 次请求<strong>开头那段长前缀是一模一样的</strong>，
 却被<strong>从头到尾重算了 n 遍</strong>——白白烧掉 (n−1) 份前缀算力，而且各次串行、互相看不见。换成 <span class="mono">s.fork(n)</span>，你把"<strong>共享前缀 + n 条后缀</strong>"的结构<strong>一次性声明清楚</strong>，
-运行时只算<strong>一份前缀</strong>、再加 n 段短后缀，且无依赖的分支还能并发。前缀越长、n 越大，省得越多。换个角度看，串行循环和 fork 在<strong>最终结果上完全等价</strong>（都得到 n 个候选），区别<strong>纯粹在于代价</strong>：前者把"共享"这件事<strong>藏在了你看不见的地方</strong>，运行时只能把每次请求当成<strong>互不相干的孤岛</strong>，于是被迫重算前缀；后者把"共享"<strong>摆到明面上</strong>，运行时一眼看穿、只算一次。这正呼应了第 9 课那句话：<strong>写得越结构化，框架能省的就越多</strong>。fork 就是这条原则在"并行"维度上的具体兑现。</p>
+运行时只算<strong>一份前缀</strong>、再加 n 段短后缀，且无依赖的分支还能并发。前缀越长、n 越大，省得越多。换个角度看，串行循环和 fork 在<strong>最终结果上完全等价</strong>（都得到 n 个候选），区别<strong>纯粹在于代价</strong>：前者把"共享"这件事<strong>藏在了你看不见的地方</strong>，运行时只能把每次请求当成<strong>互不相干的孤岛</strong>，于是被迫重算前缀；后者把"共享"<strong>摆到明面上</strong>，运行时一眼看穿、只算一次。这正呼应了<a class="xref" href="09-structured-generation-language.html">第 9 课</a>那句话：<strong>写得越结构化，框架能省的就越多</strong>。fork 就是这条原则在"并行"维度上的具体兑现。</p>
 
 <div class="cols">
   <div class="col"><h4>串行 for 循环：N × 完整提示</h4><p>循环里跑 n 次 gen，每次都把<strong>整段长前缀重新计算一遍</strong>。代价 ≈ <strong>n × (前缀 + 后缀)</strong>，前缀被重算 n 次；各次串行，运行时<strong>看不出它们开头相同</strong>。</p></div>
-  <div class="col"><h4>s.fork(n)：1 × 前缀 + N × 后缀</h4><p>一次声明分叉，运行时把<strong>共享前缀的 KV 只算一次</strong>（第 7 课），n 个分支各自只补<strong>一段短后缀</strong>。代价 ≈ <strong>前缀 + n × 后缀</strong>；无依赖分支还能并发（第 10 课）。</p></div>
+  <div class="col"><h4>s.fork(n)：1 × 前缀 + N × 后缀</h4><p>一次声明分叉，运行时把<strong>共享前缀的 KV 只算一次</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>），n 个分支各自只补<strong>一段短后缀</strong>。代价 ≈ <strong>前缀 + n × 后缀</strong>；无依赖分支还能并发（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）。</p></div>
 </div>
 
 <h2>典型用法：fork 能干哪些活</h2>
@@ -450,7 +452,7 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
   <tr><td class="mono">tree-of-thought</td><td>在每个思考节点<strong>分叉出多条推理路径</strong>，可逐层再 fork</td><td>沿树<strong>探索 / 剪枝</strong>，回收最优路径</td></tr>
 </table>
 
-<p>这里再点一句并发：fork 出来的分支<strong>彼此没有数据依赖</strong>时，解释器（第 10 课）可以<strong>并发地推进它们</strong>，而不必傻等一个跑完再跑下一个。
+<p>这里再点一句并发：fork 出来的分支<strong>彼此没有数据依赖</strong>时，解释器（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）可以<strong>并发地推进它们</strong>，而不必傻等一个跑完再跑下一个。
 所以 fork 同时带来<strong>两种好处</strong>：算力上靠 RadixAttention<strong>省下重复前缀</strong>，时间上靠并发<strong>把多分支叠起来跑</strong>。需要提醒的是：并发能不能真的发生，取决于分支之间<strong>有没有数据依赖</strong>——若分支 1 要用到分支 0 的结果，它就只能<strong>等</strong>；但像 best-of-n 这种各分支<strong>毫不相干</strong>的场景，就能畅快地并发。下面看源码里 fork 的真身。</p>
 
 <div class="codefile">
@@ -471,7 +473,7 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
 <p>短短几行，却把本课的两半串了起来：<span class="mono">stream_executor.fork(size, …)</span> 在<strong>运行时层</strong>真正完成"<strong>从当前前缀克隆出 size 个分支</strong>"——
 这正是 RadixAttention 前缀树<strong>长出 size 个共享父节点的子节点</strong>的时刻；返回的 <span class="mono">ProgramStateGroup</span> 则给你 <span class="mono">join</span>，
 按 <span class="mono">gather_variable</span> 模式<strong>把各分支新变量回填进父状态</strong>。一句 <span class="mono">s.fork(n)</span>，前端声明与运行时复用就此<strong>合二为一</strong>。
-往后第 12 课会讲<strong>后端接口</strong>，把这套 fork/join 真正落到具体引擎上——至此 Part 3 的"语言 → 解释 → 分叉 → 落地"四步就连成了一条完整链路。读到这里，你应当能把全书前后打通：第 7 课的前缀复用是<strong>引擎的本事</strong>，本课的 fork 是<strong>语言的表达</strong>，二者一里一外、一声明一兑现，共同撑起 SGLang"<strong>又好写又高效</strong>"的承诺。</p>
+往后<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>会讲<strong>后端接口</strong>，把这套 fork/join 真正落到具体引擎上——至此 Part 3 的"语言 → 解释 → 分叉 → 落地"四步就连成了一条完整链路。读到这里，你应当能把全书前后打通：<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>的前缀复用是<strong>引擎的本事</strong>，本课的 fork 是<strong>语言的表达</strong>，二者一里一外、一声明一兑现，共同撑起 SGLang"<strong>又好写又高效</strong>"的承诺。</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState</span><span class="ln">DSL 程序拿到的句柄 s：fork 分叉、join 合并、读取生成变量</span></div>
@@ -493,10 +495,10 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>fork 做什么</strong>：<span class="mono">s.fork(n)</span> 从<strong>当前状态</strong>分叉出 n 个并行分支，每个<strong>继承同一段已建好的前缀</strong>，再各自独立生成；<span class="mono">join</span>（gather）把各分支<strong>新命名变量收回父状态</strong>供比较 / 投票 / 汇总。</li>
-    <li><strong>核心对应</strong>：fork 是"<strong>声明端</strong>"，RadixAttention（第 7 课）是"<strong>兑现端</strong>"——同一想法的两半。fork 在程序里说出"<strong>这些分支开头相同</strong>"，运行时就把共享前缀的 KV<strong>只算一次、所有分支复用</strong>。</li>
+    <li><strong>核心对应</strong>：fork 是"<strong>声明端</strong>"，RadixAttention（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）是"<strong>兑现端</strong>"——同一想法的两半。fork 在程序里说出"<strong>这些分支开头相同</strong>"，运行时就把共享前缀的 KV<strong>只算一次、所有分支复用</strong>。</li>
     <li><strong>代价</strong>：从长前缀 fork 出 8 个分支 ≈ <strong>1 段前缀 + 8 段短后缀</strong>，而非 8 段完整提示；串行 for 循环则会把前缀<strong>重算 n 遍</strong>。前缀越长、n 越大，省得越多。</li>
     <li><strong>典型用法</strong>：best-of-n 并行采样、branch-and-evaluate、map over a list、tree-of-thought——共同点都是<strong>共享一段开头、再分头做事</strong>。</li>
-    <li><strong>并发</strong>：无数据依赖的分支可由解释器（第 10 课）<strong>并发推进</strong>。于是 fork 同时省算力（前缀复用）又省时间（并发）。源码见 <span class="mono">interpreter.py ::ProgramState.fork</span>，第 12 课接到具体后端。</li>
+    <li><strong>并发</strong>：无数据依赖的分支可由解释器（<a class="xref" href="10-interpreter-and-tracer.html">第 10 课</a>）<strong>并发推进</strong>。于是 fork 同时省算力（前缀复用）又省时间（并发）。源码见 <span class="mono">interpreter.py ::ProgramState.fork</span>，<a class="xref" href="12-backends-and-openai-compat.html">第 12 课</a>接到具体后端。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -511,7 +513,7 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。fork 从当前状态克隆出 n 个子状态，每个都带着<strong>到此为止建好的同一段前缀</strong>，然后各走各路独立生成。正因为前缀相同，RadixAttention（第 7 课）才能只算一次、给所有分支复用。分支用不同随机性可得不同结果，并非必然相同；也不涉及独占 GPU；更不是从零开始。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。fork 从当前状态克隆出 n 个子状态，每个都带着<strong>到此为止建好的同一段前缀</strong>，然后各走各路独立生成。正因为前缀相同，RadixAttention（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）才能只算一次、给所有分支复用。分支用不同随机性可得不同结果，并非必然相同；也不涉及独占 GPU；更不是从零开始。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -543,16 +545,16 @@ RadixAttention 则在<strong>引擎里把这次分叉的共享前缀只算一次
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用 SGLang 写一段 best-of-n 的伪代码：先往 <code>s</code> 拼好一段较长的系统提示 + 问题，再 <code>forks = s.fork(8)</code> 让 8 个分支各自 <code>gen("answer")</code>，最后 <code>forks.join()</code> 收回 8 个答案。请说明：这 8 个分支共享的是哪一段、各自独立算的是哪一段，以及运行时（RadixAttention，第 7 课）据此把什么只算了一次。</li>
+    <li>用 SGLang 写一段 best-of-n 的伪代码：先往 <code>s</code> 拼好一段较长的系统提示 + 问题，再 <code>forks = s.fork(8)</code> 让 8 个分支各自 <code>gen("answer")</code>，最后 <code>forks.join()</code> 收回 8 个答案。请说明：这 8 个分支共享的是哪一段、各自独立算的是哪一段，以及运行时（RadixAttention，<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）据此把什么只算了一次。</li>
     <li>有人说“fork 只是个写起来方便的语法糖，去掉它用 for 循环效果一样”。请结合“fork 是声明端、RadixAttention 是兑现端”这层关系反驳：为什么把分叉结构<strong>显式声明</strong>出来，对运行时的前缀复用和并发都更有利？<code>join</code> 在其中又承担了什么角色？</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
-Last lesson (Lesson 10) showed how the interpreter <strong>runs a tree of intent step by step</strong>. But what really sets SGLang apart is that a program can
+Last lesson (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>) showed how the interpreter <strong>runs a tree of intent step by step</strong>. But what really sets SGLang apart is that a program can
 <strong>fork multiple parallel branches off the current state</strong> — that is <span class="inline">s.fork(n)</span>. The one line to remember today:
-<strong>the front-end's fork and the runtime's RadixAttention (Lesson 7) are two halves of one idea</strong>. fork lets you <strong>declare "branch here" in the program</strong>;
+<strong>the front-end's fork and the runtime's RadixAttention (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) are two halves of one idea</strong>. fork lets you <strong>declare "branch here" in the program</strong>;
 RadixAttention <strong>computes that branch's shared prefix once in the engine and reuses it for every branch</strong>. One <strong>states the structure</strong>, the other <strong>cashes it in as saved compute</strong>.
 Grasp this correspondence and you finally understand the weight of the word <strong>Structured</strong> in SGLang's name.
 </p>
@@ -569,7 +571,7 @@ Grasp this correspondence and you finally understand the weight of the word <str
   <div class="tag">🌍 The big picture</div>
   In one line: <span class="inline">s.fork(n)</span> clones <strong>n parallel continuation branches</strong> from the <strong>current state</strong>, each <strong>inheriting the same prompt prefix built so far</strong>,
   then each generates independently (e.g. n different samples, or n different sub-questions); <strong>join / gather</strong> then <strong>collects each branch's newly-captured variables back into the parent state</strong> for you to compare, vote, or aggregate.
-  Its power is <strong>not convenience but saved compute</strong>: since the n branches share an identical prefix, RadixAttention <strong>computes that prefix's KV once and shares it across all branches</strong> (Lesson 7).
+  Its power is <strong>not convenience but saved compute</strong>: since the n branches share an identical prefix, RadixAttention <strong>computes that prefix's KV once and shares it across all branches</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>).
   So forking 8 branches off a long prefix costs roughly "<strong>1 prefix + 8 very short suffixes</strong>," not "<strong>8 full prompts</strong>." fork is therefore not just a convenience — <strong>it is what "prefix sharing" looks like in the programming model</strong>.
 </div>
 
@@ -583,7 +585,7 @@ e.g. a variable in the parent becomes a <strong>list</strong> holding all n bran
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Build the shared prefix</h4><p>First assemble system + few-shot + question into <span class="mono">s</span> — this segment is <strong>shared by all branches</strong> and is the root of fork's savings.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>s.fork(n): branch in place</h4><p>Clone <strong>n parallel sub-states</strong> from the current state, each inheriting <strong>the same prefix</strong>; returns a <span class="mono">ProgramStateGroup</span>.</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>Each branch generates independently</h4><p>Each branch <span class="mono">forks[i] += gen("answer")</span> writes its own; branches with no data dependency can <strong>run concurrently</strong> (interpreter, Lesson 10).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Each branch generates independently</h4><p>Each branch <span class="mono">forks[i] += gen("answer")</span> writes its own; branches with no data dependency can <strong>run concurrently</strong> (interpreter, <a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>).</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>join: gather answers back</h4><p><span class="mono">forks.join()</span> aggregates each branch's <strong>new variables</strong> back into <span class="mono">s</span>, so <span class="mono">s["answer"]</span> becomes a list of n results to compare / vote / aggregate.</p></div></div>
 </div>
 
@@ -613,13 +615,13 @@ e.g. a variable in the parent becomes a <strong>list</strong> holding all n bran
 <p>Concretely: a prefix of about <strong>2000 tokens</strong> (system + few-shot + question), then <span class="mono">s.fork(3)</span> and each branch writes only ~<strong>100 tokens</strong>. Running it serially 3 times costs <span class="mono">3×2000 + 3×100 ≈ 6300</span> tokens; with fork it costs only <span class="mono">2000 + 3×100 ≈ 2300</span> — <strong>saving roughly 4000 tokens of duplicated prefix compute</strong>.</p>
 
 <h2>The core: fork and RadixAttention are two halves of one idea</h2>
-<p>This is the part to <strong>highlight hardest</strong>. Lesson 7 explained: RadixAttention organizes all requests' prefixes into a <strong>radix tree</strong>, where a <strong>common prefix stores one copy of KV shared by many requests</strong>.
+<p>This is the part to <strong>highlight hardest</strong>. <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a> explained: RadixAttention organizes all requests' prefixes into a <strong>radix tree</strong>, where a <strong>common prefix stores one copy of KV shared by many requests</strong>.
 What fork does is exactly <strong>deliberately create a "one common prefix + many different suffixes" shape in the program</strong>. In other words: <strong>fork is the "declaration side," RadixAttention is the "redemption side."</strong>
 Writing <span class="mono">s.fork(8)</span> in the DSL tells the runtime plainly: "<strong>these 8 branches have an identical opening.</strong>" The runtime takes that signal and computes the shared prefix's attention <strong>only once</strong>;
 the 8 branches <strong>share one prefix KV</strong>, each adding compute only for its own short suffix. Without fork's declaration, RadixAttention could still <strong>discover after the fact</strong> that prefixes match; with fork, the sharing is <strong>structurally explicit, zero-guess</strong>.</p>
 
 <div class="cellgroup">
-  <div class="cg-cap"><b>Shared prefix computed once, each branch adds a short suffix</b>: highlighted cells are the <strong>same prefix KV shared by all forked branches</strong> (Lesson 7 RadixAttention reuse); white cells are what each branch computes anew</div>
+  <div class="cg-cap"><b>Shared prefix computed once, each branch adds a short suffix</b>: highlighted cells are the <strong>same prefix KV shared by all forked branches</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a> RadixAttention reuse); white cells are what each branch computes anew</div>
   <div class="cells"><span class="lab">Branch 0</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer A</span></div>
   <div class="cells"><span class="lab">Branch 1</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer B</span></div>
   <div class="cells"><span class="lab">Branch 2</span><span class="cell hl">system</span><span class="cell hl">few-shot</span><span class="cell hl">question</span><span class="sep">→</span><span class="cell">answer C</span></div>
@@ -658,7 +660,7 @@ the runtime computes <strong>one prefix</strong> plus n short suffixes, and inde
 
 <div class="cols">
   <div class="col"><h4>Serial for loop: N × full prompt</h4><p>Run n gens in a loop, each <strong>recomputing the whole long prefix</strong>. Cost ≈ <strong>n × (prefix + suffix)</strong>, prefix recomputed n times; iterations serial, runtime <strong>can't tell their openings match</strong>.</p></div>
-  <div class="col"><h4>s.fork(n): 1 × prefix + N × suffix</h4><p>Declare the fork once; the runtime computes the <strong>shared prefix KV only once</strong> (Lesson 7), n branches each add only a <strong>short suffix</strong>. Cost ≈ <strong>prefix + n × suffix</strong>; independent branches also run concurrently (Lesson 10).</p></div>
+  <div class="col"><h4>s.fork(n): 1 × prefix + N × suffix</h4><p>Declare the fork once; the runtime computes the <strong>shared prefix KV only once</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), n branches each add only a <strong>short suffix</strong>. Cost ≈ <strong>prefix + n × suffix</strong>; independent branches also run concurrently (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>).</p></div>
 </div>
 
 <h2>Common uses: what fork is good for</h2>
@@ -672,7 +674,7 @@ the runtime computes <strong>one prefix</strong> plus n short suffixes, and inde
   <tr><td class="mono">tree-of-thought</td><td>at each thinking node <strong>fork several reasoning paths</strong>, forking again layer by layer</td><td><strong>explore / prune</strong> down the tree, recover the best path</td></tr>
 </table>
 
-<p>One more word on concurrency: when forked branches <strong>have no data dependency</strong>, the interpreter (Lesson 10) can <strong>advance them concurrently</strong> rather than waiting for one to finish before the next.
+<p>One more word on concurrency: when forked branches <strong>have no data dependency</strong>, the interpreter (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>) can <strong>advance them concurrently</strong> rather than waiting for one to finish before the next.
 So fork brings <strong>two benefits at once</strong>: compute-wise, RadixAttention <strong>saves the duplicated prefix</strong>; time-wise, concurrency <strong>overlaps the branches</strong>. Now the real fork in the source.</p>
 
 <div class="codefile">
@@ -693,7 +695,7 @@ So fork brings <strong>two benefits at once</strong>: compute-wise, RadixAttenti
 <p>A few lines, but they tie the two halves together: <span class="mono">stream_executor.fork(size, …)</span> does the real "<strong>clone size branches from the current prefix</strong>" at the <strong>runtime layer</strong> —
 exactly the moment RadixAttention's prefix tree <strong>grows size children off a shared parent node</strong>; the returned <span class="mono">ProgramStateGroup</span> gives you <span class="mono">join</span>,
 which in <span class="mono">gather_variable</span> mode <strong>copies each branch's new variables back into the parent state</strong>. With one <span class="mono">s.fork(n)</span>, front-end declaration and runtime reuse become <strong>one and the same</strong>.
-Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/join onto concrete engines — completing Part 3's chain of "language → interpret → fork → land."</p>
+<a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a> next covers the <strong>backend interface</strong>, landing this fork/join onto concrete engines — completing Part 3's chain of "language → interpret → fork → land."</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/lang/interpreter.py ::ProgramState</span><span class="ln">the handle s a DSL program receives: fork, join, read generated variables</span></div>
@@ -715,10 +717,10 @@ Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/
   <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>What fork does</strong>: <span class="mono">s.fork(n)</span> branches n parallel continuations off the <strong>current state</strong>, each <strong>inheriting the same already-built prefix</strong>, then generating independently; <span class="mono">join</span> (gather) copies each branch's <strong>new named variables back into the parent</strong> for compare / vote / aggregate.</li>
-    <li><strong>The core correspondence</strong>: fork is the "<strong>declaration side</strong>," RadixAttention (Lesson 7) the "<strong>redemption side</strong>" — two halves of one idea. fork states "<strong>these branches share an opening</strong>"; the runtime computes the shared prefix's KV <strong>once and reuses it for every branch</strong>.</li>
+    <li><strong>The core correspondence</strong>: fork is the "<strong>declaration side</strong>," RadixAttention (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) the "<strong>redemption side</strong>" — two halves of one idea. fork states "<strong>these branches share an opening</strong>"; the runtime computes the shared prefix's KV <strong>once and reuses it for every branch</strong>.</li>
     <li><strong>Cost</strong>: forking 8 branches off a long prefix ≈ <strong>1 prefix + 8 short suffixes</strong>, not 8 full prompts; a serial for loop <strong>recomputes the prefix n times</strong>. The longer the prefix and larger n, the more you save.</li>
     <li><strong>Common uses</strong>: best-of-n sampling, branch-and-evaluate, map over a list, tree-of-thought — all share "<strong>share an opening, then do things separately</strong>."</li>
-    <li><strong>Concurrency</strong>: branches with no data dependency can be <strong>advanced concurrently</strong> by the interpreter (Lesson 10). So fork saves compute (prefix reuse) and time (concurrency) at once. Source: <span class="mono">interpreter.py ::ProgramState.fork</span>; Lesson 12 lands it on concrete backends.</li>
+    <li><strong>Concurrency</strong>: branches with no data dependency can be <strong>advanced concurrently</strong> by the interpreter (<a class="xref" href="10-interpreter-and-tracer.html">Lesson 10</a>). So fork saves compute (prefix reuse) and time (concurrency) at once. Source: <span class="mono">interpreter.py ::ProgramState.fork</span>; <a class="xref" href="12-backends-and-openai-compat.html">Lesson 12</a> lands it on concrete backends.</li>
   </ul>
 </div>
 <div class="selftest">
@@ -733,7 +735,7 @@ Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. fork clones n sub-states from the current state, each carrying <strong>the same prefix built so far</strong>, after which they generate independently. Precisely because the prefix is identical, RadixAttention (Lesson 7) computes it once and reuses it across branches. Branches with different randomness yield different results (not necessarily identical); no dedicated GPU is involved; and it is not from scratch.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. fork clones n sub-states from the current state, each carrying <strong>the same prefix built so far</strong>, after which they generate independently. Precisely because the prefix is identical, RadixAttention (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) computes it once and reuses it across branches. Branches with different randomness yield different results (not necessarily identical); no dedicated GPU is involved; and it is not from scratch.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -765,7 +767,7 @@ Lesson 12 next covers the <strong>backend interface</strong>, landing this fork/
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Write best-of-n pseudocode in SGLang: build a longish system prompt + question into <code>s</code>, then <code>forks = s.fork(8)</code> so 8 branches each do <code>gen("answer")</code>, finally <code>forks.join()</code> to gather 8 answers. Explain which segment the 8 branches share, which segment each computes independently, and what the runtime (RadixAttention, Lesson 7) thereby computes only once.</li>
+    <li>Write best-of-n pseudocode in SGLang: build a longish system prompt + question into <code>s</code>, then <code>forks = s.fork(8)</code> so 8 branches each do <code>gen("answer")</code>, finally <code>forks.join()</code> to gather 8 answers. Explain which segment the 8 branches share, which segment each computes independently, and what the runtime (RadixAttention, <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) thereby computes only once.</li>
     <li>Someone claims 'fork is just convenient syntactic sugar; drop it and a for loop does the same.' Rebut this using the 'fork is the declaration side, RadixAttention the redemption side' relationship: why does <strong>explicitly declaring</strong> the branch structure benefit both prefix reuse and concurrency at the runtime? And what role does <code>join</code> play in all this?</li>
   </ul>
 </div>

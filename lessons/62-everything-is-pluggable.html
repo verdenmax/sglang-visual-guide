@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -339,7 +341,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>同一个模式，遍布整台引擎</h2>
 <p>这个「面向接口编程、部署时选实现」的模式，不是某一处的巧合，而是<strong>反复出现的设计主题</strong>。我们在前面的课里逐一见过它的化身，现在把它们摆在一起，那条暗线就清晰可见了：</p>
-<p>注意力后端（<strong>第33课</strong>）是最典型的一缝：模型代码只调用 <span class="mono">self.attn(...)</span>，至于背后是 FlashInfer、Triton 还是 FlashAttention，由后端实现去满足同一组方法；模型作者完全不必知道内核细节。硬件平台抽象（<strong>第42课</strong>）让<strong>一套引擎、多种芯片</strong>，平台差异被收进 Platform 接口，换芯片不是换引擎。量化方法（<strong>第35课</strong>）可按模型逐个替换，FP8、INT4 等只是同一接口的不同实现。投机算法家族 EAGLE/NGRAM/…（<strong>第43课</strong>）藏在一个枚举背后，调度路径只认「投机」这件事而不在意具体算法。四条并行轴 TP/PP/DP/EP（<strong>第46课</strong>）被同一个 <span class="mono">GroupCoordinator</span> 统一表达，通信细节被收进一个协调器。语法后端 xgrammar/outlines/llguidance（<strong>第48课</strong>）为结构化输出提供可换的实现，约束引擎与解码循环解耦。KV 传输连接器 Mooncake/NIXL（<strong>第45课</strong>）支撑 PD 分离，跨机搬运 KV 的方式可换而调度不变。甚至「写一个模型」（<strong>第26课</strong>）本身，也是面向稳定的层 API 编程，而非改动引擎——你拼装的是层，而层背后是哪种注意力、哪种量化，又是另一层可插拔。</p>
+<p>注意力后端（<strong><a class="xref" href="33-attention-backend-abstraction.html">第33课</a></strong>）是最典型的一缝：模型代码只调用 <span class="mono">self.attn(...)</span>，至于背后是 FlashInfer、Triton 还是 FlashAttention，由后端实现去满足同一组方法；模型作者完全不必知道内核细节。硬件平台抽象（<strong><a class="xref" href="42-multi-hardware-backends.html">第42课</a></strong>）让<strong>一套引擎、多种芯片</strong>，平台差异被收进 Platform 接口，换芯片不是换引擎。量化方法（<strong><a class="xref" href="35-quantization.html">第35课</a></strong>）可按模型逐个替换，FP8、INT4 等只是同一接口的不同实现。投机算法家族 EAGLE/NGRAM/…（<strong><a class="xref" href="43-speculative-decoding-overview.html">第43课</a></strong>）藏在一个枚举背后，调度路径只认「投机」这件事而不在意具体算法。四条并行轴 TP/PP/DP/EP（<strong><a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a></strong>）被同一个 <span class="mono">GroupCoordinator</span> 统一表达，通信细节被收进一个协调器。语法后端 xgrammar/outlines/llguidance（<strong><a class="xref" href="48-structured-outputs-and-jump-forward.html">第48课</a></strong>）为结构化输出提供可换的实现，约束引擎与解码循环解耦。KV 传输连接器 Mooncake/NIXL（<strong><a class="xref" href="45-pd-disaggregation.html">第45课</a></strong>）支撑 PD 分离，跨机搬运 KV 的方式可换而调度不变。甚至「写一个模型」（<strong><a class="xref" href="26-writing-a-model.html">第26课</a></strong>）本身，也是面向稳定的层 API 编程，而非改动引擎——你拼装的是层，而层背后是哪种注意力、哪种量化，又是另一层可插拔。</p>
 <p>把它们排在一起，你会看到惊人的一致：每一处都是「一个接口 + 多个实现 + 部署时选一个」。这就是综合课要点亮的那张<strong>跨课之网</strong>。它们看似各管各的领域——硬件、算法、格式、通信——但<strong>骨架是同一副</strong>。一旦你认得这副骨架，先前那些孤立的知识点就会彼此勾连，形成一张可以互相印证的网，而不再是一堆需要死记的特性。更妙的是，当你日后遇到一个全新的领域（比如一种尚未出现的加速器或解码策略），你几乎可以预判 SGLang 会怎么接纳它：定义一个新接口，提供若干实现，部署时选一个。范型本身就是预测力。</p>
 <p>这也解释了为什么本课不引入任何新机制，却被放在全书接近收尾的位置。你必须先一课课见过这些缝的具体样子——见过注意力后端怎么调、见过平台怎么抽象、见过并行怎么协调——才能在此刻把它们抽象成同一个形状。综合课的价值不在于新增知识，而在于<strong>重组已有知识</strong>：把散落各处的点收成一条线，让你从「知道很多事」升级为「看懂一件事」。</p>
 
@@ -356,16 +358,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p class="lead">所以「一切皆可插拔」不是一句口号，而是 SGLang 反复采用的<strong>工程纪律</strong>：凡是会变的，都先抽象成接口；凡是核心要依赖的，都只依赖接口而非实现。读完这一课，希望你以后翻开任何一个模块，第一反应都是去找它的抽象基类——找到了它，你就找到了这道缝的契约，也就找到了理解与扩展它的起点。</p>
 
 <table class="t"><tr><th>可插拔的缝</th><th>接口 / 抽象</th><th>例子（实现）</th><th>课次</th></tr>
-<tr><td>注意力后端</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td>第33课</td></tr>
-<tr><td>硬件平台</td><td><span class="mono">Platform</span></td><td>多种芯片，一套引擎</td><td>第42课</td></tr>
-<tr><td>量化方法</td><td><span class="mono">QuantizeMethod</span></td><td>按模型逐个替换</td><td>第35课</td></tr>
-<tr><td>投机算法</td><td>算法枚举</td><td>EAGLE / NGRAM / …</td><td>第43课</td></tr>
-<tr><td>并行轴</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td>第46课</td></tr>
-<tr><td>语法后端</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td>第48课</td></tr>
-<tr><td>KV 传输</td><td>KV connector</td><td>Mooncake / NIXL</td><td>第45课</td></tr>
-<tr><td>写模型</td><td>稳定层 API</td><td>面向层 API 实现模型</td><td>第26课</td></tr></table>
+<tr><td>注意力后端</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td><a class="xref" href="33-attention-backend-abstraction.html">第33课</a></td></tr>
+<tr><td>硬件平台</td><td><span class="mono">Platform</span></td><td>多种芯片，一套引擎</td><td><a class="xref" href="42-multi-hardware-backends.html">第42课</a></td></tr>
+<tr><td>量化方法</td><td><span class="mono">QuantizeMethod</span></td><td>按模型逐个替换</td><td><a class="xref" href="35-quantization.html">第35课</a></td></tr>
+<tr><td>投机算法</td><td>算法枚举</td><td>EAGLE / NGRAM / …</td><td><a class="xref" href="43-speculative-decoding-overview.html">第43课</a></td></tr>
+<tr><td>并行轴</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td><a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a></td></tr>
+<tr><td>语法后端</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td><a class="xref" href="48-structured-outputs-and-jump-forward.html">第48课</a></td></tr>
+<tr><td>KV 传输</td><td>KV connector</td><td>Mooncake / NIXL</td><td><a class="xref" href="45-pd-disaggregation.html">第45课</a></td></tr>
+<tr><td>写模型</td><td>稳定层 API</td><td>面向层 API 实现模型</td><td><a class="xref" href="26-writing-a-model.html">第26课</a></td></tr></table>
 
-<div class="layers"><div class="layer">🔌 注意力后端（第33课）</div><div class="layer">🔌 硬件平台（第42课）</div><div class="layer"><strong>稳定核心：Scheduler · 模型执行循环 · 内存池</strong></div><div class="layer">🔌 量化 / 投机 / 并行（第35/43/46课）</div><div class="layer">🔌 语法 / KV 传输 / 写模型（第48/45/26课）</div></div>
+<div class="layers"><div class="layer">🔌 注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）</div><div class="layer">🔌 硬件平台（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）</div><div class="layer"><strong>稳定核心：Scheduler · 模型执行循环 · 内存池</strong></div><div class="layer">🔌 量化 / 投机 / 并行（第35/43/46课）</div><div class="layer">🔌 语法 / KV 传输 / 写模型（第48/45/26课）</div></div>
 
 <div class="cols"><div class="col"><strong>硬编码（一个实现焊死在核心里）</strong><br>新硬件 = 改调度器；新算法 = 改执行循环；任何变化都要动核心，风险扩散、难以协作。</div><div class="col"><strong>面向接口编程（部署时替换）</strong><br>核心只认抽象基类；新实现满足接口即可接入；部署时选定具体实现，核心一行不改。</div></div>
 
@@ -459,7 +461,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一个模式，处处复现</strong>：面向接口（抽象基类）编程，具体实现在<span class="mono">部署时</span>选定；这是贯穿全书的同一副骨架。</li>
 <li><strong>稳定核心</strong>：Scheduler、模型执行循环、内存池保持不变，是一切可替换的前提；核心越稳定，边缘就越自由。</li>
-<li><strong>可变边缘</strong>：注意力后端（第33课）、平台（第42课）、量化（第35课）、投机（第43课）、并行（第46课）、语法（第48课）、KV 传输（第45课）、写模型（第26课）都是同一缝的化身。</li>
+<li><strong>可变边缘</strong>：注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）、平台（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）、量化（<a class="xref" href="35-quantization.html">第35课</a>）、投机（<a class="xref" href="43-speculative-decoding-overview.html">第43课</a>）、并行（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>）、语法（<a class="xref" href="48-structured-outputs-and-jump-forward.html">第48课</a>）、KV 传输（<a class="xref" href="45-pd-disaggregation.html">第45课</a>）、写模型（<a class="xref" href="26-writing-a-model.html">第26课</a>）都是同一缝的化身。</li>
 <li><strong>接口即契约</strong>：抽象基类只规定「必须能做什么」，不规定「怎么做」；多个实现因此对核心完全等价，可自由替换与对比。</li>
 <li><strong>可扩展性的来源</strong>：贡献 = 实现一个已存在的接口，而非重写核心；改动局部化，评审范围收窄，多团队可并行推进而互不冲突。</li>
 <li><strong>读懂全书的钥匙</strong>：看任何一课都先问「缝在哪、接口是什么、实现有几个、部署时怎么选」，打开陌生模块先找它的抽象基类，找到契约就找到了一切的起点。</li>
@@ -489,7 +491,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。核心稳定，是其他一切能自由替换的前提。注意力后端（第33课）、平台（第42课）、量化（第35课）、投机（第43课）、并行（第46课）、语法（第48课）、KV 传输（第45课）都是同一条缝的化身：核心只认接口，不认实现。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。核心稳定，是其他一切能自由替换的前提。注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）、平台（<a class="xref" href="42-multi-hardware-backends.html">第42课</a>）、量化（<a class="xref" href="35-quantization.html">第35课</a>）、投机（<a class="xref" href="43-speculative-decoding-overview.html">第43课</a>）、并行（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第46课</a>）、语法（<a class="xref" href="48-structured-outputs-and-jump-forward.html">第48课</a>）、KV 传输（<a class="xref" href="45-pd-disaggregation.html">第45课</a>）都是同一条缝的化身：核心只认接口，不认实现。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -502,13 +504,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。接口是契约，核心是稳定的舞台，社区在边缘并行扩张。贡献通常不是重写引擎，而是沿着已有的缝补上一个新实现——这正是「写一个模型」（第26课）也只是面向稳定层 API 编程的原因。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。接口是契约，核心是稳定的舞台，社区在边缘并行扩张。贡献通常不是重写引擎，而是沿着已有的缝补上一个新实现——这正是「写一个模型」（<a class="xref" href="26-writing-a-model.html">第26课</a>）也只是面向稳定层 API 编程的原因。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用你自己的话解释「面向接口编程，部署时选实现」这个范型：以注意力后端（第33课）为例，说明模型代码为什么只调用 self.attn(...) 而不在意背后是 FlashInfer、Triton 还是 FA，以及这种解耦带来了什么好处。</li>
+    <li>用你自己的话解释「面向接口编程，部署时选实现」这个范型：以注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）为例，说明模型代码为什么只调用 self.attn(...) 而不在意背后是 FlashInfer、Triton 还是 FA，以及这种解耦带来了什么好处。</li>
     <li>本课说看懂这个形状后，看任何一课都会先问「缝在哪、接口是什么、实现有几个、部署时怎么选」。请从第35、42、43、45、46、48 课中至少挑三处，说明它们如何共享同一形状，并解释为什么把变化关在可插拔边缘能让引擎核心保持简洁可靠。</li>
   </ul>
 </div>
@@ -530,7 +532,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>One pattern, all over the engine</h2>
 <p>This "program to an interface, choose an implementation at deploy time" pattern is not a one-off coincidence but a <strong>recurring design theme</strong>. We met its incarnations across earlier lessons; line them up and the hidden through-line becomes clear:</p>
-<p>The attention backend (<strong>Lesson 33</strong>) is the archetypal seam: model code only calls <span class="mono">self.attn(...)</span>, and whether FlashInfer, Triton, or FlashAttention sits behind it, the backend satisfies the same set of methods—the model author need not know any kernel detail. The hardware platform abstraction (<strong>Lesson 42</strong>) gives you <strong>one engine, many chips</strong>, with chip differences tucked into the Platform interface, so swapping chips is not swapping engines. Quantization methods (<strong>Lesson 35</strong>) are swappable per model; FP8, INT4 and the rest are just different implementations of one interface. The speculative-algorithm family EAGLE/NGRAM/… (<strong>Lesson 43</strong>) hides behind one enum, so the scheduling path only knows "speculation," not the specific algorithm. The four parallelism axes TP/PP/DP/EP (<strong>Lesson 46</strong>) are expressed uniformly by one <span class="mono">GroupCoordinator</span>, with communication detail folded into a single coordinator. The grammar backends xgrammar/outlines/llguidance (<strong>Lesson 48</strong>) provide swappable implementations for structured output, decoupling the constraint engine from the decode loop. The KV-transfer connectors Mooncake/NIXL (<strong>Lesson 45</strong>) power PD disaggregation, with the way KV moves across machines swappable while scheduling stays put. And even "writing a model" (<strong>Lesson 26</strong>) is itself programming against stable layer APIs rather than editing the engine—you assemble layers, and which attention or quantization those layers use is yet another pluggable layer.</p>
+<p>The attention backend (<strong><a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a></strong>) is the archetypal seam: model code only calls <span class="mono">self.attn(...)</span>, and whether FlashInfer, Triton, or FlashAttention sits behind it, the backend satisfies the same set of methods—the model author need not know any kernel detail. The hardware platform abstraction (<strong><a class="xref" href="42-multi-hardware-backends.html">Lesson 42</a></strong>) gives you <strong>one engine, many chips</strong>, with chip differences tucked into the Platform interface, so swapping chips is not swapping engines. Quantization methods (<strong><a class="xref" href="35-quantization.html">Lesson 35</a></strong>) are swappable per model; FP8, INT4 and the rest are just different implementations of one interface. The speculative-algorithm family EAGLE/NGRAM/… (<strong><a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a></strong>) hides behind one enum, so the scheduling path only knows "speculation," not the specific algorithm. The four parallelism axes TP/PP/DP/EP (<strong><a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a></strong>) are expressed uniformly by one <span class="mono">GroupCoordinator</span>, with communication detail folded into a single coordinator. The grammar backends xgrammar/outlines/llguidance (<strong><a class="xref" href="48-structured-outputs-and-jump-forward.html">Lesson 48</a></strong>) provide swappable implementations for structured output, decoupling the constraint engine from the decode loop. The KV-transfer connectors Mooncake/NIXL (<strong><a class="xref" href="45-pd-disaggregation.html">Lesson 45</a></strong>) power PD disaggregation, with the way KV moves across machines swappable while scheduling stays put. And even "writing a model" (<strong><a class="xref" href="26-writing-a-model.html">Lesson 26</a></strong>) is itself programming against stable layer APIs rather than editing the engine—you assemble layers, and which attention or quantization those layers use is yet another pluggable layer.</p>
 <p>Line them up and the consistency is striking: every one is "one interface + many implementations + pick one at deploy time." This is the <strong>cross-lesson web</strong> the synthesis lesson exists to light up. They seem to mind their own domains—hardware, algorithm, format, communication—but the <strong>skeleton is the same</strong>. Once you recognize that skeleton, formerly isolated facts hook into one another, forming a web that cross-validates itself rather than a pile of features to memorize. Better still, when you later meet a brand-new domain (say an accelerator or decoding strategy that does not yet exist), you can almost predict how SGLang will absorb it: define a new interface, supply a few implementations, pick one at deploy time. The archetype itself is predictive power.</p>
 <p>This also explains why this lesson introduces no new mechanism yet sits near the book's end. You must first have seen each seam concretely, lesson by lesson—seen how the attention backend is called, how the platform is abstracted, how parallelism is coordinated—before you can abstract them here into one shape. A synthesis lesson's value is not in adding knowledge but in <strong>reorganizing existing knowledge</strong>: gathering scattered dots into one line, upgrading you from "knowing many things" to "understanding one thing."</p>
 
@@ -547,14 +549,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p class="lead">So "everything is pluggable" is not a slogan but an <strong>engineering discipline</strong> SGLang applies again and again: whatever varies is abstracted into an interface first; whatever the core depends on depends only on the interface, never the implementation. After this lesson, may your first instinct on opening any module be to hunt for its abstract base class—find it and you have found the contract of the seam, and with it the starting point for understanding and extending it.</p>
 
 <table class="t"><tr><th>Pluggable seam</th><th>Interface / abstraction</th><th>Example (implementations)</th><th>Lesson</th></tr>
-<tr><td>Attention backend</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td>Lesson 33</td></tr>
-<tr><td>Hardware platform</td><td><span class="mono">Platform</span></td><td>Many chips, one engine</td><td>Lesson 42</td></tr>
-<tr><td>Quantization method</td><td><span class="mono">QuantizeMethod</span></td><td>Swappable per model</td><td>Lesson 35</td></tr>
-<tr><td>Speculative algorithm</td><td>Algorithm enum</td><td>EAGLE / NGRAM / …</td><td>Lesson 43</td></tr>
-<tr><td>Parallelism axes</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td>Lesson 46</td></tr>
-<tr><td>Grammar backend</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td>Lesson 48</td></tr>
-<tr><td>KV transfer</td><td>KV connector</td><td>Mooncake / NIXL</td><td>Lesson 45</td></tr>
-<tr><td>Write a model</td><td>Stable layer APIs</td><td>Implement a model on layer APIs</td><td>Lesson 26</td></tr></table>
+<tr><td>Attention backend</td><td><span class="mono">AttentionBackend</span></td><td>FlashInfer / Triton / FA</td><td><a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a></td></tr>
+<tr><td>Hardware platform</td><td><span class="mono">Platform</span></td><td>Many chips, one engine</td><td><a class="xref" href="42-multi-hardware-backends.html">Lesson 42</a></td></tr>
+<tr><td>Quantization method</td><td><span class="mono">QuantizeMethod</span></td><td>Swappable per model</td><td><a class="xref" href="35-quantization.html">Lesson 35</a></td></tr>
+<tr><td>Speculative algorithm</td><td>Algorithm enum</td><td>EAGLE / NGRAM / …</td><td><a class="xref" href="43-speculative-decoding-overview.html">Lesson 43</a></td></tr>
+<tr><td>Parallelism axes</td><td><span class="mono">GroupCoordinator</span></td><td>TP / PP / DP / EP</td><td><a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a></td></tr>
+<tr><td>Grammar backend</td><td>Grammar backend</td><td>xgrammar / outlines / llguidance</td><td><a class="xref" href="48-structured-outputs-and-jump-forward.html">Lesson 48</a></td></tr>
+<tr><td>KV transfer</td><td>KV connector</td><td>Mooncake / NIXL</td><td><a class="xref" href="45-pd-disaggregation.html">Lesson 45</a></td></tr>
+<tr><td>Write a model</td><td>Stable layer APIs</td><td>Implement a model on layer APIs</td><td><a class="xref" href="26-writing-a-model.html">Lesson 26</a></td></tr></table>
 
 <div class="layers"><div class="layer">🔌 Attention backend (L33)</div><div class="layer">🔌 Hardware platform (L42)</div><div class="layer"><strong>Stable core: Scheduler · model loop · memory pools</strong></div><div class="layer">🔌 Quant / speculation / parallelism (L35/43/46)</div><div class="layer">🔌 Grammar / KV transfer / write a model (L48/45/26)</div></div>
 
@@ -699,7 +701,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>In your own words, explain the 'program to an interface, choose at deploy time' archetype: using the attention backend (Lesson 33) as an example, explain why model code only calls self.attn(...) without caring whether FlashInfer, Triton, or FA sits behind it, and what this decoupling buys you.</li>
+    <li>In your own words, explain the 'program to an interface, choose at deploy time' archetype: using the attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) as an example, explain why model code only calls self.attn(...) without caring whether FlashInfer, Triton, or FA sits behind it, and what this decoupling buys you.</li>
     <li>The lesson says that once you see the shape, you read any lesson by asking 'where is the seam, what is the interface, how many implementations, how is one chosen at deploy time'. Pick at least three of Lessons 35, 42, 43, 45, 46, 48 and show how they share the same shape, then explain why fencing variation behind pluggable edges keeps the engine core simple and reliable.</li>
   </ul>
 </div>

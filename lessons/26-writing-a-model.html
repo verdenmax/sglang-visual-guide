@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -324,7 +326,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead">
-上一课我们看了权重<strong>怎么进来</strong>（load_weights，第 25 课）。这一课回答一个更让人好奇的问题：在 SGLang 里
+上一课我们看了权重<strong>怎么进来</strong>（load_weights，<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>）。这一课回答一个更让人好奇的问题：在 SGLang 里
 <strong>"写一个模型"到底要写什么</strong>？答案出乎意料地轻——一个模型文件，本质上就是把 SGLang 早就备好的
 <strong>并行层</strong>像积木一样<strong>搭起来</strong>。你不写注意力内核、不写跨卡通信、不写 KV 管理，只描述<strong>架构</strong>。
 这正是 SGLang "对新模型几乎是 day-0 支持、模型覆盖面极广"背后那个朴素的工程真相。
@@ -350,29 +352,29 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>四个类，层层套娃：Llama 是怎么搭出来的</h2>
 <p>先把这四层拆开看，你会发现每一层都<strong>只负责一件事</strong>，而且每一件事用的零件都来自 SGLang，而非你手写。最里层是
 <span class="mono">LlamaAttention</span>：它先用一个<strong>列并行线性层</strong> <span class="mono">QKVParallelLinear</span> 把隐藏向量一次投影出 q/k/v
-（三者被打包在一个权重里，正是第 25 课 load_weights 要做融合映射的原因），对 q/k 施加 <strong>RoPE</strong> 旋转位置编码，再把 q 和历史
+（三者被打包在一个权重里，正是<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a> load_weights 要做融合映射的原因），对 q/k 施加 <strong>RoPE</strong> 旋转位置编码，再把 q 和历史
 k/v 交给 <span class="mono">RadixAttention</span>（注意力层）去算——这一步会<strong>读写 KV 池</strong>，具体用哪个注意力后端、KV 落在池子哪些槽位，
-全由传进来的 <span class="mono">forward_batch</span> 决定（第 33 课）；最后 o_proj 用<strong>行并行线性层</strong> <span class="mono">RowParallelLinear</span>
+全由传进来的 <span class="mono">forward_batch</span> 决定（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）；最后 o_proj 用<strong>行并行线性层</strong> <span class="mono">RowParallelLinear</span>
 把多头输出投影回隐藏维。注意：q/k/v、gate/up 走<strong>列并行</strong>（按输出维切片），o_proj、down_proj 走<strong>行并行</strong>（按输入维切片再 all-reduce），
-这套切法第 46 课会细讲，但模型作者<strong>只是挑用哪种层，切片与通信都在层内部自动发生</strong>。</p>
+这套切法<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>会细讲，但模型作者<strong>只是挑用哪种层，切片与通信都在层内部自动发生</strong>。</p>
 <p>外面一层是 <span class="mono">LlamaMLP</span>：gate/up 投影 + <strong>SiLU</strong> 激活（<span class="mono">SiluAndMul</span>）+ down 投影，没有任何花活。再外一层
 <span class="mono">LlamaDecoderLayer</span> 把注意力和 MLP 缝合成一层标准 Transformer 块，关键在<strong>残差结构</strong>：input_norm → 注意力 → 残差相加 →
 post_norm → MLP → 残差相加。<span class="mono">LlamaModel</span> 则是骨架：<span class="mono">embed_tokens</span>（词表并行嵌入，<span class="mono">VocabParallelEmbedding</span>）
 → N 层解码层 → 末端 <span class="mono">RMSNorm</span>。最外层 <span class="mono">LlamaForCausalLM</span> 才是对运行时暴露的"整模型"：它持有 <span class="mono">model</span>、
 一个 <span class="mono">lm_head</span>（<span class="mono">ParallelLMHead</span>，权重可与嵌入共享 tie_word_embeddings），一个 <span class="mono">forward(input_ids, positions,
-forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</span>（第 25 课）。ModelRunner（第 24 课）握住的就是这个最外层类。</p>
+forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</span>（<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>）。ModelRunner（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）握住的就是这个最外层类。</p>
 
-<p>这种"套娃"不是为了好看，而是 PyTorch <span class="mono">nn.Module</span> 组合范式的自然结果：父模块在 <span class="mono">__init__</span> 里把子模块当成普通属性挂上去，<span class="mono">forward</span> 里再按顺序调用它们，于是"注册参数、搬到 GPU、保存 / 加载"这些事 PyTorch 会沿着这棵模块树<strong>自动递归</strong>完成。这也解释了第 25 课的 <span class="mono">load_weights</span> 为什么能按 <span class="mono">model.layers.0.self_attn.qkv_proj</span> 这样的<strong>点分路径</strong>精确定位每个权重——路径就是套娃的层级，名字天然对应模块树上的位置。理解了这一点，你看任何一个 SGLang 模型文件都能一眼分辨"谁套着谁"，进而知道某个权重该塞进哪个子模块。</p>
+<p>这种"套娃"不是为了好看，而是 PyTorch <span class="mono">nn.Module</span> 组合范式的自然结果：父模块在 <span class="mono">__init__</span> 里把子模块当成普通属性挂上去，<span class="mono">forward</span> 里再按顺序调用它们，于是"注册参数、搬到 GPU、保存 / 加载"这些事 PyTorch 会沿着这棵模块树<strong>自动递归</strong>完成。这也解释了<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>的 <span class="mono">load_weights</span> 为什么能按 <span class="mono">model.layers.0.self_attn.qkv_proj</span> 这样的<strong>点分路径</strong>精确定位每个权重——路径就是套娃的层级，名字天然对应模块树上的位置。理解了这一点，你看任何一个 SGLang 模型文件都能一眼分辨"谁套着谁"，进而知道某个权重该塞进哪个子模块。</p>
 
 <p>再看 <span class="mono">LlamaAttention</span> 里一个体现"组装"威力的细节：它要处理<strong>分组查询注意力</strong>（GQA）——查询头多、键值头少。代码里据 <span class="mono">tp_size</span> 把总头数、总 KV 头数分摊到每张卡，当 KV 头数比卡数还少时就<strong>复制</strong>而非切分。这些边界逻辑看着琐碎，但它们只决定"每张卡分到几个头、维度多大"，算出来的 <span class="mono">num_heads</span>、<span class="mono">head_dim</span> 再原样交给 <span class="mono">QKVParallelLinear</span> 和 <span class="mono">RadixAttention</span>。也就是说，连 GQA 这种看似要动注意力实现的特性，在模型文件里也只是<strong>几行维度算术</strong>，真正的注意力计算仍然原封不动地复用库里的那一个算子。</p>
 
-<p>同样的"组装"思路也贯穿 <span class="mono">LlamaMLP</span>：gate 与 up 两个投影被合并成一个 <span class="mono">MergedColumnParallelLinear</span>（磁盘上是分开的两份权重，加载时由 load_weights 拼成一份，第 25 课），<span class="mono">SiluAndMul</span> 则把"对 gate 做 SiLU、再与 up 逐元素相乘"这两步融合进一个算子。你会发现一个反复出现的模式：<strong>凡是能融合的相邻操作，库都提前打包好了</strong>——QKV 合一、gate/up 合一、norm 与残差合一。模型作者只要知道"该用哪个打包好的层"，就自动享受到这些算子级优化，而不必理解它们为什么更快。这种"默认就快"的设计，让一份朴素的模型文件也能跑出接近手工优化的性能。</p>
+<p>同样的"组装"思路也贯穿 <span class="mono">LlamaMLP</span>：gate 与 up 两个投影被合并成一个 <span class="mono">MergedColumnParallelLinear</span>（磁盘上是分开的两份权重，加载时由 load_weights 拼成一份，<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>），<span class="mono">SiluAndMul</span> 则把"对 gate 做 SiLU、再与 up 逐元素相乘"这两步融合进一个算子。你会发现一个反复出现的模式：<strong>凡是能融合的相邻操作，库都提前打包好了</strong>——QKV 合一、gate/up 合一、norm 与残差合一。模型作者只要知道"该用哪个打包好的层"，就自动享受到这些算子级优化，而不必理解它们为什么更快。这种"默认就快"的设计，让一份朴素的模型文件也能跑出接近手工优化的性能。</p>
 
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">入口</span><span class="name">LlamaForCausalLM</span></div><div class="ld">对运行时暴露的整模型：持有 <span class="mono">model</span> + <span class="mono">lm_head</span>，提供 <span class="mono">forward(...)→logits</span> 与 <span class="mono">load_weights</span>（第 25 课）。</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">入口</span><span class="name">LlamaForCausalLM</span></div><div class="ld">对运行时暴露的整模型：持有 <span class="mono">model</span> + <span class="mono">lm_head</span>，提供 <span class="mono">forward(...)→logits</span> 与 <span class="mono">load_weights</span>（<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>）。</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">骨架</span><span class="name">LlamaModel</span></div><div class="ld"><span class="mono">embed_tokens</span>（词表并行嵌入）→ N× 解码层 → 末端 <span class="mono">RMSNorm</span>。</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">× N</span><span class="name">LlamaDecoderLayer</span></div><div class="ld">一层标准块：input_norm → 注意力 → 残差 → post_norm → MLP → 残差。</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">子层</span><span class="name">LlamaAttention</span></div><div class="ld">QKV 列并行投影 + RoPE + <span class="mono">RadixAttention</span>（读写 KV 池，第 33 课）+ o_proj 行并行。</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">子层</span><span class="name">LlamaAttention</span></div><div class="ld">QKV 列并行投影 + RoPE + <span class="mono">RadixAttention</span>（读写 KV 池，<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）+ o_proj 行并行。</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">子层</span><span class="name">LlamaMLP</span></div><div class="ld">gate/up 列并行 + <span class="mono">SiLU</span> + down 行并行。</div></div>
   <div class="layer l-app"><div class="lh"><span class="badge">出口</span><span class="name">lm_head</span></div><div class="ld">把末端 hidden 投影到词表维，得到 <strong>logits</strong>（可与嵌入共享权重）。</div></div>
 </div>
@@ -411,10 +413,10 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
 </div>
 
 <h2>一层里发生了什么：跟着残差走一遍</h2>
-<p>值得强调的是，<strong>层的选择本身就编码了并行策略</strong>。当作者把 q/k/v 投影写成 <span class="mono">QKVParallelLinear</span>、把 o_proj 写成 <span class="mono">RowParallelLinear</span> 时，他没有写任何一行通信代码，却已经决定了：这层在张量并行下，权重按输出维切给各卡、各卡先各算一段、再在 o_proj 之后用一次 all-reduce 把结果拼齐（第 46 课）。换句话说，"选哪种并行层"就是在"选这层怎么跨卡分布"。同理，<span class="mono">VocabParallelEmbedding</span> 把词表维切开、<span class="mono">ParallelLMHead</span> 把输出投影切开。作者要操心的只是"维度对不对、切法配不配套"，真正的切片与集合通信全在层内部默默发生——这正是模型文件能保持简短的关键。</p>
+<p>值得强调的是，<strong>层的选择本身就编码了并行策略</strong>。当作者把 q/k/v 投影写成 <span class="mono">QKVParallelLinear</span>、把 o_proj 写成 <span class="mono">RowParallelLinear</span> 时，他没有写任何一行通信代码，却已经决定了：这层在张量并行下，权重按输出维切给各卡、各卡先各算一段、再在 o_proj 之后用一次 all-reduce 把结果拼齐（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>）。换句话说，"选哪种并行层"就是在"选这层怎么跨卡分布"。同理，<span class="mono">VocabParallelEmbedding</span> 把词表维切开、<span class="mono">ParallelLMHead</span> 把输出投影切开。作者要操心的只是"维度对不对、切法配不配套"，真正的切片与集合通信全在层内部默默发生——这正是模型文件能保持简短的关键。</p>
 <p>把镜头推进到<strong>单独一层</strong>解码层，你能看清"组装"具体组装出了什么。数据带着上一层的残差进来，先做一次
-<span class="mono">input_layernorm</span>（RMSNorm，第 36 课）；归一化后的向量进注意力子层——投影出 q/k/v、给 q/k 转上 RoPE、当前 k/v
-按 <span class="mono">forward_batch</span> 指定的槽位<strong>写进 KV 池</strong>、再让 q 去看自己与所有历史 k/v（若前缀已被 RadixAttention 缓存就直接复用，第 7 课）；
+<span class="mono">input_layernorm</span>（RMSNorm，<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>）；归一化后的向量进注意力子层——投影出 q/k/v、给 q/k 转上 RoPE、当前 k/v
+按 <span class="mono">forward_batch</span> 指定的槽位<strong>写进 KV 池</strong>、再让 q 去看自己与所有历史 k/v（若前缀已被 RadixAttention 缓存就直接复用，<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）；
 注意力输出经 o_proj 回到隐藏维，与残差<strong>相加</strong>。接着 <span class="mono">post_attention_layernorm</span> 再归一化一次，进 MLP，又一次残差相加。
 就这么六步，一层结束，把 <span class="mono">(hidden_states, residual)</span> 交给下一层。N 层叠完做末端归一，<span class="mono">lm_head</span> 投影出 logits。
 注意 <span class="mono">forward_batch</span> 是怎么<strong>一路穿到</strong>每一层注意力的——它就是模型文件与运行时之间的<strong>那道缝</strong>：模型只管"把张量算对"，
@@ -422,11 +424,11 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
 
 <p>这里还藏着一个常被忽略的细节：<span class="mono">residual</span> 是<strong>跨层传递</strong>的。注意看代码里第一层进来时 residual 为 None、于是把输入本身当残差；之后每层都把"归一化前的值"作为残差留到相加时用。SGLang 的 <span class="mono">RMSNorm</span> 还把"归一化 + 残差相加"<strong>融合</strong>成一次调用——<span class="mono">input_layernorm(hidden, residual)</span> 同时返回新 hidden 和更新后的 residual，省去一次显存往返。这种把常见组合"焊死"成单个高效算子的做法，正是底层库替你做掉的优化：你照着调用就行，完全不必关心它内部怎么把两步合一。模型作者眼里只有"先 norm 再 attn 再残差"这条清晰的逻辑，看不到也不需要看到融合内核的存在。</p>
 
-<p>顺带说清一个容易混的点：解码阶段每一步其实只前向<strong>一个</strong>新 token，但它要看<strong>全部历史</strong>的 K/V；预填充阶段则一次前向<strong>整段</strong>提示的多个 token。同一份 <span class="mono">forward</span> 代码两种情形都能跑，靠的就是 <span class="mono">forward_batch</span> 里的 <span class="mono">forward_mode</span> 和注意力元数据替模型把差异吸收掉——模型文件里你看不到 EXTEND / DECODE 的分叉，那都在注意力层与 ModelRunner（第 24 课）里处理了。这进一步印证了本课主线：模型作者描述的是"<strong>静态的架构</strong>"，而"<strong>动态的怎么跑</strong>"由运行时与库层接管。</p>
+<p>顺带说清一个容易混的点：解码阶段每一步其实只前向<strong>一个</strong>新 token，但它要看<strong>全部历史</strong>的 K/V；预填充阶段则一次前向<strong>整段</strong>提示的多个 token。同一份 <span class="mono">forward</span> 代码两种情形都能跑，靠的就是 <span class="mono">forward_batch</span> 里的 <span class="mono">forward_mode</span> 和注意力元数据替模型把差异吸收掉——模型文件里你看不到 EXTEND / DECODE 的分叉，那都在注意力层与 ModelRunner（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）里处理了。这进一步印证了本课主线：模型作者描述的是"<strong>静态的架构</strong>"，而"<strong>动态的怎么跑</strong>"由运行时与库层接管。</p>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>对输入做 RMSNorm（第 36 课），保留 residual 备用。</p></div></div>
-  <div class="step"><div class="num">2</div><div class="sc"><h4>注意力（读写 KV）</h4><p>QKV 投影 + RoPE；按 <span class="mono">forward_batch</span> 写/读 KV 池，q 看历史 k/v（第 33 课）。</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>对输入做 RMSNorm（<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>），保留 residual 备用。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>注意力（读写 KV）</h4><p>QKV 投影 + RoPE；按 <span class="mono">forward_batch</span> 写/读 KV 池，q 看历史 k/v（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>残差相加</h4><p>注意力输出经 o_proj 回隐藏维，与 residual 相加。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>post_norm</h4><p>再做一次 RMSNorm，准备进 MLP。</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down，提取非线性特征。</p></div></div>
@@ -491,7 +493,7 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
         <span class="kw">return</span> output</pre>
 </div>
 
-<p>把这段代码和上图对起来看，你会发现整个 <span class="mono">LlamaAttention</span> 里<strong>没有一行注意力数学</strong>：它只负责投影、拆分、转 RoPE，然后把 q/k/v 原样递给 <span class="mono">self.attn</span>。最能说明问题的是这个具体例子——<strong>只要把 <span class="mono">self.attn = RadixAttention(...)</span> 这一行写进新模型</strong>，它就自动继承了前缀缓存（第 7 课）、分页 KV 与所有注意力后端（第 33 课），你不必碰任何一行缓存或内核代码。再配一组真实数字感受一下规模：<span class="mono">Llama-2-7B</span> 就是把上面这层注意力 + MLP 打包成 <strong>32 个</strong> <span class="mono">LlamaDecoderLayer</span>、hidden 维 <strong>4096</strong> 竖着叠起来——同一份 <span class="mono">LlamaAttention</span> 代码被实例化 32 次，每次只是 <span class="mono">layer_id</span> 与切片不同，算子始终是库里那一个。</p>
+<p>把这段代码和上图对起来看，你会发现整个 <span class="mono">LlamaAttention</span> 里<strong>没有一行注意力数学</strong>：它只负责投影、拆分、转 RoPE，然后把 q/k/v 原样递给 <span class="mono">self.attn</span>。最能说明问题的是这个具体例子——<strong>只要把 <span class="mono">self.attn = RadixAttention(...)</span> 这一行写进新模型</strong>，它就自动继承了前缀缓存（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）、分页 KV 与所有注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>），你不必碰任何一行缓存或内核代码。再配一组真实数字感受一下规模：<span class="mono">Llama-2-7B</span> 就是把上面这层注意力 + MLP 打包成 <strong>32 个</strong> <span class="mono">LlamaDecoderLayer</span>、hidden 维 <strong>4096</strong> 竖着叠起来——同一份 <span class="mono">LlamaAttention</span> 代码被实例化 32 次，每次只是 <span class="mono">layer_id</span> 与切片不同，算子始终是库里那一个。</p>
 
 <h2>谁写、谁给：一张分工表把成本说清</h2>
 <p>现在回到那个核心命题：为什么"加一个模型"在 SGLang 里这么便宜？看下面这张表——四（五）个类各自的职责，<strong>无一例外</strong>
@@ -508,11 +510,11 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
   <tr><td class="mono">LlamaForCausalLM</td><td>整模型：forward→logits + load_weights</td><td class="mono">ParallelLMHead / LogitsProcessor</td></tr>
 </table>
 
-<p>把这张表再读深一层会更有体会：凡是带 "Parallel" 字样的层，背后都站着一整套张量并行的切片与通信实现；<span class="mono">RadixAttention</span> 背后是前缀缓存复用（第 7 课）+ 分页 KV + 多种硬件注意力后端（第 33 课）；<span class="mono">RMSNorm</span>、RoPE 背后是手写的融合内核（第 36 课）。这些每一项单独拎出来都是一篇大文章，但对模型作者而言它们只是<strong>一行构造、一次调用</strong>。这就是"复杂度下沉、接口上浮"的威力：把难的东西沉到可复用层里，露在模型文件表面的，只剩下"这个模型长什么样"。</p>
+<p>把这张表再读深一层会更有体会：凡是带 "Parallel" 字样的层，背后都站着一整套张量并行的切片与通信实现；<span class="mono">RadixAttention</span> 背后是前缀缓存复用（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）+ 分页 KV + 多种硬件注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）；<span class="mono">RMSNorm</span>、RoPE 背后是手写的融合内核（<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>）。这些每一项单独拎出来都是一篇大文章，但对模型作者而言它们只是<strong>一行构造、一次调用</strong>。这就是"复杂度下沉、接口上浮"的威力：把难的东西沉到可复用层里，露在模型文件表面的，只剩下"这个模型长什么样"。</p>
 
 <div class="cols">
-  <div class="col"><h4>你写的（模型文件）</h4><p><strong>架构</strong>：用哪些层、各维度、残差结构、N 层怎么叠；<strong>load_weights</strong>：HF 权重名 → 内部参数名的映射与 q/k/v、gate/up 融合（第 25 课）。仅此而已——一份文件、几百行。</p></div>
-  <div class="col"><h4>SGLang 提供的（白拿）</h4><p>并行线性层（列/行并行，自动切片 + 通信，第 46 课）、<strong>注意力后端</strong>与 KV 管理（第 33 课）、RoPE/RMSNorm（第 36 课）、CUDA 图（第 27 课）、采样（第 28 课）。你<strong>一行都不用碰</strong>。</p></div>
+  <div class="col"><h4>你写的（模型文件）</h4><p><strong>架构</strong>：用哪些层、各维度、残差结构、N 层怎么叠；<strong>load_weights</strong>：HF 权重名 → 内部参数名的映射与 q/k/v、gate/up 融合（<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>）。仅此而已——一份文件、几百行。</p></div>
+  <div class="col"><h4>SGLang 提供的（白拿）</h4><p>并行线性层（列/行并行，自动切片 + 通信，<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>）、<strong>注意力后端</strong>与 KV 管理（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）、RoPE/RMSNorm（<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>）、CUDA 图（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第 27 课</a>）、采样（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）。你<strong>一行都不用碰</strong>。</p></div>
 </div>
 
 <p>反过来想，这套分工也<strong>约束</strong>了模型作者：你能表达的架构，受限于 SGLang 已提供的层。如果一个新模型用了某种全新的注意力变体或激活，而库里还没有对应层，那就需要<strong>先给库添一块新积木</strong>（一个新的可复用层），再在模型文件里组装它。但现实是，主流开源模型的构件高度同质——都是某种线性投影、某种注意力、某种归一化的排列组合，所以绝大多数新模型落地时，库里的积木<strong>早已齐备</strong>，作者真的只需组装。这正是"day-0 支持"在工程上能成立的前提，也是为什么 SGLang 的模型目录能轻松扩张到上百个文件而不失控。</p>
@@ -542,16 +544,16 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
 <span class="mono">self.model</span> 跑出 hidden，再交给 <span class="mono">logits_processor</span> 配合 <span class="mono">lm_head</span> 出 logits；
 <span class="mono">LlamaDecoderLayer.forward</span> 也只是把归一化、注意力、MLP、残差按顺序串起来。没有 CUDA、没有 all-reduce、没有 KV 分页的影子，
 那些复杂度全被关进了它调用的那些层里。这种"模型文件薄、底层库厚"的分工，正是为什么一个新开源模型发布当天，社区往往只要<strong>照葫芦画瓢写一份这样的文件</strong>
-就能让 SGLang 跑起来；多模态（第 49 课）、MoE（第 34 课）这些更复杂的架构，也只是在<strong>同一套脚手架</strong>上多插几种层而已。</p>
+就能让 SGLang 跑起来；多模态（<a class="xref" href="49-multimodal-vlm-serving.html">第 49 课</a>）、MoE（<a class="xref" href="34-moe-layer.html">第 34 课</a>）这些更复杂的架构，也只是在<strong>同一套脚手架</strong>上多插几种层而已。</p>
 
-<p>最后值得点一句"<strong>注册</strong>"这步。写完模型文件还要把类登记到模型注册表里（按架构名，比如 config 里 <span class="mono">architectures</span> 字段写着 <span class="mono">LlamaForCausalLM</span>），运行时据此从权重目录的 <span class="mono">config.json</span> 找到该用哪个类。这一步通常只是一行映射，却是"配置驱动、自动派发"的关键：用户启动服务时只给一个模型路径，TokenizerManager 与 ModelRunner（第 24 课）顺着 config 的架构名就能找到对应文件、实例化、加载权重、开跑。于是从"社区提交一个模型文件"到"线上能服务这个模型"，中间<strong>不需要改任何调度、批处理或内核代码</strong>——这条干净的边界，才是广泛模型支持真正的工程红利。也正因如此，当你下次想给 SGLang 适配一个新模型时，思路应该是"<strong>先去 models 目录找一个最像的现有文件照着改</strong>"，而不是从零设计——绝大多数时候，你要做的只是调整层的种类与维度、改对 load_weights 的名字映射、再注册一下而已。</p>
+<p>最后值得点一句"<strong>注册</strong>"这步。写完模型文件还要把类登记到模型注册表里（按架构名，比如 config 里 <span class="mono">architectures</span> 字段写着 <span class="mono">LlamaForCausalLM</span>），运行时据此从权重目录的 <span class="mono">config.json</span> 找到该用哪个类。这一步通常只是一行映射，却是"配置驱动、自动派发"的关键：用户启动服务时只给一个模型路径，TokenizerManager 与 ModelRunner（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）顺着 config 的架构名就能找到对应文件、实例化、加载权重、开跑。于是从"社区提交一个模型文件"到"线上能服务这个模型"，中间<strong>不需要改任何调度、批处理或内核代码</strong>——这条干净的边界，才是广泛模型支持真正的工程红利。也正因如此，当你下次想给 SGLang 适配一个新模型时，思路应该是"<strong>先去 models 目录找一个最像的现有文件照着改</strong>"，而不是从零设计——绝大多数时候，你要做的只是调整层的种类与维度、改对 load_weights 的名字映射、再注册一下而已。</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
     <li><strong>模型文件 = 组装</strong>：SGLang 模型就是一组嵌套的 <span class="mono">nn.Module</span>，内部全用现成的<strong>并行层</strong>搭成，作者基本不写底层算子。</li>
     <li><strong>Llama 四（五）类套娃</strong>：<span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>。</li>
-    <li><strong>你只写两样</strong>：架构（哪些层、维度、残差）+ <span class="mono">load_weights</span> 名字映射（第 25 课）；注意力、TP 通信、KV 管理由 SGLang 白给。</li>
+    <li><strong>你只写两样</strong>：架构（哪些层、维度、残差）+ <span class="mono">load_weights</span> 名字映射（<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>）；注意力、TP 通信、KV 管理由 SGLang 白给。</li>
     <li><strong>forward_batch 是那道缝</strong>：它一路穿到每层注意力，告诉模型该读写 KV 池哪些槽位（第 24/33 课）——模型与运行时的边界。</li>
     <li><strong>所以加模型便宜</strong>：新开源模型常能 day-0 支持，写一份文件、注册即服务；MoE/多模态只是同套脚手架上多插几种层（第 34/49 课）。</li>
   </ul>
@@ -568,7 +570,7 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。模型文件就是把 SGLang 现成的并行层（<code>QKVParallelLinear</code>、<code>RowParallelLinear</code>、<code>RadixAttention</code>、<code>RMSNorm</code> 等）<strong>组装</strong>起来：作者只描述架构并写 <code>load_weights</code> 的名字映射（第 25 课）。注意力内核、TP 通信、KV 管理、CUDA 图全是白拿的——这正是“加模型便宜、day-0 支持广”的根因。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。模型文件就是把 SGLang 现成的并行层（<code>QKVParallelLinear</code>、<code>RowParallelLinear</code>、<code>RadixAttention</code>、<code>RMSNorm</code> 等）<strong>组装</strong>起来：作者只描述架构并写 <code>load_weights</code> 的名字映射（<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>）。注意力内核、TP 通信、KV 管理、CUDA 图全是白拿的——这正是“加模型便宜、day-0 支持广”的根因。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -581,7 +583,7 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。套娃关系是 <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>。每个类只负责一件事、内部都用 SGLang 现成层。ModelRunner（第 24 课）握住的是最外层 <code>LlamaForCausalLM</code>，它提供 <code>forward(...)→logits</code> 与 <code>load_weights</code>。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。套娃关系是 <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>。每个类只负责一件事、内部都用 SGLang 现成层。ModelRunner（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）握住的是最外层 <code>LlamaForCausalLM</code>，它提供 <code>forward(...)→logits</code> 与 <code>load_weights</code>。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -594,20 +596,20 @@ forward_batch)</span> 返回 logits，以及 <span class="mono">load_weights</sp
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。<code>forward_batch</code>（第 24 课）携带 KV 槽位、注意力元数据等，逐层穿到 <code>self_attn</code>，让注意力知道当前 k/v 写到池子哪、历史从哪读（第 33 课）。这正是“模型只管把张量算对、运行时负责 KV 寻址”的分界。它不存权重、不是采样容器，预填充与解码都要传。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。<code>forward_batch</code>（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）携带 KV 槽位、注意力元数据等，逐层穿到 <code>self_attn</code>，让注意力知道当前 k/v 写到池子哪、历史从哪读（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）。这正是“模型只管把张量算对、运行时负责 KV 寻址”的分界。它不存权重、不是采样容器，预填充与解码都要传。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“标准乐高积木拼模型”的类比，完整讲清在 SGLang 里“写一个 Llama”到底写了什么、又白拿了什么。请逐一覆盖：①四（五）个类如何<strong>层层套娃</strong>（<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>）；②每个类用到哪些 SGLang 现成层（<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE）；③一层里“input_norm→注意力(读写 KV)→残差→post_norm→MLP→残差”的结构；④作者真正<strong>新写</strong>的只有架构 + <code>load_weights</code> 映射（第 25 课），而注意力内核、TP 切片/通信（第 46 课）、KV 管理（第 33 课）都是白拿。</li>
-    <li>解释为什么 SGLang 能对新开源模型做到近乎 <strong>day-0 支持</strong>、模型覆盖面极广。请说明：①“模型文件薄、底层库厚”的分工——<code>LlamaForCausalLM.forward</code> 几乎只是把活儿交给 <code>self.model</code> 再交给 <code>logits_processor</code>/<code>lm_head</code>，没有 CUDA/all-reduce/KV 分页的影子；②<code>forward_batch</code> 作为模型与运行时之间的缝，如何让同一份模型文件适配不同注意力后端与并行配置（第 24/33/46 课）；③MoE（第 34 课）、多模态（第 49 课）等更复杂架构为何只是“同套脚手架上多插几种层”，而非推倒重来。</li>
+    <li>用“标准乐高积木拼模型”的类比，完整讲清在 SGLang 里“写一个 Llama”到底写了什么、又白拿了什么。请逐一覆盖：①四（五）个类如何<strong>层层套娃</strong>（<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>）；②每个类用到哪些 SGLang 现成层（<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE）；③一层里“input_norm→注意力(读写 KV)→残差→post_norm→MLP→残差”的结构；④作者真正<strong>新写</strong>的只有架构 + <code>load_weights</code> 映射（<a class="xref" href="25-model-loading-and-weights.html">第 25 课</a>），而注意力内核、TP 切片/通信（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>）、KV 管理（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）都是白拿。</li>
+    <li>解释为什么 SGLang 能对新开源模型做到近乎 <strong>day-0 支持</strong>、模型覆盖面极广。请说明：①“模型文件薄、底层库厚”的分工——<code>LlamaForCausalLM.forward</code> 几乎只是把活儿交给 <code>self.model</code> 再交给 <code>logits_processor</code>/<code>lm_head</code>，没有 CUDA/all-reduce/KV 分页的影子；②<code>forward_batch</code> 作为模型与运行时之间的缝，如何让同一份模型文件适配不同注意力后端与并行配置（第 24/33/46 课）；③MoE（<a class="xref" href="34-moe-layer.html">第 34 课</a>）、多模态（<a class="xref" href="49-multimodal-vlm-serving.html">第 49 课</a>）等更复杂架构为何只是“同套脚手架上多插几种层”，而非推倒重来。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
-Last lesson covered how weights <strong>get in</strong> (load_weights, Lesson 25). This one answers a more intriguing question: in SGLang,
+Last lesson covered how weights <strong>get in</strong> (load_weights, <a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>). This one answers a more intriguing question: in SGLang,
 what does it actually take to <strong>"write a model"</strong>? The answer is surprisingly light — a model file is essentially just
 <strong>snapping together</strong> the <strong>parallel layers</strong> SGLang already ships, like LEGO. You write no attention kernel, no cross-GPU
 communication, no KV management — only the <strong>architecture</strong>. That is the plain engineering truth behind SGLang's
@@ -635,11 +637,11 @@ communication, no KV management — only the <strong>architecture</strong>. That
 <h2>Four classes nesting: how Llama is built</h2>
 <p>Pull these four layers apart and you'll find each <strong>does just one thing</strong>, and every piece it uses comes from SGLang, not from your hand.
 Innermost is <span class="mono">LlamaAttention</span>: it projects q/k/v in one shot via a <strong>column-parallel</strong> <span class="mono">QKVParallelLinear</span>
-(the three are packed in one weight — exactly why load_weights does fusion mapping, Lesson 25), applies <strong>RoPE</strong> to q/k, then hands q and the
+(the three are packed in one weight — exactly why load_weights does fusion mapping, <a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>), applies <strong>RoPE</strong> to q/k, then hands q and the
 historical k/v to <span class="mono">RadixAttention</span> (the attention layer) — this step <strong>reads/writes the KV pool</strong>, with the attention backend
-and which pool slots all dictated by the incoming <span class="mono">forward_batch</span> (Lesson 33); finally o_proj projects multi-head output back to
+and which pool slots all dictated by the incoming <span class="mono">forward_batch</span> (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>); finally o_proj projects multi-head output back to
 hidden dim via the <strong>row-parallel</strong> <span class="mono">RowParallelLinear</span>. Note: q/k/v, gate/up go <strong>column-parallel</strong> (split on output dim),
-o_proj/down_proj go <strong>row-parallel</strong> (split on input dim then all-reduce); Lesson 46 details this slicing, but the model author <strong>only picks which
+o_proj/down_proj go <strong>row-parallel</strong> (split on input dim then all-reduce); <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> details this slicing, but the model author <strong>only picks which
 layer to use — slicing and communication happen inside the layer automatically</strong>.</p>
 <p>One layer out is <span class="mono">LlamaMLP</span>: gate/up projection + <strong>SiLU</strong> (<span class="mono">SiluAndMul</span>) + down projection, nothing fancy.
 Outer still, <span class="mono">LlamaDecoderLayer</span> stitches attention and MLP into one standard Transformer block; the key is the <strong>residual structure</strong>:
@@ -647,19 +649,19 @@ input_norm → attention → residual add → post_norm → MLP → residual add
 (vocab-parallel embedding, <span class="mono">VocabParallelEmbedding</span>) → N decoder layers → final <span class="mono">RMSNorm</span>. The outermost
 <span class="mono">LlamaForCausalLM</span> is the "whole model" exposed to the runtime: it holds <span class="mono">model</span>, an <span class="mono">lm_head</span>
 (<span class="mono">ParallelLMHead</span>, weight optionally shared with embed via tie_word_embeddings), a <span class="mono">forward(input_ids, positions,
-forward_batch)</span> returning logits, and <span class="mono">load_weights</span> (Lesson 25). ModelRunner (Lesson 24) holds exactly this outermost class.</p>
+forward_batch)</span> returning logits, and <span class="mono">load_weights</span> (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>). ModelRunner (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>) holds exactly this outermost class.</p>
 
-<p>This "nesting" isn't for looks; it's the natural result of PyTorch's <span class="mono">nn.Module</span> composition: a parent module hangs child modules as ordinary attributes in <span class="mono">__init__</span> and calls them in order in <span class="mono">forward</span>, so "register params, move to GPU, save / load" are done <strong>recursively and automatically</strong> by PyTorch along this module tree. That's also why Lesson 25's <span class="mono">load_weights</span> can pinpoint each weight by a <strong>dotted path</strong> like <span class="mono">model.layers.0.self_attn.qkv_proj</span> — the path is the nesting hierarchy, and the name maps naturally to a position in the module tree. Grasp this and you can tell at a glance "who nests whom" in any SGLang model file, and thus which submodule a given weight belongs in.</p>
+<p>This "nesting" isn't for looks; it's the natural result of PyTorch's <span class="mono">nn.Module</span> composition: a parent module hangs child modules as ordinary attributes in <span class="mono">__init__</span> and calls them in order in <span class="mono">forward</span>, so "register params, move to GPU, save / load" are done <strong>recursively and automatically</strong> by PyTorch along this module tree. That's also why <a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>'s <span class="mono">load_weights</span> can pinpoint each weight by a <strong>dotted path</strong> like <span class="mono">model.layers.0.self_attn.qkv_proj</span> — the path is the nesting hierarchy, and the name maps naturally to a position in the module tree. Grasp this and you can tell at a glance "who nests whom" in any SGLang model file, and thus which submodule a given weight belongs in.</p>
 
 <p>Look at one detail in <span class="mono">LlamaAttention</span> that shows the power of "assembly": it handles <strong>grouped-query attention</strong> (GQA) — many query heads, few key-value heads. The code divides total heads and total KV heads across cards by <span class="mono">tp_size</span>, and when KV heads are fewer than cards it <strong>replicates</strong> rather than splits. This boundary logic looks fiddly, but it only decides "how many heads each card gets and what dim," and the resulting <span class="mono">num_heads</span>, <span class="mono">head_dim</span> are handed as-is to <span class="mono">QKVParallelLinear</span> and <span class="mono">RadixAttention</span>. So even a feature like GQA that seems to touch the attention implementation is, in the model file, just <strong>a few lines of dimension arithmetic</strong> — the actual attention compute still reuses that one library op untouched.</p>
 
-<p>The same "assembly" idea runs through <span class="mono">LlamaMLP</span>: the gate and up projections are merged into one <span class="mono">MergedColumnParallelLinear</span> (two separate weights on disk, stitched into one by load_weights at load time, Lesson 25), and <span class="mono">SiluAndMul</span> fuses "SiLU on gate, then element-wise multiply with up" into one op. You'll notice a recurring pattern: <strong>whenever adjacent operations can be fused, the library has pre-packaged them</strong> — QKV into one, gate/up into one, norm with residual into one. The author only needs to know "which packaged layer to use" to automatically enjoy these op-level optimizations, without understanding why they're faster. This "fast by default" design lets even a plain model file run at close to hand-optimized performance.</p>
+<p>The same "assembly" idea runs through <span class="mono">LlamaMLP</span>: the gate and up projections are merged into one <span class="mono">MergedColumnParallelLinear</span> (two separate weights on disk, stitched into one by load_weights at load time, <a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>), and <span class="mono">SiluAndMul</span> fuses "SiLU on gate, then element-wise multiply with up" into one op. You'll notice a recurring pattern: <strong>whenever adjacent operations can be fused, the library has pre-packaged them</strong> — QKV into one, gate/up into one, norm with residual into one. The author only needs to know "which packaged layer to use" to automatically enjoy these op-level optimizations, without understanding why they're faster. This "fast by default" design lets even a plain model file run at close to hand-optimized performance.</p>
 
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">entry</span><span class="name">LlamaForCausalLM</span></div><div class="ld">The model the runtime sees: holds <span class="mono">model</span> + <span class="mono">lm_head</span>, offers <span class="mono">forward(...)→logits</span> and <span class="mono">load_weights</span> (Lesson 25).</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">entry</span><span class="name">LlamaForCausalLM</span></div><div class="ld">The model the runtime sees: holds <span class="mono">model</span> + <span class="mono">lm_head</span>, offers <span class="mono">forward(...)→logits</span> and <span class="mono">load_weights</span> (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>).</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">skeleton</span><span class="name">LlamaModel</span></div><div class="ld"><span class="mono">embed_tokens</span> (vocab-parallel) → N× decoder layers → final <span class="mono">RMSNorm</span>.</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">× N</span><span class="name">LlamaDecoderLayer</span></div><div class="ld">One standard block: input_norm → attention → residual → post_norm → MLP → residual.</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaAttention</span></div><div class="ld">QKV column-parallel proj + RoPE + <span class="mono">RadixAttention</span> (reads/writes KV pool, Lesson 33) + o_proj row-parallel.</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaAttention</span></div><div class="ld">QKV column-parallel proj + RoPE + <span class="mono">RadixAttention</span> (reads/writes KV pool, <a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) + o_proj row-parallel.</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">sublayer</span><span class="name">LlamaMLP</span></div><div class="ld">gate/up column-parallel + <span class="mono">SiLU</span> + down row-parallel.</div></div>
   <div class="layer l-app"><div class="lh"><span class="badge">exit</span><span class="name">lm_head</span></div><div class="ld">Projects final hidden to vocab dim to get <strong>logits</strong> (weight may be shared with embed).</div></div>
 </div>
@@ -698,11 +700,11 @@ forward_batch)</span> returning logits, and <span class="mono">load_weights</spa
 </div>
 
 <h2>What happens in one layer: follow the residual</h2>
-<p>Worth stressing: <strong>the choice of layer itself encodes the parallel strategy</strong>. When the author writes the q/k/v projection as <span class="mono">QKVParallelLinear</span> and o_proj as <span class="mono">RowParallelLinear</span>, they write no line of communication code, yet have already decided: under tensor parallelism this layer's weight is split on the output dim across cards, each card computes a slice, then one all-reduce after o_proj stitches results back (Lesson 46). In other words, "which parallel layer you pick" is "how this layer distributes across GPUs." Likewise <span class="mono">VocabParallelEmbedding</span> splits the vocab dim and <span class="mono">ParallelLMHead</span> splits the output projection. The author only worries about "are the dims right, do the slicing schemes match" — actual slicing and collective comms happen silently inside the layer, which is exactly why a model file stays short.</p>
+<p>Worth stressing: <strong>the choice of layer itself encodes the parallel strategy</strong>. When the author writes the q/k/v projection as <span class="mono">QKVParallelLinear</span> and o_proj as <span class="mono">RowParallelLinear</span>, they write no line of communication code, yet have already decided: under tensor parallelism this layer's weight is split on the output dim across cards, each card computes a slice, then one all-reduce after o_proj stitches results back (<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>). In other words, "which parallel layer you pick" is "how this layer distributes across GPUs." Likewise <span class="mono">VocabParallelEmbedding</span> splits the vocab dim and <span class="mono">ParallelLMHead</span> splits the output projection. The author only worries about "are the dims right, do the slicing schemes match" — actual slicing and collective comms happen silently inside the layer, which is exactly why a model file stays short.</p>
 <p>Zoom into a <strong>single</strong> decoder layer and you see what "assembly" actually assembles. Data arrives carrying the previous layer's residual, first goes
-through <span class="mono">input_layernorm</span> (RMSNorm, Lesson 36); the normalized vector enters the attention sublayer — project q/k/v, spin RoPE onto q/k,
+through <span class="mono">input_layernorm</span> (RMSNorm, <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>); the normalized vector enters the attention sublayer — project q/k/v, spin RoPE onto q/k,
 <strong>write</strong> the current k/v into the KV pool at slots specified by <span class="mono">forward_batch</span>, then let q attend over itself and all historical k/v
-(if the prefix was cached by RadixAttention, reuse it directly, Lesson 7); attention output goes through o_proj back to hidden dim and is <strong>added to the residual</strong>.
+(if the prefix was cached by RadixAttention, reuse it directly, <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>); attention output goes through o_proj back to hidden dim and is <strong>added to the residual</strong>.
 Then <span class="mono">post_attention_layernorm</span> normalizes again, enters the MLP, another residual add. Six steps, layer done, handing
 <span class="mono">(hidden_states, residual)</span> to the next layer. After N layers, final norm, <span class="mono">lm_head</span> projects out logits.
 Notice how <span class="mono">forward_batch</span> <strong>threads all the way</strong> into each layer's attention — it is <strong>the seam</strong> between the model file and the runtime:
@@ -710,11 +712,11 @@ the model only "computes tensors right," while "which KV-pool slots to read/writ
 
 <p>One more easily-missed detail: <span class="mono">residual</span> is <strong>passed across layers</strong>. Note in the code that the first layer arrives with residual None, so it treats the input itself as the residual; afterward every layer keeps "the value before norm" as the residual to add later. SGLang's <span class="mono">RMSNorm</span> even <strong>fuses</strong> "normalize + residual-add" into one call — <span class="mono">input_layernorm(hidden, residual)</span> returns both the new hidden and the updated residual, saving a memory round-trip. "Welding" a common combo into a single efficient op is exactly the optimization the underlying library does for you: you just call it, never minding how it merges two steps internally. The author sees only the clean logic "norm then attn then residual," and neither sees nor needs to see the fused kernel.</p>
 
-<p>While we're here, clear up an easily-confused point: in decode each step actually forwards just <strong>one</strong> new token, yet it must attend over <strong>all historical</strong> K/V; in prefill it forwards the <strong>whole</strong> prompt's many tokens at once. The same <span class="mono">forward</span> code runs both cases because <span class="mono">forward_mode</span> and attention metadata inside <span class="mono">forward_batch</span> absorb the difference for the model — you see no EXTEND / DECODE branching in the model file; that's all handled in the attention layer and ModelRunner (Lesson 24). This further confirms the lesson's through-line: the author describes the <strong>static architecture</strong>, while <strong>how it dynamically runs</strong> is taken over by the runtime and library layers.</p>
+<p>While we're here, clear up an easily-confused point: in decode each step actually forwards just <strong>one</strong> new token, yet it must attend over <strong>all historical</strong> K/V; in prefill it forwards the <strong>whole</strong> prompt's many tokens at once. The same <span class="mono">forward</span> code runs both cases because <span class="mono">forward_mode</span> and attention metadata inside <span class="mono">forward_batch</span> absorb the difference for the model — you see no EXTEND / DECODE branching in the model file; that's all handled in the attention layer and ModelRunner (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>). This further confirms the lesson's through-line: the author describes the <strong>static architecture</strong>, while <strong>how it dynamically runs</strong> is taken over by the runtime and library layers.</p>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>RMSNorm the input (Lesson 36), keep residual aside.</p></div></div>
-  <div class="step"><div class="num">2</div><div class="sc"><h4>Attention (reads/writes KV)</h4><p>QKV proj + RoPE; write/read KV pool per <span class="mono">forward_batch</span>, q attends history (Lesson 33).</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>input_norm</h4><p>RMSNorm the input (<a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>), keep residual aside.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>Attention (reads/writes KV)</h4><p>QKV proj + RoPE; write/read KV pool per <span class="mono">forward_batch</span>, q attends history (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>).</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>Residual add</h4><p>Attention output via o_proj back to hidden dim, add to residual.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>post_norm</h4><p>RMSNorm again, ready for MLP.</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>MLP</h4><p>gate/up + <span class="mono">SiLU</span> + down, extract nonlinear features.</p></div></div>
@@ -779,7 +781,7 @@ the model only "computes tensors right," while "which KV-pool slots to read/writ
         <span class="kw">return</span> output</pre>
 </div>
 
-<p>Line this code up with the figure above and you'll see that the whole <span class="mono">LlamaAttention</span> contains <strong>not one line of attention math</strong>: it only projects, splits, and spins RoPE, then hands q/k/v as-is to <span class="mono">self.attn</span>. The most telling concrete example: <strong>just writing the line <span class="mono">self.attn = RadixAttention(...)</span> into a new model</strong> is all it takes to inherit prefix caching (Lesson 7), paged KV, and every attention backend (Lesson 33) — you never touch a line of cache or kernel code. For a feel of the scale, some real numbers: <span class="mono">Llama-2-7B</span> is exactly this attention + MLP packed into <strong>32</strong> <span class="mono">LlamaDecoderLayer</span>s with hidden dim <strong>4096</strong>, stacked vertically — the same <span class="mono">LlamaAttention</span> code is instantiated 32 times, differing only by <span class="mono">layer_id</span> and slicing, while the op is always that one from the library.</p>
+<p>Line this code up with the figure above and you'll see that the whole <span class="mono">LlamaAttention</span> contains <strong>not one line of attention math</strong>: it only projects, splits, and spins RoPE, then hands q/k/v as-is to <span class="mono">self.attn</span>. The most telling concrete example: <strong>just writing the line <span class="mono">self.attn = RadixAttention(...)</span> into a new model</strong> is all it takes to inherit prefix caching (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), paged KV, and every attention backend (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) — you never touch a line of cache or kernel code. For a feel of the scale, some real numbers: <span class="mono">Llama-2-7B</span> is exactly this attention + MLP packed into <strong>32</strong> <span class="mono">LlamaDecoderLayer</span>s with hidden dim <strong>4096</strong>, stacked vertically — the same <span class="mono">LlamaAttention</span> code is instantiated 32 times, differing only by <span class="mono">layer_id</span> and slicing, while the op is always that one from the library.</p>
 
 <h2>Who writes, who provides: one table makes the cost clear</h2>
 <p>Back to the core claim: why is "adding a model" so cheap in SGLang? Read the table below — the responsibility of each of the four (five) classes is,
@@ -797,11 +799,11 @@ Everything else — attention kernels, TP communication, KV management, CUDA gra
   <tr><td class="mono">LlamaForCausalLM</td><td>whole model: forward→logits + load_weights</td><td class="mono">ParallelLMHead / LogitsProcessor</td></tr>
 </table>
 
-<p>Read this table one level deeper and it lands harder: every layer with "Parallel" in its name stands on a whole tensor-parallel slicing-and-communication implementation; behind <span class="mono">RadixAttention</span> sit prefix-cache reuse (Lesson 7) + paged KV + multiple hardware attention backends (Lesson 33); behind <span class="mono">RMSNorm</span> and RoPE sit hand-written fused kernels (Lesson 36). Each of these alone is a long story, yet to the model author they are just <strong>one line of construction, one call</strong>. That's the power of "complexity sinks, interface floats": push the hard things down into reusable layers, and all that's left on the surface of a model file is "what this model looks like."</p>
+<p>Read this table one level deeper and it lands harder: every layer with "Parallel" in its name stands on a whole tensor-parallel slicing-and-communication implementation; behind <span class="mono">RadixAttention</span> sit prefix-cache reuse (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) + paged KV + multiple hardware attention backends (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>); behind <span class="mono">RMSNorm</span> and RoPE sit hand-written fused kernels (<a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>). Each of these alone is a long story, yet to the model author they are just <strong>one line of construction, one call</strong>. That's the power of "complexity sinks, interface floats": push the hard things down into reusable layers, and all that's left on the surface of a model file is "what this model looks like."</p>
 
 <div class="cols">
-  <div class="col"><h4>What you write (the model file)</h4><p><strong>Architecture</strong>: which layers, the dims, residual structure, how N layers stack; <strong>load_weights</strong>: HF weight name → internal param mapping and q/k/v, gate/up fusion (Lesson 25). That's all — one file, a few hundred lines.</p></div>
-  <div class="col"><h4>What SGLang provides (for free)</h4><p>Parallel linear layers (column/row-parallel, auto slicing + comms, Lesson 46), the <strong>attention backend</strong> and KV management (Lesson 33), RoPE/RMSNorm (Lesson 36), CUDA graphs (Lesson 27), sampling (Lesson 28). You <strong>touch none of it</strong>.</p></div>
+  <div class="col"><h4>What you write (the model file)</h4><p><strong>Architecture</strong>: which layers, the dims, residual structure, how N layers stack; <strong>load_weights</strong>: HF weight name → internal param mapping and q/k/v, gate/up fusion (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>). That's all — one file, a few hundred lines.</p></div>
+  <div class="col"><h4>What SGLang provides (for free)</h4><p>Parallel linear layers (column/row-parallel, auto slicing + comms, <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>), the <strong>attention backend</strong> and KV management (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), RoPE/RMSNorm (<a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>), CUDA graphs (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>), sampling (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>). You <strong>touch none of it</strong>.</p></div>
 </div>
 
 <p>Flip it around and this division also <strong>constrains</strong> the author: the architectures you can express are bounded by the layers SGLang already provides. If a new model uses some brand-new attention variant or activation that the library lacks, you must <strong>first add a new brick to the library</strong> (a new reusable layer), then assemble it in the model file. But in reality, mainstream open models are highly homogeneous in their building blocks — all permutations of some linear projection, some attention, some normalization — so for the vast majority of new models the library's bricks are <strong>already complete</strong>, and the author truly just assembles. That is the engineering premise that makes "day-0 support" possible, and why SGLang's model directory can grow comfortably to hundreds of files without losing control.</p>
@@ -831,17 +833,17 @@ Everything else — attention kernels, TP communication, KV management, CUDA gra
 <span class="mono">self.model</span> for hidden, then to <span class="mono">logits_processor</span> with <span class="mono">lm_head</span> for logits;
 <span class="mono">LlamaDecoderLayer.forward</span> just strings norm, attention, MLP, residual in order. No CUDA, no all-reduce, no trace of KV paging —
 all that complexity is sealed inside the layers it calls. This "thin model file, thick underlying library" split is exactly why, the day a new open model drops,
-the community often only needs to <strong>write such a file by the same template</strong> to get SGLang running it; more complex architectures like multimodal (Lesson 49)
-and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffolding</strong>.</p>
+the community often only needs to <strong>write such a file by the same template</strong> to get SGLang running it; more complex architectures like multimodal (<a class="xref" href="49-multimodal-vlm-serving.html">Lesson 49</a>)
+and MoE (<a class="xref" href="34-moe-layer.html">Lesson 34</a>) just plug a few extra layers into the <strong>same scaffolding</strong>.</p>
 
-<p>One last word on the <strong>registration</strong> step. After writing the model file you register the class in the model registry (by architecture name — e.g. config's <span class="mono">architectures</span> field says <span class="mono">LlamaForCausalLM</span>), and the runtime uses that to find which class to use from the weight directory's <span class="mono">config.json</span>. This step is usually one line of mapping, yet it's the key to "config-driven, automatic dispatch": the user starts the server with just a model path, and TokenizerManager and ModelRunner (Lesson 24) follow config's architecture name to locate the file, instantiate it, load weights, and run. So from "the community submits a model file" to "this model is served in production," <strong>no scheduling, batching, or kernel code needs to change</strong> — that clean boundary is the real engineering dividend of broad model support. That's also why, the next time you want to bring up a new model in SGLang, the mindset should be "<strong>go to the models directory, find the closest existing file, and adapt it</strong>" rather than designing from scratch — in the vast majority of cases, all you do is adjust the kinds and dims of layers, get the load_weights name mapping right, and register it.</p>
+<p>One last word on the <strong>registration</strong> step. After writing the model file you register the class in the model registry (by architecture name — e.g. config's <span class="mono">architectures</span> field says <span class="mono">LlamaForCausalLM</span>), and the runtime uses that to find which class to use from the weight directory's <span class="mono">config.json</span>. This step is usually one line of mapping, yet it's the key to "config-driven, automatic dispatch": the user starts the server with just a model path, and TokenizerManager and ModelRunner (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>) follow config's architecture name to locate the file, instantiate it, load weights, and run. So from "the community submits a model file" to "this model is served in production," <strong>no scheduling, batching, or kernel code needs to change</strong> — that clean boundary is the real engineering dividend of broad model support. That's also why, the next time you want to bring up a new model in SGLang, the mindset should be "<strong>go to the models directory, find the closest existing file, and adapt it</strong>" rather than designing from scratch — in the vast majority of cases, all you do is adjust the kinds and dims of layers, get the load_weights name mapping right, and register it.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
     <li><strong>Model file = assembly</strong>: a SGLang model is nested <span class="mono">nn.Module</span>s built entirely from ready-made <strong>parallel layers</strong>; the author barely writes low-level ops.</li>
     <li><strong>Llama's four (five) nesting classes</strong>: <span class="mono">LlamaAttention</span> → <span class="mono">LlamaMLP</span> → <span class="mono">LlamaDecoderLayer</span> → <span class="mono">LlamaModel</span> → <span class="mono">LlamaForCausalLM</span>.</li>
-    <li><strong>You write only two things</strong>: architecture (which layers, dims, residuals) + <span class="mono">load_weights</span> name mapping (Lesson 25); attention, TP comms, KV mgmt come free.</li>
+    <li><strong>You write only two things</strong>: architecture (which layers, dims, residuals) + <span class="mono">load_weights</span> name mapping (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>); attention, TP comms, KV mgmt come free.</li>
     <li><strong>forward_batch is the seam</strong>: it threads into every layer's attention, telling the model which KV-pool slots to read/write (Lessons 24/33) — the model/runtime boundary.</li>
     <li><strong>So adding a model is cheap</strong>: new open models often get day-0 support — write one file, register, served; MoE/multimodal just plug extra layers into the same scaffolding (Lessons 34/49).</li>
   </ul>
@@ -858,7 +860,7 @@ and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffoldi
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A model file <strong>assembles</strong> SGLang's ready parallel layers (<code>QKVParallelLinear</code>, <code>RowParallelLinear</code>, <code>RadixAttention</code>, <code>RMSNorm</code>, ...): the author only describes the architecture and writes <code>load_weights</code> name mapping (Lesson 25). Attention kernels, TP comms, KV mgmt, CUDA graphs come free — the root reason adding a model is cheap and day-0 support is broad.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A model file <strong>assembles</strong> SGLang's ready parallel layers (<code>QKVParallelLinear</code>, <code>RowParallelLinear</code>, <code>RadixAttention</code>, <code>RMSNorm</code>, ...): the author only describes the architecture and writes <code>load_weights</code> name mapping (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>). Attention kernels, TP comms, KV mgmt, CUDA graphs come free — the root reason adding a model is cheap and day-0 support is broad.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -871,7 +873,7 @@ and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffoldi
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The nesting is <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>. Each class does one thing, all using SGLang's ready layers. ModelRunner (Lesson 24) holds the outermost <code>LlamaForCausalLM</code>, which offers <code>forward(...)→logits</code> and <code>load_weights</code>.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The nesting is <code>LlamaAttention</code>/<code>LlamaMLP</code> → <code>LlamaDecoderLayer</code> → <code>LlamaModel</code> → <code>LlamaForCausalLM</code>. Each class does one thing, all using SGLang's ready layers. ModelRunner (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>) holds the outermost <code>LlamaForCausalLM</code>, which offers <code>forward(...)→logits</code> and <code>load_weights</code>.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -884,14 +886,14 @@ and MoE (Lesson 34) just plug a few extra layers into the <strong>same scaffoldi
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <code>forward_batch</code> (Lesson 24) carries KV slots and attention metadata, threading layer by layer into <code>self_attn</code> so attention knows where to write current k/v and read history (Lesson 33). That is the boundary 'model computes tensors right, runtime owns KV addressing.' It doesn't store weights, isn't a sampling container, and is passed in both prefill and decode.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. <code>forward_batch</code> (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>) carries KV slots and attention metadata, threading layer by layer into <code>self_attn</code> so attention knows where to write current k/v and read history (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>). That is the boundary 'model computes tensors right, runtime owns KV addressing.' It doesn't store weights, isn't a sampling container, and is passed in both prefill and decode.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'building with standard LEGO bricks' analogy, fully explain what 'writing a Llama' in SGLang actually writes and what it gets for free. Cover each: (1) how the four (five) classes <strong>nest</strong> (<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>); (2) which ready SGLang layers each uses (<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE); (3) the in-layer structure 'input_norm→attention(read/write KV)→residual→post_norm→MLP→residual'; (4) that the author truly writes anew only the architecture + <code>load_weights</code> mapping (Lesson 25), while attention kernels, TP slicing/comms (Lesson 46), KV mgmt (Lesson 33) come free.</li>
-    <li>Explain why SGLang achieves near <strong>day-0 support</strong> for new open models with very broad coverage. Cover: (1) the 'thin model file, thick library' split — <code>LlamaForCausalLM.forward</code> basically just hands work to <code>self.model</code> then <code>logits_processor</code>/<code>lm_head</code>, with no trace of CUDA/all-reduce/KV paging; (2) how <code>forward_batch</code>, as the model/runtime seam, lets one model file adapt to different attention backends and parallel configs (Lessons 24/33/46); (3) why more complex architectures like MoE (Lesson 34) and multimodal (Lesson 49) are just 'plug a few extra layers into the same scaffolding' rather than a rewrite.</li>
+    <li>Using the 'building with standard LEGO bricks' analogy, fully explain what 'writing a Llama' in SGLang actually writes and what it gets for free. Cover each: (1) how the four (five) classes <strong>nest</strong> (<code>LlamaAttention</code>→<code>LlamaMLP</code>→<code>LlamaDecoderLayer</code>→<code>LlamaModel</code>→<code>LlamaForCausalLM</code>); (2) which ready SGLang layers each uses (<code>QKVParallelLinear</code>/<code>RowParallelLinear</code>/<code>RadixAttention</code>/<code>VocabParallelEmbedding</code>/<code>RMSNorm</code>/RoPE); (3) the in-layer structure 'input_norm→attention(read/write KV)→residual→post_norm→MLP→residual'; (4) that the author truly writes anew only the architecture + <code>load_weights</code> mapping (<a class="xref" href="25-model-loading-and-weights.html">Lesson 25</a>), while attention kernels, TP slicing/comms (<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>), KV mgmt (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) come free.</li>
+    <li>Explain why SGLang achieves near <strong>day-0 support</strong> for new open models with very broad coverage. Cover: (1) the 'thin model file, thick library' split — <code>LlamaForCausalLM.forward</code> basically just hands work to <code>self.model</code> then <code>logits_processor</code>/<code>lm_head</code>, with no trace of CUDA/all-reduce/KV paging; (2) how <code>forward_batch</code>, as the model/runtime seam, lets one model file adapt to different attention backends and parallel configs (Lessons 24/33/46); (3) why more complex architectures like MoE (<a class="xref" href="34-moe-layer.html">Lesson 34</a>) and multimodal (<a class="xref" href="49-multimodal-vlm-serving.html">Lesson 49</a>) are just 'plug a few extra layers into the same scaffolding' rather than a rewrite.</li>
   </ul>
 </div>
 </div></div>

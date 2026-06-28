@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -324,10 +326,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead">
-第 29 课那棵基数树看着很美：请求用完即种、来人撞上前缀就白捡。但它有个被刻意回避的难题——<strong>树不能无限长大</strong>。
-它的每个节点都攥着第 30 课显存池里的一批 KV 槽位，而显存池是有限的。当槽位快用光、分配器再也凑不出新请求要的空间时，
+<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>那棵基数树看着很美：请求用完即种、来人撞上前缀就白捡。但它有个被刻意回避的难题——<strong>树不能无限长大</strong>。
+它的每个节点都攥着<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>显存池里的一批 KV 槽位，而显存池是有限的。当槽位快用光、分配器再也凑不出新请求要的空间时，
 谁该被<strong>清掉腾位</strong>？清的时候又绝不能误伤<strong>正在被使用</strong>的前缀。这一课讲的就是前缀缓存的<strong>经济学</strong>：
-驱逐（evict）选谁、靠什么铁律保命、以及衡量这一切是否划算的终极指标——<strong>命中率</strong>。读懂这一课，你就读懂了第 30 课那只显存池为什么会"满"，也读懂了缓存机制最终如何兑换成第 8 课的吞吐。
+驱逐（evict）选谁、靠什么铁律保命、以及衡量这一切是否划算的终极指标——<strong>命中率</strong>。读懂这一课，你就读懂了<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>那只显存池为什么会"满"，也读懂了缓存机制最终如何兑换成<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>的吞吐。
 </p>
 
 <div class="card analogy">
@@ -340,13 +342,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
   记住一句话：<strong>驱逐是被逼出来的，命中率是它换来的回报</strong>。驱逐不是没事就清，而是<strong>分配器告急</strong>那一刻调度器才触发；
-  它只动<strong>可驱逐的叶子</strong>、按策略（默认 LRU）排序、跳过被锁住的节点，把腾出的 KV 槽位还给池（第 30 课）。
-  命中率则衡量"<strong>有多少 prompt token 是从缓存白拿、没重算的</strong>"。高前缀共享（第 7/29 课）+ 缓存感知调度（第 20 课）→ 高命中率 → 少重算 → 高吞吐（第 8 课）；
-  HiCache（第 31 课）则把被驱逐的前缀沉到下层，进一步抬高<strong>有效</strong>命中率。一句话：<strong>驱逐管腾地方、命中率管收回报，两者都围着"显存有限"这个根本约束打转</strong>。
+  它只动<strong>可驱逐的叶子</strong>、按策略（默认 LRU）排序、跳过被锁住的节点，把腾出的 KV 槽位还给池（<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>）。
+  命中率则衡量"<strong>有多少 prompt token 是从缓存白拿、没重算的</strong>"。高前缀共享（第 7/29 课）+ 缓存感知调度（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）→ 高命中率 → 少重算 → 高吞吐（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）；
+  HiCache（<a class="xref" href="31-hicache-tiering.html">第 31 课</a>）则把被驱逐的前缀沉到下层，进一步抬高<strong>有效</strong>命中率。一句话：<strong>驱逐管腾地方、命中率管收回报，两者都围着"显存有限"这个根本约束打转</strong>。
 </div>
 
 <h2>为什么要驱逐：树长在有限的池子上</h2>
-<p>第 29 课反复强调"树是索引、池是仓库"。索引可以画得很大，但它指向的<strong>仓库是有限的</strong>——每个 <span class="mono">TreeNode</span> 的 value 是一批真实占着显存的 KV 槽位。
+<p><a class="xref" href="29-radixattention-implementation.html">第 29 课</a>反复强调"树是索引、池是仓库"。索引可以画得很大，但它指向的<strong>仓库是有限的</strong>——每个 <span class="mono">TreeNode</span> 的 value 是一批真实占着显存的 KV 槽位。
 请求不断把算过的前缀<strong>种进树</strong>，节点越积越多，池里的空闲槽位越来越少。直到某一刻，分配器面对一条新请求，<strong>再也凑不出它需要的连续槽位</strong>——这就是触发驱逐的信号。
 注意这个触发是<strong>按需、被动</strong>的：不是定时清理，而是"<strong>不腾就跑不动</strong>"时才动手。调度器会算出"还差多少 token 的空间"，把这个数交给 <span class="mono">evict</span>，让它至少回收这么多槽位。</p>
 <p>这也解释了缓存为什么是一种<strong>赌注</strong>而非纯收益。把前缀留在树上，它占着 HBM、挤掉了本可用于<strong>更高并发</strong>的空间；把它驱逐掉，未来若再撞上同样前缀就得<strong>从头重算几千 token</strong>。
@@ -364,7 +366,7 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 这就是为什么绝大多数缓存系统、包括这里的前缀缓存，都把 LRU 作为稳妥的默认，只在特定负载画像下才考虑切换到别的策略。</p>
 <p>这里有个关键约束：<strong>只有叶子可被驱逐</strong>。为什么不能直接清一个深处的公共前缀？因为只要还有<strong>更长的路径挂在它下面</strong>，那条长路径就<strong>依赖</strong>这段前缀的 KV——
 你不能把一段前缀抽掉，却让它的孩子悬空。所以回收永远<strong>从叶子往根</strong>进行：清掉一个叶子，它的父节点若就此变成新叶子、且没被锁，才轮到它成为下一个候选。
-清掉一个节点做两件事：把它的 KV 槽位 <span class="mono">free</span> 回分配器（第 30 课），并把它从树上摘除。</p>
+清掉一个节点做两件事：把它的 KV 槽位 <span class="mono">free</span> 回分配器（<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>），并把它从树上摘除。</p>
 
 <table class="t">
   <tr><th>驱逐策略</th><th>get_priority 取什么</th><th>偏向清掉谁 / 何时用</th></tr>
@@ -382,13 +384,13 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 </div>
 
 <h2>铁律：lock_ref&gt;0 的节点永不被驱逐</h2>
-<p>整套驱逐里有一条<strong>不可逾越的铁律</strong>：一个 <span class="mono">lock_ref &gt; 0</span> 的节点——也就是当下正被某条在跑的请求使用的前缀（第 29 课）——<strong>永远不可驱逐</strong>。
+<p>整套驱逐里有一条<strong>不可逾越的铁律</strong>：一个 <span class="mono">lock_ref &gt; 0</span> 的节点——也就是当下正被某条在跑的请求使用的前缀（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）——<strong>永远不可驱逐</strong>。
 道理很硬：那段 KV 正被<strong>一次在飞的前向</strong>读着，你若把它的槽位回收了，正在算的请求就会读到一片<strong>被覆盖的垃圾</strong>，结果直接崩坏。
-所以"在用"和"可驱逐"是<strong>互斥</strong>的两种状态。第 29 课讲过的 <span class="mono">inc_lock_ref</span> / <span class="mono">dec_lock_ref</span>，正是在这两个集合之间搬动节点：
+所以"在用"和"可驱逐"是<strong>互斥</strong>的两种状态。<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>讲过的 <span class="mono">inc_lock_ref</span> / <span class="mono">dec_lock_ref</span>，正是在这两个集合之间搬动节点：
 请求开始用某前缀，就从命中节点向上逐个 <span class="mono">lock_ref += 1</span>，把整条链从<strong>可驱逐集</strong>挪进<strong>受保护集</strong>；请求结束再减回去，归零的节点才重新成为驱逐候选。</p>
 <p>把这条铁律和 LRU 合起来看就通透了：<strong>压力之下，被锁的（在用的）前缀一定活下来，而冷清、没人锁的叶子被回收</strong>。
 一个节点哪怕 <span class="mono">last_access_time</span> 很老、看着最该淘汰，只要 <span class="mono">lock_ref&gt;0</span> 就<strong>动它不得</strong>；反过来，一个刚被某历史请求种下、但此刻无人在用的叶子，lock_ref 为 0，就是最理想的回收对象。
-这正是第 29 课那个区分的延续：lock_ref 计的是"<strong>正在飞的引用</strong>"，不是"<strong>历史用过几次</strong>"——驱逐要回收的，恰恰是<strong>留在树上、当下却没人用</strong>的那些。</p>
+这正是<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>那个区分的延续：lock_ref 计的是"<strong>正在飞的引用</strong>"，不是"<strong>历史用过几次</strong>"——驱逐要回收的，恰恰是<strong>留在树上、当下却没人用</strong>的那些。</p>
 <p>举个具体场景把铁律讲实：设想一段很长的共享系统提示，正被<strong>二十条并发请求</strong>同时解码。它那条前缀链上挂着 <span class="mono">lock_ref=20</span>，于是无论引擎显存多紧张，这条链都<strong>动不得</strong>——这正是我们要的，因为清掉它会同时弄崩二十次在飞的前向。
 随着这些请求一条条结束，每条都调一次 <span class="mono">dec_lock_ref</span>，把计数 20→19→…→0 地往下减；只有当<strong>最后一条</strong>也结束、计数归零，这条链才重新回到可驱逐集，而且还得它本身是叶子才行。
 这就解释了为什么<strong>热门共享前缀天然扛得住压力</strong>：一段前缀越忙、锁它的请求越多，它被钉得越牢。缓存因此<strong>恰好保护了最值得保护的东西</strong>——这甚至不是刻意设计的优化，而是"保证正确性"顺带产生的副作用。</p>
@@ -434,14 +436,14 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 
 <h2>命中率：这一切的回报，以及那笔取舍</h2>
 <p>绕了一圈，驱逐到底图什么？图的是<strong>命中率</strong>——衡量"<strong>有多少 prompt token 是从缓存直接拿到、不必重算的</strong>"那个比例。
-命中率是把前面所有努力串起来的<strong>收益指标</strong>：高前缀共享（第 7/29 课）让更多 token 能复用；缓存感知调度（第 20 课）则更进一步，它<strong>主动重排队列</strong>、优先把"前缀已在树上"的请求放进批，让命中真正发生。
-命中率越高 → 重算越少 → 吞吐越高（第 8 课）。而 HiCache（第 31 课）的价值，正是把被驱逐的前缀沉到 CPU/磁盘，使<strong>有效命中率</strong>不因一次驱逐就归零——再撞上时拷回来即可，省掉一次重算。</p>
+命中率是把前面所有努力串起来的<strong>收益指标</strong>：高前缀共享（第 7/29 课）让更多 token 能复用；缓存感知调度（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）则更进一步，它<strong>主动重排队列</strong>、优先把"前缀已在树上"的请求放进批，让命中真正发生。
+命中率越高 → 重算越少 → 吞吐越高（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。而 HiCache（<a class="xref" href="31-hicache-tiering.html">第 31 课</a>）的价值，正是把被驱逐的前缀沉到 CPU/磁盘，使<strong>有效命中率</strong>不因一次驱逐就归零——再撞上时拷回来即可，省掉一次重算。</p>
 <p>但命中率不是免费的。它背后是一笔<strong>核心取舍</strong>：<strong>驱逐了将来重算，还是留在 HBM 里</strong>。
 <strong>留</strong>的代价是占显存——前缀霸着 HBM，留给并发的空间就少，批量做不大；<strong>驱</strong>的代价是未来某次命中变成 miss，得吃一次几千 token 的前向重算。
 整个内存这一部分（第 29–32 课）讲的所有机制——基数树共享、分页池、HiCache 分层、LRU 驱逐——本质都是<strong>为了把这笔取舍做得更好</strong>：尽量多留有用的、尽量准地驱冷的，让显存这点稀缺资源换来最高的命中率与吞吐。</p>
 <p>还有一个微妙之处把它接回调度：命中率不只是缓存自己的事，它还取决于<strong>请求抵达缓存的先后顺序</strong>。设想两条请求共享一段长前缀，但调度器在它们中间插进了十几条无关请求——等第二条到来时，那段共享前缀可能<strong>早已被驱逐</strong>，本该稳拿的命中就变成了 miss。
-这正是缓存感知调度（第 20 课）要<strong>重排队列</strong>、把共享前缀的请求<strong>尽量靠拢</strong>的原因：它主动制造出那些"缓存独自会因驱逐而错失"的命中。
-所以驱逐策略和调度策略其实是同一项优化的两半：驱逐这边决定<strong>留什么</strong>，调度那边决定<strong>何时问</strong>，二者合力，才能把有效命中率、进而把吞吐（第 8 课）顶到硬件允许的上限。</p>
+这正是缓存感知调度（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）要<strong>重排队列</strong>、把共享前缀的请求<strong>尽量靠拢</strong>的原因：它主动制造出那些"缓存独自会因驱逐而错失"的命中。
+所以驱逐策略和调度策略其实是同一项优化的两半：驱逐这边决定<strong>留什么</strong>，调度那边决定<strong>何时问</strong>，二者合力，才能把有效命中率、进而把吞吐（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）顶到硬件允许的上限。</p>
 
 <div class="cols">
   <div class="col"><h4>驱逐（evict & 将来重算）</h4><p>立刻把冷前缀的 KV 槽位还给池，<strong>腾出 HBM</strong>给更高并发；代价是若它将来再被命中，要<strong>从头重算几千 token</strong>（一次昂贵前向）。赌"它不会再来"。</p></div>
@@ -516,10 +518,10 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
-  <strong>① 驱逐是被逼的、按需的</strong>：节点占着第 30 课池里的 KV 槽位，分配器凑不出新空间时，调度器才触发 <span class="mono">evict</span> 回收若干槽位。
+  <strong>① 驱逐是被逼的、按需的</strong>：节点占着<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>池里的 KV 槽位，分配器凑不出新空间时，调度器才触发 <span class="mono">evict</span> 回收若干槽位。
   <strong>② 清谁由 EvictionStrategy 排序</strong>：默认 LRU（<span class="mono">get_priority = last_access_time</span>，最久未访问先走），另有 LFU / FIFO / MRU；<strong>只有叶子可驱逐</strong>，回收从叶往根。
-  <strong>③ 铁律：lock_ref&gt;0 永不驱逐</strong>——在飞的前向正读那段 KV，回收即崩坏；inc/dec_lock_ref 在可驱逐集与受保护集之间搬节点（第 29 课）。
-  <strong>④ 命中率是回报指标</strong>：从缓存白拿的 token 占比，由高共享（第 7/29 课）+ 缓存感知调度（第 20 课）抬高 → 少重算 → 高吞吐（第 8 课）；HiCache（第 31 课）抬高有效命中率。
+  <strong>③ 铁律：lock_ref&gt;0 永不驱逐</strong>——在飞的前向正读那段 KV，回收即崩坏；inc/dec_lock_ref 在可驱逐集与受保护集之间搬节点（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）。
+  <strong>④ 命中率是回报指标</strong>：从缓存白拿的 token 占比，由高共享（第 7/29 课）+ 缓存感知调度（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）抬高 → 少重算 → 高吞吐（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）；HiCache（<a class="xref" href="31-hicache-tiering.html">第 31 课</a>）抬高有效命中率。
   <strong>⑤ 核心取舍：驱逐后重算 vs 留在 HBM</strong>——留占显存挤掉并发，驱省显存赔上重算；整个内存部分都在把这笔取舍做好。
 </div>
 <div class="selftest">
@@ -553,28 +555,28 @@ LFU 虽然记得"谁历史上最热门"，却容易被<strong>陈旧的热门</s
 <div class="quiz">
   <div class="qn">3. <strong>命中率</strong>衡量什么，为什么说它最终等价于<strong>吞吐</strong>？</div>
   <ol class="opts">
-    <li><strong>它衡量有多少 prompt token 是从缓存直接拿到、不必重算的比例</strong>。命中越多→需要跑前向重算的 token 越少→同样的 GPU 时间能服务更多请求，于是吞吐越高（第 8 课）。高前缀共享（第 7/29 课）+ 缓存感知调度（第 20 课）把命中率抬上去，HiCache（第 31 课）再抬高有效命中率</li>
+    <li><strong>它衡量有多少 prompt token 是从缓存直接拿到、不必重算的比例</strong>。命中越多→需要跑前向重算的 token 越少→同样的 GPU 时间能服务更多请求，于是吞吐越高（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。高前缀共享（第 7/29 课）+ 缓存感知调度（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）把命中率抬上去，HiCache（<a class="xref" href="31-hicache-tiering.html">第 31 课</a>）再抬高有效命中率</li>
     <li>它衡量网络请求的成功率，与重算无关</li>
     <li>它衡量模型预测下一个 token 的准确率</li>
     <li>它衡量 GPU 显存占用率，越满吞吐越高</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。命中率 = 从缓存白拿、不必重算的 prompt token 占比。命中越多、重算越少，同样 GPU 时间服务更多请求 → 吞吐越高（第 8 课）。它不是显存占用率、不是预测准确率、也不是网络成功率。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。命中率 = 从缓存白拿、不必重算的 prompt token 占比。命中越多、重算越少，同样 GPU 时间服务更多请求 → 吞吐越高（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）。它不是显存占用率、不是预测准确率、也不是网络成功率。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“图书管理员清理书架”的类比，把驱逐机制讲透。请覆盖：①驱逐<strong>何时</strong>被触发（节点占着第 30 课池里的 KV 槽位，分配器凑不出新请求要的空间时，调度器才触发 <span class='mono'>evict</span> 回收若干槽位），为什么它是被动按需、而非定时清理；②<strong>清谁</strong>由 <span class='mono'>EvictionStrategy</span> 的 <span class='mono'>get_priority</span> 排序，默认 LRU=<span class='mono'>last_access_time</span>（最久未访问先走），并简述 LFU / FIFO / MRU 的区别；③为什么<strong>只有叶子</strong>可驱逐、回收从叶往根；④铁律：<span class='mono'>lock_ref&gt;0</span> 的节点（正被在跑请求使用，第 29 课）永不被驱逐，<span class='mono'>inc/dec_lock_ref</span> 如何在可驱逐集与受保护集之间搬节点。</li>
-    <li>说清前缀缓存的<strong>经济学</strong>，并把它接回相邻几课。请说明：①<strong>命中率</strong>衡量什么（从缓存白拿、不重算的 prompt token 占比），它如何被高前缀共享（第 7/29 课）+ 缓存感知调度（第 20 课，主动重排队列优先放命中请求）抬高，又如何转化为更高吞吐（第 8 课）；②核心<strong>取舍</strong>：驱逐later重算 vs 留在 HBM——留占显存挤掉并发、驱省显存却赔上一次几千 token 的重算，为什么整个内存部分（第 29–32 课）都在把这笔取舍做好；③HiCache（第 31 课）如何通过把被驱逐前缀沉到下层、抬高<strong>有效</strong>命中率。</li>
+    <li>用“图书管理员清理书架”的类比，把驱逐机制讲透。请覆盖：①驱逐<strong>何时</strong>被触发（节点占着<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>池里的 KV 槽位，分配器凑不出新请求要的空间时，调度器才触发 <span class='mono'>evict</span> 回收若干槽位），为什么它是被动按需、而非定时清理；②<strong>清谁</strong>由 <span class='mono'>EvictionStrategy</span> 的 <span class='mono'>get_priority</span> 排序，默认 LRU=<span class='mono'>last_access_time</span>（最久未访问先走），并简述 LFU / FIFO / MRU 的区别；③为什么<strong>只有叶子</strong>可驱逐、回收从叶往根；④铁律：<span class='mono'>lock_ref&gt;0</span> 的节点（正被在跑请求使用，<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）永不被驱逐，<span class='mono'>inc/dec_lock_ref</span> 如何在可驱逐集与受保护集之间搬节点。</li>
+    <li>说清前缀缓存的<strong>经济学</strong>，并把它接回相邻几课。请说明：①<strong>命中率</strong>衡量什么（从缓存白拿、不重算的 prompt token 占比），它如何被高前缀共享（第 7/29 课）+ 缓存感知调度（<a class="xref" href="20-schedule-policy.html">第 20 课</a>，主动重排队列优先放命中请求）抬高，又如何转化为更高吞吐（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）；②核心<strong>取舍</strong>：驱逐later重算 vs 留在 HBM——留占显存挤掉并发、驱省显存却赔上一次几千 token 的重算，为什么整个内存部分（第 29–32 课）都在把这笔取舍做好；③HiCache（<a class="xref" href="31-hicache-tiering.html">第 31 课</a>）如何通过把被驱逐前缀沉到下层、抬高<strong>有效</strong>命中率。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
-Lesson 29's radix tree looked elegant: requests plant prefixes when done, newcomers that hit them get a free ride. But it sidestepped one hard problem — <strong>the tree can't grow forever</strong>.
-Every node holds a batch of KV slots from Lesson 30's pool, and the pool is finite. When free slots run low and the allocator can no longer satisfy a new request, <strong>who gets reclaimed</strong> to make room?
+<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s radix tree looked elegant: requests plant prefixes when done, newcomers that hit them get a free ride. But it sidestepped one hard problem — <strong>the tree can't grow forever</strong>.
+Every node holds a batch of KV slots from <a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>'s pool, and the pool is finite. When free slots run low and the allocator can no longer satisfy a new request, <strong>who gets reclaimed</strong> to make room?
 And the reclaim must never touch a prefix that is <strong>currently in use</strong>. This lesson is the <strong>economics</strong> of the prefix cache:
 who <strong>evict</strong> picks, what iron rule keeps a node alive, and the ultimate metric that says whether any of it pays off — the <strong>hit rate</strong>.
 </p>
@@ -589,13 +591,13 @@ who <strong>evict</strong> picks, what iron rule keeps a node alive, and the ult
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
   Keep one line in mind: <strong>eviction is forced on you; hit rate is the payoff it buys</strong>. Eviction isn't idle cleanup — it fires only the moment the <strong>allocator is starved</strong>;
-  it touches only <strong>evictable leaves</strong>, orders them by a strategy (LRU by default), skips locked nodes, and returns the freed KV slots to the pool (Lesson 30).
-  Hit rate measures "<strong>what fraction of prompt tokens were served from the cache without recompute</strong>." High prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) → high hit rate → less recompute → higher throughput (Lesson 8);
-  HiCache (Lesson 31) sinks evicted prefixes to lower tiers, raising the <strong>effective</strong> hit rate further.
+  it touches only <strong>evictable leaves</strong>, orders them by a strategy (LRU by default), skips locked nodes, and returns the freed KV slots to the pool (<a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>).
+  Hit rate measures "<strong>what fraction of prompt tokens were served from the cache without recompute</strong>." High prefix sharing (Lessons 7/29) + cache-aware scheduling (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) → high hit rate → less recompute → higher throughput (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>);
+  HiCache (<a class="xref" href="31-hicache-tiering.html">Lesson 31</a>) sinks evicted prefixes to lower tiers, raising the <strong>effective</strong> hit rate further.
 </div>
 
 <h2>Why evict: the tree grows on a finite pool</h2>
-<p>Lesson 29 hammered "tree is the index, pool is the warehouse." The index can be drawn huge, but it points into a <strong>finite warehouse</strong> — each <span class="mono">TreeNode</span>'s value is a batch of real, HBM-occupying KV slots.
+<p><a class="xref" href="29-radixattention-implementation.html">Lesson 29</a> hammered "tree is the index, pool is the warehouse." The index can be drawn huge, but it points into a <strong>finite warehouse</strong> — each <span class="mono">TreeNode</span>'s value is a batch of real, HBM-occupying KV slots.
 Requests keep <strong>planting</strong> computed prefixes into the tree, nodes pile up, free slots dwindle. Until one moment the allocator faces a new request and <strong>can no longer assemble the slots it needs</strong> — that is the eviction signal.
 Note the trigger is <strong>on-demand and reactive</strong>: not scheduled cleanup, but action taken only when "<strong>you can't run unless you free something</strong>." The scheduler computes "how many tokens short we are" and hands that number to <span class="mono">evict</span>, asking it to reclaim at least that much.</p>
 <p>This also explains why caching is a <strong>bet</strong>, not pure gain. Keep a prefix in the tree and it occupies HBM, squeezing out space that could serve <strong>more concurrency</strong>; evict it and a future hit on the same prefix means <strong>recomputing thousands of tokens from scratch</strong>.
@@ -610,7 +612,7 @@ LFU remembers "who was historically hottest," but is easily dragged down by <str
 That's why most caches, including this prefix cache, pick LRU as the safe default and switch strategies only under specific workload profiles.</p>
 <p>A key constraint: <strong>only leaves are evictable</strong>. Why can't you just clear a deep common prefix? Because as long as a <strong>longer path still hangs below it</strong>, that long path <strong>depends</strong> on this prefix's KV —
 you can't pull a prefix out and leave its children dangling. So reclaim always proceeds <strong>from leaves toward the root</strong>: clear a leaf, and only if its parent becomes a new leaf and isn't locked does the parent become the next candidate.
-Clearing a node does two things: <span class="mono">free</span> its KV slots back to the allocator (Lesson 30), and remove it from the tree.</p>
+Clearing a node does two things: <span class="mono">free</span> its KV slots back to the allocator (<a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>), and remove it from the tree.</p>
 <p>It's worth clearing up a common worry: eviction <strong>never loses data for any request still generating</strong>. What it reclaims is always the "settled prefixes" <strong>left by past requests and used by no one now</strong>.
 As long as a request is running, its entire prefix chain is locked (<span class="mono">lock_ref&gt;0</span>) and eviction <strong>simply can't see it</strong>. So when eviction happens you lose not correctness but merely "<strong>a possible future reuse</strong>" —
 if that cleared KV is later hit by some request, it must be recomputed; if no one ever needs it again, the eviction was pure profit. Because both gain and loss land in an <strong>uncertain future</strong>, caching is called a gamble, and strategies like LRU just <strong>guess the future from the past</strong>: whatever went longest untouched probably stays untouched.</p>
@@ -631,13 +633,13 @@ if that cleared KV is later hit by some request, it must be recomputed; if no on
 </div>
 
 <h2>The iron rule: a lock_ref&gt;0 node is never evicted</h2>
-<p>One <strong>inviolable rule</strong> governs all eviction: a node with <span class="mono">lock_ref &gt; 0</span> — a prefix currently used by a running request (Lesson 29) — is <strong>never evictable</strong>.
+<p>One <strong>inviolable rule</strong> governs all eviction: a node with <span class="mono">lock_ref &gt; 0</span> — a prefix currently used by a running request (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>) — is <strong>never evictable</strong>.
 The reason is hard: that KV is being read by an <strong>in-flight forward</strong>; reclaim its slots and the running request reads <strong>overwritten garbage</strong>, corrupting the result.
-So "in use" and "evictable" are <strong>mutually exclusive</strong> states. Lesson 29's <span class="mono">inc_lock_ref</span> / <span class="mono">dec_lock_ref</span> are exactly what move nodes between the two sets:
+So "in use" and "evictable" are <strong>mutually exclusive</strong> states. <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s <span class="mono">inc_lock_ref</span> / <span class="mono">dec_lock_ref</span> are exactly what move nodes between the two sets:
 when a request starts using a prefix, it walks up from the hit node doing <span class="mono">lock_ref += 1</span>, moving the whole chain from the <strong>evictable set</strong> into the <strong>protected set</strong>; when it ends it decrements back, and a node that hits zero becomes an eviction candidate again.</p>
 <p>Put this rule together with LRU and it clicks: <strong>under pressure, locked (in-use) prefixes survive, while cold unlocked leaves get reclaimed</strong>.
 A node may have a very old <span class="mono">last_access_time</span> and look most disposable, yet if <span class="mono">lock_ref&gt;0</span> you <strong>cannot touch it</strong>; conversely a leaf just planted by some past request but used by nobody now has lock_ref 0 and is the ideal reclaim target.
-This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight references</strong>," not "<strong>how many times used historically</strong>" — what eviction reclaims is exactly what's <strong>left in the tree yet used by no one now</strong>.</p>
+This continues <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s distinction: lock_ref counts "<strong>in-flight references</strong>," not "<strong>how many times used historically</strong>" — what eviction reclaims is exactly what's <strong>left in the tree yet used by no one now</strong>.</p>
 <p>One more practical angle makes the rule concrete: imagine a long shared system prompt being decoded by twenty concurrent requests. Its prefix chain carries <span class="mono">lock_ref=20</span>, so no matter how memory-starved the engine gets, that chain <strong>cannot be touched</strong> — which is exactly what we want, since evicting it would corrupt twenty in-flight forwards at once. As those requests finish one by one, each calls <span class="mono">dec_lock_ref</span>, dropping the count 20→19→…→0; only when the very last one ends does the chain rejoin the evictable set, and even then only if it's a leaf. This is why <strong>hot shared prefixes naturally survive pressure</strong>: the busier a prefix is, the higher its lock count, the more firmly it's pinned — the cache protects exactly what's most worth protecting, for free, as a side effect of correctness.</p>
 
 <div class="cellgroup">
@@ -681,12 +683,12 @@ This continues Lesson 29's distinction: lock_ref counts "<strong>in-flight refer
 
 <h2>Hit rate: the payoff, and that one trade</h2>
 <p>After all this — what is eviction for? For the <strong>hit rate</strong> — the fraction measuring "<strong>how many prompt tokens were served straight from the cache, with no recompute</strong>."
-Hit rate is the <strong>payoff metric</strong> that ties every earlier effort together: high prefix sharing (Lessons 7/29) lets more tokens be reused; cache-aware scheduling (Lesson 20) goes further, <strong>reordering the queue</strong> to favor requests whose prefix is already in the tree, so hits actually happen.
-Higher hit rate → less recompute → higher throughput (Lesson 8). And HiCache's (Lesson 31) value is to sink evicted prefixes to CPU/disk so the <strong>effective</strong> hit rate doesn't drop to zero on one eviction — a re-hit just copies it back, skipping a recompute.</p>
+Hit rate is the <strong>payoff metric</strong> that ties every earlier effort together: high prefix sharing (Lessons 7/29) lets more tokens be reused; cache-aware scheduling (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) goes further, <strong>reordering the queue</strong> to favor requests whose prefix is already in the tree, so hits actually happen.
+Higher hit rate → less recompute → higher throughput (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>). And HiCache's (<a class="xref" href="31-hicache-tiering.html">Lesson 31</a>) value is to sink evicted prefixes to CPU/disk so the <strong>effective</strong> hit rate doesn't drop to zero on one eviction — a re-hit just copies it back, skipping a recompute.</p>
 <p>But hit rate isn't free. Behind it sits a <strong>core trade</strong>: <strong>evict-and-recompute-later vs keep-in-HBM</strong>.
 <strong>Keeping</strong> costs HBM — the prefix hogs memory, leaving less room for concurrency, so batches stay small; <strong>evicting</strong> costs a future hit turning into a miss, paying a thousands-token forward recompute.
 Every mechanism in this whole memory part (Lessons 29–32) — radix-tree sharing, paged pools, HiCache tiering, LRU eviction — fundamentally exists <strong>to make this trade well</strong>: keep as much useful as possible, evict the cold as accurately as possible, turning scarce HBM into the highest hit rate and throughput.</p>
-<p>A subtle point ties it all back to scheduling: hit rate isn't only the cache's job — it depends on the <strong>order requests arrive at the cache</strong>. If two requests share a long prefix but the scheduler interleaves a dozen unrelated requests between them, the shared prefix may be evicted before the second one arrives, turning a guaranteed hit into a miss. That's precisely why cache-aware scheduling (Lesson 20) <strong>reorders the queue</strong> to keep prefix-sharing requests close together — it actively manufactures hits that the cache alone would have lost to eviction. Eviction policy and scheduling policy are thus two halves of one optimization: the eviction side decides <strong>what to keep</strong>, the scheduling side decides <strong>when to ask</strong>, and only together do they push the effective hit rate — and therefore throughput (Lesson 8) — as high as the hardware allows.</p>
+<p>A subtle point ties it all back to scheduling: hit rate isn't only the cache's job — it depends on the <strong>order requests arrive at the cache</strong>. If two requests share a long prefix but the scheduler interleaves a dozen unrelated requests between them, the shared prefix may be evicted before the second one arrives, turning a guaranteed hit into a miss. That's precisely why cache-aware scheduling (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) <strong>reorders the queue</strong> to keep prefix-sharing requests close together — it actively manufactures hits that the cache alone would have lost to eviction. Eviction policy and scheduling policy are thus two halves of one optimization: the eviction side decides <strong>what to keep</strong>, the scheduling side decides <strong>when to ask</strong>, and only together do they push the effective hit rate — and therefore throughput (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>) — as high as the hardware allows.</p>
 
 <div class="cols">
   <div class="col"><h4>Evict (& recompute later)</h4><p>Immediately return a cold prefix's KV slots to the pool, <strong>freeing HBM</strong> for more concurrency; the cost is that if it's hit again later you must <strong>recompute thousands of tokens</strong> (one expensive forward). Bet "it won't come back."</p></div>
@@ -761,10 +763,10 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
-  <strong>① Eviction is forced and on-demand</strong>: nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble new space does the scheduler fire <span class="mono">evict</span> to reclaim some.
+  <strong>① Eviction is forced and on-demand</strong>: nodes hold KV slots from <a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>'s pool; only when the allocator can't assemble new space does the scheduler fire <span class="mono">evict</span> to reclaim some.
   <strong>② What to clear is ordered by EvictionStrategy</strong>: default LRU (<span class="mono">get_priority = last_access_time</span>, oldest first), plus LFU / FIFO / MRU; <strong>only leaves are evictable</strong>, reclaim goes leaf-to-root.
-  <strong>③ Iron rule: lock_ref&gt;0 is never evicted</strong> — an in-flight forward is reading that KV, reclaiming it corrupts; inc/dec_lock_ref move nodes between the evictable and protected sets (Lesson 29).
-  <strong>④ Hit rate is the payoff metric</strong>: fraction of tokens served from cache, raised by high sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) → less recompute → higher throughput (Lesson 8); HiCache (Lesson 31) raises effective hit rate.
+  <strong>③ Iron rule: lock_ref&gt;0 is never evicted</strong> — an in-flight forward is reading that KV, reclaiming it corrupts; inc/dec_lock_ref move nodes between the evictable and protected sets (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>).
+  <strong>④ Hit rate is the payoff metric</strong>: fraction of tokens served from cache, raised by high sharing (Lessons 7/29) + cache-aware scheduling (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) → less recompute → higher throughput (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>); HiCache (<a class="xref" href="31-hicache-tiering.html">Lesson 31</a>) raises effective hit rate.
   <strong>⑤ Core trade: evict-then-recompute vs keep-in-HBM</strong> — keeping costs HBM and concurrency, evicting costs a future recompute; the whole memory part is about making this trade well.
 </div>
 <div class="selftest">
@@ -798,21 +800,21 @@ Every mechanism in this whole memory part (Lessons 29–32) — radix-tree shari
 <div class="quiz">
   <div class="qn">3. What does <strong>hit rate</strong> measure, and why is it ultimately equivalent to <strong>throughput</strong>?</div>
   <ol class="opts">
-    <li><strong>It measures the fraction of prompt tokens served straight from the cache with no recompute</strong>. More hits → fewer tokens to recompute in a forward → the same GPU time serves more requests, so throughput rises (Lesson 8). High prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20) lift it; HiCache (Lesson 31) raises the effective hit rate</li>
+    <li><strong>It measures the fraction of prompt tokens served straight from the cache with no recompute</strong>. More hits → fewer tokens to recompute in a forward → the same GPU time serves more requests, so throughput rises (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>). High prefix sharing (Lessons 7/29) + cache-aware scheduling (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) lift it; HiCache (<a class="xref" href="31-hicache-tiering.html">Lesson 31</a>) raises the effective hit rate</li>
     <li>It measures network request success rate, unrelated to recompute</li>
     <li>It measures the model's next-token prediction accuracy</li>
     <li>It measures GPU memory utilization — fuller means higher throughput</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Hit rate = the fraction of prompt tokens taken free from the cache without recompute. More hits, less recompute, more requests per unit GPU time → higher throughput (Lesson 8). It's not memory utilization, not prediction accuracy, and not network success rate.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Hit rate = the fraction of prompt tokens taken free from the cache without recompute. More hits, less recompute, more requests per unit GPU time → higher throughput (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>). It's not memory utilization, not prediction accuracy, and not network success rate.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'librarian weeding the shelves' analogy, fully explain eviction. Cover: (1) <strong>when</strong> it triggers (nodes hold KV slots from Lesson 30's pool; only when the allocator can't assemble the slots a new request needs does the scheduler fire <span class='mono'>evict</span> to reclaim some), and why it's reactive/on-demand rather than scheduled cleanup; (2) <strong>who</strong> gets cleared, ordered by <span class='mono'>EvictionStrategy</span>'s <span class='mono'>get_priority</span>, default LRU=<span class='mono'>last_access_time</span> (oldest-untouched first), and briefly LFU / FIFO / MRU; (3) why <strong>only leaves</strong> are evictable and reclaim goes leaf-to-root; (4) the iron rule: a <span class='mono'>lock_ref&gt;0</span> node (in use by a running request, Lesson 29) is never evicted, and how <span class='mono'>inc/dec_lock_ref</span> move nodes between the evictable and protected sets.</li>
-    <li>Explain the <strong>economics</strong> of the prefix cache, tying it back to neighboring lessons. Cover: (1) what <strong>hit rate</strong> measures (fraction of prompt tokens taken from cache without recompute), how it's raised by high prefix sharing (Lessons 7/29) + cache-aware scheduling (Lesson 20, which reorders the queue to favor cache hits), and how it converts into higher throughput (Lesson 8); (2) the core <strong>trade</strong>: evict-and-recompute-later vs keep-in-HBM — keeping costs HBM and squeezes out concurrency, evicting costs a future thousands-token recompute, and why the whole memory part (Lessons 29–32) is about making this trade well; (3) how HiCache (Lesson 31) raises the <strong>effective</strong> hit rate by sinking evicted prefixes to lower tiers.</li>
+    <li>Using the 'librarian weeding the shelves' analogy, fully explain eviction. Cover: (1) <strong>when</strong> it triggers (nodes hold KV slots from <a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>'s pool; only when the allocator can't assemble the slots a new request needs does the scheduler fire <span class='mono'>evict</span> to reclaim some), and why it's reactive/on-demand rather than scheduled cleanup; (2) <strong>who</strong> gets cleared, ordered by <span class='mono'>EvictionStrategy</span>'s <span class='mono'>get_priority</span>, default LRU=<span class='mono'>last_access_time</span> (oldest-untouched first), and briefly LFU / FIFO / MRU; (3) why <strong>only leaves</strong> are evictable and reclaim goes leaf-to-root; (4) the iron rule: a <span class='mono'>lock_ref&gt;0</span> node (in use by a running request, <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>) is never evicted, and how <span class='mono'>inc/dec_lock_ref</span> move nodes between the evictable and protected sets.</li>
+    <li>Explain the <strong>economics</strong> of the prefix cache, tying it back to neighboring lessons. Cover: (1) what <strong>hit rate</strong> measures (fraction of prompt tokens taken from cache without recompute), how it's raised by high prefix sharing (Lessons 7/29) + cache-aware scheduling (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>, which reorders the queue to favor cache hits), and how it converts into higher throughput (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>); (2) the core <strong>trade</strong>: evict-and-recompute-later vs keep-in-HBM — keeping costs HBM and squeezes out concurrency, evicting costs a future thousands-token recompute, and why the whole memory part (Lessons 29–32) is about making this trade well; (3) how HiCache (<a class="xref" href="31-hicache-tiering.html">Lesson 31</a>) raises the <strong>effective</strong> hit rate by sinking evicted prefixes to lower tiers.</li>
   </ul>
 </div>
 </div></div>

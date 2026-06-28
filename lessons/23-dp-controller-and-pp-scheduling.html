@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -341,13 +343,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">🌍 宏观理解</div>
   一句话：<strong>DP 复制"整个模型"、把请求扇出到多个独立副本；PP 切分"模型的层"、让多个 micro-batch 在段间流水。</strong>
   DP 的指挥者是 <span class="inline">DataParallelController</span>——它本身<strong>不做前向</strong>，只负责把进来的请求<strong>轮询或按负载</strong>分给 N 个<strong>完整运行时</strong>（每个副本都有自己的调度器 + TP worker + KV 缓存 + 一整份模型权重）。
-  PP 的执行者是 <span class="inline">SchedulerPPMixin.event_loop_pp</span>——它把第 18 课那条单段心跳改造成<strong>流水线循环</strong>，让 stage1 处理 micro-batch B 的同时 stage2 在处理 micro-batch A，
-  从而把流水线<strong>填充/排空的"气泡"</strong>摊薄。再叠加<strong>张量并行 TP</strong>（切每一层的矩阵，第 46 课深入），大部署就是 <strong>TP × PP × DP</strong> 三维拼起来的。
+  PP 的执行者是 <span class="inline">SchedulerPPMixin.event_loop_pp</span>——它把<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>那条单段心跳改造成<strong>流水线循环</strong>，让 stage1 处理 micro-batch B 的同时 stage2 在处理 micro-batch A，
+  从而把流水线<strong>填充/排空的"气泡"</strong>摊薄。再叠加<strong>张量并行 TP</strong>（切每一层的矩阵，<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>深入），大部署就是 <strong>TP × PP × DP</strong> 三维拼起来的。
 </div>
 
 <h2>数据并行 DP：复制整个运行时，把请求扇出</h2>
 <p>DP 的思路最朴素：<strong>一个副本喂不饱流量，那就开 N 个副本</strong>。但关键在于——每个副本都是一台<strong>完整的引擎</strong>，
-不是共享某块权重，而是<strong>各自持有一整份模型副本</strong>、各自跑一条第 18 课讲的事件循环、各自管自己的 KV 账本。
+不是共享某块权重，而是<strong>各自持有一整份模型副本</strong>、各自跑一条<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>讲的事件循环、各自管自己的 KV 账本。
 副本之间<strong>请求级隔离</strong>：顾客 A 在副本 1、顾客 B 在副本 2，两者从不交互。唯一需要的协调，就是门口那个<strong>分发器</strong>——
 <span class="inline">DataParallelController</span>。它在最前面接住所有进来的请求，按策略（轮询 <span class="mono">round_robin_scheduler</span>、
 或按在跑请求数/token 数的负载感知）挑一个副本，把请求<strong>原样转发</strong>过去，自己绝不碰 GPU。</p>
@@ -503,7 +505,7 @@ GPU 利用率惨不忍睹——这就是<strong>流水线气泡（pipeline bubbl
 这也解释了 PP 的一个隐藏权衡：micro-batch 切得太碎，单个 batch 太小会让每次前向的 GPU 利用率下降；切得太粗，又填不满流水线。真实系统要在两者间找平衡。</p>
 
 <h2>三种并行怎么拼：TP × PP × DP</h2>
-<p>DP、PP、还有第 46 课要深讲的 <strong>TP（张量并行）</strong>，是三个<strong>正交</strong>的维度，可以叠在一起用。
+<p>DP、PP、还有<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>要深讲的 <strong>TP（张量并行）</strong>，是三个<strong>正交</strong>的维度，可以叠在一起用。
 区分它们的最快办法，是问一句：<strong>"它复制什么、切分什么？"</strong></p>
 
 <table class="t">
@@ -516,7 +518,7 @@ GPU 利用率惨不忍睹——这就是<strong>流水线气泡（pipeline bubbl
 <p>把三者拼起来想：<strong>TP 在一层之内</strong>（多卡合算同一层的矩阵乘）、<strong>PP 跨层之间</strong>（不同段在不同卡）、<strong>DP 跨整个副本</strong>（整机复制扇出）。
 一个典型的大集群可能是 "TP=8、PP=2、DP=4"——即每个副本用 16 张卡（8 路 TP × 2 段 PP）装下一份大模型，再复制 4 份副本扛流量，总共 64 张卡。
 而<strong>调度器在其中编排的是 DP（靠控制器分发）和 PP（靠 pp 循环推进 micro-batch）</strong>这两个改变控制流的维度；
-TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——调度器把批交给 ModelRunner，TP 的多卡协同在 <span class="inline">forward</span> 里自动发生（第 24 课）。这就是为什么本课归在 Part 5：DP 与 PP 是<strong>调度</strong>问题，TP 是<strong>计算</strong>问题。</p>
+TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——调度器把批交给 ModelRunner，TP 的多卡协同在 <span class="inline">forward</span> 里自动发生（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）。这就是为什么本课归在 Part 5：DP 与 PP 是<strong>调度</strong>问题，TP 是<strong>计算</strong>问题。</p>
 
 <h2>什么时候用 DP、什么时候用 PP</h2>
 <p>两者解决的是<strong>不同的瓶颈</strong>，别混为一谈：</p>
@@ -531,11 +533,11 @@ TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——
 <p>实践中两者常<strong>同时</strong>出现：先用 PP（和 TP）把一份大模型<strong>装进</strong>一组卡，再用 DP 把这组"装好的副本"<strong>复制</strong>多份扛流量。
 所以读到这里，你应当能把这句话翻译成具体动作了——<strong>"装得下"靠切分（PP/TP），"喂得饱"靠复制（DP）</strong>。</p>
 
-<p>最后再把这三维和你前面学过的整套调度知识接上，收一个干净的尾。Part 5 一路讲下来，从第 18 课的<strong>单段心跳</strong>，到第 19 课的请求与批数据结构、第 20 课的调度策略、
-第 21 课的重叠流水线、第 22 课的分块预填充——全都是<strong>一个调度器进程、一张卡</strong>之内的故事。本课做的，是把这套"单机心跳"<strong>沿两条新轴展开</strong>：
+<p>最后再把这三维和你前面学过的整套调度知识接上，收一个干净的尾。Part 5 一路讲下来，从<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>的<strong>单段心跳</strong>，到<a class="xref" href="19-req-and-schedule-batch.html">第 19 课</a>的请求与批数据结构、<a class="xref" href="20-schedule-policy.html">第 20 课</a>的调度策略、
+<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>的重叠流水线、<a class="xref" href="22-chunked-prefill.html">第 22 课</a>的分块预填充——全都是<strong>一个调度器进程、一张卡</strong>之内的故事。本课做的，是把这套"单机心跳"<strong>沿两条新轴展开</strong>：
 沿 DP 轴，是把整台心脏<strong>复印多份</strong>、在前面加一个不跳动只分发的控制器；沿 PP 轴，是把一次心跳的前向<strong>拆成接力</strong>、让多个 micro-batch 错峰填满管线。
 两条轴都<strong>不改变单次前向的数学</strong>，只改变<strong>控制流</strong>——谁来分发、有几个 micro-batch 在飞——这正是它们归在"调度"这一 Part 的根本理由。
-带着这把尺子往后读：第 24 课会钻进单次 <span class="inline">forward</span> 看 TP 怎么在一层内切矩阵，第 46 课把 TP/PP/EP/DP 四维一次性讲透，第 47 课讲 MoE 的专家负载均衡 EPLB。
+带着这把尺子往后读：<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>会钻进单次 <span class="inline">forward</span> 看 TP 怎么在一层内切矩阵，<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>把 TP/PP/EP/DP 四维一次性讲透，<a class="xref" href="47-large-scale-ep-and-eplb.html">第 47 课</a>讲 MoE 的专家负载均衡 EPLB。
 至此，调度器这颗"心脏"从单卡跳动，到多卡多副本的协同编排，你已经有了完整的骨架图。</p>
 
 <h2>真实代码：控制器怎么轮询分发</h2>
@@ -581,7 +583,7 @@ TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——
     <li><strong>DP（数据并行）</strong>：复制<strong>整个运行时</strong>成 N 个独立副本（各有调度器+TP+KV+一整份模型），<span class="mono">DataParallelController</span> 用轮询/负载感知把请求<strong>扇出</strong>；是<strong>吞吐乘法器</strong>，请求级隔离、副本间不交互。</li>
     <li><strong>PP（流水线并行）</strong>：把模型的<strong>层切成段</strong>分到多卡，<span class="mono">event_loop_pp</span> 让<strong>多个 micro-batch 同时在段间流水</strong>（stage1 跑 B 时 stage2 跑 A），靠 micro-batch 数摊平填充/排空的<strong>气泡</strong>；为<strong>装下超大模型</strong>而生。</li>
     <li><strong>TP × PP × DP 三维正交</strong>：TP 切<strong>一层内的矩阵</strong>、PP 切<strong>跨层的段</strong>、DP 复制<strong>整个副本</strong>。调度器编排 DP（控制器）与 PP（pp 循环）；TP 藏在模型前向里、对调度器透明。</li>
-    <li><strong>选型口诀</strong>：模型太大用 PP/TP（切分，"装得下"）；流量太大用 DP（复制，"喂得饱"）；大部署常三者叠加。深入见第 46 课（TP/PP/EP/DP）、第 47 课（EPLB）、第 24 课（前向）、第 18 课（事件循环）、第 2 课（三进程模型）。</li>
+    <li><strong>选型口诀</strong>：模型太大用 PP/TP（切分，"装得下"）；流量太大用 DP（复制，"喂得饱"）；大部署常三者叠加。深入见<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>（TP/PP/EP/DP）、<a class="xref" href="47-large-scale-ep-and-eplb.html">第 47 课</a>（EPLB）、<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>（前向）、<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>（事件循环）、<a class="xref" href="02-project-map.html">第 2 课</a>（三进程模型）。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -629,7 +631,7 @@ TP 则<strong>藏在模型前向内部</strong>，对调度器基本透明——
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用“超市收银通道 vs 传送带工位”的类比，完整讲清 DP 与 PP 的区别。请逐一覆盖：①<strong>DP</strong>——为何复制<strong>整个运行时</strong>（每副本自带调度器+TP+KV+一整份模型）、<code>DataParallelController</code> 如何用 <code>round_robin_scheduler</code> 把请求<strong>轮询扇出</strong>且自己不碰 GPU、为什么它是<strong>吞吐乘法器</strong>但救不了“装不下”的模型；②<strong>PP</strong>——为何把<strong>层切成段</strong>能装下超大模型、<code>event_loop_pp</code> 为何要让<strong>多个 micro-batch 错峰在飞</strong>、<strong>填充/排空气泡</strong>从哪来又怎么靠 micro-batch 数摊平。</li>
-    <li>讨论 <strong>TP × PP × DP</strong> 如何在一个大集群里拼起来，以及为什么本课归在“调度”里。请说明：①一个“TP=8、PP=2、DP=4”的部署各维度分别在切/复制什么、总卡数如何算；②为什么调度器编排的是 <strong>DP（控制器分发）与 PP（pp 循环推进 micro-batch）</strong>，而 <strong>TP 对调度器透明</strong>（藏在 <code>forward</code> 里，第 24/46 课）；③据此给出选型口诀——模型太大、流量太大分别该上哪种并行，并指出深入课程（第 46 课 TP/PP/EP/DP、第 47 课 EPLB）。</li>
+    <li>讨论 <strong>TP × PP × DP</strong> 如何在一个大集群里拼起来，以及为什么本课归在“调度”里。请说明：①一个“TP=8、PP=2、DP=4”的部署各维度分别在切/复制什么、总卡数如何算；②为什么调度器编排的是 <strong>DP（控制器分发）与 PP（pp 循环推进 micro-batch）</strong>，而 <strong>TP 对调度器透明</strong>（藏在 <code>forward</code> 里，第 24/46 课）；③据此给出选型口诀——模型太大、流量太大分别该上哪种并行，并指出深入课程（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a> TP/PP/EP/DP、<a class="xref" href="47-large-scale-ep-and-eplb.html">第 47 课</a> EPLB）。</li>
   </ul>
 </div>
 </div></div>
@@ -652,8 +654,8 @@ Note: what they change is not how the matrices compute, but <strong>who dispatch
   <div class="tag">🌍 The big picture</div>
   In one line: <strong>DP replicates "the whole model" and fans requests out to many independent replicas; PP splits "the model's layers" and pipelines multiple micro-batches across stages.</strong>
   DP's conductor is the <span class="inline">DataParallelController</span>—it does <strong>no forward</strong> itself, only dispatching incoming requests <strong>round-robin or load-aware</strong> to N <strong>full runtimes</strong> (each replica has its own scheduler + TP workers + KV cache + a full copy of the model weights).
-  PP's executor is <span class="inline">SchedulerPPMixin.event_loop_pp</span>—it reshapes Lesson 18's single-stage heartbeat into a <strong>pipelined loop</strong>, so stage1 processes micro-batch B while stage2 processes micro-batch A,
-  amortizing the fill/drain <strong>"bubble"</strong>. Layer on <strong>tensor parallel (TP)</strong> (split each layer's matrices, deep dive Lesson 46) and a big deployment is <strong>TP × PP × DP</strong> stitched in three dimensions.
+  PP's executor is <span class="inline">SchedulerPPMixin.event_loop_pp</span>—it reshapes <a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>'s single-stage heartbeat into a <strong>pipelined loop</strong>, so stage1 processes micro-batch B while stage2 processes micro-batch A,
+  amortizing the fill/drain <strong>"bubble"</strong>. Layer on <strong>tensor parallel (TP)</strong> (split each layer's matrices, deep dive <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>) and a big deployment is <strong>TP × PP × DP</strong> stitched in three dimensions.
 </div>
 
 <h2>Data parallel (DP): replicate the whole runtime, fan requests out</h2>
@@ -797,7 +799,7 @@ it <strong>tracks several</strong> micro-batches at different stages, manages in
 A plain single-stage loop watches one batch per tick; the PP loop watches a string of them. The <strong>fill</strong> and <strong>drain</strong> ends carry unavoidable bubbles, but as long as steady state is long enough (micro-batches ≫ stages), the bubble fraction approaches zero.</p>
 
 <h2>How the three compose: TP × PP × DP</h2>
-<p>DP, PP, and the <strong>TP (tensor parallel)</strong> that Lesson 46 details are three <strong>orthogonal</strong> dimensions you can stack.
+<p>DP, PP, and the <strong>TP (tensor parallel)</strong> that <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> details are three <strong>orthogonal</strong> dimensions you can stack.
 The fastest way to tell them apart is to ask: <strong>"what does it replicate, what does it split?"</strong></p>
 
 <table class="t">
@@ -810,7 +812,7 @@ The fastest way to tell them apart is to ask: <strong>"what does it replicate, w
 <p>Picture them stacked: <strong>TP within a layer</strong> (many cards co-compute one layer's matmul), <strong>PP across layers</strong> (different stages on different cards), <strong>DP across whole replicas</strong> (replicate the box and fan out).
 A typical large cluster might be "TP=8, PP=2, DP=4"—each replica uses 16 cards (8-way TP × 2 PP stages) to hold one copy of a big model, then 4 replicas to carry traffic, 64 cards in all.
 And <strong>what the scheduler orchestrates here is DP (via the controller's dispatch) and PP (via the pp loop advancing micro-batches)</strong>—the two dimensions that change control flow;
-TP <strong>hides inside the model forward</strong>, largely transparent to the scheduler—the scheduler hands the batch to ModelRunner and TP's multi-card cooperation happens automatically inside <span class="inline">forward</span> (Lesson 24). That's why this lesson belongs in Part 5: DP and PP are <strong>scheduling</strong> problems, TP is a <strong>compute</strong> problem.</p>
+TP <strong>hides inside the model forward</strong>, largely transparent to the scheduler—the scheduler hands the batch to ModelRunner and TP's multi-card cooperation happens automatically inside <span class="inline">forward</span> (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>). That's why this lesson belongs in Part 5: DP and PP are <strong>scheduling</strong> problems, TP is a <strong>compute</strong> problem.</p>
 
 <h2>When to use DP vs PP</h2>
 <p>They solve <strong>different bottlenecks</strong>—don't conflate them:</p>
@@ -868,7 +870,7 @@ and the controller immediately turns to the next. Not one line of matmul, confir
     <li><strong>DP (data parallel)</strong>: replicate the <strong>whole runtime</strong> into N independent replicas (each with scheduler+TP+KV+a full model), with <span class="mono">DataParallelController</span> <strong>fanning out</strong> requests round-robin/load-aware; a <strong>throughput multiplier</strong>, request-isolated, replicas don't interact.</li>
     <li><strong>PP (pipeline parallel)</strong>: split the model's <strong>layers into stages</strong> across cards; <span class="mono">event_loop_pp</span> keeps <strong>multiple micro-batches flowing across stages</strong> (stage1 on B while stage2 on A), amortizing the fill/drain <strong>bubble</strong> via micro-batch count; born to <strong>fit a huge model</strong>.</li>
     <li><strong>TP × PP × DP are three orthogonal dims</strong>: TP splits <strong>matrices within a layer</strong>, PP splits <strong>stages across layers</strong>, DP replicates <strong>whole replicas</strong>. The scheduler orchestrates DP (controller) and PP (pp loop); TP hides in the model forward, transparent to the scheduler.</li>
-    <li><strong>Selection rule</strong>: model too big ⇒ PP/TP (split, "make it fit"); traffic too heavy ⇒ DP (replicate, "keep it fed"); big deployments stack all three. Deep dives: Lesson 46 (TP/PP/EP/DP), Lesson 47 (EPLB), Lesson 24 (forward), Lesson 18 (event loop), Lesson 2 (3-process model).</li>
+    <li><strong>Selection rule</strong>: model too big ⇒ PP/TP (split, "make it fit"); traffic too heavy ⇒ DP (replicate, "keep it fed"); big deployments stack all three. Deep dives: <a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> (TP/PP/EP/DP), <a class="xref" href="47-large-scale-ep-and-eplb.html">Lesson 47</a> (EPLB), <a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a> (forward), <a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a> (event loop), <a class="xref" href="02-project-map.html">Lesson 2</a> (3-process model).</li>
   </ul>
 </div>
 <div class="selftest">
@@ -916,7 +918,7 @@ and the controller immediately turns to the next. Not one line of matmul, confir
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>Using the 'supermarket checkout lanes vs conveyor stations' analogy, fully explain DP vs PP. Cover each: (1) <strong>DP</strong>—why it replicates the <strong>whole runtime</strong> (each replica with its own scheduler+TP+KV+a full model), how <code>DataParallelController</code> <strong>round-robins/fans out</strong> requests via <code>round_robin_scheduler</code> without touching the GPU, and why it is a <strong>throughput multiplier</strong> yet can't rescue a model that 'doesn't fit'; (2) <strong>PP</strong>—why <strong>splitting layers into stages</strong> fits a huge model, why <code>event_loop_pp</code> keeps <strong>multiple micro-batches staggered in flight</strong>, and where the <strong>fill/drain bubble</strong> comes from and how micro-batch count amortizes it.</li>
-    <li>Discuss how <strong>TP × PP × DP</strong> compose in a large cluster, and why this lesson belongs to 'scheduling'. Explain: (1) for a 'TP=8, PP=2, DP=4' deployment, what each dimension splits/replicates and how the total card count is computed; (2) why the scheduler orchestrates <strong>DP (controller dispatch) and PP (the pp loop advancing micro-batches)</strong> while <strong>TP is transparent to the scheduler</strong> (hidden in <code>forward</code>, Lessons 24/46); (3) from this, state the selection rule—which parallelism to reach for when the model is too big vs traffic too heavy—and point to the deep dives (Lesson 46 TP/PP/EP/DP, Lesson 47 EPLB).</li>
+    <li>Discuss how <strong>TP × PP × DP</strong> compose in a large cluster, and why this lesson belongs to 'scheduling'. Explain: (1) for a 'TP=8, PP=2, DP=4' deployment, what each dimension splits/replicates and how the total card count is computed; (2) why the scheduler orchestrates <strong>DP (controller dispatch) and PP (the pp loop advancing micro-batches)</strong> while <strong>TP is transparent to the scheduler</strong> (hidden in <code>forward</code>, Lessons 24/46); (3) from this, state the selection rule—which parallelism to reach for when the model is too big vs traffic too heavy—and point to the deep dives (<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a> TP/PP/EP/DP, <a class="xref" href="47-large-scale-ep-and-eplb.html">Lesson 47</a> EPLB).</li>
   </ul>
 </div>
 </div></div>

@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -324,7 +326,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead">
-第 14 课讲了运行时的<strong>入口</strong>——TokenizerManager 把人类文本变成 token id 送进 GPU。
+<a class="xref" href="14-tokenizer-manager.html">第 14 课</a>讲了运行时的<strong>入口</strong>——TokenizerManager 把人类文本变成 token id 送进 GPU。
 这一课讲<strong>出口</strong>：GPU 一个个吐出来的 token id，怎样变回人类能读的文字，再像打字机一样
 <strong>一段一段</strong>流回客户端。负责这件事的，是一个独立的子进程——<strong>DetokenizerManager（反分词器）</strong>。
 它是整条链路上<strong>最后一个会说人话的组件</strong>，也是 Part 4 的收尾。读懂它，你就完整走完了一条请求<strong>从文本进、到文本出</strong>的全程。
@@ -347,12 +349,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  回忆第 2 课的<strong>三进程模型</strong>：分词在主进程、调度+前向在调度器子进程、<strong>反分词在反分词器子进程</strong>。
-  调度器每跑完一步，就把这一批请求<strong>新生成的 token id</strong> 打包成 <span class="mono">BatchTokenIDOutput</span>（第 16 课）
-  发给反分词器；反分词器把 id 解码成文本，再打包成 <span class="mono">BatchStrOutput</span> 发回 <strong>TokenizerManager</strong>（第 14 课），
+  回忆<a class="xref" href="02-project-map.html">第 2 课</a>的<strong>三进程模型</strong>：分词在主进程、调度+前向在调度器子进程、<strong>反分词在反分词器子进程</strong>。
+  调度器每跑完一步，就把这一批请求<strong>新生成的 token id</strong> 打包成 <span class="mono">BatchTokenIDOutput</span>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>）
+  发给反分词器；反分词器把 id 解码成文本，再打包成 <span class="mono">BatchStrOutput</span> 发回 <strong>TokenizerManager</strong>（<a class="xref" href="14-tokenizer-manager.html">第 14 课</a>），
   由它按 <span class="mono">rid</span> 投回正在 <span class="mono">await</span> 的协程，最终以 <strong>SSE</strong> 流给 HTTP 客户端。
   之所以让反分词单独占一个进程，是因为它是<strong>纯 CPU 的字符串活</strong>——可以和 GPU 的前向循环<strong>重叠</strong>起来，
-  互不等待（零开销思想，第 21 课）。
+  互不等待（零开销思想，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）。
 </div>
 
 <h2>它在哪：运行时的最后一道门</h2>
@@ -383,7 +385,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <span class="mono">len(output_str)</span>。下一步再来，又只发新的尾巴。这样每个字符<strong>只过线一次</strong>，传输量是线性的。</p>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>收到新 token id</h4><p>调度器送来本步新生成的 token id（随 <span class="mono">BatchTokenIDOutput</span>，第 16 课），追加到该请求已有的 id 序列。</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>收到新 token id</h4><p>调度器送来本步新生成的 token id（随 <span class="mono">BatchTokenIDOutput</span>，<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>），追加到该请求已有的 id 序列。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>解码出完整文本</h4><p>把当前 id 序列解码，得到到目前为止的完整文本 <span class="mono">output_str</span>（含多字节边界处理）。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>只切新增片段</h4><p>取 <span class="mono">incremental = output_str[sent_offset:]</span>——只要上次发送之后<strong>新冒出来</strong>的那一小段。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>推进偏移量</h4><p><span class="mono">sent_offset = len(output_str)</span>，记下“已发到这”，保证下一步不会重复发送已发过的字符。</p></div></div>
@@ -452,7 +454,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 理解了这一点，你就能体会到：流式输出顺滑的表象之下，是一套对<strong>字符边界</strong>极其小心的字节级记账。</p>
 <h2>停止条件与 SSE：生成何时结束</h2>
 <p>流式输出总要有个尽头。一条请求的生成会在三种情况下停下，反分词器/调度器据此在<strong>停止边界</strong>处把输出裁齐
-（采样与停止细节见第 28 课）：</p>
+（采样与停止细节见<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）：</p>
 
 <table class="t">
   <tr><th>停止条件</th><th>含义</th><th>对输出的影响</th></tr>
@@ -467,7 +469,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 EOS 则相反——它是一个<strong>特殊 token</strong>，本就不会被解码成可见字符，所以无需额外裁剪，自然消失。这种“按停止原因区别处理”的细节，
 正是让最终输出既<strong>恰好停在该停的地方</strong>、又<strong>不带任何控制噪声</strong>的关键。</p>
 
-<p>还要厘清一个常见误解：<strong>停止判定本身不在反分词器做</strong>。是调度器在采样那一步（第 28 课）判断“这条请求该不该停、为什么停”，
+<p>还要厘清一个常见误解：<strong>停止判定本身不在反分词器做</strong>。是调度器在采样那一步（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）判断“这条请求该不该停、为什么停”，
 把 <span class="mono">finished_reasons</span> 随 <span class="mono">BatchTokenIDOutput</span> 一起告诉反分词器；反分词器只负责<strong>据此把文本裁齐并收尾</strong>。
 这又是一次清爽的职责分离：<strong>调度器决定“停不停”，反分词器决定“怎么把停的那一刻的文本交付干净”</strong>，两者各司其职，互不越界。
 这又是一次清爽的职责分离：把“做决定”和“干脏活”拆到不同组件，每一块都能保持简单、可测、可独立替换，这种模式在 SGLang 里随处可见。</p>
@@ -549,11 +551,11 @@ output_strs.append(incremental_output)</pre>
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
-    <li><strong>出口 / 独立子进程</strong>：DetokenizerManager 是运行时的出口，跑在<strong>自己的子进程</strong>里（第 2 课三进程模型），只认 token id、绝不碰 GPU。</li>
-    <li><strong>消息往返</strong>：调度器发来 <span class="mono">BatchTokenIDOutput</span>（新 token id），反分词器解码后回 <span class="mono">BatchStrOutput</span>（第 16 课）给 TokenizerManager（第 14 课），再按 <span class="mono">rid</span> 投回协程。</li>
+    <li><strong>出口 / 独立子进程</strong>：DetokenizerManager 是运行时的出口，跑在<strong>自己的子进程</strong>里（<a class="xref" href="02-project-map.html">第 2 课</a>三进程模型），只认 token id、绝不碰 GPU。</li>
+    <li><strong>消息往返</strong>：调度器发来 <span class="mono">BatchTokenIDOutput</span>（新 token id），反分词器解码后回 <span class="mono">BatchStrOutput</span>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>）给 TokenizerManager（<a class="xref" href="14-tokenizer-manager.html">第 14 课</a>），再按 <span class="mono">rid</span> 投回协程。</li>
     <li><strong>增量是关键</strong>：每条请求记 <span class="mono">sent_offset</span>，每步只发 <span class="mono">output_str[sent_offset:]</span> 再推进偏移量；避免全量重发的 O(n²) 与重复前缀。</li>
     <li><strong>多字节边界</strong>：半个汉字/坏 emoji 等不完整 UTF-8 要<strong>先扣住</strong>，攒成完整字符再吐，绝不流出半个字符。</li>
-    <li><strong>停止与 SSE</strong>：EOS / 停止串 / max_new_tokens 三选一收尾（第 28 课）；TokenizerManager <strong>逐条 yield</strong> 片段，再由 <strong>HTTP 服务路由</strong>用 <span class="mono">StreamingResponse</span> 包成 SSE “打字机”（离线 Engine 不走 SSE）。独立成进程是为了和 GPU 重叠（零开销，第 21 课）。</li>
+    <li><strong>停止与 SSE</strong>：EOS / 停止串 / max_new_tokens 三选一收尾（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）；TokenizerManager <strong>逐条 yield</strong> 片段，再由 <strong>HTTP 服务路由</strong>用 <span class="mono">StreamingResponse</span> 包成 SSE “打字机”（离线 Engine 不走 SSE）。独立成进程是为了和 GPU 重叠（零开销，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -588,26 +590,26 @@ output_strs.append(incremental_output)</pre>
   <div class="qn">3. 为什么 SGLang 要把反分词单独放进一个<strong>子进程</strong>，而不是在调度器或主进程里顺手做掉？</div>
   <ol class="opts">
     <li>因为反分词需要直接访问 GPU 显存，必须独立进程</li>
-    <li>因为反分词是<strong>纯 CPU 的字符串活</strong>，放进独立进程才能和 GPU 的前向循环<strong>重叠</strong>、互不等待（零开销思想，第 21 课）；这也呼应第 2 课的三进程模型——分词/调度+前向/反分词各占一进程</li>
+    <li>因为反分词是<strong>纯 CPU 的字符串活</strong>，放进独立进程才能和 GPU 的前向循环<strong>重叠</strong>、互不等待（零开销思想，<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>）；这也呼应<a class="xref" href="02-project-map.html">第 2 课</a>的三进程模型——分词/调度+前向/反分词各占一进程</li>
     <li>因为子进程比主进程拥有更高的 CPU 优先级</li>
     <li>纯粹是历史遗留，没有实际意义</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。反分词把 token id 拼回文本是 CPU 密集的字符串工作，和 GPU 矩阵乘毫无关系。若塞进 GPU 进程，CPU 在拼字符串时 GPU 只能干等。拆成独立子进程后，反分词能和 GPU 前向<strong>真正并行重叠</strong>——这正是第 21 课零开销调度的根基，也和第 2 课的三进程边界一脉相承。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。反分词把 token id 拼回文本是 CPU 密集的字符串工作，和 GPU 矩阵乘毫无关系。若塞进 GPU 进程，CPU 在拼字符串时 GPU 只能干等。拆成独立子进程后，反分词能和 GPU 前向<strong>真正并行重叠</strong>——这正是<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>零开销调度的根基，也和<a class="xref" href="02-project-map.html">第 2 课</a>的三进程边界一脉相承。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“同声传译只说新增的词、并等完整词再出声”的类比，完整描述一条流式请求从 GPU 吐出 token id 到客户端看到“打字机”文字的全过程。请点明：<code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code>（第 16 课）的消息往返、反分词器为什么把结果发回 TokenizerManager（第 14 课）而不是直接给客户端、<code>sent_offset</code> 如何保证“只增不重”，以及不完整 UTF-8 为什么要先攒着。</li>
-    <li>生成什么时候算结束？请列出三种停止条件（EOS token / 停止串 / max_new_tokens，详见第 28 课），分别说明它们对最终输出的影响，并解释反分词器在结束时为什么要调用 <code>trim_matched_stop</code> 把停止串裁掉、再发出最后一段 <code>output_str[sent_offset:]</code>。最后说明 <strong>HTTP 服务路由</strong>是如何用 <code>StreamingResponse</code>（<code>text/event-stream</code>）把 TokenizerManager 逐条 yield 的片段变成 SSE “打字机”的（离线 Engine 则不走 SSE）。</li>
+    <li>用“同声传译只说新增的词、并等完整词再出声”的类比，完整描述一条流式请求从 GPU 吐出 token id 到客户端看到“打字机”文字的全过程。请点明：<code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code>（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>）的消息往返、反分词器为什么把结果发回 TokenizerManager（<a class="xref" href="14-tokenizer-manager.html">第 14 课</a>）而不是直接给客户端、<code>sent_offset</code> 如何保证“只增不重”，以及不完整 UTF-8 为什么要先攒着。</li>
+    <li>生成什么时候算结束？请列出三种停止条件（EOS token / 停止串 / max_new_tokens，详见<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>），分别说明它们对最终输出的影响，并解释反分词器在结束时为什么要调用 <code>trim_matched_stop</code> 把停止串裁掉、再发出最后一段 <code>output_str[sent_offset:]</code>。最后说明 <strong>HTTP 服务路由</strong>是如何用 <code>StreamingResponse</code>（<code>text/event-stream</code>）把 TokenizerManager 逐条 yield 的片段变成 SSE “打字机”的（离线 Engine 则不走 SSE）。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
-Lesson 14 covered the runtime's <strong>entrance</strong> — the TokenizerManager turns human text into token ids and sends them to the GPU.
+<a class="xref" href="14-tokenizer-manager.html">Lesson 14</a> covered the runtime's <strong>entrance</strong> — the TokenizerManager turns human text into token ids and sends them to the GPU.
 This lesson covers the <strong>exit</strong>: how the token ids the GPU emits one at a time become readable text again, then stream back to the
 client <strong>piece by piece</strong>, like a typewriter. The component responsible is its own subprocess — the
 <strong>DetokenizerManager</strong>. It is the <strong>last component in the chain that speaks human language</strong>, and it closes Part 4.
@@ -631,13 +633,13 @@ screen. Grasp these two and you'll see why streaming looks so smooth while quiet
 
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
-  Recall Lesson 2's <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
+  Recall <a class="xref" href="02-project-map.html">Lesson 2</a>'s <strong>three-process model</strong>: tokenize in the main process, schedule+forward in the scheduler subprocess,
   <strong>detokenize in the detokenizer subprocess</strong>. After each step, the scheduler packs the batch's <strong>newly generated token
-  ids</strong> into a <span class="mono">BatchTokenIDOutput</span> (Lesson 16) and sends it to the detokenizer; the detokenizer decodes ids into
-  text, packs a <span class="mono">BatchStrOutput</span>, and sends it back to the <strong>TokenizerManager</strong> (Lesson 14), which routes it
+  ids</strong> into a <span class="mono">BatchTokenIDOutput</span> (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) and sends it to the detokenizer; the detokenizer decodes ids into
+  text, packs a <span class="mono">BatchStrOutput</span>, and sends it back to the <strong>TokenizerManager</strong> (<a class="xref" href="14-tokenizer-manager.html">Lesson 14</a>), which routes it
   by <span class="mono">rid</span> to the <span class="mono">await</span>ing coroutine, finally streaming it to the HTTP client via
   <strong>SSE</strong>. Detokenize gets its own process because it is <strong>pure CPU string work</strong> that can <strong>overlap</strong> with
-  the GPU forward loop without either waiting on the other (the zero-overhead idea, Lesson 21).
+  the GPU forward loop without either waiting on the other (the zero-overhead idea, <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>).
 </div>
 
 <h2>Where it lives: the runtime's last door</h2>
@@ -666,7 +668,7 @@ slice</strong> <span class="mono">output_str[sent_offset:]</span>, then advance 
 traffic is linear.</p>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>receive new token ids</h4><p>The scheduler delivers this step's newly generated token ids (in a <span class="mono">BatchTokenIDOutput</span>, Lesson 16), appended to the request's existing id sequence.</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>receive new token ids</h4><p>The scheduler delivers this step's newly generated token ids (in a <span class="mono">BatchTokenIDOutput</span>, <a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>), appended to the request's existing id sequence.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>decode the full text</h4><p>Decode the current id sequence into the full-text-so-far <span class="mono">output_str</span> (with multi-byte boundary handling).</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>slice only the new part</h4><p>Take <span class="mono">incremental = output_str[sent_offset:]</span> — only the small slice that <strong>appeared since</strong> the last send.</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>advance the offset</h4><p><span class="mono">sent_offset = len(output_str)</span>, recording "sent up to here" so the next step never re-sends already-sent characters.</p></div></div>
@@ -728,7 +730,7 @@ how <span class="mono">sent_offset</span> advances per step and <strong>stays pu
 
 <h2>Stop conditions and SSE: when generation ends</h2>
 <p>Streaming always needs an end. A request's generation halts under one of three conditions, and the detokenizer/scheduler trims the output at
-the <strong>stop boundary</strong> accordingly (sampling and stop details in Lesson 28):</p>
+the <strong>stop boundary</strong> accordingly (sampling and stop details in <a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>):</p>
 
 <table class="t">
   <tr><th>Stop condition</th><th>Meaning</th><th>Effect on output</th></tr>
@@ -814,11 +816,11 @@ output_strs.append(incremental_output)</pre>
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
-    <li><strong>Exit / own subprocess</strong>: the DetokenizerManager is the runtime's exit, running in <strong>its own subprocess</strong> (Lesson 2's three-process model); it only speaks token ids and never touches the GPU.</li>
-    <li><strong>Message round-trip</strong>: the scheduler sends <span class="mono">BatchTokenIDOutput</span> (new token ids); the detokenizer decodes and returns <span class="mono">BatchStrOutput</span> (Lesson 16) to the TokenizerManager (Lesson 14), routed back by <span class="mono">rid</span>.</li>
+    <li><strong>Exit / own subprocess</strong>: the DetokenizerManager is the runtime's exit, running in <strong>its own subprocess</strong> (<a class="xref" href="02-project-map.html">Lesson 2</a>'s three-process model); it only speaks token ids and never touches the GPU.</li>
+    <li><strong>Message round-trip</strong>: the scheduler sends <span class="mono">BatchTokenIDOutput</span> (new token ids); the detokenizer decodes and returns <span class="mono">BatchStrOutput</span> (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) to the TokenizerManager (<a class="xref" href="14-tokenizer-manager.html">Lesson 14</a>), routed back by <span class="mono">rid</span>.</li>
     <li><strong>Incremental is key</strong>: each request keeps a <span class="mono">sent_offset</span>; each step emits only <span class="mono">output_str[sent_offset:]</span> then advances the offset — avoiding the O(n²) and duplicate prefixes of full resends.</li>
     <li><strong>Multi-byte boundaries</strong>: incomplete UTF-8 (half a Chinese character / broken emoji) must be <strong>held back</strong> until a full character forms — never stream half a character.</li>
-    <li><strong>Stop and SSE</strong>: generation ends on EOS / stop string / max_new_tokens (Lesson 28); the TokenizerManager <strong>yields</strong> slices and the <strong>HTTP server route</strong> wraps them into an SSE "typewriter" via <span class="mono">StreamingResponse</span> (the offline Engine path has no SSE). A separate process so it can overlap the GPU (zero-overhead, Lesson 21).</li>
+    <li><strong>Stop and SSE</strong>: generation ends on EOS / stop string / max_new_tokens (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>); the TokenizerManager <strong>yields</strong> slices and the <strong>HTTP server route</strong> wraps them into an SSE "typewriter" via <span class="mono">StreamingResponse</span> (the offline Engine path has no SSE). A separate process so it can overlap the GPU (zero-overhead, <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>).</li>
   </ul>
 </div>
 <div class="selftest">
@@ -853,20 +855,20 @@ output_strs.append(incremental_output)</pre>
   <div class="qn">3. Why does SGLang put detokenize in its <strong>own subprocess</strong> rather than doing it inside the scheduler or main process?</div>
   <ol class="opts">
     <li>Because detokenize needs direct GPU VRAM access, requiring a separate process</li>
-    <li>Because detokenize is <strong>pure CPU string work</strong>; isolating it in its own process lets it <strong>overlap</strong> the GPU forward loop without either waiting (the zero-overhead idea, Lesson 21) — echoing Lesson 2's three-process model: tokenize / schedule+forward / detokenize each in one process</li>
+    <li>Because detokenize is <strong>pure CPU string work</strong>; isolating it in its own process lets it <strong>overlap</strong> the GPU forward loop without either waiting (the zero-overhead idea, <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>) — echoing <a class="xref" href="02-project-map.html">Lesson 2</a>'s three-process model: tokenize / schedule+forward / detokenize each in one process</li>
     <li>Because subprocesses get higher CPU priority than the main process</li>
     <li>Purely a historical accident with no real significance</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Stitching token ids back into text is CPU-bound string work, unrelated to GPU matmuls. Inside the GPU process, the GPU would idle while the CPU builds strings. As a separate subprocess, detokenize <strong>truly overlaps</strong> the GPU forward — the foundation of Lesson 21's zero-overhead scheduling and consistent with Lesson 2's three-process boundaries.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Stitching token ids back into text is CPU-bound string work, unrelated to GPU matmuls. Inside the GPU process, the GPU would idle while the CPU builds strings. As a separate subprocess, detokenize <strong>truly overlaps</strong> the GPU forward — the foundation of <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>'s zero-overhead scheduling and consistent with <a class="xref" href="02-project-map.html">Lesson 2</a>'s three-process boundaries.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (Lesson 16) round-trip, why the detokenizer sends results back to the TokenizerManager (Lesson 14) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.</li>
-    <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see Lesson 28), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the <strong>HTTP server route</strong> turns the slices TokenizerManager yields into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>) — and why the offline Engine path has no SSE.</li>
+    <li>Using the 'simultaneous interpreter speaks only the new words and waits for a whole word' analogy, describe end-to-end how a streaming request goes from the GPU emitting token ids to the client seeing 'typewriter' text. Call out: the <code>BatchTokenIDOutput</code>→<code>BatchStrOutput</code> (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>) round-trip, why the detokenizer sends results back to the TokenizerManager (<a class="xref" href="14-tokenizer-manager.html">Lesson 14</a>) instead of straight to the client, how <code>sent_offset</code> guarantees 'add-only, never-repeat', and why incomplete UTF-8 must be held back.</li>
+    <li>When does generation end? List the three stop conditions (EOS token / stop string / max_new_tokens, see <a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>), explain each one's effect on the final output, and explain why on finish the detokenizer calls <code>trim_matched_stop</code> to cut the stop string before emitting the last <code>output_str[sent_offset:]</code>. Finally, explain how the <strong>HTTP server route</strong> turns the slices TokenizerManager yields into an SSE 'typewriter' via <code>StreamingResponse</code> (<code>text/event-stream</code>) — and why the offline Engine path has no SSE.</li>
   </ul>
 </div>
 </div></div>

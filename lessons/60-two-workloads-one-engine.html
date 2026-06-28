@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -341,11 +343,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <li><strong>Decode 是逐字挤牙膏</strong>：一次只生成一个 token，但每生成一个就要把<strong>整套权重 + 全部 KV 缓存重新读一遍</strong>，乘加单元大半时间在空转——显存带宽是瓶颈。</li>
 <li><strong>一个引擎要同时服务两者</strong>，而它们在同一块 GPU 上<strong>互相打架</strong>。</li>
 </ul>
-<p>SGLang 有两条调解路线：要么<strong>同卡分时</strong>（第22课的 chunked prefill，把 prefill 切片，插进 decode 的缝隙里），要么<strong>分机分离</strong>（第45课的 PD 分离，给两种负载各自一池 GPU，再把 KV 搬过去）。两条路看似毫不相干，背后却是同一道题。</p>
+<p>SGLang 有两条调解路线：要么<strong>同卡分时</strong>（<a class="xref" href="22-chunked-prefill.html">第22课</a>的 chunked prefill，把 prefill 切片，插进 decode 的缝隙里），要么<strong>分机分离</strong>（<a class="xref" href="45-pd-disaggregation.html">第45课</a>的 PD 分离，给两种负载各自一池 GPU，再把 KV 搬过去）。两条路看似毫不相干，背后却是同一道题。</p>
 </div>
 
 <h2>一、为什么 prefill 与 decode 是两种负载</h2>
-<p>这正是<strong>第4课</strong>埋下的种子。当时我们第一次区分了 <span class="mono">compute-bound</span> 与 <span class="mono">bandwidth-bound</span>：一个算子到底卡在"算得不够快"还是"数据搬得不够快"，取决于它的<strong>算术强度</strong>（每读一字节数据能做多少次乘加）。</p>
+<p>这正是<strong><a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a></strong>埋下的种子。当时我们第一次区分了 <span class="mono">compute-bound</span> 与 <span class="mono">bandwidth-bound</span>：一个算子到底卡在"算得不够快"还是"数据搬得不够快"，取决于它的<strong>算术强度</strong>（每读一字节数据能做多少次乘加）。</p>
 <p>Prefill 的算术强度<strong>很高</strong>。一次处理整段 prompt，意味着同一份权重被成百上千个 token 复用——权重读一次，做几百次乘加。GPU 的张量核心被喂满，这是它最擅长、最划算的工况。</p>
 <p>给个直观的量级感受：几千个 token 的 prompt 基本一口气流过网络的每一层，里面的矩阵乘又大又厚，GPU 跑在接近峰值算力的状态。这正是硬件厂商标在宣传页上那个漂亮 FLOPs 数字所对应的工况——而 prefill 是推理里少数几个真能逼近这个数字的阶段。</p>
 <p>Decode 的算术强度<strong>很低</strong>。每步只生成一个 token，却要把<strong>整套模型权重</strong>外加<strong>这条序列至今全部的 KV 缓存</strong>从显存里重新读一遍，读完只做了一个 token 的乘加。绝大部分时间花在<strong>搬数据</strong>上，乘加单元闲着。所以单纯堆算力对 decode 几乎没用，真正的解药是把 batch 做大（让一次权重读取服务更多序列）——但这又牵出新的张力。</p>
@@ -381,19 +383,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>举个具体数字：prefill 一次大矩阵乘里，权重每读一字节能摊上<strong>成千上万次</strong>乘加（compute-bound）；而 decode 每生成一个 token，每读一字节往往只做<strong>个位数</strong>次乘加（bandwidth-bound）。同一块卡，两种负载的算术强度能差出几个数量级——这正是它们落在屋顶线两端的原因。</p>
 
 <h2>二、这个对立如何制造吞吐与延迟的拉扯</h2>
-<p><strong>第8课</strong>讲的<strong>吞吐 vs 延迟</strong>之争，根子就在这里。两个关键指标：<span class="mono">TTFT</span>（首字延迟，主要由 prefill 决定）和 <span class="mono">ITL</span>（字间延迟，由 decode 决定）。</p>
+<p><strong><a class="xref" href="08-throughput-vs-latency.html">第8课</a></strong>讲的<strong>吞吐 vs 延迟</strong>之争，根子就在这里。两个关键指标：<span class="mono">TTFT</span>（首字延迟，主要由 prefill 决定）和 <span class="mono">ITL</span>（字间延迟，由 decode 决定）。</p>
 <p>把两种负载塞进一个串行队列会发生什么？一个超长 prompt 的 prefill 是一大块算力密集的活，它一旦上 GPU，就会把<strong>所有正在解码的请求全部堵住</strong>——大家的 ITL 瞬间飙高，输出卡顿。反过来，若一味优先 decode 的流畅，新请求的 prefill 又迟迟排不上，TTFT 变长。</p>
 <p>于是矛盾凸显：<strong>prefill 想要大块、独占、算力拉满；decode 想要频繁、低延迟、雨露均沾。</strong>同一块 GPU 没法同时满足。这就是为什么 SGLang 不能简单地"先来先做"，而必须在调度层动脑筋。</p>
 <p>把这层张力说得再具体一点：假设此刻 GPU 上有 30 条序列在逐字解码，每一步几毫秒，用户能看到字一个个稳稳冒出来。这时来了一个 8000 token 的长 prompt，它的 prefill 需要把这 8000 个 token 一次性过完整个网络——这一大块算力密集的活若整块占住 GPU，那 30 条解码序列就得集体卡顿几十甚至上百毫秒，用户端立刻感到"卡了一下"。反过来，如果为了不卡顿而把这个 prefill 无限往后推，新用户的首字（TTFT）又迟迟出不来。<strong>无论先满足谁，另一方都受损</strong>——这就是一台引擎服务两种负载的代价。</p>
 <p>正因为这是结构性的矛盾、而非某次调参没调好，所以它需要结构性的答案。下面两节就是 SGLang 给出的两条结构性出路：一条不动硬件、靠调度（chunked prefill），一条直接动硬件、靠分机（PD 分离）。</p>
 
 <h2>三、同卡分时：chunked prefill</h2>
-<p><strong>第22课</strong>的 <span class="mono">chunked prefill</span>（分块预填充）是<strong>共置（co-located）</strong>路线的答案：既然一整块 prefill 会堵住 decode，那就<strong>别让它一整块上</strong>。把长 prompt 切成若干小片，每个 step 只处理一片 prefill，并把它和正在跑的 decode <strong>拼进同一个 batch 一起算</strong>。</p>
+<p><strong><a class="xref" href="22-chunked-prefill.html">第22课</a></strong>的 <span class="mono">chunked prefill</span>（分块预填充）是<strong>共置（co-located）</strong>路线的答案：既然一整块 prefill 会堵住 decode，那就<strong>别让它一整块上</strong>。把长 prompt 切成若干小片，每个 step 只处理一片 prefill，并把它和正在跑的 decode <strong>拼进同一个 batch 一起算</strong>。</p>
 <p>这样 GPU 在每一步里都<strong>同时</strong>干着两种活：一小片 prefill 借机会喂饱算力，一批 decode 顺道蹭上这次权重读取。谁都不至于饿死——prefill 不再独占整个 GPU 把 decode 闷住，decode 也不必干等一个巨长 prefill 跑完。这是用<strong>聪明的调度</strong>，在一块 GPU 上把两种负载<strong>时间分片</strong>地揉到一起。</p>
-<p>它精妙的地方在于<strong>顺势而为</strong>：decode 本来就是 bandwidth-bound、算力大半空着，那块空着的算力正好拿来跑一小片 compute-bound 的 prefill，几乎不额外占用带宽。换句话说，chunked prefill 让两种瓶颈互补的负载<strong>互相填空</strong>——decode 的空闲算力填给 prefill，prefill 顺手把这一步的权重读取分摊掉。切片的大小（chunk size）成了一个调节旋钮：切得太大，单片 prefill 又开始堵 decode；切得太小，调度和启动的固定开销又摊不下来。这正是第22课反复权衡的那个甜点区。</p>
+<p>它精妙的地方在于<strong>顺势而为</strong>：decode 本来就是 bandwidth-bound、算力大半空着，那块空着的算力正好拿来跑一小片 compute-bound 的 prefill，几乎不额外占用带宽。换句话说，chunked prefill 让两种瓶颈互补的负载<strong>互相填空</strong>——decode 的空闲算力填给 prefill，prefill 顺手把这一步的权重读取分摊掉。切片的大小（chunk size）成了一个调节旋钮：切得太大，单片 prefill 又开始堵 decode；切得太小，调度和启动的固定开销又摊不下来。这正是<a class="xref" href="22-chunked-prefill.html">第22课</a>反复权衡的那个甜点区。</p>
 
 <h2>四、分机分离：PD 分离</h2>
-<p><strong>第45课</strong>的 <span class="mono">PD 分离</span>（Prefill-Decode Disaggregation）是另一条路：既然两种负载性质对立、互相干扰，那干脆<strong>物理上分开</strong>。给 prefill 一池 GPU，给 decode 另一池 GPU，prompt 先在 prefill 池跑完、算出 KV 缓存，再把<strong>KV 跨网络搬到</strong> decode 池继续逐字生成。</p>
+<p><strong><a class="xref" href="45-pd-disaggregation.html">第45课</a></strong>的 <span class="mono">PD 分离</span>（Prefill-Decode Disaggregation）是另一条路：既然两种负载性质对立、互相干扰，那干脆<strong>物理上分开</strong>。给 prefill 一池 GPU，给 decode 另一池 GPU，prompt 先在 prefill 池跑完、算出 KV 缓存，再把<strong>KV 跨网络搬到</strong> decode 池继续逐字生成。</p>
 <p>好处是<strong>各自饱和各自的瓶颈、互不打扰</strong>：prefill 池可以把算力榨干，decode 池可以专心把 batch 做大、把带宽用足，两边能独立扩缩容、独立调优。代价是多了一道<strong>KV 传输</strong>——这正是下面那段代码所守护的接缝。</p>
 <p>为什么这种"看起来更费事"的方案反而值得？因为共置方案里两种负载永远在抢同一块 GPU，调度器再聪明，prefill 切片和 decode 之间总有一点互相挤压；而分离之后，prefill 池里全是清一色的大并行、可以用最适合 compute-bound 的批策略，decode 池里全是清一色的逐字生成、可以把 batch 堆到带宽极限——<strong>每一池都不再被另一种负载拖累</strong>。在超大规模、对 TTFT 和 ITL 都有严格 SLA 的线上服务里，这种物理隔离往往比"在一块卡上精打细算"更省心、也更稳。</p>
 <p>当然，分离不是免费的午餐。KV 缓存可能高达每条序列几百 MB，要在 prefill 池算完后跨网络搬到 decode 池，这条传输链路的带宽与延迟就成了新的关键路径——搬得慢，decode 侧就得干等。所以 PD 分离把一个"GPU 内部的调度问题"换成了一个"跨机的数据搬运问题"，而这个搬运问题的接口，正由 <span class="mono">BaseKVManager</span> 来定义。</p>
@@ -444,10 +446,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <table class="t">
 <tr><th>设计回应</th><th>它在解的矛盾</th><th>出处</th></tr>
-<tr><td>根本对比：compute-bound vs bandwidth-bound</td><td>为什么两种负载天生不同</td><td>第4课</td></tr>
-<tr><td>吞吐 vs 延迟（TTFT vs ITL）</td><td>长 prefill 堵住大家的 decode</td><td>第8课</td></tr>
-<tr><td>同卡分时：chunked prefill</td><td>切片 prefill，插进 decode 缝隙，谁都不饿死</td><td>第22课</td></tr>
-<tr><td>分机分离：PD 分离</td><td>各给一池 GPU + 搬 KV，各自饱和不互扰</td><td>第45课</td></tr>
+<tr><td>根本对比：compute-bound vs bandwidth-bound</td><td>为什么两种负载天生不同</td><td><a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a></td></tr>
+<tr><td>吞吐 vs 延迟（TTFT vs ITL）</td><td>长 prefill 堵住大家的 decode</td><td><a class="xref" href="08-throughput-vs-latency.html">第8课</a></td></tr>
+<tr><td>同卡分时：chunked prefill</td><td>切片 prefill，插进 decode 缝隙，谁都不饿死</td><td><a class="xref" href="22-chunked-prefill.html">第22课</a></td></tr>
+<tr><td>分机分离：PD 分离</td><td>各给一池 GPU + 搬 KV，各自饱和不互扰</td><td><a class="xref" href="45-pd-disaggregation.html">第45课</a></td></tr>
 </table>
 
 <div class="flow"><div class="node">请求 request</div><div class="arrow">→</div><div class="node">prefill 负载（算力受限）</div><div class="arrow">→</div><div class="node">KV 缓存</div><div class="arrow">→</div><div class="node">decode 负载（带宽受限）</div><div class="arrow">→</div><div class="node">逐字流式输出</div></div>
@@ -482,15 +484,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>这段 <span class="mono">KVPoll</span> 就是上面那道 KV 传输接缝的"仪表盘"：每一条跨池搬运的 KV，都在这五个整数状态里走——从 <span class="mono">Bootstrapping</span>（建连配对）到 <span class="mono">WaitingForInput</span>、<span class="mono">Transferring</span>（搬运中），一路轮询直到 <span class="mono">Success</span>，中途出错则落到 <span class="mono">Failed</span>。decode 侧正是靠不停 <span class="mono">poll()</span> 这个状态，判断 prefill 算好的 KV 到没到、能不能开始逐字生成。一个朴素的状态机，把"跨机搬数据"这件麻烦事收拢成了一个可观测、可重试的循环。</p>
 
 <h2>五、一个轴，看懂许多决定</h2>
-<p>现在把镜头拉到最远。第4课的 compute-bound vs bandwidth-bound、第8课的吞吐 vs 延迟、第22课的 chunked prefill、第45课的 PD 分离——这四课乍看分属四个话题，其实是同一根轴上的四个点。<strong>根本对立</strong>（prefill 与 decode 性质相反）产生<strong>张力</strong>（它们抢同一块 GPU），张力逼出<strong>两种调解</strong>（共置分时、或分机分离）。</p>
+<p>现在把镜头拉到最远。<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>的 compute-bound vs bandwidth-bound、<a class="xref" href="08-throughput-vs-latency.html">第8课</a>的吞吐 vs 延迟、<a class="xref" href="22-chunked-prefill.html">第22课</a>的 chunked prefill、<a class="xref" href="45-pd-disaggregation.html">第45课</a>的 PD 分离——这四课乍看分属四个话题，其实是同一根轴上的四个点。<strong>根本对立</strong>（prefill 与 decode 性质相反）产生<strong>张力</strong>（它们抢同一块 GPU），张力逼出<strong>两种调解</strong>（共置分时、或分机分离）。</p>
 <p>掌握了这条轴，很多原本要死记硬背的设计决策就变成了可以推导的结论。为什么要有 chunked prefill？因为不想让长 prefill 堵 decode。为什么要做 PD 分离？因为想让两种瓶颈各自饱和。为什么 decode 阶段拼命想把 batch 做大？因为它 bandwidth-bound，多一条序列几乎不额外读权重。<strong>看似零散的优化，背后是同一句话：prefill 和 decode 是两种负载，一套引擎要么聪明地让它们共处，要么干脆把它们分开。</strong></p>
 <p>所以下次你再遇到 SGLang 里某个陌生的调度参数或部署模式，别急着死记，先问自己一句：<strong>它是在帮 prefill 和 decode 更好地共处，还是在帮它们更彻底地分开？</strong>答案几乎总能落在这条轴的某一端。这就是"一个轴看懂全局"的真正含义——你记住的不再是几十条孤立的规则，而是一条能生成这些规则的根本原理。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
-<li><strong>一条根本对立</strong>：prefill 是 <span class="mono">compute-bound</span> 的大并行一次过，decode 是 <span class="mono">bandwidth-bound</span> 的逐字挤牙膏（第4课）。</li>
-<li><strong>对立制造张力</strong>：长 prefill 会一口气堵住大家的 decode，于是有了吞吐 vs 延迟、TTFT vs ITL 的拉扯（第8课）。</li>
-<li><strong>同卡分时</strong>：chunked prefill 把 prefill 切片、插进 decode 缝隙，一块 GPU 时间分片地服务两种负载（第22课）。</li>
-<li><strong>分机分离</strong>：PD 分离给两种负载各一池 GPU，再把 KV 搬过去，各自饱和各自瓶颈、互不干扰（第45课）。</li>
+<li><strong>一条根本对立</strong>：prefill 是 <span class="mono">compute-bound</span> 的大并行一次过，decode 是 <span class="mono">bandwidth-bound</span> 的逐字挤牙膏（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）。</li>
+<li><strong>对立制造张力</strong>：长 prefill 会一口气堵住大家的 decode，于是有了吞吐 vs 延迟、TTFT vs ITL 的拉扯（<a class="xref" href="08-throughput-vs-latency.html">第8课</a>）。</li>
+<li><strong>同卡分时</strong>：chunked prefill 把 prefill 切片、插进 decode 缝隙，一块 GPU 时间分片地服务两种负载（<a class="xref" href="22-chunked-prefill.html">第22课</a>）。</li>
+<li><strong>分机分离</strong>：PD 分离给两种负载各一池 GPU，再把 KV 搬过去，各自饱和各自瓶颈、互不干扰（<a class="xref" href="45-pd-disaggregation.html">第45课</a>）。</li>
 <li><strong>一个轴看懂全局</strong>：prefill-vs-decode 这一条轴，能解释 SGLang 许多看似无关的设计——要么靠聪明的调度共处，要么靠物理上的分开隔离。</li>
 </ul></div>
 <div class="selftest">
@@ -505,7 +507,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。prefill 一次处理整段 prompt，权重读一次被成百上千 token 复用，算术强度高、吃满乘加单元，是 compute-bound；decode 每步只出一个 token 却要重读整套权重+全部 KV，算术强度低、乘加大半空转，是 bandwidth-bound。一台引擎要同时服务两者，这是第4课埋下的根本对立。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。prefill 一次处理整段 prompt，权重读一次被成百上千 token 复用，算术强度高、吃满乘加单元，是 compute-bound；decode 每步只出一个 token 却要重读整套权重+全部 KV，算术强度低、乘加大半空转，是 bandwidth-bound。一台引擎要同时服务两者，这是<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>埋下的根本对立。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -518,7 +520,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。prefill 想要大块、独占、算力拉满；decode 想要频繁、低延迟、雨露均沾。把两种负载塞进一个串行队列，长 prefill 一上 GPU 就把正在解码的请求全堵住，ITL 瞬间飙高（第8课的吞吐 vs 延迟）。一台 GPU 无法同时满足两种诉求，所以必须在调度层动脑筋。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。prefill 想要大块、独占、算力拉满；decode 想要频繁、低延迟、雨露均沾。把两种负载塞进一个串行队列，长 prefill 一上 GPU 就把正在解码的请求全堵住，ITL 瞬间飙高（<a class="xref" href="08-throughput-vs-latency.html">第8课</a>的吞吐 vs 延迟）。一台 GPU 无法同时满足两种诉求，所以必须在调度层动脑筋。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -526,7 +528,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <ol class="opts">
     <li>两者完全相同，只是叫法不一样</li>
     <li>chunked prefill 需要两池 GPU，PD 分离只需要一块 GPU</li>
-    <li><strong>chunked prefill 把 prefill 切片插进 decode 缝隙，让一块 GPU 时间分片地服务两者（第22课）；PD 分离给两种负载各一池 GPU 再搬 KV，让各自饱和各自瓶颈、互不干扰（第45课）</strong></li>
+    <li><strong>chunked prefill 把 prefill 切片插进 decode 缝隙，让一块 GPU 时间分片地服务两者（<a class="xref" href="22-chunked-prefill.html">第22课</a>）；PD 分离给两种负载各一池 GPU 再搬 KV，让各自饱和各自瓶颈、互不干扰（<a class="xref" href="45-pd-disaggregation.html">第45课</a>）</strong></li>
     <li>PD 分离不需要传输 KV，chunked prefill 才需要</li>
   </ol>
   <details class="accordion">
@@ -561,11 +563,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <li><strong>Decode squeezes out one token at a time</strong>: each step generates a single token, yet must <strong>re-read the entire set of weights + all the KV cache</strong>, leaving the math units mostly idle—memory bandwidth is the bottleneck.</li>
 <li><strong>One engine must serve both</strong>, and on the same GPU they <strong>fight each other</strong>.</li>
 </ul>
-<p>SGLang has two ways to reconcile this: either <strong>time-share one GPU</strong> (Lesson 22's chunked prefill, slicing prefill and interleaving it into decode's gaps), or <strong>separate the machines</strong> (Lesson 45's PD disaggregation, giving each workload its own pool of GPUs and transferring the KV across). The two paths look unrelated, but they answer the same question.</p>
+<p>SGLang has two ways to reconcile this: either <strong>time-share one GPU</strong> (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>'s chunked prefill, slicing prefill and interleaving it into decode's gaps), or <strong>separate the machines</strong> (<a class="xref" href="45-pd-disaggregation.html">Lesson 45</a>'s PD disaggregation, giving each workload its own pool of GPUs and transferring the KV across). The two paths look unrelated, but they answer the same question.</p>
 </div>
 
 <h2>1. Why prefill and decode are two workloads</h2>
-<p>This is exactly the seed planted in <strong>Lesson 4</strong>. There we first distinguished <span class="mono">compute-bound</span> from <span class="mono">bandwidth-bound</span>: whether an operator is stuck "not computing fast enough" or "not moving data fast enough" depends on its <strong>arithmetic intensity</strong> (how many multiply-adds you do per byte read).</p>
+<p>This is exactly the seed planted in <strong><a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a></strong>. There we first distinguished <span class="mono">compute-bound</span> from <span class="mono">bandwidth-bound</span>: whether an operator is stuck "not computing fast enough" or "not moving data fast enough" depends on its <strong>arithmetic intensity</strong> (how many multiply-adds you do per byte read).</p>
 <p>Prefill has <strong>high</strong> arithmetic intensity. Processing the whole prompt at once means the same weights are reused by hundreds or thousands of tokens—read the weights once, do hundreds of multiply-adds. The tensor cores are kept full; it's the GPU's best, most economical regime.</p>
 <p>To picture the scale: a prompt of a few thousand tokens flows through every layer of the network in essentially one shot, the GEMMs are big and fat, and the GPU runs near its peak FLOPs. This is the regime hardware vendors quote their headline numbers for—and prefill is one of the few inference phases that actually reaches it.</p>
 <p>Decode has <strong>low</strong> arithmetic intensity. Each step generates one token, yet must re-read the <strong>entire model's weights</strong> plus <strong>all of this sequence's KV cache so far</strong> from memory, only to do one token's worth of multiply-adds. Most of the time is spent <strong>moving data</strong> while the math units sit idle. So piling on raw compute barely helps decode; the real cure is to grow the batch (so one weight read serves more sequences)—which raises a new tension.</p>
@@ -601,19 +603,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Concretely: in one big prefill GEMM, every byte of weights read is amortized over <strong>thousands</strong> of multiply-adds (compute-bound); in decode, each generated token does only a <strong>handful</strong> of multiply-adds per byte read (bandwidth-bound). On the same card the two workloads' arithmetic intensities differ by orders of magnitude—which is exactly why they land at opposite ends of the roofline.</p>
 
 <h2>2. How this contrast creates the throughput-vs-latency pull</h2>
-<p><strong>Lesson 8</strong>'s <strong>throughput vs latency</strong> fight is rooted right here. Two key metrics: <span class="mono">TTFT</span> (time to first token, driven mainly by prefill) and <span class="mono">ITL</span> (inter-token latency, driven by decode).</p>
+<p><strong><a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a></strong>'s <strong>throughput vs latency</strong> fight is rooted right here. Two key metrics: <span class="mono">TTFT</span> (time to first token, driven mainly by prefill) and <span class="mono">ITL</span> (inter-token latency, driven by decode).</p>
 <p>What happens if you stuff both workloads into one serial queue? A very long prompt's prefill is a big compute-heavy chunk; once it hits the GPU it <strong>blocks every request that's currently decoding</strong>—everyone's ITL spikes and output stutters. Conversely, if you always favor smooth decode, new requests' prefill never gets scheduled and TTFT climbs.</p>
 <p>So the conflict surfaces: <strong>prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared.</strong> One GPU can't satisfy both at once. That's why SGLang can't simply go "first come first served" and must get clever at the scheduling layer.</p>
 <p>To make the tension concrete: suppose 30 sequences are decoding token by token on the GPU right now, a few milliseconds per step, so the user sees characters stream out steadily. Now an 8000-token prompt arrives; its prefill must push all 8000 tokens through the whole network in one pass—and if that compute-heavy block occupies the GPU as one chunk, those 30 decoding sequences stall for tens or even hundreds of milliseconds, and the user feels a "hitch". Conversely, if you defer that prefill indefinitely to avoid the hitch, the new user's first token (TTFT) never arrives. <strong>Whichever side you favor, the other suffers</strong>—that's the price of one engine serving two workloads.</p>
 <p>Precisely because this is a structural conflict—not a one-off mistuning—it needs a structural answer. The next two sections give SGLang's two structural ways out: one leaves the hardware alone and relies on scheduling (chunked prefill); the other changes the hardware layout directly and relies on separate machines (PD disaggregation).</p>
 
 <h2>3. Co-located time-sharing: chunked prefill</h2>
-<p><strong>Lesson 22</strong>'s <span class="mono">chunked prefill</span> is the <strong>co-located</strong> answer: since a whole block of prefill blocks decode, <strong>don't let it go in as one block</strong>. Slice the long prompt into chunks, process only one chunk of prefill per step, and <strong>pack it into the same batch</strong> as the decodes already running.</p>
+<p><strong><a class="xref" href="22-chunked-prefill.html">Lesson 22</a></strong>'s <span class="mono">chunked prefill</span> is the <strong>co-located</strong> answer: since a whole block of prefill blocks decode, <strong>don't let it go in as one block</strong>. Slice the long prompt into chunks, process only one chunk of prefill per step, and <strong>pack it into the same batch</strong> as the decodes already running.</p>
 <p>Now in every step the GPU does <strong>both</strong> jobs: a small prefill chunk grabs the chance to fill the compute, and a batch of decodes piggybacks on that same weight read. Neither starves—prefill no longer monopolizes the whole GPU and smothers decode, and decode no longer idles waiting for one giant prefill to finish. It's <strong>smart scheduling</strong> that <strong>time-slices</strong> two workloads onto one GPU.</p>
-<p>The elegance is that it <strong>goes with the grain</strong>: decode is bandwidth-bound with most of its compute sitting idle, and that idle compute is exactly what a small compute-bound prefill chunk can use, with almost no extra bandwidth cost. In other words, chunked prefill lets two workloads with complementary bottlenecks <strong>fill each other's gaps</strong>—decode's spare compute goes to prefill, and prefill amortizes that step's weight read. The chunk size becomes a tuning knob: too big and a single chunk starts blocking decode again; too small and the fixed scheduling/launch overhead can't be amortized. That's the sweet spot Lesson 22 keeps weighing.</p>
+<p>The elegance is that it <strong>goes with the grain</strong>: decode is bandwidth-bound with most of its compute sitting idle, and that idle compute is exactly what a small compute-bound prefill chunk can use, with almost no extra bandwidth cost. In other words, chunked prefill lets two workloads with complementary bottlenecks <strong>fill each other's gaps</strong>—decode's spare compute goes to prefill, and prefill amortizes that step's weight read. The chunk size becomes a tuning knob: too big and a single chunk starts blocking decode again; too small and the fixed scheduling/launch overhead can't be amortized. That's the sweet spot <a class="xref" href="22-chunked-prefill.html">Lesson 22</a> keeps weighing.</p>
 
 <h2>4. Separated machines: PD disaggregation</h2>
-<p><strong>Lesson 45</strong>'s <span class="mono">PD disaggregation</span> (Prefill-Decode Disaggregation) is the other path: since the two workloads are opposite in nature and interfere, just <strong>separate them physically</strong>. Give prefill one pool of GPUs and decode another; the prompt runs through the prefill pool first to compute its KV cache, then the <strong>KV is transferred across the network</strong> to the decode pool to keep generating token by token.</p>
+<p><strong><a class="xref" href="45-pd-disaggregation.html">Lesson 45</a></strong>'s <span class="mono">PD disaggregation</span> (Prefill-Decode Disaggregation) is the other path: since the two workloads are opposite in nature and interfere, just <strong>separate them physically</strong>. Give prefill one pool of GPUs and decode another; the prompt runs through the prefill pool first to compute its KV cache, then the <strong>KV is transferred across the network</strong> to the decode pool to keep generating token by token.</p>
 <p>The upside is that <strong>each pool saturates its own bottleneck without interference</strong>: the prefill pool can wring out compute, the decode pool can focus on growing the batch and using bandwidth fully, and each can scale and tune independently. The cost is an extra <strong>KV transfer</strong>—which is exactly the seam the code below guards.</p>
 <p>Why is this "seemingly more troublesome" approach worth it? Because in the co-located approach the two workloads forever contend for the same GPU; however clever the scheduler, there's always some squeeze between prefill chunks and decode. Once separated, the prefill pool is all uniform big parallel passes and can use the batching strategy best suited to compute-bound work, while the decode pool is all uniform token-by-token generation and can pile the batch up to the bandwidth limit—<strong>each pool is no longer dragged down by the other workload</strong>. In very large-scale online serving with strict SLAs on both TTFT and ITL, this physical isolation is often more reliable and less fiddly than penny-pinching on one card.</p>
 <p>Of course, separation is no free lunch. The KV cache can be hundreds of MB per sequence, and after the prefill pool computes it, it must be moved across the network to the decode pool, so that transfer link's bandwidth and latency become a new critical path—move it slowly and the decode side just waits. So PD disaggregation swaps an "in-GPU scheduling problem" for a "cross-machine data-movement problem", and the interface for that movement is exactly what <span class="mono">BaseKVManager</span> defines.</p>
@@ -664,10 +666,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <table class="t">
 <tr><th>Design response</th><th>The tension it resolves</th><th>Source</th></tr>
-<tr><td>Root contrast: compute-bound vs bandwidth-bound</td><td>why the two workloads are inherently different</td><td>Lesson 4</td></tr>
-<tr><td>Throughput vs latency (TTFT vs ITL)</td><td>a long prefill blocks everyone's decode</td><td>Lesson 8</td></tr>
-<tr><td>Co-located time-share: chunked prefill</td><td>slice prefill into decode's gaps, nobody starves</td><td>Lesson 22</td></tr>
-<tr><td>Separated machines: PD disaggregation</td><td>a pool each + transfer KV, each saturates without interfering</td><td>Lesson 45</td></tr>
+<tr><td>Root contrast: compute-bound vs bandwidth-bound</td><td>why the two workloads are inherently different</td><td><a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a></td></tr>
+<tr><td>Throughput vs latency (TTFT vs ITL)</td><td>a long prefill blocks everyone's decode</td><td><a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a></td></tr>
+<tr><td>Co-located time-share: chunked prefill</td><td>slice prefill into decode's gaps, nobody starves</td><td><a class="xref" href="22-chunked-prefill.html">Lesson 22</a></td></tr>
+<tr><td>Separated machines: PD disaggregation</td><td>a pool each + transfer KV, each saturates without interfering</td><td><a class="xref" href="45-pd-disaggregation.html">Lesson 45</a></td></tr>
 </table>
 
 <div class="flow"><div class="node">request</div><div class="arrow">→</div><div class="node">prefill workload (compute-bound)</div><div class="arrow">→</div><div class="node">KV cache</div><div class="arrow">→</div><div class="node">decode workload (bandwidth-bound)</div><div class="arrow">→</div><div class="node">streamed output</div></div>
@@ -702,15 +704,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>This <span class="mono">KVPoll</span> is the "dashboard" of that KV-transfer seam: every cross-pool KV move walks through these five integer states—from <span class="mono">Bootstrapping</span> (connect and pair) through <span class="mono">WaitingForInput</span> and <span class="mono">Transferring</span> (in flight), polled until <span class="mono">Success</span>, dropping to <span class="mono">Failed</span> if anything breaks. The decode side keeps calling <span class="mono">poll()</span> on this state to tell whether the KV computed by prefill has arrived and token-by-token generation can begin. A plain little state machine that wraps the messy business of "moving data across machines" into one observable, retryable loop.</p>
 
 <h2>5. One axis explains many decisions</h2>
-<p>Now pull the camera all the way back. Lesson 4's compute-bound vs bandwidth-bound, Lesson 8's throughput vs latency, Lesson 22's chunked prefill, Lesson 45's PD disaggregation—these four lessons look like four separate topics, but they are four points on the same axis. The <strong>root tension</strong> (prefill and decode are opposite in nature) produces a <strong>pull</strong> (they contend for the same GPU), and the pull forces <strong>two reconciliations</strong> (co-located time-sharing, or separated machines).</p>
+<p>Now pull the camera all the way back. <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>'s compute-bound vs bandwidth-bound, <a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>'s throughput vs latency, <a class="xref" href="22-chunked-prefill.html">Lesson 22</a>'s chunked prefill, <a class="xref" href="45-pd-disaggregation.html">Lesson 45</a>'s PD disaggregation—these four lessons look like four separate topics, but they are four points on the same axis. The <strong>root tension</strong> (prefill and decode are opposite in nature) produces a <strong>pull</strong> (they contend for the same GPU), and the pull forces <strong>two reconciliations</strong> (co-located time-sharing, or separated machines).</p>
 <p>Master this axis and many design decisions that once needed rote memorization become derivable conclusions. Why have chunked prefill? Because you don't want a long prefill to block decode. Why do PD disaggregation? Because you want each bottleneck to saturate on its own. Why does the decode phase strive so hard to grow the batch? Because it's bandwidth-bound, so one more sequence reads almost no extra weights. <strong>Seemingly scattered optimizations all rest on the same sentence: prefill and decode are two workloads, and one engine must either let them coexist cleverly or separate them outright.</strong></p>
 <p>So next time you meet an unfamiliar scheduling knob or deployment mode in SGLang, don't rush to memorize it—first ask yourself: <strong>is it helping prefill and decode coexist better, or helping them separate more thoroughly?</strong> The answer almost always lands on one end of this axis. That's what "one axis explains the whole" really means—what you remember is no longer dozens of isolated rules, but the one root principle that generates them.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
-<li><strong>One root tension</strong>: prefill is a <span class="mono">compute-bound</span> big parallel pass; decode is a <span class="mono">bandwidth-bound</span> one-token-at-a-time squeeze (Lesson 4).</li>
-<li><strong>The tension creates a pull</strong>: a long prefill blocks everyone's decode, giving rise to throughput vs latency, TTFT vs ITL (Lesson 8).</li>
-<li><strong>Co-located time-sharing</strong>: chunked prefill slices prefill into decode's gaps, so one GPU time-slices to serve both workloads (Lesson 22).</li>
-<li><strong>Separated machines</strong>: PD disaggregation gives each workload its own GPU pool and transfers the KV across, so each saturates its own bottleneck without interference (Lesson 45).</li>
+<li><strong>One root tension</strong>: prefill is a <span class="mono">compute-bound</span> big parallel pass; decode is a <span class="mono">bandwidth-bound</span> one-token-at-a-time squeeze (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</li>
+<li><strong>The tension creates a pull</strong>: a long prefill blocks everyone's decode, giving rise to throughput vs latency, TTFT vs ITL (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>).</li>
+<li><strong>Co-located time-sharing</strong>: chunked prefill slices prefill into decode's gaps, so one GPU time-slices to serve both workloads (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>).</li>
+<li><strong>Separated machines</strong>: PD disaggregation gives each workload its own GPU pool and transfers the KV across, so each saturates its own bottleneck without interference (<a class="xref" href="45-pd-disaggregation.html">Lesson 45</a>).</li>
 <li><strong>One axis explains the whole</strong>: the prefill-vs-decode axis explains many seemingly unrelated SGLang decisions—reconciled either by smart scheduling or by physical separation.</li>
 </ul></div>
 <div class="selftest">
@@ -725,7 +727,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Prefill processes the whole prompt at once—weights read once, reused by hundreds of tokens—so its arithmetic intensity is high and it saturates the math units: compute-bound. Decode emits one token per step yet re-reads the full weights + all KV, low arithmetic intensity, math units mostly idle: bandwidth-bound. One engine must serve both—the root tension seeded in Lesson 4.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Prefill processes the whole prompt at once—weights read once, reused by hundreds of tokens—so its arithmetic intensity is high and it saturates the math units: compute-bound. Decode emits one token per step yet re-reads the full weights + all KV, low arithmetic intensity, math units mostly idle: bandwidth-bound. One engine must serve both—the root tension seeded in <a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -738,7 +740,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared. Stuff both into one serial queue and a long prefill, once on the GPU, blocks every decoding request and spikes ITL (Lesson 8's throughput vs latency). One GPU can't satisfy both, so the scheduler must get clever.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Prefill wants big, exclusive, compute-maxed; decode wants frequent, low-latency, fair-shared. Stuff both into one serial queue and a long prefill, once on the GPU, blocks every decoding request and spikes ITL (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>'s throughput vs latency). One GPU can't satisfy both, so the scheduler must get clever.</div></div></div>
   </details>
 </div>
 <div class="quiz">

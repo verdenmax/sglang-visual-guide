@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -432,7 +434,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 所以随着生成变长，每步要读的缓存越来越大，单步算力却很小，时间几乎都花在"<strong>把缓存从显存搬进计算单元</strong>"上，
 这正是 decode "<strong>访存密集</strong>"的根源，也解释了为什么提高 decode 吞吐的关键不在算力、而在<strong>显存带宽与批大小</strong>。
 第二，缓存<strong>只追加、不修改</strong>，历史行写进去就再也不动——正是这个"只读、可共享"的性质，让后面
-<strong>多条请求共享同一段前缀的 KV</strong>（第 7 课 RadixAttention）能够成立。换句话说，本课讲的"缓存"不只是一次性能优化，
+<strong>多条请求共享同一段前缀的 KV</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a> RadixAttention）能够成立。换句话说，本课讲的"缓存"不只是一次性能优化，
 它的数据结构性质，直接决定了整个引擎后面能玩出多少花样。</p>
 
 <h2>一个常被忽略的细节：GQA 让 KV 头远少于 Q 头</h2>
@@ -447,8 +449,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>在 SGLang 运行时里，所有 token 的 K/V 不是零散地挂在各个请求上，而是统一放进一个<strong>大显存池</strong>。
 以最常见的多头注意力为例，这个池子由 <span class="inline">MHATokenToKVPool</span> 管理——它在启动时按
 "<strong>能放多少 token × 多少层 × 多少个 KV 头 × 每头维度</strong>"一次性开辟好 K 和 V 两块大缓冲区，之后每来一个
-新 token，就往里<strong>写一行</strong>。把缓存做成"池 + 按行分配"，是后面<strong>分页（第 6 课）</strong>与
-<strong>前缀复用（第 7 课）</strong>能玩出花样的物理基础。</p>
+新 token，就往里<strong>写一行</strong>。把缓存做成"池 + 按行分配"，是后面<strong>分页（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）</strong>与
+<strong>前缀复用（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）</strong>能玩出花样的物理基础。</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">KV 缓存池的形状</span></div>
@@ -519,7 +521,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>还有一层因果常被忽略：<strong>缓存的总容量，直接决定了能同时服务多少请求</strong>。显存池就那么大，能放下的 token 总数是固定的；
 每条请求都要占走"上下文长度 × 每 token 字节"那么多缓存。于是<strong>上下文越长、并发就越少</strong>，二者在同一块显存上互相挤占。
-这意味着 KV 缓存不只是性能问题，更是<strong>容量与并发的硬约束</strong>——SGLang 的调度器（第 18 课起）每一步都要回答"显存还够不够再收一条请求"，
+这意味着 KV 缓存不只是性能问题，更是<strong>容量与并发的硬约束</strong>——SGLang 的调度器（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>起）每一步都要回答"显存还够不够再收一条请求"，
 而它能回答得多大胆，取决于缓存被管理得多省。把这条因果链记牢：<strong>缓存省一分，能并发的请求就多一分，整机吞吐就高一分</strong>。
 这也是我们要花整整一个"内存管理"部分（第 29–32 课）去深挖它的原因。换个角度说，<strong>一个推理引擎的水平高低，很大程度上就是"同样的显存能塞下多少并发、缓存利用率有多高"</strong>——而这一切的起点，正是看懂本课讲的"缓存是什么、为什么省、省在哪里"。</p>
 
@@ -536,13 +538,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 "<strong>一口气读完一本书</strong>"（吞吐型、计算密集），decode 像"<strong>逐句往下写</strong>"（延迟型、访存密集）。
 正因为 decode 是访存密集（每步的计算量很小，时间几乎都花在把 KV 缓存和权重从显存搬进计算单元），<strong>把多条请求
 拼成一批一起做</strong>就特别划算——一次权重读取服务多条请求，GPU 不再为单条请求空等。这正是下一课<strong>连续批处理</strong>的动机；
-而两阶段特性的差异，最终还催生了把它们<strong>拆到不同机器</strong>的 PD 分离（第 45 课）。</p>
+而两阶段特性的差异，最终还催生了把它们<strong>拆到不同机器</strong>的 PD 分离（<a class="xref" href="45-pd-disaggregation.html">第 45 课</a>）。</p>
 
 <p>把这一课放回整个 Part 2 的脉络里看，会更清楚它为什么排第一。自回归 + KV 缓存定义了推理的两个"<strong>基本盘</strong>"：
 <strong>串行的逐 token 循环</strong>（决定了单条延迟的下限）和<strong>只增不改、随上下文线性膨胀的缓存</strong>（决定了并发的上限）。
-接下来的四课，本质都是在这两个基本盘上做文章——<strong>第 5 课</strong>用连续批处理把"串行单条"变成"并行多条"，榨干 decode 时被浪费的算力；
-<strong>第 6 课</strong>用分页把"线性膨胀的缓存"装得更紧、碎片更少；<strong>第 7 课</strong>用 RadixAttention 让<strong>不同请求共享前缀的缓存</strong>，
-把"只读"性质变现成真金白银的省算省存；<strong>第 8 课</strong>则把这一切放到"<strong>吞吐 vs 延迟</strong>"的天平上，告诉你这些招式各自在天平的哪一端用力。
+接下来的四课，本质都是在这两个基本盘上做文章——<strong><a class="xref" href="05-continuous-batching.html">第 5 课</a></strong>用连续批处理把"串行单条"变成"并行多条"，榨干 decode 时被浪费的算力；
+<strong><a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a></strong>用分页把"线性膨胀的缓存"装得更紧、碎片更少；<strong><a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a></strong>用 RadixAttention 让<strong>不同请求共享前缀的缓存</strong>，
+把"只读"性质变现成真金白银的省算省存；<strong><a class="xref" href="08-throughput-vs-latency.html">第 8 课</a></strong>则把这一切放到"<strong>吞吐 vs 延迟</strong>"的天平上，告诉你这些招式各自在天平的哪一端用力。
 带着"缓存=钱、并发=吞吐、串行=延迟下限"这三把尺子往下读，后面每一个设计你都能一眼看出它在省什么、换什么。</p>
 
 <div class="card key">
@@ -552,7 +554,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <li><strong>KV 缓存</strong>：历史 token 的 K/V 只读不变，存下来即可复用，把每步计算从重算整段 <span class="mono">O(t²)</span> 压到 <span class="mono">O(t)</span>。</li>
     <li><strong>显存大头</strong>：缓存 ≈ 2×层×KV头×head_dim×字节/每 token，随<strong>上下文长度</strong>线性膨胀——省显存是头等大事。</li>
     <li><strong>两阶段</strong>：prefill 计算密集（一次填满），decode 访存密集（逐行追加）；一条请求 = 1 次 prefill + N 次 decode。</li>
-    <li><strong>承上启下</strong>：decode 访存密集 ⇒ 批处理划算（第 5 课）；缓存按池/行管理 ⇒ 分页（第 6 课）与前缀复用（第 7 课）成为可能。</li>
+    <li><strong>承上启下</strong>：decode 访存密集 ⇒ 批处理划算（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）；缓存按池/行管理 ⇒ 分页（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）与前缀复用（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）成为可能。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -722,7 +724,7 @@ history</strong> — so as generation grows, each step reads an ever-larger cach
 "<strong>moving the cache from HBM into the compute units</strong>". That is the root of decode being <strong>memory-bound</strong>,
 and why the key to decode throughput isn't FLOPs but <strong>memory bandwidth and batch size</strong>. Second, the cache is
 <strong>append-only, never modified</strong> — once a history row is written it never moves. It is exactly this "read-only,
-shareable" property that lets later requests <strong>share the same prefix's KV</strong> (Lesson 7, RadixAttention). In other
+shareable" property that lets later requests <strong>share the same prefix's KV</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>, RadixAttention). In other
 words, the "cache" here is not just a one-off optimization; its data-structure properties directly decide how many tricks the
 whole engine can pull off downstream.</p>
 
@@ -739,7 +741,7 @@ many copies, how many bits". When you read the memory-management lessons, rememb
 For ordinary multi-head attention that pool is managed by <span class="inline">MHATokenToKVPool</span>: at startup it carves
 out two big buffers for K and V sized by "<strong>how many tokens × layers × KV heads × head_dim</strong>", and every new token
 <strong>writes one row</strong>. Making the cache a "pool + per-row allocation" is the physical basis for the tricks in
-<strong>paging (Lesson 6)</strong> and <strong>prefix reuse (Lesson 7)</strong>.</p>
+<strong>paging (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>)</strong> and <strong>prefix reuse (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>)</strong>.</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/mem_cache/memory_pool.py ::MHATokenToKVPool</span><span class="ln">shape of the KV pool</span></div>
@@ -812,7 +814,7 @@ inference engine's number-one job</strong> — paging, prefix reuse, quantizatio
 once</strong>. The HBM pool is fixed, so the total number of tokens it can hold is fixed; every request consumes "context length ×
 bytes per token" of cache. Thus <strong>longer context means lower concurrency</strong> — the two contend for the same HBM. So the
 KV cache isn't just a performance issue but a <strong>hard capacity-vs-concurrency constraint</strong>: the SGLang scheduler (from
-Lesson 18) must answer "is there enough HBM to admit one more request?" every step, and how boldly it can answer depends on how
+<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) must answer "is there enough HBM to admit one more request?" every step, and how boldly it can answer depends on how
 frugally the cache is managed. Keep this chain in mind: <strong>save a bit of cache → admit a few more requests → higher whole-machine
 throughput</strong>. That is exactly why we spend a whole "memory management" part (Lessons 29–32) digging into it.</p>
 
@@ -831,15 +833,15 @@ personalities — prefill is like "<strong>reading a whole book in one breath</s
 tiny; the time goes to moving the KV cache and weights from HBM into the compute units), <strong>batching many requests together</strong>
 pays off — one weight read serves many requests so the GPU stops idling on a single one. That is the motivation for the next lesson,
 <strong>continuous batching</strong>; and the phase asymmetry ultimately motivates splitting them onto <strong>different machines</strong>
-in PD disaggregation (Lesson 45).</p>
+in PD disaggregation (<a class="xref" href="45-pd-disaggregation.html">Lesson 45</a>).</p>
 
 <p>Put this lesson back into Part 2's arc and you see why it comes first. Autoregression + the KV cache define inference's two
 <strong>fundamentals</strong>: a <strong>serial per-token loop</strong> (which sets the floor on single-request latency) and an
 <strong>append-only cache that grows linearly with context</strong> (which sets the ceiling on concurrency). The next four lessons
-are all moves on these two fundamentals — <strong>Lesson 5</strong> uses continuous batching to turn "serial single" into
-"parallel many", reclaiming the FLOPs wasted during decode; <strong>Lesson 6</strong> uses paging to pack that linearly-growing
-cache tighter with less fragmentation; <strong>Lesson 7</strong> uses RadixAttention to let <strong>different requests share a
-prefix's cache</strong>, cashing the "read-only" property into real compute and memory savings; <strong>Lesson 8</strong> puts it
+are all moves on these two fundamentals — <strong><a class="xref" href="05-continuous-batching.html">Lesson 5</a></strong> uses continuous batching to turn "serial single" into
+"parallel many", reclaiming the FLOPs wasted during decode; <strong><a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a></strong> uses paging to pack that linearly-growing
+cache tighter with less fragmentation; <strong><a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a></strong> uses RadixAttention to let <strong>different requests share a
+prefix's cache</strong>, cashing the "read-only" property into real compute and memory savings; <strong><a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a></strong> puts it
 all on the <strong>throughput-vs-latency</strong> scale and tells you which end each trick pushes on. Read on with three rulers —
 "cache = money, concurrency = throughput, serial = latency floor" — and you'll see at a glance what every later design saves and trades.</p>
 
@@ -850,7 +852,7 @@ all on the <strong>throughput-vs-latency</strong> scale and tells you which end 
     <li><strong>KV cache</strong>: historical K/V are read-only, so cache and reuse them; each step drops from re-running the whole sequence <span class="mono">O(t²)</span> to <span class="mono">O(t)</span>.</li>
     <li><strong>HBM dominator</strong>: cache ≈ 2×layers×KV-heads×head_dim×bytes per token, growing with <strong>context length</strong> — saving HBM is job #1.</li>
     <li><strong>Two phases</strong>: prefill is compute-bound (fills once), decode is memory-bound (appends a row); one request = 1 prefill + N decodes.</li>
-    <li><strong>Bridges</strong>: memory-bound decode ⇒ batching pays off (Lesson 5); pool/row-managed cache ⇒ paging (Lesson 6) and prefix reuse (Lesson 7) become possible.</li>
+    <li><strong>Bridges</strong>: memory-bound decode ⇒ batching pays off (<a class="xref" href="05-continuous-batching.html">Lesson 5</a>); pool/row-managed cache ⇒ paging (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>) and prefix reuse (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) become possible.</li>
   </ul>
 </div>
 <div class="selftest">

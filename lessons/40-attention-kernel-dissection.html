@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -323,7 +325,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <h1><span class="lang-zh">关键 attention kernel 剖析</span><span class="lang-en">Dissecting an attention kernel</span></h1>
   </div>
   <div class="lang-zh">
-<p class="lead">第40课，我们把镜头拉到最近，正面解剖一个真实的 <strong>attention kernel</strong>（注意力核函数）。前面几课我们讲过分页 KV 缓存（第30课）、解码阶段的带宽瓶颈（第4课）、以及注意力后端的封装方式（第33课），这一课要把这些拼图拼到一起：当一个序列在 <span class="mono">decode</span>（解码，每步只生成一个新 token）阶段需要做注意力时，GPU 上那段被成千上万次反复调用的核函数，里面到底发生了什么。我们不谈玄学，只谈这段代码每一步搬了哪些字节、为什么这么搬。</p>
+<p class="lead">第40课，我们把镜头拉到最近，正面解剖一个真实的 <strong>attention kernel</strong>（注意力核函数）。前面几课我们讲过分页 KV 缓存（<a class="xref" href="30-paged-memory-pools.html">第30课</a>）、解码阶段的带宽瓶颈（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）、以及注意力后端的封装方式（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>），这一课要把这些拼图拼到一起：当一个序列在 <span class="mono">decode</span>（解码，每步只生成一个新 token）阶段需要做注意力时，GPU 上那段被成千上万次反复调用的核函数，里面到底发生了什么。我们不谈玄学，只谈这段代码每一步搬了哪些字节、为什么这么搬。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div>
 <p>把 decode 注意力核函数想象成一个<strong>仓库拣货员</strong>。仓库里的货架（KV 缓存）不是一整排连续摆放的，而是被切成一个个<strong>货格</strong>（page，分页），散落在仓库各处。拣货员手里有一张<strong>取货单</strong>（<span class="mono">page_table</span>，块表），上面写着「这个客户的货分别在 7 号、3 号、19 号格子」。他不会把整个仓库搬空，而是<strong>只按单取那几格</strong>，边取边算账。</p>
@@ -347,7 +349,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>再强调一遍这条主线为什么重要：在 decode 阶段，模型权重的搬运和注意力对 KV 的搬运，共同决定了每一步生成耗时，而其中 KV 的访问会随着序列变长而不断增大。也就是说，序列越长、上下文越多，注意力核函数搬运的 KV 字节就越多，它在整步耗时里的占比也越高。这就是为什么我们必须把这段核函数看得这么仔细：它不是一段可有可无的小函数，而是长上下文推理里实打实的热点。理解它每一步搬了什么，才能理解后端为它做的种种优化到底优化在哪里。</p>
 
 <h2>二、为什么 KV 要分页，以及核函数如何「按页拣货」</h2>
-<p>第30课讲过，分页 KV 缓存把每条序列的历史切成固定大小的页，像操作系统的虚拟内存一样按页分配。好处是：不同序列长度差异巨大，按页分配可以避免为长序列预留巨大连续显存、也避免短序列浪费，显存利用率高、还能在序列间共享前缀。但代价是：<strong>同一条序列的 KV 在物理上不再连续</strong>，逻辑上第 0、1、2、3 个 KV 块，可能分别落在 7、3、19、5 号物理页。</p>
+<p><a class="xref" href="30-paged-memory-pools.html">第30课</a>讲过，分页 KV 缓存把每条序列的历史切成固定大小的页，像操作系统的虚拟内存一样按页分配。好处是：不同序列长度差异巨大，按页分配可以避免为长序列预留巨大连续显存、也避免短序列浪费，显存利用率高、还能在序列间共享前缀。但代价是：<strong>同一条序列的 KV 在物理上不再连续</strong>，逻辑上第 0、1、2、3 个 KV 块，可能分别落在 7、3、19、5 号物理页。</p>
 <p>核函数要还原逻辑顺序，就得靠 <span class="mono">page_table</span>（也叫 block table）。它是一张「逻辑块号 → 物理页号」的映射表。核函数遍历某个序列需要的逻辑位置，通过 page_table 翻译成物理页地址，再去那一页读 K、V。下面这组格子就是 page_table 收集分页 KV 的样子——逻辑上相邻的页，物理上是跳着取的：</p>
 
 <div class="cellgroup"><div class="cell">页 #7</div><div class="cell">页 #3</div><div class="cell">页 #19</div><div class="cell">页 #5</div><div class="cell">页 #12</div><div class="cell">页 #0</div></div>
@@ -400,7 +402,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="figcap"><b>图 1 · 分页 KV 收集</b> — 逻辑上连续的序列（<span class="mono">L0…L3</span>）经 <span class="mono">page_table / kv_indices</span>（同一"逻辑→物理"映射的两种布局）翻译成物理上分散的 KV 页（#7、#3、#19、#5）；核函数先按 <span class="mono">kv_indices</span> 把这些散落的页收集回来，才能把它们当作一条序列来注意。</div>
 </div>
 
-<p>这种「跳着取」的访存正是 decode 核函数最大的工程挑战。如果实现得粗糙，跳页会让访存变得零散、带宽利用率低；实现得好，核函数会让一个线程块负责一个序列、或者把多个 KV 页的读取合并成对齐的、连贯的内存事务，尽量把每一次显存读取都用满。这也是为什么同一份注意力数学，不同后端（第33课）跑出来的速度天差地别——差距几乎全在 KV 的访存效率上。</p>
+<p>这种「跳着取」的访存正是 decode 核函数最大的工程挑战。如果实现得粗糙，跳页会让访存变得零散、带宽利用率低；实现得好，核函数会让一个线程块负责一个序列、或者把多个 KV 页的读取合并成对齐的、连贯的内存事务，尽量把每一次显存读取都用满。这也是为什么同一份注意力数学，不同后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）跑出来的速度天差地别——差距几乎全在 KV 的访存效率上。</p>
 
 <p>这里还藏着一个常见误解需要澄清：分页并不会让注意力「算得更少」，它改变的只是 KV 在显存里的<strong>组织方式</strong>。点积、softmax、加权这些数学一步都没省，省的是<strong>显存的分配与浪费</strong>，以及让相同前缀能被多条序列共享、不必重复存一遍。换句话说，分页是显存管理层面的胜利，而核函数要做的是「在这种非连续布局上，依然把字节高效地搬进来」。理解了这一点，你就不会把 page_table 误当成某种加速算法——它是寻址机制，是核函数和分页缓存之间的那张地图。</p>
 
@@ -409,7 +411,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>但分块带来一个数学难题：softmax 需要先知道所有分数里的最大值、再算所有指数的总和，才能归一化。如果分块流式处理，怎么可能「先看完所有分数」？答案是 FlashAttention 风格的<strong>在线 softmax</strong>：核函数维护两个累计量——一个<strong>运行最大值</strong>（running max）和一个<strong>运行分母</strong>（running denominator，即累计的指数和）。每来一个新瓦片，就用新的局部最大值去修正旧的累计值（按指数比例缩放之前累加的结果），再把这块的贡献加进去。这样<strong>只需要一遍流式扫描</strong>，不用存下所有分数，就能算出和「全局 softmax」完全等价的结果，省显存、更省带宽。</p>
 <p>这也解释了 prefill（预填充）和 decode 两种核函数为什么长得不一样。下面把两者并排对比：</p>
 
-<div class="cols"><div class="col"><strong>prefill 核函数</strong><br>处理 prompt 的所有 token，查询位置很多，是一个又宽又厚的、类似 GEMM（大矩阵乘）的稠密计算。计算密集，能把张量核心喂饱，瓶颈更偏算力。</div><div class="col"><strong>decode 核函数</strong><br>每步只有一个查询位置，形状又「瘦」又长，主体是按 page_table 在 KV 缓存上反复 gather。计算量很小、访存量很大，瓶颈是显存带宽（第4课）。</div></div>
+<div class="cols"><div class="col"><strong>prefill 核函数</strong><br>处理 prompt 的所有 token，查询位置很多，是一个又宽又厚的、类似 GEMM（大矩阵乘）的稠密计算。计算密集，能把张量核心喂饱，瓶颈更偏算力。</div><div class="col"><strong>decode 核函数</strong><br>每步只有一个查询位置，形状又「瘦」又长，主体是按 page_table 在 KV 缓存上反复 gather。计算量很小、访存量很大，瓶颈是显存带宽（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）。</div></div>
 
 <p>正因为两者的形状和瓶颈完全不同，SGLang 会为它们走不同的核函数路径：prefill 像一次大 GEMM，decode 像一次大规模的稀疏拣货。把它们硬塞进同一个实现，往往两头都跑不快。</p>
 
@@ -500,7 +502,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <p>注意这段 Python 本身<strong>几乎不做数学</strong>：它读形状、定下 MLA 的潜变量与 rope 维度、把头数补齐到 128、开好输出张量，然后把所有指针交给编译核函数。真正的「gather → 分块点积 → 在线 softmax → 加权」全在 <span class="mono">torch.ops.sgl_kernel.cutlass_mla_decode</span> 背后的 C++/CUDA 里。这些 CUDA 源码就放在 <span class="mono">sgl-kernel/csrc/attention/</span> 目录下，例如 <span class="mono">cutlass_mla_kernel.cu</span>、<span class="mono">merge_attn_states.cu</span>（后者负责把多个 KV 分片各自算出的局部 softmax 结果按在线 softmax 规则合并起来）。本课不贴 CUDA，只指路；想深入可以顺着这个路径去读。</p>
 
-<p>为什么 MLA 要这么折腾？因为它把每个头原本各自一份的 K、V，压缩成了一份共享的低维潜变量，再加一小段承载位置信息的 rope。这样存下来的 KV 体积大幅变小，decode 阶段要搬运的字节随之减少——对一个带宽瓶颈的负载来说，这是直接的性能收益。代价是核函数读到的不再是「现成的每头 K、V」，而是压缩布局，需要在核函数内部按 MLA 的方式展开和计算。这正是「真实核函数的皱褶」：教科书公式干干净净，工程实现却要迁就具体的存储布局、对齐要求和瓦片宽度。把头数补齐到 <span class="mono">MAX_HEADS=128</span> 也是同理——编译核函数是按固定瓦片宽度优化的，不足就补齐、算完再把多余的头切掉（<span class="mono">out[:, :H]</span>），用一点点冗余换取核函数走在它最擅长的形状上。这层封装本身被注意力后端（第33课）调用，而当核函数已经足够精炼，下一步要省的就是反复启动它们的开销，那正是 CUDA Graph（第41课）的主场。</p>
+<p>为什么 MLA 要这么折腾？因为它把每个头原本各自一份的 K、V，压缩成了一份共享的低维潜变量，再加一小段承载位置信息的 rope。这样存下来的 KV 体积大幅变小，decode 阶段要搬运的字节随之减少——对一个带宽瓶颈的负载来说，这是直接的性能收益。代价是核函数读到的不再是「现成的每头 K、V」，而是压缩布局，需要在核函数内部按 MLA 的方式展开和计算。这正是「真实核函数的皱褶」：教科书公式干干净净，工程实现却要迁就具体的存储布局、对齐要求和瓦片宽度。把头数补齐到 <span class="mono">MAX_HEADS=128</span> 也是同理——编译核函数是按固定瓦片宽度优化的，不足就补齐、算完再把多余的头切掉（<span class="mono">out[:, :H]</span>），用一点点冗余换取核函数走在它最擅长的形状上。这层封装本身被注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）调用，而当核函数已经足够精炼，下一步要省的就是反复启动它们的开销，那正是 CUDA Graph（<a class="xref" href="41-operator-fusion-and-cuda-graph.html">第41课</a>）的主场。</p>
 
 <p>最后把几个核心设计选择和它们的理由列成一张表，方便回顾：</p>
 
@@ -511,14 +513,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <tr><td>MLA 压缩潜变量（512 + 64）</td><td>KV 体积更小、搬运更省带宽；核函数读压缩布局并补齐头数到 128 的瓦片宽度</td></tr>
 </table>
 
-<p>把这些放在一起看：decode 注意力核函数的设计哲学，从头到尾都是<strong>围绕带宽做减法</strong>——少存、少搬、一遍算完。理解了这条主线，你就能看懂注意力后端（第33课）为什么长那样，也为后面要讲的 CUDA Graph（第41课）打好基础——当核函数本身已经足够精炼，下一步要优化的就是「反复启动这些核函数」的开销了。</p>
+<p>把这些放在一起看：decode 注意力核函数的设计哲学，从头到尾都是<strong>围绕带宽做减法</strong>——少存、少搬、一遍算完。理解了这条主线，你就能看懂注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）为什么长那样，也为后面要讲的 CUDA Graph（<a class="xref" href="41-operator-fusion-and-cuda-graph.html">第41课</a>）打好基础——当核函数本身已经足够精炼，下一步要优化的就是「反复启动这些核函数」的开销了。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
-<li><strong>decode 核函数的真正第一步是收集，不是相乘</strong>：先用 <span class="mono">page_table</span> 从分页 KV 缓存（第30课）里 gather 非连续的 K、V 页，再做 Q·Kᵀ → softmax → ·V。</li>
+<li><strong>decode 核函数的真正第一步是收集，不是相乘</strong>：先用 <span class="mono">page_table</span> 从分页 KV 缓存（<a class="xref" href="30-paged-memory-pools.html">第30课</a>）里 gather 非连续的 K、V 页，再做 Q·Kᵀ → softmax → ·V。</li>
 <li><strong>分块 tiling</strong>：把 KV 切成瓦片流进 SRAM，绝不物化完整分数矩阵，让数据刚好放进寄存器/共享内存。</li>
 <li><strong>在线 softmax</strong>（FlashAttention 风格）：维护运行最大值 + 运行分母，一遍流式扫描得到等价归一化，省显存省带宽。</li>
-<li><strong>prefill 与 decode 核函数不同</strong>：prefill 是又宽又厚的类 GEMM 稠密计算；decode 又瘦又长、以 KV gather 为主，受带宽限制（第4课）。</li>
-<li><strong>MLA 的现实皱褶</strong>：KV 存成压缩潜变量（512）+ rope（64），核函数读 <span class="mono">kv_c_and_k_pe_cache</span>、补齐头数到 128 再派发；封装在注意力后端（第33课）里，CUDA 源码位于 <span class="mono">sgl-kernel/csrc/attention/</span>。前向引用 CUDA Graph（第41课）。</li>
+<li><strong>prefill 与 decode 核函数不同</strong>：prefill 是又宽又厚的类 GEMM 稠密计算；decode 又瘦又长、以 KV gather 为主，受带宽限制（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）。</li>
+<li><strong>MLA 的现实皱褶</strong>：KV 存成压缩潜变量（512）+ rope（64），核函数读 <span class="mono">kv_c_and_k_pe_cache</span>、补齐头数到 128 再派发；封装在注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）里，CUDA 源码位于 <span class="mono">sgl-kernel/csrc/attention/</span>。前向引用 CUDA Graph（<a class="xref" href="41-operator-fusion-and-cuda-graph.html">第41课</a>）。</li>
 </ul></div>
 <div class="selftest">
 <h2>🧪 自测 · 想一想为什么这么设计</h2>
@@ -558,19 +560,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。两者形状与瓶颈相反：prefill 是对很多查询位置的类 GEMM 稠密大计算，偏算力；decode 每步仅一个查询位置，主体是 KV gather，受显存带宽限制（第4课）。所以 SGLang 为它们走不同核函数路径，绝非相同，也不是“prefill 受带宽限制”。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。两者形状与瓶颈相反：prefill 是对很多查询位置的类 GEMM 稠密大计算，偏算力；decode 每步仅一个查询位置，主体是 KV gather，受显存带宽限制（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）。所以 SGLang 为它们走不同核函数路径，绝非相同，也不是“prefill 受带宽限制”。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用自己的话描述一次 decode 注意力核函数的完整主线：从拿到一行 Q 开始，如何用 <span class='mono'>page_table</span> 从分页 KV 缓存收集非连续的 K、V，如何用<strong>分块 tiling</strong> 把瓦片流进 SRAM，并用<strong>在线 softmax</strong> 一遍算完 Q·Kᵀ → softmax → ·V。说明为什么这套设计本质上是“围绕带宽做减法”。</li>
-    <li>结合 MLA（DeepSeek 风格）的真实皱褶说明 <span class='mono'>cutlass_mla_decode</span> 的封装做了什么：KV 为何存成压缩潜变量（<span class='mono'>D_latent=512</span>）+ rope（<span class='mono'>D_rope=64</span>），为什么要把头数补齐到 <span class='mono'>MAX_HEADS=128</span> 再派发给编译核函数，以及它和注意力后端（第33课）、CUDA Graph（第41课）的关系。</li>
+    <li>结合 MLA（DeepSeek 风格）的真实皱褶说明 <span class='mono'>cutlass_mla_decode</span> 的封装做了什么：KV 为何存成压缩潜变量（<span class='mono'>D_latent=512</span>）+ rope（<span class='mono'>D_rope=64</span>），为什么要把头数补齐到 <span class='mono'>MAX_HEADS=128</span> 再派发给编译核函数，以及它和注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第33课</a>）、CUDA Graph（<a class="xref" href="41-operator-fusion-and-cuda-graph.html">第41课</a>）的关系。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
-<p class="lead">In Lesson 40 we zoom all the way in and dissect a real <strong>attention kernel</strong>. Earlier lessons covered the paged KV cache (Lesson 30), why decode is bandwidth-bound (Lesson 4), and how attention backends wrap kernels (Lesson 33). Now we put the pieces together: when a sequence runs an attention step during <span class="mono">decode</span> (generating one new token per step), what actually happens inside that kernel that gets called tens of thousands of times on the GPU? No hand-waving — just which bytes this code moves at each step, and why.</p>
+<p class="lead">In Lesson 40 we zoom all the way in and dissect a real <strong>attention kernel</strong>. Earlier lessons covered the paged KV cache (<a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>), why decode is bandwidth-bound (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>), and how attention backends wrap kernels (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>). Now we put the pieces together: when a sequence runs an attention step during <span class="mono">decode</span> (generating one new token per step), what actually happens inside that kernel that gets called tens of thousands of times on the GPU? No hand-waving — just which bytes this code moves at each step, and why.</p>
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div>
 <p>Picture a decode attention kernel as a <strong>warehouse picker</strong>. The shelves (the KV cache) are not one long contiguous row; they are cut into <strong>bins</strong> (pages) scattered around the warehouse. The picker holds a <strong>pick list</strong> (<span class="mono">page_table</span>, the block table) that says "this customer's goods are in bins 7, 3, 19." He does not empty the whole warehouse — he <strong>fetches only those bins</strong> and tallies as he goes.</p>
@@ -590,7 +592,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>Notice the first node: in many textbook attention diagrams step one is "Q times K," but in a real decode kernel <strong>the true first step is "gather the KV per the pick list."</strong> This step sets the kernel's memory-access pattern and decides whether it can saturate memory bandwidth. Since the KV cache is usually far larger than on-chip SRAM, how pages are brought in — and at what granularity — is essentially performance itself.</p>
 
 <h2>2. Why KV is paged, and how the kernel "picks by page"</h2>
-<p>As Lesson 30 explained, the paged KV cache cuts each sequence's history into fixed-size pages, allocated by page like an OS virtual-memory system. The upside: sequence lengths vary wildly, so per-page allocation avoids reserving huge contiguous memory for long sequences and avoids waste for short ones — high memory utilisation, plus prefix sharing across sequences. The cost: <strong>a single sequence's KV is no longer physically contiguous</strong>; logical KV blocks 0, 1, 2, 3 might land on physical pages 7, 3, 19, 5.</p>
+<p>As <a class="xref" href="30-paged-memory-pools.html">Lesson 30</a> explained, the paged KV cache cuts each sequence's history into fixed-size pages, allocated by page like an OS virtual-memory system. The upside: sequence lengths vary wildly, so per-page allocation avoids reserving huge contiguous memory for long sequences and avoids waste for short ones — high memory utilisation, plus prefix sharing across sequences. The cost: <strong>a single sequence's KV is no longer physically contiguous</strong>; logical KV blocks 0, 1, 2, 3 might land on physical pages 7, 3, 19, 5.</p>
 <p>To restore logical order the kernel relies on the <span class="mono">page_table</span> (also called the block table): a "logical block id → physical page id" map. The kernel walks the logical positions a sequence needs, translates them through the page_table into physical page addresses, and reads K/V there. The cells below show paged KV gathered by a page_table — logically adjacent pages fetched out of physical order:</p>
 
 <div class="cellgroup"><div class="cell">page #7</div><div class="cell">page #3</div><div class="cell">page #19</div><div class="cell">page #5</div><div class="cell">page #12</div><div class="cell">page #0</div></div>
@@ -643,14 +645,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="figcap"><b>Fig 1 · Paged-KV gather</b> — a logically contiguous sequence (<span class="mono">L0…L3</span>) is translated through the <span class="mono">page_table / kv_indices</span> (two layouts of the same logical→physical map) into physically scattered KV pages (#7, #3, #19, #5); the kernel first gathers those scattered pages by <span class="mono">kv_indices</span> before it can attend to them as one sequence.</div>
 </div>
 
-<p>This "jump-around" access is the biggest engineering challenge of a decode kernel. Done crudely, page jumps make access scattered and bandwidth poor; done well, the kernel lets one thread block own one sequence, or coalesces several page reads into aligned, contiguous memory transactions, using every memory read fully. That is why the very same attention math runs at wildly different speeds across backends (Lesson 33) — almost all the difference is KV access efficiency.</p>
+<p>This "jump-around" access is the biggest engineering challenge of a decode kernel. Done crudely, page jumps make access scattered and bandwidth poor; done well, the kernel lets one thread block own one sequence, or coalesces several page reads into aligned, contiguous memory transactions, using every memory read fully. That is why the very same attention math runs at wildly different speeds across backends (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) — almost all the difference is KV access efficiency.</p>
 
 <h2>3. Tiling and online softmax: done in one streaming pass</h2>
 <p>The second key design is <strong>tiling</strong>. A GPU's registers and shared memory (SRAM) are tiny — they cannot hold the full K/V, let alone the whole attention score matrix of a long sequence. So the kernel cuts the KV into <strong>tiles</strong> and streams one tile into SRAM at a time, overwriting it with the next. The kernel <strong>never materialises the full score matrix</strong> at once, because that matrix would occupy memory and be read and written repeatedly — pure wasted bandwidth.</p>
 <p>But tiling creates a math problem: softmax needs the maximum of all scores and the sum of all exponentials before it can normalise. If we process in tiles, how can we "see all scores first"? The answer is FlashAttention-style <strong>online softmax</strong>: the kernel keeps two running quantities — a <strong>running max</strong> and a <strong>running denominator</strong> (the accumulated sum of exponentials). For each new tile, it corrects the old totals using the new local max (rescaling the previously accumulated result by an exponential factor) and adds this tile's contribution. Thus <strong>one streaming pass</strong> suffices, with no need to store all scores, yet the result is exactly equivalent to a global softmax — saving memory and bandwidth.</p>
 <p>This also explains why prefill and decode kernels look different. Here they are side by side:</p>
 
-<div class="cols"><div class="col"><strong>prefill kernel</strong><br>Processes all prompt tokens, with many query positions — a wide, thick, GEMM-like dense computation. Compute-heavy, it can keep tensor cores fed; the bottleneck leans toward arithmetic.</div><div class="col"><strong>decode kernel</strong><br>One query position per step, a skinny and long shape, dominated by gathering over the KV cache via page_table. Tiny compute, large access; the bottleneck is memory bandwidth (Lesson 4).</div></div>
+<div class="cols"><div class="col"><strong>prefill kernel</strong><br>Processes all prompt tokens, with many query positions — a wide, thick, GEMM-like dense computation. Compute-heavy, it can keep tensor cores fed; the bottleneck leans toward arithmetic.</div><div class="col"><strong>decode kernel</strong><br>One query position per step, a skinny and long shape, dominated by gathering over the KV cache via page_table. Tiny compute, large access; the bottleneck is memory bandwidth (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</div></div>
 
 <p>Because their shapes and bottlenecks differ entirely, SGLang takes different kernel paths for them: prefill like one big GEMM, decode like a large sparse pick. Forcing both into one implementation usually leaves both running slowly.</p>
 
@@ -748,14 +750,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <tr><td>MLA compressed latent (512 + 64)</td><td>Smaller KV, cheaper to move; the kernel reads the compressed layout and pads heads to the 128 tile width</td></tr>
 </table>
 
-<p>Seen together: a decode attention kernel's whole design philosophy is <strong>subtraction around bandwidth</strong> — store less, move less, finish in one pass. Grasp this main line and you'll understand why attention backends (Lesson 33) look the way they do, and you'll be ready for CUDA Graph (Lesson 41) next — once the kernel itself is lean enough, the next thing to optimise is the cost of launching these kernels over and over.</p>
+<p>Seen together: a decode attention kernel's whole design philosophy is <strong>subtraction around bandwidth</strong> — store less, move less, finish in one pass. Grasp this main line and you'll understand why attention backends (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) look the way they do, and you'll be ready for CUDA Graph (<a class="xref" href="41-operator-fusion-and-cuda-graph.html">Lesson 41</a>) next — once the kernel itself is lean enough, the next thing to optimise is the cost of launching these kernels over and over.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
-<li><strong>A decode kernel's true first step is gather, not multiply</strong>: use <span class="mono">page_table</span> to gather non-contiguous K/V pages from the paged KV cache (Lesson 30), then do Q·Kᵀ → softmax → ·V.</li>
+<li><strong>A decode kernel's true first step is gather, not multiply</strong>: use <span class="mono">page_table</span> to gather non-contiguous K/V pages from the paged KV cache (<a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>), then do Q·Kᵀ → softmax → ·V.</li>
 <li><strong>Tiling</strong>: stream KV tiles into SRAM and never materialise the full score matrix, fitting data into registers/shared memory.</li>
 <li><strong>Online softmax</strong> (FlashAttention-style): keep a running max + running denominator for an equivalent normalisation in one streaming pass, saving memory and bandwidth.</li>
-<li><strong>Prefill and decode kernels differ</strong>: prefill is a wide, thick GEMM-like dense pass; decode is skinny and long, gather-heavy, bandwidth-bound (Lesson 4).</li>
-<li><strong>MLA's real wrinkle</strong>: KV stored as a compressed latent (512) + rope (64); the kernel reads <span class="mono">kv_c_and_k_pe_cache</span>, pads heads to 128, then dispatches; wrapped by attention backends (Lesson 33), with CUDA sources under <span class="mono">sgl-kernel/csrc/attention/</span>. Forward-ref CUDA Graph (Lesson 41).</li>
+<li><strong>Prefill and decode kernels differ</strong>: prefill is a wide, thick GEMM-like dense pass; decode is skinny and long, gather-heavy, bandwidth-bound (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</li>
+<li><strong>MLA's real wrinkle</strong>: KV stored as a compressed latent (512) + rope (64); the kernel reads <span class="mono">kv_c_and_k_pe_cache</span>, pads heads to 128, then dispatches; wrapped by attention backends (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>), with CUDA sources under <span class="mono">sgl-kernel/csrc/attention/</span>. Forward-ref CUDA Graph (<a class="xref" href="41-operator-fusion-and-cuda-graph.html">Lesson 41</a>).</li>
 </ul></div>
 <div class="selftest">
 <h2>🧪 Self-test - think about the design</h2>
@@ -795,14 +797,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Their shapes and bottlenecks are opposite: prefill is a GEMM-like dense compute over many query positions (compute-leaning); decode has one query position per step and is dominated by KV gather, bandwidth-bound (Lesson 4). Hence SGLang takes different kernel paths; they are not identical, and prefill is not the bandwidth-bound one.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Their shapes and bottlenecks are opposite: prefill is a GEMM-like dense compute over many query positions (compute-leaning); decode has one query position per step and is dominated by KV gather, bandwidth-bound (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>). Hence SGLang takes different kernel paths; they are not identical, and prefill is not the bandwidth-bound one.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>In your own words, trace the full main line of one decode attention kernel: starting from one row of Q, how it uses the <span class='mono'>page_table</span> to gather non-contiguous K/V from the paged KV cache, how it streams tiles into SRAM via <strong>tiling</strong>, and how <strong>online softmax</strong> computes Q·Kᵀ → softmax → ·V in one pass. Explain why this design is essentially 'subtraction around bandwidth'.</li>
-    <li>Using MLA's (DeepSeek-style) real wrinkle, explain what the <span class='mono'>cutlass_mla_decode</span> wrapper does: why KV is stored as a compressed latent (<span class='mono'>D_latent=512</span>) + rope (<span class='mono'>D_rope=64</span>), why heads are padded to <span class='mono'>MAX_HEADS=128</span> before dispatching to the compiled kernel, and how it relates to attention backends (Lesson 33) and CUDA Graph (Lesson 41).</li>
+    <li>Using MLA's (DeepSeek-style) real wrinkle, explain what the <span class='mono'>cutlass_mla_decode</span> wrapper does: why KV is stored as a compressed latent (<span class='mono'>D_latent=512</span>) + rope (<span class='mono'>D_rope=64</span>), why heads are padded to <span class='mono'>MAX_HEADS=128</span> before dispatching to the compiled kernel, and how it relates to attention backends (<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) and CUDA Graph (<a class="xref" href="41-operator-fusion-and-cuda-graph.html">Lesson 41</a>).</li>
   </ul>
 </div>
 </div></div>

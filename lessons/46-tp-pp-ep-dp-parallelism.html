@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -335,7 +337,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
-<p>四种并行回答的是两个不同的问题。<strong>TP / PP / EP</strong> 在切<strong>模型本身</strong>：TP 切一层之内的权重矩阵（第25、37课的列/行切分与词表切分），PP 切层与层之间的边界（第23课），EP 切 MoE 的专家集合（第34课）。<strong>DP</strong> 不切模型而是切<strong>数据（请求）</strong>：复制模型、分摊请求（第23课的 dp-controller）。一句话：前三种"分担一份模型的体积与算力"，DP"分担吞吐"。SGLang 还有一个变体叫 <strong>Attention-DP</strong>：对注意力做 DP 切分、对专家做 EP 切分，二者并存。真正优雅的是：这四种并行在代码里没有四套实现，而是同一个 <span class="mono">GroupCoordinator</span> 在不同的 rank 分组上跑不同的集合通信，于是它们天然可以叠乘组合，例如 TP=8 × PP=2 × DP=4。</p>
+<p>四种并行回答的是两个不同的问题。<strong>TP / PP / EP</strong> 在切<strong>模型本身</strong>：TP 切一层之内的权重矩阵（第25、37课的列/行切分与词表切分），PP 切层与层之间的边界（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>），EP 切 MoE 的专家集合（<a class="xref" href="34-moe-layer.html">第34课</a>）。<strong>DP</strong> 不切模型而是切<strong>数据（请求）</strong>：复制模型、分摊请求（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>的 dp-controller）。一句话：前三种"分担一份模型的体积与算力"，DP"分担吞吐"。SGLang 还有一个变体叫 <strong>Attention-DP</strong>：对注意力做 DP 切分、对专家做 EP 切分，二者并存。真正优雅的是：这四种并行在代码里没有四套实现，而是同一个 <span class="mono">GroupCoordinator</span> 在不同的 rank 分组上跑不同的集合通信，于是它们天然可以叠乘组合，例如 TP=8 × PP=2 × DP=4。</p>
 <p>那么什么时候用哪一招？可以顺着"瓶颈是什么"来判断：模型大到<strong>一张卡装不下</strong>，先上 TP 把每一层切薄；单机的卡数还不够，再叠 PP 把层分到更多机器上。模型是<strong>专家众多的 MoE</strong>、总参数把显存撑爆，就上 EP 把专家摊开。模型本来就<strong>装得下</strong>、只是想要<strong>更高吞吐</strong>，那就上 DP 多复制几份、把请求分摊出去。绝大多数真实部署都不是单选题，而是按这套优先级把几招叠起来用：TP 吃满单机内的高速链路，PP 跨机扩展模型规模，EP 摊开专家，DP 复制换吞吐。</p>
 </div>
 
@@ -393,7 +395,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>TP 张量并行：切开"一层之内"的矩阵</h2>
-<p><strong>TP（tensor parallel）</strong>把每一层的<strong>权重矩阵</strong>沿某个维度切成若干片，分给同组的各个 rank。最典型的就是第25课讲的注意力 q/k/v 投影按列切、第37课讲的 MLP 上投影按列切、词表（vocab）按行切。每个 rank 只持有矩阵的一片，于是只算出<strong>部分结果</strong>；要得到完整的层输出，就必须把各 rank 的部分和<strong>合并</strong>——列切+行切的组合用一次 <span class="mono">all_reduce</span> 求和，词表并行的 logits 则用 <span class="mono">all_gather</span> 拼接。</p>
+<p><strong>TP（tensor parallel）</strong>把每一层的<strong>权重矩阵</strong>沿某个维度切成若干片，分给同组的各个 rank。最典型的就是<a class="xref" href="25-model-loading-and-weights.html">第25课</a>讲的注意力 q/k/v 投影按列切、<a class="xref" href="37-logits-and-vocab-parallel.html">第37课</a>讲的 MLP 上投影按列切、词表（vocab）按行切。每个 rank 只持有矩阵的一片，于是只算出<strong>部分结果</strong>；要得到完整的层输出，就必须把各 rank 的部分和<strong>合并</strong>——列切+行切的组合用一次 <span class="mono">all_reduce</span> 求和，词表并行的 logits 则用 <span class="mono">all_gather</span> 拼接。</p>
 <p>TP 的特点是：它把<strong>单层的算力和显存</strong>都摊薄了，一张卡装不下的大矩阵被切成几片分别存放、分别计算。代价是<strong>每一层</strong>都要通信一次（前向一次、反向再一次），通信极其频繁。因此 TP 组内的 GPU 必须用<strong>高速近邻链路</strong>（NVLink / NVSwitch），通常局限在<strong>单机之内</strong>；跨机做 TP 会被慢链路拖垮。</p>
 <div class="layers"><div class="layer">Rank0：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank1：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank2：每一层都只持有该层权重的 1/4 切片</div><div class="layer">Rank3：每一层都只持有该层权重的 1/4 切片</div></div>
 <p>注意上图：TP 下<strong>每个 rank 都"纵向"贯穿了所有层</strong>，只是每层都只拿到一小条。这正是 TP 与 PP 的根本区别——TP 横向切一层的宽度，PP 纵向切层的深度。</p>
@@ -401,18 +403,18 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>把这些落到一条具体命令上：<span class="mono">--tp-size 8</span> 会把<strong>每一层</strong>的矩阵切到 8 张卡上，每过一层就做<strong>一次</strong> <span class="mono">all_reduce</span> 把部分和加起来——正因为它<strong>每层都通信</strong>，TP 组必须用机内的高速链路（NVLink）；相比之下 <span class="mono">--dp-size</span> 复制整份模型、每步<strong>几乎不通信</strong>，慢链路也无所谓。这正是"TP 吃满机内 NVLink、DP 几乎不通信"这条经验法则的由来。</p>
 
 <h2>PP 流水线并行：把"层"切成前后接力的阶段</h2>
-<p><strong>PP（pipeline parallel）</strong>把模型的<strong>层</strong>按顺序分成几个连续的<strong>阶段（stage）</strong>，放在不同 GPU 上。第 1～k 层在 rank0，第 k+1～2k 层在 rank1，依此类推。前向时，激活值从一个阶段<strong>流向</strong>下一个阶段（向 <span class="mono">next_rank</span> 发送、从 <span class="mono">prev_rank</span> 接收，第23课）；反向时梯度沿相反方向回传。</p>
+<p><strong>PP（pipeline parallel）</strong>把模型的<strong>层</strong>按顺序分成几个连续的<strong>阶段（stage）</strong>，放在不同 GPU 上。第 1～k 层在 rank0，第 k+1～2k 层在 rank1，依此类推。前向时，激活值从一个阶段<strong>流向</strong>下一个阶段（向 <span class="mono">next_rank</span> 发送、从 <span class="mono">prev_rank</span> 接收，<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>）；反向时梯度沿相反方向回传。</p>
 <p>PP 只在<strong>阶段交界处</strong>通信，通信量远小于 TP，普通链路（甚至跨机）都能胜任。但它有个固有问题：若只送一个批次进去，前面的阶段算完就得干等后面阶段，利用率很低。解决办法是把一个大批次拆成许多<strong>微批次（micro-batch）</strong>像流水线一样连续灌入，让所有阶段同时有活干；即便如此，开头和结尾仍有阶段空转，这段浪费叫<strong>流水线气泡（bubble）</strong>。PP 摊薄的是<strong>层数带来的显存</strong>（每张卡只放一部分层），而不是单层的算力。</p>
 <p>气泡占比大致正比于<strong>阶段数 ÷ 微批次数</strong>：阶段越多、微批次越少，开头收尾的空转占比就越高；把微批次开多，就能把这段浪费摊薄到可以接受。PP 的最大好处是<strong>只在交界处搬一份激活</strong>，搬运量只与隐藏维度（以及 batch、序列长度）成正比、与层数无关，因此特别适合"模型层数太多、单机装不下、机器之间又只有较慢链路"的场景——先用 PP 把模型<strong>纵向</strong>铺到多台机器上，再在每台机器内部用 TP 做<strong>横向</strong>细切，两者刚好互补。</p>
 
 <h2>EP 专家并行：把 MoE 的"专家"摊到不同 rank</h2>
-<p><strong>EP（expert parallel）</strong>专为 MoE 而生（第34课）。MoE 层里有很多专家（FFN），但每个 token 的路由器只挑选其中 top-k 个去计算。EP 把不同的<strong>专家</strong>放在不同 rank 上：每一步，先用一次 <span class="mono">all_to_all</span> 把<strong>每个 token</strong> 送到"它选中的专家所在"的那个 rank，专家算完后再用第二次 <span class="mono">all_to_all</span> 把结果送回原来的 rank。</p>
+<p><strong>EP（expert parallel）</strong>专为 MoE 而生（<a class="xref" href="34-moe-layer.html">第34课</a>）。MoE 层里有很多专家（FFN），但每个 token 的路由器只挑选其中 top-k 个去计算。EP 把不同的<strong>专家</strong>放在不同 rank 上：每一步，先用一次 <span class="mono">all_to_all</span> 把<strong>每个 token</strong> 送到"它选中的专家所在"的那个 rank，专家算完后再用第二次 <span class="mono">all_to_all</span> 把结果送回原来的 rank。</p>
 <p>为什么 EP 用 <span class="mono">all_to_all</span> 而不是 TP 那样的 <span class="mono">all_reduce</span>？因为每个 token 要去的目的地<strong>各不相同</strong>——token A 选了专家3、token B 选了专家7，这是一种"点对点重排"而非"全体求和"。<span class="mono">all_to_all</span> 正是为这种"各发各的、各收各的"而设计的集合通信：每个 rank 同时向所有其它 rank 发送一份不同的数据、也从所有 rank 各收一份，恰好对应"把 token 按所选专家分发到对应 rank"这件事。</p>
-<p>EP 摊薄的是<strong>专家的显存</strong>——成百上千个专家分散存放，单卡放不下的总参数被分摊。它的通信量随 <strong>token 数 × top-k</strong> 增长：批次越大、每个 token 选的专家越多，all-to-all 搬运的数据越多。SGLang 的 Attention-DP 常与 EP 搭配：注意力部分按 DP 复制分流、专家部分按 EP 分片，二者在同一部署中并存。这又是一个"不同 GroupCoordinator 各司其职"的实例。大规模 EP 以及专家负载均衡（EPLB）会在<strong>第47课</strong>展开。</p>
-<p>EP 与 TP 还有一个关键差别在于<strong>通信量是否随负载浮动</strong>：TP 每层 all_reduce 的大小是固定的（只取决于隐藏维度），而 EP 的 all_to_all 大小随<strong>实际 token 数 × top-k</strong> 变化，batch 越大、每个 token 选的专家越多，搬运的数据越多。更棘手的是<strong>专家负载常常不均</strong>——某些热门专家被大量 token 选中、某些专家几乎闲置，持有热门专家的那个 rank 就会成为整步的瓶颈。如何把专家在 rank 间重新摆放、让负载尽量均衡，正是第47课 EPLB 要解决的问题。</p>
+<p>EP 摊薄的是<strong>专家的显存</strong>——成百上千个专家分散存放，单卡放不下的总参数被分摊。它的通信量随 <strong>token 数 × top-k</strong> 增长：批次越大、每个 token 选的专家越多，all-to-all 搬运的数据越多。SGLang 的 Attention-DP 常与 EP 搭配：注意力部分按 DP 复制分流、专家部分按 EP 分片，二者在同一部署中并存。这又是一个"不同 GroupCoordinator 各司其职"的实例。大规模 EP 以及专家负载均衡（EPLB）会在<strong><a class="xref" href="47-large-scale-ep-and-eplb.html">第47课</a></strong>展开。</p>
+<p>EP 与 TP 还有一个关键差别在于<strong>通信量是否随负载浮动</strong>：TP 每层 all_reduce 的大小是固定的（只取决于隐藏维度），而 EP 的 all_to_all 大小随<strong>实际 token 数 × top-k</strong> 变化，batch 越大、每个 token 选的专家越多，搬运的数据越多。更棘手的是<strong>专家负载常常不均</strong>——某些热门专家被大量 token 选中、某些专家几乎闲置，持有热门专家的那个 rank 就会成为整步的瓶颈。如何把专家在 rank 间重新摆放、让负载尽量均衡，正是<a class="xref" href="47-large-scale-ep-and-eplb.html">第47课</a> EPLB 要解决的问题。</p>
 
 <h2>DP 数据并行 + 统一抽象 GroupCoordinator</h2>
-<p><strong>DP（data parallel）</strong>最简单：<strong>复制</strong>整份模型到每个副本，把<strong>请求</strong>分给不同副本各自独立处理（第23课的 dp-controller 负责分发）。每一步几乎<strong>零通信</strong>（仅训练时才需在反向后同步梯度，推理服务里副本间近乎独立），代价是每个副本都要装下<strong>整份模型</strong>，省不了显存只换吞吐。</p>
+<p><strong>DP（data parallel）</strong>最简单：<strong>复制</strong>整份模型到每个副本，把<strong>请求</strong>分给不同副本各自独立处理（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>的 dp-controller 负责分发）。每一步几乎<strong>零通信</strong>（仅训练时才需在反向后同步梯度，推理服务里副本间近乎独立），代价是每个副本都要装下<strong>整份模型</strong>，省不了显存只换吞吐。</p>
 <p>SGLang 的 <strong>Attention-DP</strong> 值得单独点一句：在大规模 MoE 部署里，注意力部分参数小、却最怕 KV 缓存被重复占用与冗余计算，于是按 DP 分流让每个副本各管一批请求的注意力；而专家部分参数巨大、必须摊开显存，于是按 EP 分片。两种切法在<strong>同一份模型</strong>里各管一段——注意力走 DP、FFN/专家走 EP，互不冲突。这本质上又是"不同的 GroupCoordinator 在不同 rank 布局上各司其职"，只不过这次把 DP 和 EP 拼在了一个模型的不同子模块上。</p>
 <table class="t"><tr><th>并行轴</th><th>切什么</th><th>每步通信什么</th><th>链路需求</th></tr>
 <tr><td><span class="mono">TP</span></td><td>每层的权重矩阵（一层之内）</td><td>每层一次 all-reduce / all-gather</td><td>很高，需 NVLink，通常单机内</td></tr>
@@ -422,7 +424,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>真正的关键统一在这里：SGLang 不为四种并行写四套通信代码，而是用<strong>同一个抽象</strong> <span class="mono">GroupCoordinator</span> 表达全部。一个 <span class="mono">GroupCoordinator</span> 就是"一个进程组"，带着 <span class="mono">rank</span>（本进程全局编号）、<span class="mono">ranks</span>（属于本组的全局 rank 列表）、<span class="mono">world_size</span>（本组大小）、<span class="mono">rank_in_group</span>（组内位置），并暴露 <span class="mono">all_reduce</span> / <span class="mono">all_gather</span> / <span class="mono">all_to_all_single</span> / <span class="mono">next_rank</span> / <span class="mono">prev_rank</span> 这些方法。</p>
 <div class="cols"><div class="col"><strong>切"权重"（TP / PP / EP）</strong><br/>把一份模型的矩阵、层、专家分散到多卡，每卡只持有一部分参数；省显存、省单卡算力，但要靠集合通信把结果拼回来。</div><div class="col"><strong>切"数据"（DP）</strong><br/>把整份模型复制到每个副本，按请求分流；每副本独立、几乎不通信，省不了显存只提吞吐。</div></div>
 <p>于是 <span class="mono">TP</span>、<span class="mono">PP</span>、<span class="mono">EP</span>、<span class="mono">DP</span> 只是<strong>同一个类的不同实例</strong>，分别建立在不同的 rank 布局上：TP 组把单机 8 卡编为一组、PP 组把跨机的对应 rank 串成阶段、EP 组覆盖所有专家 rank、DP 组把若干副本编为一组。它们因此天然<strong>可组合</strong>——一个部署完全可以是 TP=8 × PP=2 × DP=4，每张卡同时属于多个 GroupCoordinator，在不同的组里走不同的集合通信。</p>
-<p>把四招合起来看一个具体例子：假设手上有 64 张 GPU，配成 <strong>TP=8 × PP=2 × DP=4</strong>。每 8 张卡（一台机器内）组成一个 TP 组，靠 NVLink 做每层一次的高频 all_reduce；相邻两个 TP 组首尾相接组成 2 个 PP 阶段，跨机只在阶段交界 send/recv 激活——这样 16 张卡才拼出<strong>一份完整模型副本</strong>；再把这样的副本复制 4 份组成 DP，请求由第23课的 dp-controller 分发给这 4 份副本。于是<strong>同一张卡同时身处三个 GroupCoordinator</strong>：它的 TP 组、它的 PP 组、它的 DP 组，每个组各跑各的集合通信，互不干扰。8×2×4=64，恰好用满全部 GPU。</p>
+<p>把四招合起来看一个具体例子：假设手上有 64 张 GPU，配成 <strong>TP=8 × PP=2 × DP=4</strong>。每 8 张卡（一台机器内）组成一个 TP 组，靠 NVLink 做每层一次的高频 all_reduce；相邻两个 TP 组首尾相接组成 2 个 PP 阶段，跨机只在阶段交界 send/recv 激活——这样 16 张卡才拼出<strong>一份完整模型副本</strong>；再把这样的副本复制 4 份组成 DP，请求由<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>的 dp-controller 分发给这 4 份副本。于是<strong>同一张卡同时身处三个 GroupCoordinator</strong>：它的 TP 组、它的 PP 组、它的 DP 组，每个组各跑各的集合通信，互不干扰。8×2×4=64，恰好用满全部 GPU。</p>
 <p>挑选组合时的取舍始终绕着四件事：<strong>通信量</strong>（TP 最高、DP 最低）、<strong>链路要求</strong>（TP 要 NVLink，PP/DP 普通链路即可）、<strong>流水线气泡</strong>（只有 PP 有，靠微批次缓解）、<strong>显存</strong>（TP/PP/EP 都省显存，DP 不省只换吞吐）。一般经验法则就是：先用 TP 吃满单机内的高速链路，再用 PP 跨机扩展模型规模，MoE 用 EP 把专家摊开，最后用 DP 复制整套换吞吐——四个 GroupCoordinator 各司其职，又彼此叠乘成一套完整的部署拓扑。</p>
 <div class="flow"><div class="node">TP 部分层输出</div><div class="arrow">→</div><div class="node">all_reduce 求和</div><div class="arrow">→</div><div class="node">完整层输出</div></div>
 <div class="flow"><div class="node">EP token 批</div><div class="arrow">→</div><div class="node">all_to_all 路由到专家</div><div class="arrow">→</div><div class="node">汇总结果</div></div>
@@ -489,9 +491,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>TP</strong> 切<strong>一层之内的权重矩阵</strong>（q/k/v、MLP 列、词表，第25/37课），每层用 <span class="mono">all_reduce</span>/<span class="mono">all_gather</span> 合并；通信最频繁，需 NVLink、通常单机内。</li>
-<li><strong>PP</strong> 切<strong>层</strong>成连续阶段（第23课），只在阶段交界 <span class="mono">send</span>/<span class="mono">recv</span> 激活；链路便宜，但有流水线气泡，靠微批次填满。</li>
-<li><strong>EP</strong> 切 MoE 的<strong>专家</strong>（第34课），每步两次 <span class="mono">all_to_all</span> 把 token 路由到专家再送回；通信随 token×top-k 增长，第47课接续大规模 EP + EPLB。</li>
-<li><strong>DP</strong> <strong>复制模型、切请求</strong>（第23课 dp-controller），每步近乎零通信但每副本要装整份模型；Attention-DP 是"注意力 DP + 专家 EP"的组合变体。</li>
+<li><strong>PP</strong> 切<strong>层</strong>成连续阶段（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>），只在阶段交界 <span class="mono">send</span>/<span class="mono">recv</span> 激活；链路便宜，但有流水线气泡，靠微批次填满。</li>
+<li><strong>EP</strong> 切 MoE 的<strong>专家</strong>（<a class="xref" href="34-moe-layer.html">第34课</a>），每步两次 <span class="mono">all_to_all</span> 把 token 路由到专家再送回；通信随 token×top-k 增长，<a class="xref" href="47-large-scale-ep-and-eplb.html">第47课</a>接续大规模 EP + EPLB。</li>
+<li><strong>DP</strong> <strong>复制模型、切请求</strong>（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a> dp-controller），每步近乎零通信但每副本要装整份模型；Attention-DP 是"注意力 DP + 专家 EP"的组合变体。</li>
 <li><strong>统一与组合</strong>：四者都是同一个 <span class="mono">GroupCoordinator</span>（带 <span class="mono">rank</span>/<span class="mono">ranks</span>/<span class="mono">world_size</span>/<span class="mono">rank_in_group</span>）的不同实例，可叠乘组合成 TP=8 × PP=2 × DP=4。</li>
 <li><strong>怎么选</strong>：装不下→先 TP（单机内）再 PP（跨机）；MoE 专家撑爆显存→EP；装得下只想要更高吞吐→DP。真实部署常按这套优先级把几招叠起来用。</li>
 <li><strong>取舍四要素</strong>：通信量、链路要求、流水线气泡、显存占用。TP 通信最贵但省单层算力与显存，DP 通信最省但每副本占整份显存，PP 链路便宜却有气泡，EP 通信随 token×top-k 浮动且要防负载不均。</li>
@@ -508,7 +510,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。记住两类问题：<strong>TP/PP/EP</strong> 切<strong>模型本身</strong>——TP 切一层内的权重矩阵（第25/37课 q/k/v、MLP 列、词表），PP 切层与层的边界成阶段（第23课），EP 切 MoE 的专家（第34课）；<strong>DP</strong> 不切模型而是<strong>复制模型、切请求</strong>（第23课 dp-controller）。前三种分担一份模型的体积与算力，DP 分担吞吐。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。记住两类问题：<strong>TP/PP/EP</strong> 切<strong>模型本身</strong>——TP 切一层内的权重矩阵（第25/37课 q/k/v、MLP 列、词表），PP 切层与层的边界成阶段（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>），EP 切 MoE 的专家（<a class="xref" href="34-moe-layer.html">第34课</a>）；<strong>DP</strong> 不切模型而是<strong>复制模型、切请求</strong>（<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a> dp-controller）。前三种分担一份模型的体积与算力，DP 分担吞吐。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -540,8 +542,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用你自己的话区分 TP 与 PP：为什么说 TP 是“横向切一层的宽度”（把一层的权重矩阵分片，每层都要 all-reduce 合并、需 NVLink、通常单机内，联系第25/37课），而 PP 是“纵向切层的深度”（把层分成连续阶段、只在交界 send/recv 激活、链路便宜但有流水线气泡、靠微批次填满，联系第23课）；并说明二者为什么可以同时使用。</li>
-    <li>描述 EP 在一个 MoE 步中的完整数据流（第34课）：路由器选 top-k 专家后，第一次 all-to-all 把每个 token 送到拥有其专家的 rank、专家计算、第二次 all-to-all 送回，并说明通信量为何随 token×top-k 增长；再解释 SGLang 的 Attention-DP 如何把“注意力 DP + 专家 EP”组合起来，以及为什么所有这些最终都落在同一个 GroupCoordinator 抽象上；前瞻第47课大规模 EP + EPLB。</li>
+    <li>用你自己的话区分 TP 与 PP：为什么说 TP 是“横向切一层的宽度”（把一层的权重矩阵分片，每层都要 all-reduce 合并、需 NVLink、通常单机内，联系第25/37课），而 PP 是“纵向切层的深度”（把层分成连续阶段、只在交界 send/recv 激活、链路便宜但有流水线气泡、靠微批次填满，联系<a class="xref" href="23-dp-controller-and-pp-scheduling.html">第23课</a>）；并说明二者为什么可以同时使用。</li>
+    <li>描述 EP 在一个 MoE 步中的完整数据流（<a class="xref" href="34-moe-layer.html">第34课</a>）：路由器选 top-k 专家后，第一次 all-to-all 把每个 token 送到拥有其专家的 rank、专家计算、第二次 all-to-all 送回，并说明通信量为何随 token×top-k 增长；再解释 SGLang 的 Attention-DP 如何把“注意力 DP + 专家 EP”组合起来，以及为什么所有这些最终都落在同一个 GroupCoordinator 抽象上；前瞻<a class="xref" href="47-large-scale-ep-and-eplb.html">第47课</a>大规模 EP + EPLB。</li>
   </ul>
 </div>
 </div></div>
@@ -731,7 +733,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two kinds of question: <strong>TP/PP/EP</strong> split the <strong>model itself</strong>—TP the weight matrices within a layer (Lessons 25/37 q/k/v, MLP columns, vocab), PP the layer boundaries into stages (Lesson 23), EP the MoE experts (Lesson 34); <strong>DP</strong> doesn't split the model but <strong>replicates it and splits requests</strong> (Lesson 23 dp-controller). The first three share one model's size and compute; DP shares throughput.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two kinds of question: <strong>TP/PP/EP</strong> split the <strong>model itself</strong>—TP the weight matrices within a layer (Lessons 25/37 q/k/v, MLP columns, vocab), PP the layer boundaries into stages (<a class="xref" href="23-dp-controller-and-pp-scheduling.html">Lesson 23</a>), EP the MoE experts (<a class="xref" href="34-moe-layer.html">Lesson 34</a>); <strong>DP</strong> doesn't split the model but <strong>replicates it and splits requests</strong> (<a class="xref" href="23-dp-controller-and-pp-scheduling.html">Lesson 23</a> dp-controller). The first three share one model's size and compute; DP shares throughput.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -763,8 +765,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>In your own words, distinguish TP from PP: why TP "splits the width of a layer" (sharding a layer's weight matrices, all-reducing every layer, needing NVLink, usually single node; link Lessons 25/37) while PP "splits the depth of the stack" (layers into consecutive stages, send/recv activations only at boundaries, cheap link but pipeline bubbles filled by micro-batches; link Lesson 23); and explain why the two can be used together.</li>
-    <li>Describe EP's full dataflow in one MoE step (Lesson 34): after the router picks top-k experts, a first all-to-all sends each token to the rank owning its expert, experts compute, a second all-to-all sends results back; explain why communication grows with token×top-k. Then explain how SGLang's Attention-DP combines "attention DP + expert EP", and why all of this ultimately rests on the same GroupCoordinator abstraction; forward-ref Lesson 47's large-scale EP + EPLB.</li>
+    <li>In your own words, distinguish TP from PP: why TP "splits the width of a layer" (sharding a layer's weight matrices, all-reducing every layer, needing NVLink, usually single node; link Lessons 25/37) while PP "splits the depth of the stack" (layers into consecutive stages, send/recv activations only at boundaries, cheap link but pipeline bubbles filled by micro-batches; link <a class="xref" href="23-dp-controller-and-pp-scheduling.html">Lesson 23</a>); and explain why the two can be used together.</li>
+    <li>Describe EP's full dataflow in one MoE step (<a class="xref" href="34-moe-layer.html">Lesson 34</a>): after the router picks top-k experts, a first all-to-all sends each token to the rank owning its expert, experts compute, a second all-to-all sends results back; explain why communication grows with token×top-k. Then explain how SGLang's Attention-DP combines "attention DP + expert EP", and why all of this ultimately rests on the same GroupCoordinator abstraction; forward-ref <a class="xref" href="47-large-scale-ep-and-eplb.html">Lesson 47</a>'s large-scale EP + EPLB.</li>
   </ul>
 </div>
 </div></div>

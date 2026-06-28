@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -338,17 +340,17 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  末端归一（第 36 课）后，每个位置一个隐藏向量。<strong>lm_head</strong>（一个 [hidden × vocab] 的大矩阵）把它投影成
-  <strong>每个词表 token 一个分数 = logits</strong>，再由采样器（第 28 课）选出 token。词表很大（3 万~25 万），
-  lm_head 与词嵌入矩阵都很重，所以在张量并行（第 46 课）下按<strong>词表维度切分到各 rank</strong>，每卡只算自己那一片，
+  末端归一（<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>）后，每个位置一个隐藏向量。<strong>lm_head</strong>（一个 [hidden × vocab] 的大矩阵）把它投影成
+  <strong>每个词表 token 一个分数 = logits</strong>，再由采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）选出 token。词表很大（3 万~25 万），
+  lm_head 与词嵌入矩阵都很重，所以在张量并行（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>）下按<strong>词表维度切分到各 rank</strong>，每卡只算自己那一片，
   再 <strong>all-gather</strong> 拼成完整 logits。<span class="mono">LogitsProcessor</span> 负责把这套流程（含<strong>只取末位</strong>的优化）串起来。
 </div>
 
 <h2>从 hidden 到 logits：输出头 lm_head</h2>
-<p>模型的主体（第 26 课）一层层算下来，给每个输入位置产出一个 <strong>hidden 向量</strong>（维度就是模型的隐藏维，比如 4096）。
+<p>模型的主体（<a class="xref" href="26-writing-a-model.html">第 26 课</a>）一层层算下来，给每个输入位置产出一个 <strong>hidden 向量</strong>（维度就是模型的隐藏维，比如 4096）。
 但这只是"中间表示"，不是答案。要预测下一个词，得知道<strong>词表里每个候选 token 有多"合适"</strong>——这就是 <span class="mono">lm_head</span> 干的事：
 它是一个形状为 <span class="mono">[hidden_dim × vocab_size]</span> 的大矩阵，把 hidden 向量乘上去，得到一个<strong>长度等于词表大小</strong>的分数向量，
-这就是 <strong>logits</strong>。logits 越大的 token，模型越认为它该是下一个词。logits 接着交给采样器（第 28 课）做温度、top-k/p、采样，最终落成一个具体 token。
+这就是 <strong>logits</strong>。logits 越大的 token，模型越认为它该是下一个词。logits 接着交给采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）做温度、top-k/p、采样，最终落成一个具体 token。
 很多模型还会让 lm_head 与输入词嵌入<strong>共享权重</strong>（tied embedding），因为"把词变向量"和"把向量变回词分数"本就是一对互逆的事。</p>
 
 <div class="fig">
@@ -375,10 +377,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>主体前向</h4><p>嵌入 → N 层 → 末端归一（第 36 课），得到每位置的 hidden。</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>主体前向</h4><p>嵌入 → N 层 → 末端归一（<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>），得到每位置的 hidden。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>取末位</h4><p>解码时<strong>只留每条请求的最后一个位置</strong>——只有它的 logits 用来预测下一个词。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>lm_head 投影</h4><p>hidden × lm_head → 词表维度的 <strong>logits</strong>（按 rank 各算一片）。</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>跨卡汇总 + 采样</h4><p><strong>all-gather</strong> 拼出完整 logits → 采样器（第 28 课）出 token。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>跨卡汇总 + 采样</h4><p><strong>all-gather</strong> 拼出完整 logits → 采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）出 token。</p></div></div>
 </div>
 
 <div class="flow">
@@ -390,7 +392,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="arrow">→</div>
   <div class="node"><div class="nt">完整 logits</div><div class="nd">长度 = 词表大小<br>每个 token 一个分</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Sampler·第 28 课</div><div class="nd">温度 / top-k/p<br>选出下一个 token</div></div>
+  <div class="node"><div class="nt">Sampler·<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a></div><div class="nd">温度 / top-k/p<br>选出下一个 token</div></div>
 </div>
 
 <h2>只取末位：一行 logits 胜过两千行</h2>
@@ -398,12 +400,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>于是 <span class="mono">LogitsProcessor</span> 在调用 lm_head 之前，先把 hidden 从 <span class="mono">[2000, hidden]</span> 裁成 <span class="mono">[1, hidden]</span>，<strong>只让最后一行过那张 [hidden × vocab] 的大矩阵</strong>。lm_head 是整个前向里数一数二贵的矩阵乘（词表几万到几十万列），把它的输入从 2000 行压到 1 行，等于把这步的算力和访存直接<strong>砍掉了两千倍</strong>。批处理时也一样：每条请求只贡献它自己的末位，一个 batch 有多少条请求，就只算多少行 logits，而不是把整批 prompt 的全部位置都算一遍。</p>
 <p>唯一的例外是<strong>用户要 logprob</strong>：要返回每个 prompt token 的对数概率（评测、打分、推测解码的草稿校验都会用到），就得保留那些位置的 logits。<span class="mono">logits_metadata</span> 正是用来记录"这一批里哪些位置需要完整 logits、哪些只要末位"，让 LogitsProcessor 按需裁剪——默认省到只剩末位，需要时才多留几行。这也解释了为什么同一份代码，普通生成飞快、而开了 <span class="mono">logprobs</span> 的请求会稍慢一点：后者让那张大矩阵乘多吃了好些行输入。</p>
 
-<p>解码阶段这个优化更是天然成立：每步只往前走一个 token，每条请求的 hidden 本来就只有<strong>一行</strong>（最新那个位置），lm_head 自然只算一行。所以"末位切片"在预填充时是<strong>主动裁剪</strong>、在解码时是<strong>本就如此</strong>——两种模式（第 4 课）在这里被统一成同一句话：<strong>每条请求只取一行 hidden 去算 logits</strong>。也正因为输出头只处理这薄薄的几行，它在整个前向里的耗时占比通常很小；真正的大头还是中间那几十层注意力与 MLP。把这件事想清楚，你就能解释一个常见困惑：模型参数里词表头占了一大块<strong>显存</strong>，但它在每步解码里花的<strong>时间</strong>却很少——因为算的行数实在太少了。</p>
+<p>解码阶段这个优化更是天然成立：每步只往前走一个 token，每条请求的 hidden 本来就只有<strong>一行</strong>（最新那个位置），lm_head 自然只算一行。所以"末位切片"在预填充时是<strong>主动裁剪</strong>、在解码时是<strong>本就如此</strong>——两种模式（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）在这里被统一成同一句话：<strong>每条请求只取一行 hidden 去算 logits</strong>。也正因为输出头只处理这薄薄的几行，它在整个前向里的耗时占比通常很小；真正的大头还是中间那几十层注意力与 MLP。把这件事想清楚，你就能解释一个常见困惑：模型参数里词表头占了一大块<strong>显存</strong>，但它在每步解码里花的<strong>时间</strong>却很少——因为算的行数实在太少了。</p>
 
 <h2>词表太大：为什么要按 TP 切分</h2>
 <p>这里藏着一个容易被忽视的规模问题：<strong>词表非常大</strong>。常见模型的词表在 3 万到 25 万 token 之间，而 lm_head 是
 <span class="mono">[hidden × vocab]</span>、词嵌入是 <span class="mono">[vocab × hidden]</span>——当 vocab=15 万、hidden=8192 时，<strong>单这一张表就有十几亿参数</strong>，
-占整个模型相当可观的一块。在张量并行（第 46 课，把每层矩阵切到多卡）下，<strong>没法把整张词表头塞进一张卡</strong>，也不该让一张卡独扛这么大的乘法和显存。</p>
+占整个模型相当可观的一块。在张量并行（<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">第 46 课</a>，把每层矩阵切到多卡）下，<strong>没法把整张词表头塞进一张卡</strong>，也不该让一张卡独扛这么大的乘法和显存。</p>
 
 <p>解决办法叫<strong>词表并行（vocab parallelism）</strong>：<span class="mono">VocabParallelEmbedding</span> 与 <span class="mono">ParallelLMHead</span>
 把<strong>词表维度</strong>切成若干段，分给各个 TP rank——比如 4 卡、15 万词表，每卡负责约 3.75 万个 token。前向时，<strong>每卡只用自己那段 lm_head 算出"本段词的 logits"</strong>，
@@ -473,7 +475,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 ①<strong>末位切片</strong>——解码时，每条请求其实只需要<strong>最后一个位置</strong>的 logits 来预测下一个词；而预填充时虽然算了整段 prompt 的 hidden，
 但同样<strong>只有最后一位的 logits 有用</strong>（除非要算 logprob）。所以先把 hidden 裁到"每条请求的末位"，能大幅减少 lm_head 这步的计算量。
 ②<strong>词表并行投影</strong>——用 <span class="mono">ParallelLMHead</span> 算出本 rank 负责那段词表的 logits。③<strong>跨卡 all-gather</strong>——
-把各 rank 的片段汇总成完整 logits（由 <span class="mono">do_tensor_parallel_all_gather</span> 控制，单卡时跳过）。最后产出 <span class="mono">next_token_logits</span> 交给采样器（第 28 课）。</p>
+把各 rank 的片段汇总成完整 logits（由 <span class="mono">do_tensor_parallel_all_gather</span> 控制，单卡时跳过）。最后产出 <span class="mono">next_token_logits</span> 交给采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）。</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/logits_processor.py ::LogitsProcessor</span><span class="ln">输出头的编排</span></div>
@@ -490,21 +492,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>采样之前的最后一公里：logprob、结构化掩码与 logit bias</h2>
-<p>logits 拼齐之后、真正采样之前，还有几道"挂"在输出头附近的后处理，全都作用在这条词表维向量上。其一是 <strong>logprob</strong>：把 logits 过一次 log-softmax，就得到每个 token 的对数概率；用户要 top-k logprob、要给 prompt 里每个 token 打分、或推测解码要校验草稿 token，都从这里取数。其二是<strong>结构化输出的词表掩码</strong>（第 48 课）：当请求要求输出必须是合法 JSON 或匹配某个语法时，约束引擎会算出"当前这一步<strong>哪些 token 允许、哪些禁止</strong>"，把禁止的那些 token 的 logit 直接压到负无穷，于是采样器无论如何都选不到它们。</p>
-<p>其三是 <strong>logit bias</strong>：用户可以手动给某些 token 加正负偏置，抬高或压低它们被选中的概率——同样是在这条 logits 向量的对应位置上加一个数。这几样东西的共同点是：它们都<strong>不改变 lm_head 和词表并行的主干</strong>，只是在"完整 logits → 采样器（第 28 课）"这段缝隙里，按每条请求的需求<strong>对分数做微调或屏蔽</strong>。把它们和末位切片、跨卡汇总放在一起，就构成了 <span class="mono">LogitsProcessor</span> 到 <span class="mono">Sampler</span> 之间这"最后一公里"的全部工作：先裁、再投影、再拼齐、再按需打掩码加偏置，最后才交给采样器落子。</p>
+<p>logits 拼齐之后、真正采样之前，还有几道"挂"在输出头附近的后处理，全都作用在这条词表维向量上。其一是 <strong>logprob</strong>：把 logits 过一次 log-softmax，就得到每个 token 的对数概率；用户要 top-k logprob、要给 prompt 里每个 token 打分、或推测解码要校验草稿 token，都从这里取数。其二是<strong>结构化输出的词表掩码</strong>（<a class="xref" href="48-structured-outputs-and-jump-forward.html">第 48 课</a>）：当请求要求输出必须是合法 JSON 或匹配某个语法时，约束引擎会算出"当前这一步<strong>哪些 token 允许、哪些禁止</strong>"，把禁止的那些 token 的 logit 直接压到负无穷，于是采样器无论如何都选不到它们。</p>
+<p>其三是 <strong>logit bias</strong>：用户可以手动给某些 token 加正负偏置，抬高或压低它们被选中的概率——同样是在这条 logits 向量的对应位置上加一个数。这几样东西的共同点是：它们都<strong>不改变 lm_head 和词表并行的主干</strong>，只是在"完整 logits → 采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）"这段缝隙里，按每条请求的需求<strong>对分数做微调或屏蔽</strong>。把它们和末位切片、跨卡汇总放在一起，就构成了 <span class="mono">LogitsProcessor</span> 到 <span class="mono">Sampler</span> 之间这"最后一公里"的全部工作：先裁、再投影、再拼齐、再按需打掩码加偏置，最后才交给采样器落子。</p>
 
 <p>这里有个容易踩的顺序问题值得点明：<strong>掩码和偏置必须在 logits 上、采样之前施加</strong>，而不能在采样之后补救。因为采样器是从一个概率分布里抽样，一旦某个非法 token 进入了候选、被 top-k/p 选中并抽出来，就已经晚了；唯有事先把它的 logit 压成负无穷，softmax 之后它的概率才<strong>恰好为零</strong>，从根上断绝被选中的可能。结构化输出之所以能<strong>保证</strong>每一步都合法，正是靠这种"在分数层面提前封死"的机制，而不是生成完再校验、出错再重试。这也是为什么 logits 这条向量是兵家必争之地：它是"模型的原始判断"与"用户的硬约束"<strong>唯一能干净汇合</strong>的地方。</p>
 
-<p>这一课也把<strong>整条前向路径收束</strong>了：第 24 课 ModelRunner.forward → 模型主体（第 26 课，含注意力第 33 课、MoE 第 34 课、RoPE/Norm 第 36 课）
-→ <strong>LogitsProcessor → logits → Sampler（第 28 课）→ 下一个 token</strong>。词表并行也是继 q/k/v、MLP 之后又一个 TP 切分的例子（第 25/46 课），
-它和前面的量化（第 35 课）、注意力后端（第 33 课）一起，构成了 Part 8"算子层"的全貌：模型只管<strong>调用</strong>这些可复用、可切分、可换内核的层，真正的工程复杂度都被收进了层内部。</p>
+<p>这一课也把<strong>整条前向路径收束</strong>了：<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a> ModelRunner.forward → 模型主体（<a class="xref" href="26-writing-a-model.html">第 26 课</a>，含注意力<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>、MoE <a class="xref" href="34-moe-layer.html">第 34 课</a>、RoPE/Norm <a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>）
+→ <strong>LogitsProcessor → logits → Sampler（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）→ 下一个 token</strong>。词表并行也是继 q/k/v、MLP 之后又一个 TP 切分的例子（第 25/46 课），
+它和前面的量化（<a class="xref" href="35-quantization.html">第 35 课</a>）、注意力后端（<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>）一起，构成了 Part 8"算子层"的全貌：模型只管<strong>调用</strong>这些可复用、可切分、可换内核的层，真正的工程复杂度都被收进了层内部。</p>
 
-<p>站远一点看，这一课其实给 Part 8 画上了句号。第 33 课讲注意力后端怎么把"算注意力"这件事抽象成可换的 kernel，第 34 课讲 MoE 怎么用门控只激活少数专家，第 35 课讲量化怎么用更少比特换显存与带宽，第 36 课讲 RoPE 注入位置、RMSNorm 做归一、以及小算子怎么融合——而本课的输出头与词表并行，正是这条流水线的<strong>最后一站</strong>：把算了半天的 hidden 翻译回人能用的 token。这些层无一例外都遵循同一条设计哲学：<strong>模型文件只负责"按顺序调用"，真正的并行、量化、换内核、集合通信都被收进层的内部</strong>。正因如此，SGLang 才能用一份很薄的模型代码，去适配千变万化的硬件、并行度和精度配置——而你现在已经能从 hidden 一路讲到 token，把这条路上的每一站都说清楚了——嵌入怎么进、注意力怎么算、归一怎么稳、输出头怎么切、采样怎么落子，整条流水线再没有黑箱。</p>
+<p>站远一点看，这一课其实给 Part 8 画上了句号。<a class="xref" href="33-attention-backend-abstraction.html">第 33 课</a>讲注意力后端怎么把"算注意力"这件事抽象成可换的 kernel，<a class="xref" href="34-moe-layer.html">第 34 课</a>讲 MoE 怎么用门控只激活少数专家，<a class="xref" href="35-quantization.html">第 35 课</a>讲量化怎么用更少比特换显存与带宽，<a class="xref" href="36-rope-norm-and-ops.html">第 36 课</a>讲 RoPE 注入位置、RMSNorm 做归一、以及小算子怎么融合——而本课的输出头与词表并行，正是这条流水线的<strong>最后一站</strong>：把算了半天的 hidden 翻译回人能用的 token。这些层无一例外都遵循同一条设计哲学：<strong>模型文件只负责"按顺序调用"，真正的并行、量化、换内核、集合通信都被收进层的内部</strong>。正因如此，SGLang 才能用一份很薄的模型代码，去适配千变万化的硬件、并行度和精度配置——而你现在已经能从 hidden 一路讲到 token，把这条路上的每一站都说清楚了——嵌入怎么进、注意力怎么算、归一怎么稳、输出头怎么切、采样怎么落子，整条流水线再没有黑箱。</p>
 
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
-    <li><strong>lm_head</strong>：把每位置的 hidden 投影成<strong>词表大小的分数 = logits</strong>，交采样器（第 28 课）出 token。</li>
+    <li><strong>lm_head</strong>：把每位置的 hidden 投影成<strong>词表大小的分数 = logits</strong>，交采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）出 token。</li>
     <li><strong>词表很大</strong>（3 万~25 万）⇒ lm_head/嵌入是大矩阵，TP 下放不下一张卡。</li>
     <li><strong>词表并行</strong>：<span class="mono">VocabParallelEmbedding</span>/<span class="mono">ParallelLMHead</span> 按词表维切到各 rank，每卡算一段，再 <strong>all-gather</strong> 拼完整。</li>
     <li><strong>末位切片</strong>：只需每条请求最后一位的 logits，先裁 hidden 大幅省算力。</li>
@@ -519,11 +521,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <li>产出 KV 缓存，供后续解码复用</li>
     <li>产出注意力权重矩阵，给下一层用</li>
     <li>直接产出一个最终的 token 字符串，不再需要采样</li>
-    <li><strong>把每个位置的 hidden 投影成一条“词表大小”的分数向量 = logits</strong>——长度等于词表 token 数，每个分数表示该 token 有多“该”当下一个词，随后交采样器（第 28 课）选出 token</li>
+    <li><strong>把每个位置的 hidden 投影成一条“词表大小”的分数向量 = logits</strong>——长度等于词表 token 数，每个分数表示该 token 有多“该”当下一个词，随后交采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）选出 token</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。lm_head 是个 <span class='mono'>[hidden × vocab]</span> 的大矩阵，把 hidden 向量乘上去，得到一条<strong>长度等于词表大小</strong>的 logits——每个词表 token 一个分数。它<strong>不</strong>直接出 token（那是采样器第 28 课的活），不是注意力权重，也不是 KV 缓存。logits 只是“原始打分”，还要经过采样才落成具体 token。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。lm_head 是个 <span class='mono'>[hidden × vocab]</span> 的大矩阵，把 hidden 向量乘上去，得到一条<strong>长度等于词表大小</strong>的 logits——每个词表 token 一个分数。它<strong>不</strong>直接出 token（那是采样器<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>的活），不是注意力权重，也不是 KV 缓存。logits 只是“原始打分”，还要经过采样才落成具体 token。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -555,8 +557,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“<strong>超大词典 + N 个管理员</strong>”的类比把输出头与词表并行讲透，并算清<strong>末位切片</strong>省下的算力。请覆盖：①<span class='mono'>lm_head</span> 是 <span class='mono'>[hidden × vocab]</span> 大矩阵，把每位置 hidden 投影成<strong>词表大小的 logits</strong>，再交采样器（第 28 课）出 token；②词表很大（3 万~25 万）⇒ 这张表十几亿参数，TP 下放不下一卡，于是 <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> 按<strong>词表维</strong>切给各 rank，每卡算一段、再 <strong>all-gather</strong> 拼成完整 logits（和 q/k/v、MLP 的切法同源，第 25/46 课）；③<strong>末位切片</strong>——一条 2000 token 的 prompt，预填充虽算了全部位置的 hidden，但<strong>只有最后一位</strong>的 logits 用来预测下一个词，于是把 lm_head 的输入从 2000 行压到 <strong>1 行</strong>，这步算力直接砍掉两千倍（除非要 logprob 才多留几行）。</li>
-    <li>说清 <span class='mono'>LogitsProcessor</span> 如何把输出头<strong>串成一条流水线</strong>，并把它放进“整条前向收束”的脉络里。请说明：①它的三步——<strong>末位切片</strong>（按 <span class='mono'>logits_metadata</span> 只留每条请求的末位 hidden）→ <strong>词表并行投影</strong>（<span class='mono'>ParallelLMHead</span> 算本 rank 那段）→ <strong>跨卡 all-gather</strong>（<span class='mono'>do_tensor_parallel_all_gather</span> 控制，单卡跳过）；②采样前“最后一公里”的后处理都作用在这条 logits 向量上——<strong>logprob</strong>（log-softmax 取对数概率）、<strong>结构化输出词表掩码</strong>（第 48 课，把非法 token 的 logit 压成负无穷）、<strong>logit bias</strong>，且都必须在<strong>采样之前</strong>施加才能从根上封死非法 token；③本课如何收束整条前向：第 24 课 ModelRunner.forward → 模型主体（第 26 课）→ LogitsProcessor → logits → Sampler（第 28 课）→ token，并把 Part 8（注意力第 33、MoE 第 34、量化第 35、RoPE/Norm 第 36、本课 logits/词表并行）连成“可插拔算子层”的全貌。</li>
+    <li>用“<strong>超大词典 + N 个管理员</strong>”的类比把输出头与词表并行讲透，并算清<strong>末位切片</strong>省下的算力。请覆盖：①<span class='mono'>lm_head</span> 是 <span class='mono'>[hidden × vocab]</span> 大矩阵，把每位置 hidden 投影成<strong>词表大小的 logits</strong>，再交采样器（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）出 token；②词表很大（3 万~25 万）⇒ 这张表十几亿参数，TP 下放不下一卡，于是 <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> 按<strong>词表维</strong>切给各 rank，每卡算一段、再 <strong>all-gather</strong> 拼成完整 logits（和 q/k/v、MLP 的切法同源，第 25/46 课）；③<strong>末位切片</strong>——一条 2000 token 的 prompt，预填充虽算了全部位置的 hidden，但<strong>只有最后一位</strong>的 logits 用来预测下一个词，于是把 lm_head 的输入从 2000 行压到 <strong>1 行</strong>，这步算力直接砍掉两千倍（除非要 logprob 才多留几行）。</li>
+    <li>说清 <span class='mono'>LogitsProcessor</span> 如何把输出头<strong>串成一条流水线</strong>，并把它放进“整条前向收束”的脉络里。请说明：①它的三步——<strong>末位切片</strong>（按 <span class='mono'>logits_metadata</span> 只留每条请求的末位 hidden）→ <strong>词表并行投影</strong>（<span class='mono'>ParallelLMHead</span> 算本 rank 那段）→ <strong>跨卡 all-gather</strong>（<span class='mono'>do_tensor_parallel_all_gather</span> 控制，单卡跳过）；②采样前“最后一公里”的后处理都作用在这条 logits 向量上——<strong>logprob</strong>（log-softmax 取对数概率）、<strong>结构化输出词表掩码</strong>（<a class="xref" href="48-structured-outputs-and-jump-forward.html">第 48 课</a>，把非法 token 的 logit 压成负无穷）、<strong>logit bias</strong>，且都必须在<strong>采样之前</strong>施加才能从根上封死非法 token；③本课如何收束整条前向：<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a> ModelRunner.forward → 模型主体（<a class="xref" href="26-writing-a-model.html">第 26 课</a>）→ LogitsProcessor → logits → Sampler（<a class="xref" href="28-sampler-and-sampling-params.html">第 28 课</a>）→ token，并把 Part 8（注意力第 33、MoE 第 34、量化第 35、RoPE/Norm 第 36、本课 logits/词表并行）连成“可插拔算子层”的全貌。</li>
   </ul>
 </div>
 </div></div>
@@ -579,20 +581,20 @@ for one GPU — hence <strong>vocab parallelism</strong>. This lesson covers how
 
 <div class="card macro">
   <div class="tag">🌍 The big picture</div>
-  After the final norm (Lesson 36), each position has a hidden vector. The <strong>lm_head</strong> (a [hidden × vocab] matrix)
-  projects it to <strong>a score per vocab token = logits</strong>, which the Sampler (Lesson 28) turns into a token. The vocab is huge
-  (30k–250k), so lm_head and the embedding are heavy — under tensor parallelism (Lesson 46) they're <strong>split along the vocab
+  After the final norm (<a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>), each position has a hidden vector. The <strong>lm_head</strong> (a [hidden × vocab] matrix)
+  projects it to <strong>a score per vocab token = logits</strong>, which the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) turns into a token. The vocab is huge
+  (30k–250k), so lm_head and the embedding are heavy — under tensor parallelism (<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>) they're <strong>split along the vocab
   dimension across ranks</strong>, each GPU computing only its slice, then an <strong>all-gather</strong> assembles the full logits.
   <span class="mono">LogitsProcessor</span> orchestrates this (including the <strong>last-token-only</strong> optimization).
 </div>
 
 <h2>From hidden to logits: the lm_head output</h2>
-<p>The model body (Lesson 26) computes layer by layer, producing a <strong>hidden vector</strong> per input position (its dim is the
+<p>The model body (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>) computes layer by layer, producing a <strong>hidden vector</strong> per input position (its dim is the
 model's hidden size, e.g. 4096). But that's an intermediate representation, not an answer. To predict the next word you need to know
 <strong>how "fitting" each candidate token in the vocab is</strong> — that is what <span class="mono">lm_head</span> does: a matrix of
 shape <span class="mono">[hidden_dim × vocab_size]</span> that, multiplied with the hidden vector, yields a score vector <strong>as long
 as the vocabulary</strong> = the <strong>logits</strong>. The larger a token's logit, the more the model thinks it should come next.
-Logits then go to the Sampler (Lesson 28) for temperature, top-k/p and sampling, ending in a concrete token. Many models <strong>tie</strong>
+Logits then go to the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) for temperature, top-k/p and sampling, ending in a concrete token. Many models <strong>tie</strong>
 the lm_head with the input embedding, since "word→vector" and "vector→word scores" are naturally inverse operations.</p>
 
 <div class="fig">
@@ -619,10 +621,10 @@ the lm_head with the input embedding, since "word→vector" and "vector→word s
 </div>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>Body forward</h4><p>embed → N layers → final norm (Lesson 36) → a hidden per position.</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>Body forward</h4><p>embed → N layers → final norm (<a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>) → a hidden per position.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Take the last token</h4><p>In decode, keep <strong>only each request's last position</strong> — only its logits predict the next word.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>lm_head projection</h4><p>hidden × lm_head → vocab-sized <strong>logits</strong> (each rank computes a slice).</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>Gather + sample</h4><p><strong>all-gather</strong> assembles full logits → Sampler (Lesson 28) emits the token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>Gather + sample</h4><p><strong>all-gather</strong> assembles full logits → Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) emits the token.</p></div></div>
 </div>
 
 <div class="flow">
@@ -634,19 +636,19 @@ the lm_head with the input embedding, since "word→vector" and "vector→word s
   <div class="arrow">→</div>
   <div class="node"><div class="nt">full logits</div><div class="nd">length = vocab size,<br>one score per token</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">Sampler·Lesson 28</div><div class="nd">temperature / top-k/p<br>picks the next token</div></div>
+  <div class="node"><div class="nt">Sampler·<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a></div><div class="nd">temperature / top-k/p<br>picks the next token</div></div>
 </div>
 
 <h2>Take only the last position: one row of logits beats two thousand</h2>
 <p>"Keep only the last position" sounds like a minor tweak, but the compute it saves is substantial. Picture a 2000-token prompt: during prefill the model genuinely has to compute hidden for <strong>all 2000 positions</strong> — every layer's attention needs the representations of all preceding positions. But when we want to predict the <strong>2001st token</strong>, the only useful hidden is the <strong>last position's</strong>: it has already "seen" the whole prompt, and its logits are the next word's distribution. The logits of the other 1999 positions are, in ordinary generation, <strong>completely unused</strong>.</p>
 <p>So before calling lm_head, <span class="mono">LogitsProcessor</span> first prunes hidden from <span class="mono">[2000, hidden]</span> to <span class="mono">[1, hidden]</span>, <strong>letting only the last row pass through that [hidden × vocab] matrix</strong>. lm_head is one of the most expensive matmuls in the whole forward (tens to hundreds of thousands of vocab columns); shrinking its input from 2000 rows to 1 cuts this step's FLOPs and HBM traffic by <strong>2000×</strong>. Batching works the same way: each request contributes only its own last position, so a batch computes only as many logit rows as it has requests, not every position of every prompt.</p>
 <p>The one exception is when <strong>the user asks for logprobs</strong>: returning the log-probability of each prompt token (used by eval, scoring, and speculative-decoding draft verification) requires keeping those positions' logits. <span class="mono">logits_metadata</span> is exactly what records "which positions in this batch need full logits and which need only the last" so LogitsProcessor prunes on demand — down to just the last by default, keeping extra rows only when needed. That's why the same code is fast for ordinary generation but a touch slower with <span class="mono">logprobs</span> on: the latter feeds that big matmul several more rows.</p>
-<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (Lesson 4) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
+<p>In decode this optimization is automatic: each step advances one token, so each request's hidden is already just <strong>one row</strong> (the newest position) and lm_head naturally scores one row. So "last-token slice" is an <strong>active prune</strong> in prefill and <strong>already-the-case</strong> in decode — the two modes (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>) collapse to one sentence here: <strong>each request takes one row of hidden to compute logits</strong>. Precisely because the output head touches only these few rows, its share of forward time is usually small; the real cost is the dozens of attention and MLP layers in the middle. Grasp this and you can explain a common puzzle: the vocab head is a big chunk of <strong>HBM</strong>, yet spends little <strong>time</strong> per decode step — because it computes so few rows.</p>
 
 <h2>The vocab is huge: why split it across TP</h2>
 <p>There's an easily-missed scale problem here: the <strong>vocab is very large</strong>. Common models have 30k–250k tokens, and lm_head
 is <span class="mono">[hidden × vocab]</span>, the embedding <span class="mono">[vocab × hidden]</span> — at vocab=150k, hidden=8192,
-<strong>this one table alone is over a billion parameters</strong>, a sizable chunk of the model. Under tensor parallelism (Lesson 46, which
+<strong>this one table alone is over a billion parameters</strong>, a sizable chunk of the model. Under tensor parallelism (<a class="xref" href="46-tp-pp-ep-dp-parallelism.html">Lesson 46</a>, which
 splits each layer's matrices across GPUs), you <strong>can't put the whole vocab head on one GPU</strong>, nor should one GPU bear that
 much matmul and HBM.</p>
 
@@ -721,7 +723,7 @@ the next word; in prefill, although hidden was computed for the whole prompt, <s
 computing logprobs). So pruning hidden to "each request's last position" greatly cuts the lm_head work. ② <strong>vocab-parallel projection</strong>
 — use <span class="mono">ParallelLMHead</span> to compute the logits for this rank's vocab segment. ③ <strong>cross-GPU all-gather</strong> —
 assemble the segments into full logits (gated by <span class="mono">do_tensor_parallel_all_gather</span>, skipped on a single GPU). The result,
-<span class="mono">next_token_logits</span>, goes to the Sampler (Lesson 28).</p>
+<span class="mono">next_token_logits</span>, goes to the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>).</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/layers/logits_processor.py ::LogitsProcessor</span><span class="ln">orchestrating the output head</span></div>
@@ -738,22 +740,22 @@ assemble the segments into full logits (gated by <span class="mono">do_tensor_pa
 </div>
 
 <h2>The last mile before sampling: logprobs, structured masks, and logit bias</h2>
-<p>After logits are stitched and before sampling actually happens, a few post-processing steps "hang" near the output head, all acting on this vocab-dimension vector. First is <strong>logprob</strong>: a log-softmax over logits gives each token's log-probability; whether the user wants top-k logprobs, to score each prompt token, or speculative decoding needs to verify draft tokens, the numbers come from here. Second is the <strong>structured-output vocab mask</strong> (Lesson 48): when a request demands valid JSON or a grammar match, the constraint engine computes "which tokens are <strong>allowed vs forbidden</strong> at this step" and drives the forbidden tokens' logits to negative infinity, so the sampler can never pick them.</p>
-<p>Third is <strong>logit bias</strong>: the user can manually add a positive or negative bias to certain tokens, raising or lowering their odds of being chosen — again, just adding a number at the corresponding position of this logits vector. What these share is that they <strong>don't touch the lm_head and vocab-parallel backbone</strong>; they merely <strong>tweak or mask scores</strong> per request in the gap between "full logits → the Sampler (Lesson 28)". Put together with the last-token slice and the cross-GPU gather, they form the entire "last mile" between <span class="mono">LogitsProcessor</span> and <span class="mono">Sampler</span>: prune, project, stitch, then mask-and-bias on demand, and only then hand off to the sampler to make its move.</p>
+<p>After logits are stitched and before sampling actually happens, a few post-processing steps "hang" near the output head, all acting on this vocab-dimension vector. First is <strong>logprob</strong>: a log-softmax over logits gives each token's log-probability; whether the user wants top-k logprobs, to score each prompt token, or speculative decoding needs to verify draft tokens, the numbers come from here. Second is the <strong>structured-output vocab mask</strong> (<a class="xref" href="48-structured-outputs-and-jump-forward.html">Lesson 48</a>): when a request demands valid JSON or a grammar match, the constraint engine computes "which tokens are <strong>allowed vs forbidden</strong> at this step" and drives the forbidden tokens' logits to negative infinity, so the sampler can never pick them.</p>
+<p>Third is <strong>logit bias</strong>: the user can manually add a positive or negative bias to certain tokens, raising or lowering their odds of being chosen — again, just adding a number at the corresponding position of this logits vector. What these share is that they <strong>don't touch the lm_head and vocab-parallel backbone</strong>; they merely <strong>tweak or mask scores</strong> per request in the gap between "full logits → the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>)". Put together with the last-token slice and the cross-GPU gather, they form the entire "last mile" between <span class="mono">LogitsProcessor</span> and <span class="mono">Sampler</span>: prune, project, stitch, then mask-and-bias on demand, and only then hand off to the sampler to make its move.</p>
 <p>One ordering pitfall worth naming: <strong>masks and biases must be applied on the logits, before sampling</strong>, never patched up afterward. Because the sampler draws from a probability distribution, once an illegal token has entered the candidate set, been selected by top-k/p and drawn, it's already too late; only by driving its logit to negative infinity beforehand does its post-softmax probability become <strong>exactly zero</strong>, cutting off any chance of selection at the root. Structured output can <strong>guarantee</strong> legality at every step precisely because of this "seal it off at the score level in advance" mechanism, not by generating then validating then retrying on error. That's why this logits vector is so contested: it's the <strong>only place where</strong> "the model's raw judgment" and "the user's hard constraints" can cleanly meet.</p>
 
-<p>This lesson also <strong>closes the whole forward path</strong>: Lesson 24's ModelRunner.forward → the model body (Lesson 26, with
-attention L33, MoE L34, RoPE/Norm L36) → <strong>LogitsProcessor → logits → Sampler (Lesson 28) → the next token</strong>. Vocab parallelism
-is another TP-sharding example after q/k/v and MLP (Lessons 25/46), and together with quantization (Lesson 35) and the attention backend
-(Lesson 33) it completes Part 8's "operator layer": the model just <strong>calls</strong> these reusable, shardable, kernel-swappable layers,
+<p>This lesson also <strong>closes the whole forward path</strong>: <a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>'s ModelRunner.forward → the model body (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>, with
+attention L33, MoE L34, RoPE/Norm L36) → <strong>LogitsProcessor → logits → Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) → the next token</strong>. Vocab parallelism
+is another TP-sharding example after q/k/v and MLP (Lessons 25/46), and together with quantization (<a class="xref" href="35-quantization.html">Lesson 35</a>) and the attention backend
+(<a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a>) it completes Part 8's "operator layer": the model just <strong>calls</strong> these reusable, shardable, kernel-swappable layers,
 and the real engineering complexity is tucked inside them.</p>
 
-<p>Step back and this lesson really puts a period on Part 8. Lesson 33 showed how the attention backend abstracts "compute attention" into a swappable kernel, Lesson 34 how MoE gates to activate only a few experts, Lesson 35 how quantization trades fewer bits for HBM and bandwidth, Lesson 36 how RoPE injects position, RMSNorm normalizes, and small ops fuse — and this lesson's output head and vocab parallelism are the pipeline's <strong>final stop</strong>: translating all that hard-won hidden back into a token a human can use. Every one of these layers follows the same design philosophy: <strong>the model file only "calls in order", while the real parallelism, quantization, kernel swaps, and collectives are tucked inside the layers</strong>. That's exactly why SGLang can fit a very thin model file to wildly varying hardware, parallelism degrees, and precision configs — and you can now narrate the whole way from hidden to token, explaining every stop along the road: how embeddings go in, how attention computes, how norm steadies, how the output head splits, how sampling lands the move, with no black box left in the pipeline.</p>
+<p>Step back and this lesson really puts a period on Part 8. <a class="xref" href="33-attention-backend-abstraction.html">Lesson 33</a> showed how the attention backend abstracts "compute attention" into a swappable kernel, <a class="xref" href="34-moe-layer.html">Lesson 34</a> how MoE gates to activate only a few experts, <a class="xref" href="35-quantization.html">Lesson 35</a> how quantization trades fewer bits for HBM and bandwidth, <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a> how RoPE injects position, RMSNorm normalizes, and small ops fuse — and this lesson's output head and vocab parallelism are the pipeline's <strong>final stop</strong>: translating all that hard-won hidden back into a token a human can use. Every one of these layers follows the same design philosophy: <strong>the model file only "calls in order", while the real parallelism, quantization, kernel swaps, and collectives are tucked inside the layers</strong>. That's exactly why SGLang can fit a very thin model file to wildly varying hardware, parallelism degrees, and precision configs — and you can now narrate the whole way from hidden to token, explaining every stop along the road: how embeddings go in, how attention computes, how norm steadies, how the output head splits, how sampling lands the move, with no black box left in the pipeline.</p>
 
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
-    <li><strong>lm_head</strong>: projects each position's hidden into <strong>vocab-sized scores = logits</strong>, fed to the Sampler (Lesson 28).</li>
+    <li><strong>lm_head</strong>: projects each position's hidden into <strong>vocab-sized scores = logits</strong>, fed to the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>).</li>
     <li><strong>Vocab is huge</strong> (30k–250k) ⇒ lm_head/embedding are big matrices, too big for one GPU under TP.</li>
     <li><strong>Vocab parallel</strong>: <span class="mono">VocabParallelEmbedding</span>/<span class="mono">ParallelLMHead</span> split vocab across ranks, each computes a segment, then <strong>all-gather</strong> assembles the full logits.</li>
     <li><strong>Last-token slice</strong>: only each request's last position's logits are needed, so prune hidden first to save compute.</li>
@@ -768,11 +770,11 @@ and the real engineering complexity is tucked inside them.</p>
     <li>It produces the KV cache for later decode reuse</li>
     <li>It produces an attention weight matrix for the next layer</li>
     <li>It directly produces a final token string, no sampling needed</li>
-    <li><strong>It projects each position's hidden into a 'vocab-sized' score vector = logits</strong> — length equals the number of vocab tokens, each score saying how 'fitting' that token is as the next word, then handed to the Sampler (Lesson 28) to pick a token</li>
+    <li><strong>It projects each position's hidden into a 'vocab-sized' score vector = logits</strong> — length equals the number of vocab tokens, each score saying how 'fitting' that token is as the next word, then handed to the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) to pick a token</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. lm_head is a big <span class='mono'>[hidden × vocab]</span> matrix; multiplying the hidden vector through it yields logits <strong>as long as the vocab</strong> — one score per vocab token. It does <strong>not</strong> emit a token directly (that's the Sampler's job, Lesson 28), nor attention weights, nor the KV cache. Logits are just raw scores that still need sampling to become a concrete token.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. lm_head is a big <span class='mono'>[hidden × vocab]</span> matrix; multiplying the hidden vector through it yields logits <strong>as long as the vocab</strong> — one score per vocab token. It does <strong>not</strong> emit a token directly (that's the Sampler's job, <a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>), nor attention weights, nor the KV cache. Logits are just raw scores that still need sampling to become a concrete token.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -804,8 +806,8 @@ and the real engineering complexity is tucked inside them.</p>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the '<strong>giant dictionary + N librarians</strong>' analogy, fully explain the output head and vocab parallelism, and pin down the FLOPs saved by the <strong>last-token slice</strong>. Cover: (1) <span class='mono'>lm_head</span> is a big <span class='mono'>[hidden × vocab]</span> matrix that projects each position's hidden into <strong>vocab-sized logits</strong>, handed to the Sampler (Lesson 28) for a token; (2) the vocab is huge (30k–250k) ⇒ this table is a billion+ params, too big for one GPU under TP, so <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> split the <strong>vocab dim</strong> across ranks, each computing a segment then <strong>all-gather</strong>-ing into full logits (same idea as the q/k/v and MLP splits, Lessons 25/46); (3) the <strong>last-token slice</strong> — for a 2000-token prompt, prefill computes hidden for all positions but only the <strong>last position's</strong> logits predict the next word, so shrinking lm_head's input from 2000 rows to <strong>1 row</strong> cuts this step's compute by 2000× (unless logprobs are requested, keeping a few more rows).</li>
-    <li>Explain how <span class='mono'>LogitsProcessor</span> <strong>chains the output head into a pipeline</strong>, and place it in the 'closing the whole forward' arc. Cover: (1) its three steps — <strong>last-token slice</strong> (keep only each request's last hidden per <span class='mono'>logits_metadata</span>) → <strong>vocab-parallel projection</strong> (<span class='mono'>ParallelLMHead</span> computes this rank's segment) → <strong>cross-GPU all-gather</strong> (gated by <span class='mono'>do_tensor_parallel_all_gather</span>, skipped on one GPU); (2) the 'last mile' post-processing before sampling that all acts on this logits vector — <strong>logprob</strong> (log-softmax for log-probabilities), the <strong>structured-output vocab mask</strong> (Lesson 48, driving illegal tokens' logits to negative infinity), and <strong>logit bias</strong>, all of which must be applied <strong>before sampling</strong> to seal off illegal tokens at the root; (3) how this lesson closes the whole forward: Lesson 24's ModelRunner.forward → model body (Lesson 26) → LogitsProcessor → logits → Sampler (Lesson 28) → token, tying Part 8 (attention L33, MoE L34, quant L35, RoPE/Norm L36, and this lesson's logits/vocab parallelism) into the full 'pluggable operator layer' picture.</li>
+    <li>Using the '<strong>giant dictionary + N librarians</strong>' analogy, fully explain the output head and vocab parallelism, and pin down the FLOPs saved by the <strong>last-token slice</strong>. Cover: (1) <span class='mono'>lm_head</span> is a big <span class='mono'>[hidden × vocab]</span> matrix that projects each position's hidden into <strong>vocab-sized logits</strong>, handed to the Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) for a token; (2) the vocab is huge (30k–250k) ⇒ this table is a billion+ params, too big for one GPU under TP, so <span class='mono'>VocabParallelEmbedding</span>/<span class='mono'>ParallelLMHead</span> split the <strong>vocab dim</strong> across ranks, each computing a segment then <strong>all-gather</strong>-ing into full logits (same idea as the q/k/v and MLP splits, Lessons 25/46); (3) the <strong>last-token slice</strong> — for a 2000-token prompt, prefill computes hidden for all positions but only the <strong>last position's</strong> logits predict the next word, so shrinking lm_head's input from 2000 rows to <strong>1 row</strong> cuts this step's compute by 2000× (unless logprobs are requested, keeping a few more rows).</li>
+    <li>Explain how <span class='mono'>LogitsProcessor</span> <strong>chains the output head into a pipeline</strong>, and place it in the 'closing the whole forward' arc. Cover: (1) its three steps — <strong>last-token slice</strong> (keep only each request's last hidden per <span class='mono'>logits_metadata</span>) → <strong>vocab-parallel projection</strong> (<span class='mono'>ParallelLMHead</span> computes this rank's segment) → <strong>cross-GPU all-gather</strong> (gated by <span class='mono'>do_tensor_parallel_all_gather</span>, skipped on one GPU); (2) the 'last mile' post-processing before sampling that all acts on this logits vector — <strong>logprob</strong> (log-softmax for log-probabilities), the <strong>structured-output vocab mask</strong> (<a class="xref" href="48-structured-outputs-and-jump-forward.html">Lesson 48</a>, driving illegal tokens' logits to negative infinity), and <strong>logit bias</strong>, all of which must be applied <strong>before sampling</strong> to seal off illegal tokens at the root; (3) how this lesson closes the whole forward: <a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>'s ModelRunner.forward → model body (<a class="xref" href="26-writing-a-model.html">Lesson 26</a>) → LogitsProcessor → logits → Sampler (<a class="xref" href="28-sampler-and-sampling-params.html">Lesson 28</a>) → token, tying Part 8 (attention L33, MoE L34, quant L35, RoPE/Norm L36, and this lesson's logits/vocab parallelism) into the full 'pluggable operator layer' picture.</li>
   </ul>
 </div>
 </div></div>

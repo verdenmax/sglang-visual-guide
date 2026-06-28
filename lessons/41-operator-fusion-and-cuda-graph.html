@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -327,12 +329,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div><p>把一次内核启动想象成"去仓库取一趟货"。<strong>未融合</strong>就像：先去仓库取原料（读 HBM），加工成半成品后再送回仓库（写 HBM），下一道工序又把半成品取出来（再读 HBM）继续做。光是来回搬运就耗掉大量时间，而 GPU 的"仓库"（显存）带宽是有限的。<strong>融合</strong>则像：把相邻几道工序合并在同一个车间一次做完，半成品直接放在手边的工作台（寄存器）上，不再往返仓库。</p><p>而 <span class="mono">CUDA Graph</span> 像是把"今天要跑的整条流水线动作"提前录像一遍：每次开工不用工头（CPU）逐个喊口令，直接<strong>放录像（replay）</strong>，机器照着做即可。但录像有个前提——动作必须每次<strong>一模一样</strong>（形状固定、没有临场看数据才决定的分支），否则录像就对不上了。</p></div>
 
-<div class="card macro"><div class="tag">🌍 宏观理解</div><p>回顾<span class="mono">第4课</span>：解码阶段是<strong>带宽受限（bandwidth-bound）</strong>的，每个 token 的实际算力利用率很低，瓶颈在搬数据和发指令。于是任何能<strong>减少 HBM 往返</strong>、<strong>减少内核启动次数</strong>的手段都直接转化为吞吐。算子融合减少前者与后者，CUDA Graph（<span class="mono">第27课</span>）几乎消灭后者中"CPU 提交"的那部分。这些被融合、被捕获的内核，最终来自<span class="mono">第38课（AOT 预编译）</span>与<span class="mono">第39课（JIT 即时编译）</span>——融合与图只是更好地"编排"它们。</p></div>
+<div class="card macro"><div class="tag">🌍 宏观理解</div><p>回顾<span class="mono"><a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a></span>：解码阶段是<strong>带宽受限（bandwidth-bound）</strong>的，每个 token 的实际算力利用率很低，瓶颈在搬数据和发指令。于是任何能<strong>减少 HBM 往返</strong>、<strong>减少内核启动次数</strong>的手段都直接转化为吞吐。算子融合减少前者与后者，CUDA Graph（<span class="mono"><a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a></span>）几乎消灭后者中"CPU 提交"的那部分。这些被融合、被捕获的内核，最终来自<span class="mono"><a class="xref" href="38-sgl-kernel-overview.html">第38课</a>（AOT 预编译）</span>与<span class="mono"><a class="xref" href="39-jit-kernel.html">第39课</a>（JIT 即时编译）</span>——融合与图只是更好地"编排"它们。</p></div>
 
 <h2>一、算子融合：把多个小内核合成一个</h2>
 <p>融合的核心动机有两条。第一是<strong>访存（HBM round-trip）</strong>：未融合时，每个算子都要把输入从显存读进来、把输出写回显存，下一个算子又要重新读一遍。这些中间结果（临时张量）对最终答案没有价值，却白白占用了宝贵的显存带宽。第二是<strong>启动开销（launch overhead）</strong>：每发起一个内核，CPU 都要做一次提交，GPU 都要做一次调度；在解码这种单步计算量很小的场景下，启动开销可能比真正的计算还要久。</p>
 <p>以 SGLang 里最典型的 <span class="mono">SiluAndMul</span> 为例（门控激活，gate×up）。未融合的参考实现 <span class="mono">forward_native</span> 是"<strong>先 silu 再相乘</strong>"两步：先对前半段做 <span class="mono">F.silu(gate)</span> 得到一个临时张量并写回 HBM，再把它读出来与后半段 <span class="mono">up</span> 逐元素相乘。这意味着<strong>两趟内核、一次额外的临时张量写入与读取</strong>。融合内核 <span class="mono">forward_cuda</span> 则在<strong>一个 kernel</strong> 里同时完成 silu 与乘法：数据读进寄存器后，silu 的结果直接留在<strong>寄存器</strong>里参与乘法，从不落回显存，最后只写一次最终输出。</p>
-<p>SGLang 中类似的融合还有很多：<span class="mono">fused_add_rmsnorm</span>（把残差相加与 RMSNorm 合成一个内核，见<span class="mono">第36课</span>）、把 q/k 的归一化与 RoPE 旋转位置编码融合（fused qk-norm+rope）等。它们的共同点都是：<strong>把"写出去又读回来"的中间张量消灭在寄存器/共享内存里</strong>，并把多次启动压成一次。</p>
+<p>SGLang 中类似的融合还有很多：<span class="mono">fused_add_rmsnorm</span>（把残差相加与 RMSNorm 合成一个内核，见<span class="mono"><a class="xref" href="36-rope-norm-and-ops.html">第36课</a></span>）、把 q/k 的归一化与 RoPE 旋转位置编码融合（fused qk-norm+rope）等。它们的共同点都是：<strong>把"写出去又读回来"的中间张量消灭在寄存器/共享内存里</strong>，并把多次启动压成一次。</p>
 <p>为什么访存往返如此致命？因为现代 GPU 的算力增长速度远远快于显存带宽的增长速度，所谓"内存墙"。当一个算子真正要做的乘加运算很少，它的执行时间几乎完全由"从显存读多少、往显存写多少"决定。未融合的两趟实现，等于把一份本来可以留在芯片内部的数据，先搬下楼再搬上楼：silu 的临时张量先被写进 HBM，紧接着又被原封不动地读回来，这一来一回的带宽全是浪费。融合之所以快，本质就是把这份"中间数据"锁在离计算单元最近的寄存器或共享内存里，让它在被消费之前从不离开芯片，从而把宝贵的显存带宽只留给真正必须读写的输入和最终输出。</p>
 <p>再看启动开销这一侧。每一次内核启动，CPU 都要走一遍"准备参数、提交到 GPU 队列"的流程，GPU 也要为这次启动做调度与同步。单看一次也许只有几微秒，但解码阶段一个模型前向里可能要发起成百上千个内核，而每步又只解码一个 token——把这些零碎的启动开销累加起来，往往能和真正的计算时间相提并论，甚至更高。融合把"多次启动"压成"一次启动"，正是从根上削减了这部分固定成本。这也解释了为什么融合在解码阶段的收益，常常比在预填充阶段更明显：预填充计算量大、启动开销被摊薄，而解码恰恰是启动开销最敏感的地方。</p>
 
@@ -373,15 +375,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>二、CUDA Graph：捕获一次，反复重放</h2>
-<p>回顾<span class="mono">第27课</span>：CUDA Graph 把一串<strong>固定的内核启动序列</strong>记录下来（capture），之后每一步解码只要<strong>重放（replay）</strong>这张图即可，几乎没有 CPU 端的提交开销。这对解码极其关键，因为解码每步真正算的东西很少，CPU 逐个提交内核的开销会被放大成主要瓶颈。可以这样打个比方：没有图的时候，CPU 像一个必须亲口逐道下令的指挥，每道命令都要先在脑子里整理、再开口传达；有了图，整套命令被提前写成一张乐谱，演奏时只要照谱直奏，指挥几乎不必再开口。解码动辄要重复成千上万步，省下的这点"开口"成本累加起来非常可观，对最终的吞吐曲线影响相当明显，这也是工程上必须把这条路径打磨到位的原因。</p>
+<p>回顾<span class="mono"><a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a></span>：CUDA Graph 把一串<strong>固定的内核启动序列</strong>记录下来（capture），之后每一步解码只要<strong>重放（replay）</strong>这张图即可，几乎没有 CPU 端的提交开销。这对解码极其关键，因为解码每步真正算的东西很少，CPU 逐个提交内核的开销会被放大成主要瓶颈。可以这样打个比方：没有图的时候，CPU 像一个必须亲口逐道下令的指挥，每道命令都要先在脑子里整理、再开口传达；有了图，整套命令被提前写成一张乐谱，演奏时只要照谱直奏，指挥几乎不必再开口。解码动辄要重复成千上万步，省下的这点"开口"成本累加起来非常可观，对最终的吞吐曲线影响相当明显，这也是工程上必须把这条路径打磨到位的原因。</p>
 <p>但 CUDA Graph 有两条硬约束：<strong>形状必须静态</strong>、<strong>不能有依赖数据的控制流</strong>。捕获时记录的是一组具体的指针与启动参数；如果下一次张量形状变了，或者程序要"看了数据才决定走哪条分支"，录下来的图就不再适用。因此：<strong>形状固定、行为确定的融合内核天然是"图友好（graph-friendly）"的</strong>；而那些<strong>形状会变、或在主机端有分支</strong>的算子，必须留在捕获区<strong>之外</strong>。</p>
-<p>SGLang 的做法是引入<strong>分段 / 可打断的图（piecewise / breakable graph，<span class="mono">第27课</span>）</strong>：把整条前向拆成若干"静态子段"分别捕获成小图，中间那些动态的部分（动态形状、host 侧分支）则在小图之间<strong>以 eager 方式即时执行</strong>。这样既享受了大部分内核的零启动开销，又不被少数动态算子拖累。</p>
+<p>SGLang 的做法是引入<strong>分段 / 可打断的图（piecewise / breakable graph，<span class="mono"><a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a></span>）</strong>：把整条前向拆成若干"静态子段"分别捕获成小图，中间那些动态的部分（动态形状、host 侧分支）则在小图之间<strong>以 eager 方式即时执行</strong>。这样既享受了大部分内核的零启动开销，又不被少数动态算子拖累。</p>
 <p>这里要厘清一个常见误解：CUDA Graph 并不会让单个内核本身算得更快，它优化的是"<strong>怎么把内核交给 GPU</strong>"这件事。一张被捕获的图，记录的是一连串内核的启动顺序、各自的网格/线程块配置以及它们读写的具体显存地址。重放时，GPU 驱动不再需要 CPU 一条一条地解析与提交，而是把这整张"已经排好的指令表"一次性丢给硬件执行。正因为记录的是<strong>具体地址</strong>，所以输入张量必须落在与捕获时相同的缓冲区里、形状也必须一致——这也是为什么 SGLang 会预先分配固定大小的输入输出缓冲区，并按若干预设的 batch 尺寸分别捕获多张图，运行时再挑形状最接近的那张来重放。</p>
 <p>那么哪些东西会"打断"图？典型是<strong>依赖数据的控制流</strong>：比如根据某个张量里实际算出来的值，去决定要不要走某条分支、要循环几次、要处理多长的序列。这类逻辑发生在 host（CPU）侧，且每次的走向都可能不同，无法被录进一张固定的图里。变长输入带来的<strong>动态形状</strong>同理——形状一变，捕获时记录的地址与启动参数就全部失配。分段图的智慧就在于：不强求把整条前向塞进一张图，而是承认"有些段天生是动态的"，把它们留给 eager，只把真正静态、可复用的子段固化成图。</p>
 
 <table class="t"><tr><th>被融合的算子</th><th>为什么要融</th></tr>
 <tr><td><span class="mono">SiluAndMul</span>（gate×up 激活）</td><td>免去 silu 临时张量的 HBM 写/读，两趟变一趟，一次启动</td></tr>
-<tr><td><span class="mono">fused_add_rmsnorm</span>（残差相加 + RMSNorm，第36课）</td><td>相加结果留在寄存器直接归一化，省一次往返与一次启动</td></tr>
+<tr><td><span class="mono">fused_add_rmsnorm</span>（残差相加 + RMSNorm，<a class="xref" href="36-rope-norm-and-ops.html">第36课</a>）</td><td>相加结果留在寄存器直接归一化，省一次往返与一次启动</td></tr>
 <tr><td>fused qk-norm + RoPE</td><td>归一化与旋转位置编码同内核完成，减少访存与提交</td></tr>
 <tr><td>融合后形状固定的内核</td><td>静态形状 → 图友好 → 可被 CUDA Graph 捕获重放</td></tr></table>
 
@@ -409,10 +411,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>三、二者如何配合：少 + 融 + 静态 → 捕获 → 重放</h2>
-<p>把两件事串起来看，逻辑非常顺：先用<strong>融合</strong>把内核数量压下来、把中间访存消灭掉，让前向里大部分内核既<strong>少</strong>又<strong>形状固定</strong>；这样的内核序列恰好满足 CUDA Graph 的静态前提，于是可以<strong>捕获一次</strong>，之后每步解码<strong>反复重放</strong>，把"CPU 逐个提交内核"的开销几乎归零。对于带宽受限、启动开销敏感的解码阶段（<span class="mono">第4课</span>），这正是吞吐能上去的关键一环。</p>
-<p>对于那些实在无法静态化的算子（典型如某些动态形状或数据依赖分支），就交给<strong>分段图</strong>：把它们隔在捕获区之外，用 eager 跑，其余静态子段照常捕获重放。需要强调的是，这些内核本体并不是凭空出现的——它们来自<span class="mono">第38课</span>的 AOT 预编译算子和<span class="mono">第39课</span>的 JIT 即时编译；融合与图只是在更高层把这些内核<strong>编排</strong>得更省、更快。</p>
+<p>把两件事串起来看，逻辑非常顺：先用<strong>融合</strong>把内核数量压下来、把中间访存消灭掉，让前向里大部分内核既<strong>少</strong>又<strong>形状固定</strong>；这样的内核序列恰好满足 CUDA Graph 的静态前提，于是可以<strong>捕获一次</strong>，之后每步解码<strong>反复重放</strong>，把"CPU 逐个提交内核"的开销几乎归零。对于带宽受限、启动开销敏感的解码阶段（<span class="mono"><a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a></span>），这正是吞吐能上去的关键一环。</p>
+<p>对于那些实在无法静态化的算子（典型如某些动态形状或数据依赖分支），就交给<strong>分段图</strong>：把它们隔在捕获区之外，用 eager 跑，其余静态子段照常捕获重放。需要强调的是，这些内核本体并不是凭空出现的——它们来自<span class="mono"><a class="xref" href="38-sgl-kernel-overview.html">第38课</a></span>的 AOT 预编译算子和<span class="mono"><a class="xref" href="39-jit-kernel.html">第39课</a></span>的 JIT 即时编译；融合与图只是在更高层把这些内核<strong>编排</strong>得更省、更快。</p>
 <p>可以用一个量化的直觉来感受这套配合的威力。假设解码每步要发起一千个内核，每次启动的 CPU 提交开销约两微秒，那么光是提交就要两毫秒；而如果这一千个内核里有九成能被融合压缩并捕获进一张图，重放时这部分几乎不再有逐内核的提交成本，省下的时间就直接变成了更高的 token 生成速率。换句话说，融合负责"把内核变少、变规整"，CUDA Graph 负责"把这批规整的内核以极低成本喷给硬件"，二者一前一后，缺一不可：只融合不入图，仍要逐个提交；只入图不融合，捕获的内核又多又杂，收益有限。</p>
-<p>还要记住一个层次关系：融合与图都属于"<strong>编排层</strong>"的优化，它们不生产内核，只决定内核怎么被组织和调用。真正的内核实现住在更底层——要么是<span class="mono">第38课</span>里随包预编译好的 AOT 算子，要么是<span class="mono">第39课</span>里按需即时编译的 JIT 算子。理解这条分工，能帮你在排查性能问题时迅速定位：是某个内核本身慢（该去看 AOT/JIT 实现与 kernel 调优），还是内核没被融合、没被入图导致启动开销爆炸（该去看融合路径与图捕获范围）。</p>
+<p>还要记住一个层次关系：融合与图都属于"<strong>编排层</strong>"的优化，它们不生产内核，只决定内核怎么被组织和调用。真正的内核实现住在更底层——要么是<span class="mono"><a class="xref" href="38-sgl-kernel-overview.html">第38课</a></span>里随包预编译好的 AOT 算子，要么是<span class="mono"><a class="xref" href="39-jit-kernel.html">第39课</a></span>里按需即时编译的 JIT 算子。理解这条分工，能帮你在排查性能问题时迅速定位：是某个内核本身慢（该去看 AOT/JIT 实现与 kernel 调优），还是内核没被融合、没被入图导致启动开销爆炸（该去看融合路径与图捕获范围）。</p>
 
 <div class="cols"><div class="col"><strong>融合友好（静态形状，可入图）</strong><ul><li><span class="mono">SiluAndMul</span> 等逐元素融合：形状由隐藏维决定，固定</li><li><span class="mono">fused_add_rmsnorm</span>：残差 + 归一，形状确定</li><li>fused qk-norm + RoPE：固定头维与序列布局</li><li>这些可被一并捕获进同一张图，重放零提交开销</li></ul></div><div class="col"><strong>打断图（依赖数据 / 动态形状）</strong><ul><li>变长输入、动态 batch/seq 形状的算子</li><li>"看数据再决定分支"的 host 侧控制流</li><li>必须留在捕获区之外，或用分段图夹在小图之间</li><li>以 eager 即时执行，避免破坏已捕获的静态子段</li></ul></div></div>
 
@@ -423,7 +425,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>融合 Fuse</h4><p class="mono">SiluAndMul</p><p>把多个小算子合成一个 kernel，消除临时张量与多次启动。</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>定形 Fix shape</h4><p class="mono">static shape</p><p>融合后的内核形状静态、行为确定，满足图的前提。</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>捕获 Capture</h4><p class="mono">CUDA Graph</p><p>把这串静态内核录成一张图（第27课）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>捕获 Capture</h4><p class="mono">CUDA Graph</p><p>把这串静态内核录成一张图（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）。</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>重放 Replay</h4><p class="mono">replay</p><p>每步解码直接重放，CPU 提交开销近乎为零。</p></div></div>
 </div>
 
@@ -452,10 +454,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>融合</strong>把多个小算子合成一个内核，消除中间临时张量的 <span class="mono">HBM</span> 往返，并把多次<strong>启动开销</strong>压成一次。</li>
 <li><span class="mono">SiluAndMul</span> 的 <span class="mono">forward_native</span> 是"先 silu 再乘"的两趟参考实现；<span class="mono">forward_cuda</span> 在一个 kernel 里同时做，数据留在寄存器。</li>
-<li>SGLang 常见融合：<span class="mono">SiluAndMul</span>、<span class="mono">fused_add_rmsnorm</span>（第36课）、fused qk-norm+RoPE。</li>
-<li><strong>CUDA Graph</strong>（第27课）捕获固定内核序列再重放，几乎零提交开销，但要求<strong>静态形状、无数据依赖分支</strong>。</li>
+<li>SGLang 常见融合：<span class="mono">SiluAndMul</span>、<span class="mono">fused_add_rmsnorm</span>（<a class="xref" href="36-rope-norm-and-ops.html">第36课</a>）、fused qk-norm+RoPE。</li>
+<li><strong>CUDA Graph</strong>（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）捕获固定内核序列再重放，几乎零提交开销，但要求<strong>静态形状、无数据依赖分支</strong>。</li>
 <li>融合后形状固定的内核<strong>图友好</strong>；动态/数据依赖的算子须留在捕获区外，或用<strong>分段/可打断图</strong>夹在小图之间以 eager 执行。</li>
-<li><strong>少 + 融 + 静态 → 捕获一次 → 反复重放</strong>，是带宽受限解码阶段（第4课）吞吐的关键；内核本体来自第38课（AOT）/ 第39课（JIT）。</li>
+<li><strong>少 + 融 + 静态 → 捕获一次 → 反复重放</strong>，是带宽受限解码阶段（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）吞吐的关键；内核本体来自<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>（AOT）/ <a class="xref" href="39-jit-kernel.html">第39课</a>（JIT）。</li>
 </ul></div>
 <div class="selftest">
 <h2>🧪 自测 · 想一想为什么这么设计</h2>
@@ -473,7 +475,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">2. <strong>CUDA Graph</strong>（第27课，捕获/重放）对被捕获的内核序列有什么<strong>硬性要求</strong>？</div>
+  <div class="qn">2. <strong>CUDA Graph</strong>（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>，捕获/重放）对被捕获的内核序列有什么<strong>硬性要求</strong>？</div>
   <ol class="opts">
     <li><strong>形状必须静态、且不能有依赖数据的控制流（host 侧分支）</strong></li>
     <li>所有算子都必须用 FP8 量化</li>
@@ -501,8 +503,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>以 <span class='mono'>SiluAndMul</span> 为例，说明<strong>未融合</strong>的 <span class='mono'>forward_native</span>（先 silu 再乘）相比<strong>融合</strong>的 <span class='mono'>forward_cuda</span>（一个 kernel 同时做）多付出了哪些代价：从 <span class='mono'>HBM</span> 往返与<strong>启动开销</strong>两个角度展开，并说明这对带宽受限的解码阶段（第4课）为何重要。</li>
-    <li>解释融合与 CUDA Graph 如何<strong>配合</strong>：为什么“少 + 融 + 静态形状”的内核序列正好满足图的捕获前提，从而能<strong>捕获一次、反复重放</strong>把 CPU 提交开销降到近零；再说明被融合/捕获的内核本体来自第38课（AOT）与第39课（JIT）这一事实意味着什么。</li>
+    <li>以 <span class='mono'>SiluAndMul</span> 为例，说明<strong>未融合</strong>的 <span class='mono'>forward_native</span>（先 silu 再乘）相比<strong>融合</strong>的 <span class='mono'>forward_cuda</span>（一个 kernel 同时做）多付出了哪些代价：从 <span class='mono'>HBM</span> 往返与<strong>启动开销</strong>两个角度展开，并说明这对带宽受限的解码阶段（<a class="xref" href="04-autoregressive-and-kv-cache.html">第4课</a>）为何重要。</li>
+    <li>解释融合与 CUDA Graph 如何<strong>配合</strong>：为什么“少 + 融 + 静态形状”的内核序列正好满足图的捕获前提，从而能<strong>捕获一次、反复重放</strong>把 CPU 提交开销降到近零；再说明被融合/捕获的内核本体来自<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>（AOT）与<a class="xref" href="39-jit-kernel.html">第39课</a>（JIT）这一事实意味着什么。</li>
   </ul>
 </div>
 </div></div>
@@ -511,12 +513,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div><p>Think of one kernel launch as "a round trip to the warehouse." <strong>Unfused</strong> is like: go fetch raw material (read HBM), process it into a half-product and ship it back (write HBM), then the next step fetches that half-product again (read HBM) to keep working. The hauling alone burns huge time, and the GPU's "warehouse" (memory) bandwidth is finite. <strong>Fusion</strong> is like merging several adjacent steps into one workshop done in a single pass, keeping the half-product right on the bench (registers) instead of round-tripping to the warehouse.</p><p>And a <span class="mono">CUDA graph</span> is like recording today's whole assembly-line choreography ahead of time: each run, the foreman (CPU) need not bark every command — just <strong>play the recording (replay)</strong> and the machines follow. The catch: the moves must be <strong>identical</strong> every time (fixed shapes, no branch that is decided by looking at data), or the recording no longer matches.</p></div>
 
-<div class="card macro"><div class="tag">🌍 The big picture</div><p>Recall <span class="mono">Lesson 4</span>: decoding is <strong>bandwidth-bound</strong>; per-token compute utilization is low and the bottleneck is moving data and issuing instructions. So anything that <strong>cuts HBM round-trips</strong> and <strong>cuts kernel launch count</strong> converts directly into throughput. Fusion reduces both; CUDA graphs (<span class="mono">Lesson 27</span>) nearly eliminate the "CPU submission" part of the latter. The fused and captured kernels ultimately come from <span class="mono">Lesson 38 (AOT)</span> and <span class="mono">Lesson 39 (JIT)</span> — fusion and graphs merely <strong>orchestrate</strong> them better.</p></div>
+<div class="card macro"><div class="tag">🌍 The big picture</div><p>Recall <span class="mono"><a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a></span>: decoding is <strong>bandwidth-bound</strong>; per-token compute utilization is low and the bottleneck is moving data and issuing instructions. So anything that <strong>cuts HBM round-trips</strong> and <strong>cuts kernel launch count</strong> converts directly into throughput. Fusion reduces both; CUDA graphs (<span class="mono"><a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a></span>) nearly eliminate the "CPU submission" part of the latter. The fused and captured kernels ultimately come from <span class="mono"><a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> (AOT)</span> and <span class="mono"><a class="xref" href="39-jit-kernel.html">Lesson 39</a> (JIT)</span> — fusion and graphs merely <strong>orchestrate</strong> them better.</p></div>
 
 <h2>1. Operator fusion: merge many small kernels into one</h2>
 <p>Fusion has two core motivations. First, <strong>memory traffic (HBM round-trips)</strong>: unfused, every op reads its input from memory and writes its output back, and the next op reads it again. These intermediates (temporaries) add nothing to the final answer yet waste precious bandwidth. Second, <strong>launch overhead</strong>: every kernel launch costs a CPU submission and a GPU dispatch; in decode, where each step computes very little, launch overhead can exceed the real compute.</p>
 <p>Take SGLang's archetypal <span class="mono">SiluAndMul</span> (gate-and-up activation, gate×up). The unfused reference <span class="mono">forward_native</span> does it in <strong>two steps — silu THEN multiply</strong>: run <span class="mono">F.silu(gate)</span> on the first half into a temporary written to HBM, then read it back and multiply elementwise with the second half <span class="mono">up</span>. That is <strong>two kernel passes plus one extra temporary written and read</strong>. The fused <span class="mono">forward_cuda</span> does silu AND multiply in <strong>one kernel</strong>: once data is in registers, the silu result stays in <strong>registers</strong> for the multiply, never spilling to memory, writing only the final output once.</p>
-<p>SGLang has many similar fusions: <span class="mono">fused_add_rmsnorm</span> (residual-add fused with RMSNorm into one kernel, see <span class="mono">Lesson 36</span>), and fusing q/k normalization with RoPE (fused qk-norm+rope). Their common trait: <strong>kill the "write-out-then-read-back" intermediate inside registers/shared memory</strong>, and collapse several launches into one.</p>
+<p>SGLang has many similar fusions: <span class="mono">fused_add_rmsnorm</span> (residual-add fused with RMSNorm into one kernel, see <span class="mono"><a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a></span>), and fusing q/k normalization with RoPE (fused qk-norm+rope). Their common trait: <strong>kill the "write-out-then-read-back" intermediate inside registers/shared memory</strong>, and collapse several launches into one.</p>
 
 <div class="flow"><div class="node">read gate/up (HBM)</div><div class="arrow">→</div><div class="node">silu kernel</div><div class="arrow">→</div><div class="node">write temp (HBM)</div><div class="arrow">→</div><div class="node">read temp + up (HBM)</div><div class="arrow">→</div><div class="node">mul kernel</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
 <div class="flow"><div class="node">read x (HBM)</div><div class="arrow">→</div><div class="node">fused kernel: silu &amp; mul in registers</div><div class="arrow">→</div><div class="node">write output (HBM)</div></div>
@@ -555,13 +557,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>2. CUDA graphs: capture once, replay many times</h2>
-<p>Recall <span class="mono">Lesson 27</span>: a CUDA graph records a <strong>fixed sequence of kernel launches</strong> (capture), and then each decode step just <strong>replays</strong> that graph with almost no CPU-side submission overhead. This matters enormously for decode, because each step computes so little that per-kernel CPU submission balloons into the dominant cost.</p>
+<p>Recall <span class="mono"><a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a></span>: a CUDA graph records a <strong>fixed sequence of kernel launches</strong> (capture), and then each decode step just <strong>replays</strong> that graph with almost no CPU-side submission overhead. This matters enormously for decode, because each step computes so little that per-kernel CPU submission balloons into the dominant cost.</p>
 <p>But CUDA graphs impose two hard constraints: <strong>shapes must be static</strong> and <strong>no data-dependent control branching</strong>. Capture records concrete pointers and launch parameters; if next time a tensor's shape changes, or the program "looks at data to decide which branch to take," the recorded graph no longer applies. Hence: <strong>fixed-shape, deterministic fused kernels are inherently graph-friendly</strong>; ops whose <strong>shapes vary, or that branch on the host side</strong>, must stay <strong>outside</strong> the captured region.</p>
-<p>SGLang's answer is <strong>piecewise / breakable graphs (<span class="mono">Lesson 27</span>)</strong>: split the forward into several "static sub-spans," capture each as a small graph, and run the dynamic bits in between (dynamic shapes, host-side branches) <strong>eagerly</strong>. This way you get near-zero launch overhead on most kernels without being held back by the few dynamic ops.</p>
+<p>SGLang's answer is <strong>piecewise / breakable graphs (<span class="mono"><a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a></span>)</strong>: split the forward into several "static sub-spans," capture each as a small graph, and run the dynamic bits in between (dynamic shapes, host-side branches) <strong>eagerly</strong>. This way you get near-zero launch overhead on most kernels without being held back by the few dynamic ops.</p>
 
 <table class="t"><tr><th>Fused op</th><th>Why fuse it</th></tr>
 <tr><td><span class="mono">SiluAndMul</span> (gate×up activation)</td><td>Drops the silu temporary's HBM write/read; two passes become one, one launch</td></tr>
-<tr><td><span class="mono">fused_add_rmsnorm</span> (residual-add + RMSNorm, Lesson 36)</td><td>Sum stays in registers and is normalized in place; saves a round-trip and a launch</td></tr>
+<tr><td><span class="mono">fused_add_rmsnorm</span> (residual-add + RMSNorm, <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>)</td><td>Sum stays in registers and is normalized in place; saves a round-trip and a launch</td></tr>
 <tr><td>fused qk-norm + RoPE</td><td>Normalization and rotary embedding in one kernel; less traffic, fewer submissions</td></tr>
 <tr><td>Fixed-shape kernels after fusion</td><td>Static shape → graph-friendly → capturable/replayable by a CUDA graph</td></tr></table>
 
@@ -589,8 +591,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>3. How they cooperate: fewer + fused + static → capture → replay</h2>
-<p>Chaining the two ideas, the logic is clean: first use <strong>fusion</strong> to shrink the kernel count and erase intermediate traffic, so most kernels in the forward are both <strong>few</strong> and <strong>fixed-shape</strong>; such a kernel sequence exactly satisfies the CUDA graph's static premise, so you can <strong>capture once</strong> and then <strong>replay</strong> it every decode step, driving the "CPU submits each kernel" cost to nearly zero. For the bandwidth-bound, launch-sensitive decode stage (<span class="mono">Lesson 4</span>), this is a key reason throughput can climb.</p>
-<p>For ops that truly cannot be made static (e.g. some dynamic shapes or data-dependent branches), hand them to <strong>piecewise graphs</strong>: keep them outside the captured region, run them eagerly, and capture/replay the remaining static sub-spans as usual. Note these kernels are not conjured from nowhere — they come from <span class="mono">Lesson 38</span>'s AOT-precompiled kernels and <span class="mono">Lesson 39</span>'s JIT kernels; fusion and graphs merely <strong>orchestrate</strong> them more cheaply and quickly at a higher level.</p>
+<p>Chaining the two ideas, the logic is clean: first use <strong>fusion</strong> to shrink the kernel count and erase intermediate traffic, so most kernels in the forward are both <strong>few</strong> and <strong>fixed-shape</strong>; such a kernel sequence exactly satisfies the CUDA graph's static premise, so you can <strong>capture once</strong> and then <strong>replay</strong> it every decode step, driving the "CPU submits each kernel" cost to nearly zero. For the bandwidth-bound, launch-sensitive decode stage (<span class="mono"><a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a></span>), this is a key reason throughput can climb.</p>
+<p>For ops that truly cannot be made static (e.g. some dynamic shapes or data-dependent branches), hand them to <strong>piecewise graphs</strong>: keep them outside the captured region, run them eagerly, and capture/replay the remaining static sub-spans as usual. Note these kernels are not conjured from nowhere — they come from <span class="mono"><a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a></span>'s AOT-precompiled kernels and <span class="mono"><a class="xref" href="39-jit-kernel.html">Lesson 39</a></span>'s JIT kernels; fusion and graphs merely <strong>orchestrate</strong> them more cheaply and quickly at a higher level.</p>
 
 <div class="cols"><div class="col"><strong>Fusion-friendly (static shape, capturable)</strong><ul><li><span class="mono">SiluAndMul</span> and other elementwise fusions: shape set by hidden dim, fixed</li><li><span class="mono">fused_add_rmsnorm</span>: residual + norm, deterministic shape</li><li>fused qk-norm + RoPE: fixed head dim and sequence layout</li><li>These can be captured together into one graph, replayed with zero submission cost</li></ul></div><div class="col"><strong>Graph-breaking (data-dependent / dynamic shape)</strong><ul><li>Ops with variable-length input or dynamic batch/seq shapes</li><li>Host-side control branching that "branches after looking at data"</li><li>Must stay outside the captured region, or sit between small graphs in a piecewise graph</li><li>Run eagerly so the captured static sub-spans are not broken</li></ul></div></div>
 
@@ -600,7 +602,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>Fuse</h4><p class="mono">SiluAndMul</p><p>Merge several small ops into one kernel; kill temporaries and extra launches.</p></div></div>
   <div class="step"><div class="num">2</div><div class="sc"><h4>Fix shape</h4><p class="mono">static shape</p><p>The fused kernel is static-shaped and deterministic, meeting the graph premise.</p></div></div>
-  <div class="step"><div class="num">3</div><div class="sc"><h4>Capture</h4><p class="mono">CUDA Graph</p><p>Record this static kernel run into a graph (Lesson 27).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>Capture</h4><p class="mono">CUDA Graph</p><p>Record this static kernel run into a graph (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>).</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>Replay</h4><p class="mono">replay</p><p>Each decode step replays it; CPU submission cost near zero.</p></div></div>
 </div>
 
@@ -629,10 +631,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card key"><div class="tag">📌 Key points</div><ul>
 <li><strong>Fusion</strong> merges several small ops into one kernel, eliminating intermediate temporaries' <span class="mono">HBM</span> round-trips and collapsing many <strong>launches</strong> into one.</li>
 <li><span class="mono">SiluAndMul</span>'s <span class="mono">forward_native</span> is the "silu then multiply" two-pass reference; <span class="mono">forward_cuda</span> does both in one kernel with data kept in registers.</li>
-<li>Common SGLang fusions: <span class="mono">SiluAndMul</span>, <span class="mono">fused_add_rmsnorm</span> (Lesson 36), fused qk-norm+RoPE.</li>
-<li><strong>CUDA graphs</strong> (Lesson 27) capture a fixed kernel sequence and replay it with near-zero submission cost, but require <strong>static shapes and no data-dependent branches</strong>.</li>
+<li>Common SGLang fusions: <span class="mono">SiluAndMul</span>, <span class="mono">fused_add_rmsnorm</span> (<a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>), fused qk-norm+RoPE.</li>
+<li><strong>CUDA graphs</strong> (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>) capture a fixed kernel sequence and replay it with near-zero submission cost, but require <strong>static shapes and no data-dependent branches</strong>.</li>
 <li>Fixed-shape fused kernels are <strong>graph-friendly</strong>; dynamic/data-dependent ops must stay outside the captured region, or sit between small graphs in a <strong>piecewise/breakable graph</strong>, run eagerly.</li>
-<li><strong>Fewer + fused + static → capture once → replay</strong> is key to bandwidth-bound decode throughput (Lesson 4); the kernels themselves come from Lesson 38 (AOT) / Lesson 39 (JIT).</li>
+<li><strong>Fewer + fused + static → capture once → replay</strong> is key to bandwidth-bound decode throughput (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>); the kernels themselves come from <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> (AOT) / <a class="xref" href="39-jit-kernel.html">Lesson 39</a> (JIT).</li>
 </ul></div>
 <div class="selftest">
 <h2>🧪 Self-test - think about the design</h2>
@@ -650,7 +652,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">2. What <strong>hard requirement</strong> does a <strong>CUDA graph</strong> (Lesson 27, capture/replay) impose on the captured kernel sequence?</div>
+  <div class="qn">2. What <strong>hard requirement</strong> does a <strong>CUDA graph</strong> (<a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>, capture/replay) impose on the captured kernel sequence?</div>
   <ol class="opts">
     <li><strong>Shapes must be static and there must be no data-dependent control flow (host-side branches)</strong></li>
     <li>Every op must be FP8-quantized</li>
@@ -678,8 +680,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using <span class='mono'>SiluAndMul</span>, explain what extra cost the <strong>unfused</strong> <span class='mono'>forward_native</span> (silu then multiply) pays versus the <strong>fused</strong> <span class='mono'>forward_cuda</span> (one kernel does both): develop it from both <span class='mono'>HBM</span> round-trips and <strong>launch overhead</strong>, and explain why this matters for the bandwidth-bound decode stage (Lesson 4).</li>
-    <li>Explain how fusion and CUDA graphs <strong>cooperate</strong>: why a 'fewer + fused + static-shape' kernel sequence exactly meets the graph's capture premise so it can be <strong>captured once and replayed</strong> to drive CPU submission cost near zero; then explain what it means that the fused/captured kernels themselves come from Lesson 38 (AOT) and Lesson 39 (JIT).</li>
+    <li>Using <span class='mono'>SiluAndMul</span>, explain what extra cost the <strong>unfused</strong> <span class='mono'>forward_native</span> (silu then multiply) pays versus the <strong>fused</strong> <span class='mono'>forward_cuda</span> (one kernel does both): develop it from both <span class='mono'>HBM</span> round-trips and <strong>launch overhead</strong>, and explain why this matters for the bandwidth-bound decode stage (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</li>
+    <li>Explain how fusion and CUDA graphs <strong>cooperate</strong>: why a 'fewer + fused + static-shape' kernel sequence exactly meets the graph's capture premise so it can be <strong>captured once and replayed</strong> to drive CPU submission cost near zero; then explain what it means that the fused/captured kernels themselves come from <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> (AOT) and <a class="xref" href="39-jit-kernel.html">Lesson 39</a> (JIT).</li>
   </ul>
 </div>
 </div></div>

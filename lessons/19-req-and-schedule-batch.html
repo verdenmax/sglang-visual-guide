@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -324,7 +326,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead">
-上一课我们看清了调度器的<strong>心跳</strong>——那段 <span class="inline">while True</span> 的事件循环（第 18 课）。可它每一跳到底在
+上一课我们看清了调度器的<strong>心跳</strong>——那段 <span class="inline">while True</span> 的事件循环（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>）。可它每一跳到底在
 <strong>操作什么东西</strong>？答案是两个贯穿整个 Part 5 的核心数据结构：<strong>Req</strong> 与 <strong>ScheduleBatch</strong>。
 <span class="inline">Req</span> 是<strong>一条请求自己的状态机</strong>，从生到死它都<strong>活着</strong>；<span class="inline">ScheduleBatch</strong>
 是<strong>某一个 step 里被打包一起前向的那一撮 Req</strong>，它<strong>转瞬即逝</strong>——每跳一次就重建一次。看懂这一对"持久 vs 临时"
@@ -345,11 +347,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">🌍 宏观理解</div>
   一句话：<strong>Req 记录"一条请求是谁、走到哪了"，ScheduleBatch 记录"这一步要把哪些 Req 怎样一起算"</strong>。
   <span class="inline">Req</span> 装着输入 token、已生成的输出 token、采样参数、它占用的 KV 缓存索引（第 4/30 课）、前缀匹配信息
-  （RadixAttention 第 7 课）、以及完成/中止状态；它在 <strong>waiting → running → finished</strong> 三态间迁移。
+  （RadixAttention <a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）、以及完成/中止状态；它在 <strong>waiting → running → finished</strong> 三态间迁移。
   <span class="inline">ScheduleBatch</span> 则带着一个<strong>模式（mode）</strong>：要么 <strong>EXTEND（预填充）</strong>——接纳<strong>新请求</strong>、
   一次吃掉它们整段 prompt；要么 <strong>DECODE</strong>——让<strong>正在跑的请求</strong>每人各吐<strong>一个</strong>新 token。批还负责 KV 池的
   <strong>分配（接纳时占）与释放（完成时还）</strong>，并用 <span class="inline">filter_batch()</span> 在飞行途中<strong>剔除已完成的请求</strong>
-  （连续批处理的"腾槽"现场，第 5 课）。一句话收束：<strong>Req 管"是谁、走到哪"，ScheduleBatch 管"这一步算谁、怎么算"</strong>，二者一持久一临时，正是调度器一切决策的支点。
+  （连续批处理的"腾槽"现场，<a class="xref" href="05-continuous-batching.html">第 5 课</a>）。一句话收束：<strong>Req 管"是谁、走到哪"，ScheduleBatch 管"这一步算谁、怎么算"</strong>，二者一持久一临时，正是调度器一切决策的支点。
 </div>
 
 <h2>一、Req：一条请求的状态机，从生到死都活着</h2>
@@ -358,23 +360,23 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <em>"The input and output status of a request."</em> 它至少握着这几样东西：<strong>原始输入 token（origin_input_ids）</strong>、
 <strong>逐步追加的输出 token（output_ids）</strong>、<strong>采样参数（sampling_params）</strong>、它在
 <strong>KV 缓存里占据的位置（req_pool_idx、kv_committed_len/kv_allocated_len 等）</strong>、以及命中前缀树时的
-<strong>prefix_indices（RadixAttention，第 7 课）</strong>。最关键的是，它带着自己的<strong>生命周期</strong>：
+<strong>prefix_indices（RadixAttention，<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）</strong>。最关键的是，它带着自己的<strong>生命周期</strong>：
 被接纳前在 <strong>waiting</strong> 队列里排队，被选中预填充后进入 <strong>running</strong>，吐完最后一个 token（命中 EOS、达到 max_new_tokens 或被 abort）
 就变成 <strong>finished</strong>，随后它占的 KV 槽位被释放。下面这张图是它的一生。
 </p>
 
 <p>
-为什么这些状态非得"长在请求身上"，而不是记在别处？因为大模型推理是<strong>自回归</strong>的（第 4 课）：下一个 token 依赖前面所有 token，KV 缓存里逐格累积的正是这条请求<strong>自己的历史</strong>，
+为什么这些状态非得"长在请求身上"，而不是记在别处？因为大模型推理是<strong>自回归</strong>的（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）：下一个 token 依赖前面所有 token，KV 缓存里逐格累积的正是这条请求<strong>自己的历史</strong>，
 换一条请求就完全对不上。所以 <code>output_ids</code> 必须随它一路增长、<code>req_pool_idx</code> 必须牢牢钉住它在 KV 池里的那块地、<code>sampling_params</code> 必须从头到尾跟着它——这些都是<strong>请求私有、不可共享</strong>的状态。
-唯一能被多条请求<strong>共享</strong>的，是命中前缀树的那段公共前缀（<code>prefix_indices</code>，RadixAttention，第 7 课），但那也只是"指向同一段只读 KV 的引用"，各自后续生成依旧泾渭分明。
+唯一能被多条请求<strong>共享</strong>的，是命中前缀树的那段公共前缀（<code>prefix_indices</code>，RadixAttention，<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>），但那也只是"指向同一段只读 KV 的引用"，各自后续生成依旧泾渭分明。
 正是这种"私有状态贯穿一生"的本质，逼着 Req 成为一个持久对象——它装的不是某一拍的临时数据，而是一条请求<strong>从入队到完成</strong>的全部因果。
 </p>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>waiting（等待）</h4><p>请求被分词、经 IPC 送进调度器（第 16 课），先入<strong>等待队列</strong>。此刻它还没占 KV，只是排队，等调度策略（第 20 课）来挑。</p></div></div>
-  <div class="step"><div class="num">2</div><div class="sc"><h4>running · 第一拍 extend（预填充）</h4><p>被选中后进入 running，在一个 <strong>EXTEND 批</strong>里一次性吃掉整段 prompt：<code>prepare_for_extend()</code> 为它分配 KV 槽、铺好变长 token 张量。前缀命中部分（第 7 课）直接复用，不再重算。</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>waiting（等待）</h4><p>请求被分词、经 IPC 送进调度器（<a class="xref" href="16-io-structs-and-ipc.html">第 16 课</a>），先入<strong>等待队列</strong>。此刻它还没占 KV，只是排队，等调度策略（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）来挑。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>running · 第一拍 extend（预填充）</h4><p>被选中后进入 running，在一个 <strong>EXTEND 批</strong>里一次性吃掉整段 prompt：<code>prepare_for_extend()</code> 为它分配 KV 槽、铺好变长 token 张量。前缀命中部分（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）直接复用，不再重算。</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>running · 之后许多拍 decode（解码）</h4><p>同一个 Req 接着出现在<strong>一连串 DECODE 批</strong>里，每拍 <code>prepare_for_decode()</code> 给它要一个新 KV 槽、只算<strong>一个</strong>新 token，<code>output_ids</code> 追加一位。它在这里<strong>停留最久</strong>。</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed（完成与释放）</h4><p>命中 EOS、到达 max_new_tokens 或被 abort，状态转 <strong>finished</strong>；<code>filter_batch()</code> 把它当场清出当前批，KV 槽归还内存池（第 30 课），结果发往反分词器（第 17 课）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed（完成与释放）</h4><p>命中 EOS、到达 max_new_tokens 或被 abort，状态转 <strong>finished</strong>；<code>filter_batch()</code> 把它当场清出当前批，KV 槽归还内存池（<a class="xref" href="30-paged-memory-pools.html">第 30 课</a>），结果发往反分词器（<a class="xref" href="17-detokenizer-and-streaming.html">第 17 课</a>）。</p></div></div>
 </div>
 
 <div class="fig">
@@ -453,8 +455,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>
 这里要破除一个常见误解：<strong>批不是"队列"，而是"快照"</strong>。等待队列是长期存在、不断有人进出的；而 ScheduleBatch 是调度器在某一拍<strong>临时从运行集合里挑出一撮、拍下的一张合影</strong>，
 照完这张相、送 GPU 算完、收尾完成，这张相片就作废了。下一拍要再算，就再拍一张新的。也正因为它是快照，批里那些 GPU 张量（input_ids、seq_lens、out_cache_loc 等）才敢<strong>每步推倒重来</strong>：
-反正没人指望它们活过这一拍。把"队列=长期居所、批=瞬时合影"这组对照刻进脑子，后面第 20 课的调度策略、第 21 课的重叠调度器、第 22 课的分块预填充就都有了统一的坐标系。
-顺便说一句，正因为批是瞬时合影，调度器才敢在第 21 课用<strong>流水线</strong>把"上一拍批的收尾"与"这一拍批的前向"叠在一起跑——反正两张合影本就互不相干，谁也不依赖谁的张量存活。
+反正没人指望它们活过这一拍。把"队列=长期居所、批=瞬时合影"这组对照刻进脑子，后面<a class="xref" href="20-schedule-policy.html">第 20 课</a>的调度策略、<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>的重叠调度器、<a class="xref" href="22-chunked-prefill.html">第 22 课</a>的分块预填充就都有了统一的坐标系。
+顺便说一句，正因为批是瞬时合影，调度器才敢在<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第 21 课</a>用<strong>流水线</strong>把"上一拍批的收尾"与"这一拍批的前向"叠在一起跑——反正两张合影本就互不相干，谁也不依赖谁的张量存活。
 </p>
 
 <div class="cols">
@@ -462,14 +464,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <h4>EXTEND / prefill 批</h4>
     <p>由 <code>prepare_for_extend()</code> 构造，<code>forward_mode = EXTEND</code>。它<strong>接纳新请求</strong>，把每条请求<strong>整段 prompt</strong>的
     token 一次性前向。因为各请求 prompt 长度不同，它要铺<strong>变长（ragged）token 张量</strong>，并为每条新请求<strong>分配 KV 槽</strong>。
-    源码里 <code>input_ids</code> 取的是 <code>get_fill_ids()[len(prefix_indices):]</code>——<strong>只算前缀没命中的那截</strong>（第 7 课）。
-    长 prompt 太大装不下时，会切成 chunked prefill（第 22 课）。</p>
+    源码里 <code>input_ids</code> 取的是 <code>get_fill_ids()[len(prefix_indices):]</code>——<strong>只算前缀没命中的那截</strong>（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）。
+    长 prompt 太大装不下时，会切成 chunked prefill（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）。</p>
   </div>
   <div class="col">
     <h4>DECODE 批</h4>
     <p>由 <code>prepare_for_decode()</code> 构造，<code>forward_mode = DECODE</code>。它装的是<strong>正在跑的老请求</strong>，每条<strong>只吐一个</strong>新 token，
     因此张量是规整的<strong>每请求 1 token</strong>，只需为每条请求<strong>再要一个 KV 槽</strong>放新 token。它<strong>反复出现</strong>——一条请求一生中绝大多数拍
-    都在 decode 批里度过。这正是吞吐的主战场：批越满，GPU 越划算（连续批处理，第 5 课）。</p>
+    都在 decode 批里度过。这正是吞吐的主战场：批越满，GPU 越划算（连续批处理，<a class="xref" href="05-continuous-batching.html">第 5 课</a>）。</p>
   </div>
 </div>
 
@@ -513,7 +515,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 每条请求几十到几千 token 不等，张量是参差不齐的 ragged 布局，还要顺手为新来者在 KV 池里<strong>开辟新空间</strong>；而解码处理的是<strong>清一色每人一个</strong>的新 token，
 张量整整齐齐，只需在每条请求已有的 KV 末尾<strong>再追加一格</strong>。两者的访存模式、kernel 选择、显存压力都不同，硬塞进同一种批只会两头不讨好。
 所以 SGLang 让 <code>forward_mode</code> 当这个开关：组批时（第 18/20 课）先问一句"这一拍是接新人还是推老人"，再调对应的 <code>prepare_*</code> 把张量铺成该有的样子。
-顺带一提，当一段 prompt 长到一个 extend 批都装不下时，它会被切成几段、分多拍喂进去——这就是第 22 课要讲的<strong>分块预填充</strong>，本质仍是 EXTEND，只是把"一口吃完"改成"分几口吃"。
+顺带一提，当一段 prompt 长到一个 extend 批都装不下时，它会被切成几段、分多拍喂进去——这就是<a class="xref" href="22-chunked-prefill.html">第 22 课</a>要讲的<strong>分块预填充</strong>，本质仍是 EXTEND，只是把"一口吃完"改成"分几口吃"。
 </p>
 
 <h2>三、关键字段一览：各自装了什么、扮演什么角色</h2>
@@ -524,11 +526,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <tr><td class="mono">Req</td><td class="mono">origin_input_ids / output_ids</td><td>输入 token 与逐步追加的输出 token——请求的"内容"，持久</td></tr>
   <tr><td class="mono">Req</td><td class="mono">sampling_params</td><td>温度、top-p、max_new_tokens 等采样策略，决定怎么取下一个 token</td></tr>
   <tr><td class="mono">Req</td><td class="mono">req_pool_idx / kv_*_len</td><td>它在 KV 缓存里占的位置与长度（第 4/30 课），随生成增长</td></tr>
-  <tr><td class="mono">Req</td><td class="mono">prefix_indices</td><td>前缀树命中的复用部分（RadixAttention 第 7 课），extend 时跳过不算</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">prefix_indices</td><td>前缀树命中的复用部分（RadixAttention <a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>），extend 时跳过不算</td></tr>
   <tr><td class="mono">Req</td><td class="mono">finished() 状态</td><td>EOS / max_new_tokens / abort——触发 filter_batch 清退与 KV 释放</td></tr>
   <tr><td class="mono">ScheduleBatch</td><td class="mono">reqs: List[Req]</td><td>这一步一起前向的请求列表——批的"骨架"，每步重建</td></tr>
   <tr><td class="mono">ScheduleBatch</td><td class="mono">forward_mode</td><td>EXTEND 还是 DECODE——决定这一拍"怎么算"</td></tr>
-  <tr><td class="mono">ScheduleBatch</td><td class="mono">input_ids / seq_lens / out_cache_loc</td><td>为前向临时铺好的张量与 KV 输出位置，交给 ModelRunner（第 24 课）</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">input_ids / seq_lens / out_cache_loc</td><td>为前向临时铺好的张量与 KV 输出位置，交给 ModelRunner（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>）</td></tr>
 </table>
 
 <p>
@@ -557,12 +559,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 <p>注意三条请求<strong>已生成长度各不相同</strong>，却能同处一个 decode 批——因为 decode 张量是规整的"每请求 1 token"，长度差异由各自的
 <code>seq_lens</code> 记录。下一拍，假如 Req B 吐出了 EOS，<code>filter_batch()</code> 就把它<strong>当场剔除</strong>、释放它的 KV 槽，
-留下的 A、C 继续，空出来的容量还能接纳等待队列里的新请求（第 5 课、第 20 课）。</p>
+留下的 A、C 继续，空出来的容量还能接纳等待队列里的新请求（<a class="xref" href="05-continuous-batching.html">第 5 课</a>、<a class="xref" href="20-schedule-policy.html">第 20 课</a>）。</p>
 
 <p>
 把这幅画面与"持久 vs 临时"接起来，整条链路就活了：图里这一拍的三行，是<strong>这一个 step</strong> 临时拼出的 ScheduleBatch；而 A、B、C 三条 Req 早在前面某拍就被 extend 进来、
 此后已经走过了若干拍 decode，它们各自的"内容条"会一直加长到完成为止。下一拍的 ScheduleBatch 又是<strong>另一份新名单</strong>——也许 B 走了、也许等待队列里的 D 补了进来——但 A、C 这两条 Req
-还是原来那两个对象，带着它们一路攒下的 token 与 KV 继续往前。<strong>批在变，请求还在</strong>：这正是连续批处理（第 5 课）能让 GPU 始终满载的微观机理，也是调度器每一拍都要重算一次批的根本理由。</p>
+还是原来那两个对象，带着它们一路攒下的 token 与 KV 继续往前。<strong>批在变，请求还在</strong>：这正是连续批处理（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）能让 GPU 始终满载的微观机理，也是调度器每一拍都要重算一次批的根本理由。</p>
 
 <div class="codefile">
   <div class="cf-head"><span class="dot"></span><span class="path">python/sglang/srt/managers/schedule_batch.py ::ScheduleBatch</span><span class="ln">两个数据结构的骨架</span></div>
@@ -604,11 +606,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card key">
   <div class="tag">📌 本课要点</div>
   <ul>
-    <li><strong>Req = 一条请求的状态机，持久</strong>：装着输入/输出 token、采样参数、占用的 KV 索引（第 4/30 课）、前缀匹配信息（第 7 课）与完成状态；在 <span class="mono">waiting → running → finished</span> 间迁移，从生到死一直活着。</li>
-    <li><strong>ScheduleBatch = 这一步一起前向的那一撮 Req，临时</strong>：第一字段就是 <span class="mono">reqs: List[Req]</span>，其余多是为前向铺好的张量；它<strong>每个 step 重建一次</strong>（第 18 课），用完即弃。</li>
+    <li><strong>Req = 一条请求的状态机，持久</strong>：装着输入/输出 token、采样参数、占用的 KV 索引（第 4/30 课）、前缀匹配信息（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）与完成状态；在 <span class="mono">waiting → running → finished</span> 间迁移，从生到死一直活着。</li>
+    <li><strong>ScheduleBatch = 这一步一起前向的那一撮 Req，临时</strong>：第一字段就是 <span class="mono">reqs: List[Req]</span>，其余多是为前向铺好的张量；它<strong>每个 step 重建一次</strong>（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>），用完即弃。</li>
     <li><strong>批有两种模式</strong>：<span class="mono">EXTEND/prefill</span>（<code>prepare_for_extend()</code>，接纳新请求、吃整段 prompt、铺变长张量）对 <span class="mono">DECODE</span>（<code>prepare_for_decode()</code>，老请求每人各 +1 token、张量规整）。</li>
-    <li><strong>批管 KV 的占与还</strong>：接纳时分配、完成时释放；<span class="mono">filter_batch()</span> 在途中剔除已完成的请求，腾出槽位给等待者——这就是连续批处理（第 5 课）的现场。</li>
-    <li><strong>为何分开</strong>：同一条 Req 会出现在许多<strong>连续的 decode 批</strong>里——Req 持久、批临时。带着这对结构去看调度策略（第 20 课）、分块预填充（第 22 课）与模型前向（第 24 课），全 Part 5 一线贯通。</li>
+    <li><strong>批管 KV 的占与还</strong>：接纳时分配、完成时释放；<span class="mono">filter_batch()</span> 在途中剔除已完成的请求，腾出槽位给等待者——这就是连续批处理（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）的现场。</li>
+    <li><strong>为何分开</strong>：同一条 Req 会出现在许多<strong>连续的 decode 批</strong>里——Req 持久、批临时。带着这对结构去看调度策略（<a class="xref" href="20-schedule-policy.html">第 20 课</a>）、分块预填充（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）与模型前向（<a class="xref" href="24-model-runner-and-forward-batch.html">第 24 课</a>），全 Part 5 一线贯通。</li>
   </ul>
 </div>
 <div class="selftest">
@@ -623,7 +625,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。这正是把两者拆开的原因：批是事件循环每步<strong>重新计算的结果</strong>（第 18 课），转瞬即逝；而一条请求要跨越几十上百拍 decode 才生成完，必须有个<strong>持久</strong>对象一路携带它的输出 token、KV 索引与状态。Req 持久、批临时，是 Part 5 的主轴。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。这正是把两者拆开的原因：批是事件循环每步<strong>重新计算的结果</strong>（<a class="xref" href="18-scheduler-event-loop.html">第 18 课</a>），转瞬即逝；而一条请求要跨越几十上百拍 decode 才生成完，必须有个<strong>持久</strong>对象一路携带它的输出 token、KV 索引与状态。Req 持久、批临时，是 Part 5 的主轴。</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -636,14 +638,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。<code>forward_mode</code> 决定这一拍“怎么算”。EXTEND 处理 prompt：长度各异 ⇒ 变长张量、为新请求分配 KV，且只算前缀没命中的那截（第 7 课）。DECODE 处理生成：每条只吐一个 token ⇒ 张量规整、各再要一个 KV 槽。一条请求一生只 extend 一次（或被切成几块，第 22 课），却 decode 很多次。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。<code>forward_mode</code> 决定这一拍“怎么算”。EXTEND 处理 prompt：长度各异 ⇒ 变长张量、为新请求分配 KV，且只算前缀没命中的那截（<a class="xref" href="07-radixattention-and-prefix-caching.html">第 7 课</a>）。DECODE 处理生成：每条只吐一个 token ⇒ 张量规整、各再要一个 KV 槽。一条请求一生只 extend 一次（或被切成几块，<a class="xref" href="22-chunked-prefill.html">第 22 课</a>），却 decode 很多次。</div></div></div>
   </details>
 </div>
 <div class="quiz">
   <div class="qn">3. <code>filter_batch()</code> 在调度里干了什么？为什么它对吞吐至关重要？</div>
   <ol class="opts">
     <li>它把整批排序，让最长的请求排在最前面</li>
-    <li>它在飞行途中把<strong>已完成（finished）的请求当场从批里剔除</strong>、释放它们的 KV 槽，腾出的容量让等待队列的新请求补入——这就是<strong>连续批处理</strong>（第 5 课）的“腾槽”现场</li>
+    <li>它在飞行途中把<strong>已完成（finished）的请求当场从批里剔除</strong>、释放它们的 KV 槽，腾出的容量让等待队列的新请求补入——这就是<strong>连续批处理</strong>（<a class="xref" href="05-continuous-batching.html">第 5 课</a>）的“腾槽”现场</li>
     <li>它把批复制一份做备份，从不删除任何请求</li>
     <li>它只在引擎关停时调用一次，用来清空所有请求</li>
   </ol>
@@ -656,13 +658,13 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用“航空公司：乘客（Req）vs 航班舱单（ScheduleBatch）”的类比，完整讲清这两个数据结构的分工。请覆盖：Req 携带哪些字段（输入/输出 token、采样参数、KV 索引、prefix_indices、finished 状态）、它的 waiting→running→finished 生命周期；以及 ScheduleBatch 为何<strong>每步重建</strong>、它的 EXTEND/DECODE 两种 <code>forward_mode</code> 各自如何铺张量与分配 KV。</li>
-    <li>顺着这一课往后想：<code>get_next_batch_to_run</code>（第 18/20 课）每步要在“组一个 EXTEND 批接纳新请求”和“组一个 DECODE 批推进老请求”之间抉择。请说明这个抉择如何与 KV 池容量、等待队列长度、<code>filter_batch</code> 腾出的空槽相互作用，并联系分块预填充（第 22 课）为何能避免一个超长 prompt 把这条循环堵死。</li>
+    <li>顺着这一课往后想：<code>get_next_batch_to_run</code>（第 18/20 课）每步要在“组一个 EXTEND 批接纳新请求”和“组一个 DECODE 批推进老请求”之间抉择。请说明这个抉择如何与 KV 池容量、等待队列长度、<code>filter_batch</code> 腾出的空槽相互作用，并联系分块预填充（<a class="xref" href="22-chunked-prefill.html">第 22 课</a>）为何能避免一个超长 prompt 把这条循环堵死。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
 <p class="lead">
-Last lesson we saw the scheduler's <strong>heartbeat</strong>—that <span class="inline">while True</span> event loop (Lesson 18). But what does each
+Last lesson we saw the scheduler's <strong>heartbeat</strong>—that <span class="inline">while True</span> event loop (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>). But what does each
 beat actually <strong>operate on</strong>? The answer is two data structures that run through all of Part 5: <strong>Req</strong> and
 <strong>ScheduleBatch</strong>. <span class="inline">Req</span> is <strong>one request's own state machine</strong>—it stays <strong>alive</strong> from
 birth to death; <span class="inline">ScheduleBatch</strong> is <strong>the cluster of Reqs forwarded together in ONE step</strong>, and it is
@@ -685,11 +687,11 @@ birth to death; <span class="inline">ScheduleBatch</strong> is <strong>the clust
   <div class="tag">🌍 Big picture</div>
   In one line: <strong>Req records "who a request is and how far it got"; ScheduleBatch records "which Reqs to compute together this step, and how."</strong>
   <span class="inline">Req</span> holds input tokens, output tokens generated so far, sampling params, the KV-cache indices it owns (Lessons 4/30),
-  prefix-match info (RadixAttention, Lesson 7), and finished/abort status; it moves through <strong>waiting → running → finished</strong>.
+  prefix-match info (RadixAttention, <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), and finished/abort status; it moves through <strong>waiting → running → finished</strong>.
   <span class="inline">ScheduleBatch</span> carries a <strong>mode</strong>: either <strong>EXTEND (prefill)</strong>—admit <strong>new requests</strong>
   and consume their whole prompt at once—or <strong>DECODE</strong>—let <strong>running requests</strong> each emit <strong>one</strong> new token. The batch
   also handles KV-pool <strong>alloc (on admit) and free (on finish)</strong>, and <span class="inline">filter_batch()</span> <strong>drops finished
-  requests</strong> mid-flight (the "slot freeing" of continuous batching, Lesson 5).
+  requests</strong> mid-flight (the "slot freeing" of continuous batching, <a class="xref" href="05-continuous-batching.html">Lesson 5</a>).
 </div>
 
 <h2>1. Req: one request's state machine, alive from birth to death</h2>
@@ -698,16 +700,16 @@ birth to death; <span class="inline">ScheduleBatch</strong> is <strong>the clust
 docstring is one line: <em>"The input and output status of a request."</em> It holds at least: <strong>original input tokens (origin_input_ids)</strong>,
 <strong>incrementally appended output tokens (output_ids)</strong>, <strong>sampling params (sampling_params)</strong>, the <strong>position it occupies in
 the KV cache (req_pool_idx, kv_committed_len/kv_allocated_len, ...)</strong>, and, on a prefix-tree hit, its <strong>prefix_indices (RadixAttention,
-Lesson 7)</strong>. Crucially it carries its own <strong>lifecycle</strong>: before admission it queues in <strong>waiting</strong>; once chosen for
+<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>)</strong>. Crucially it carries its own <strong>lifecycle</strong>: before admission it queues in <strong>waiting</strong>; once chosen for
 prefill it enters <strong>running</strong>; after emitting its last token (EOS hit, max_new_tokens reached, or abort) it becomes <strong>finished</strong>,
 and its KV slots are freed. Here is its whole life.
 </p>
 
 <div class="vflow">
-  <div class="step"><div class="num">1</div><div class="sc"><h4>waiting</h4><p>The request is tokenized and sent into the scheduler over IPC (Lesson 16), landing first in the <strong>waiting queue</strong>. It owns no KV yet—just queuing, waiting for the schedule policy (Lesson 20) to pick it.</p></div></div>
-  <div class="step"><div class="num">2</div><div class="sc"><h4>running · first beat: extend (prefill)</h4><p>Once selected it enters running and, in an <strong>EXTEND batch</strong>, consumes its whole prompt at once: <code>prepare_for_extend()</code> allocates its KV slots and lays out variable-length token tensors. Prefix-hit parts (Lesson 7) are reused, not recomputed.</p></div></div>
+  <div class="step"><div class="num">1</div><div class="sc"><h4>waiting</h4><p>The request is tokenized and sent into the scheduler over IPC (<a class="xref" href="16-io-structs-and-ipc.html">Lesson 16</a>), landing first in the <strong>waiting queue</strong>. It owns no KV yet—just queuing, waiting for the schedule policy (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>) to pick it.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>running · first beat: extend (prefill)</h4><p>Once selected it enters running and, in an <strong>EXTEND batch</strong>, consumes its whole prompt at once: <code>prepare_for_extend()</code> allocates its KV slots and lays out variable-length token tensors. Prefix-hit parts (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>) are reused, not recomputed.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>running · then many beats: decode</h4><p>The same Req then appears in <strong>a long run of DECODE batches</strong>; each beat <code>prepare_for_decode()</code> requests one new KV slot and computes just <strong>one</strong> new token, appending one to <code>output_ids</code>. It <strong>dwells here longest</strong>.</p></div></div>
-  <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed</h4><p>On EOS, max_new_tokens, or abort it turns <strong>finished</strong>; <code>filter_batch()</code> drops it from the current batch on the spot, KV slots return to the pool (Lesson 30), and results flow to the detokenizer (Lesson 17).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>finished / freed</h4><p>On EOS, max_new_tokens, or abort it turns <strong>finished</strong>; <code>filter_batch()</code> drops it from the current batch on the spot, KV slots return to the pool (<a class="xref" href="30-paged-memory-pools.html">Lesson 30</a>), and results flow to the detokenizer (<a class="xref" href="17-detokenizer-and-streaming.html">Lesson 17</a>).</p></div></div>
 </div>
 
 <div class="fig">
@@ -782,14 +784,14 @@ other fields are tensors <strong>laid out temporarily</strong> for the forward p
     <p>Built by <code>prepare_for_extend()</code>, <code>forward_mode = EXTEND</code>. It <strong>admits new requests</strong> and forwards each request's
     <strong>whole prompt</strong> at once. Because prompts differ in length, it lays out <strong>variable-length (ragged) token tensors</strong> and
     <strong>allocates KV slots</strong> for each new request. In source, <code>input_ids</code> takes <code>get_fill_ids()[len(prefix_indices):]</code>—
-    <strong>only the part the prefix missed</strong> (Lesson 7). When a long prompt is too big, it is sliced into chunked prefill (Lesson 22).</p>
+    <strong>only the part the prefix missed</strong> (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>). When a long prompt is too big, it is sliced into chunked prefill (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>).</p>
   </div>
   <div class="col">
     <h4>DECODE batch</h4>
     <p>Built by <code>prepare_for_decode()</code>, <code>forward_mode = DECODE</code>. It holds <strong>already-running requests</strong>, each emitting
     <strong>just one</strong> new token, so tensors are the regular <strong>1 token per request</strong>, needing only <strong>one more KV slot</strong> per
     request for the new token. It <strong>recurs constantly</strong>—a request spends the vast majority of its beats in decode batches. This is throughput's
-    main stage: the fuller the batch, the better the GPU pays off (continuous batching, Lesson 5).</p>
+    main stage: the fuller the batch, the better the GPU pays off (continuous batching, <a class="xref" href="05-continuous-batching.html">Lesson 5</a>).</p>
   </div>
 </div>
 
@@ -836,11 +838,11 @@ other fields are tensors <strong>laid out temporarily</strong> for the forward p
   <tr><td class="mono">Req</td><td class="mono">origin_input_ids / output_ids</td><td>Input tokens and incrementally appended output tokens—the request's "content," persistent</td></tr>
   <tr><td class="mono">Req</td><td class="mono">sampling_params</td><td>Temperature, top-p, max_new_tokens, ...—decides how to pick the next token</td></tr>
   <tr><td class="mono">Req</td><td class="mono">req_pool_idx / kv_*_len</td><td>Its position and length in the KV cache (Lessons 4/30), growing as it generates</td></tr>
-  <tr><td class="mono">Req</td><td class="mono">prefix_indices</td><td>Prefix-tree reuse (RadixAttention, Lesson 7), skipped during extend</td></tr>
+  <tr><td class="mono">Req</td><td class="mono">prefix_indices</td><td>Prefix-tree reuse (RadixAttention, <a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), skipped during extend</td></tr>
   <tr><td class="mono">Req</td><td class="mono">finished() status</td><td>EOS / max_new_tokens / abort—triggers filter_batch eviction and KV free</td></tr>
   <tr><td class="mono">ScheduleBatch</td><td class="mono">reqs: List[Req]</td><td>The requests forwarded together this step—the batch's "skeleton," rebuilt each step</td></tr>
   <tr><td class="mono">ScheduleBatch</td><td class="mono">forward_mode</td><td>EXTEND or DECODE—decides "how" this beat computes</td></tr>
-  <tr><td class="mono">ScheduleBatch</td><td class="mono">input_ids / seq_lens / out_cache_loc</td><td>Tensors laid out for the forward pass and KV output locations, handed to ModelRunner (Lesson 24)</td></tr>
+  <tr><td class="mono">ScheduleBatch</td><td class="mono">input_ids / seq_lens / out_cache_loc</td><td>Tensors laid out for the forward pass and KV output locations, handed to ModelRunner (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>)</td></tr>
 </table>
 
 <h2>4. What a decode batch looks like: a few requests, each +1 this beat</h2>
@@ -896,11 +898,11 @@ spot</strong> and frees its KV slots, leaving A and C running; the freed capacit
 <div class="card key">
   <div class="tag">📌 Key points</div>
   <ul>
-    <li><strong>Req = one request's state machine, persistent</strong>: holds input/output tokens, sampling params, owned KV indices (Lessons 4/30), prefix-match info (Lesson 7), and finished status; moves through <span class="mono">waiting → running → finished</span>, alive from birth to death.</li>
-    <li><strong>ScheduleBatch = the cluster of Reqs forwarded together this step, temporary</strong>: its first field is <span class="mono">reqs: List[Req]</span>, the rest mostly tensors laid out for the forward pass; it is <strong>rebuilt every step</strong> (Lesson 18) and discarded after use.</li>
+    <li><strong>Req = one request's state machine, persistent</strong>: holds input/output tokens, sampling params, owned KV indices (Lessons 4/30), prefix-match info (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>), and finished status; moves through <span class="mono">waiting → running → finished</span>, alive from birth to death.</li>
+    <li><strong>ScheduleBatch = the cluster of Reqs forwarded together this step, temporary</strong>: its first field is <span class="mono">reqs: List[Req]</span>, the rest mostly tensors laid out for the forward pass; it is <strong>rebuilt every step</strong> (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>) and discarded after use.</li>
     <li><strong>The batch has two modes</strong>: <span class="mono">EXTEND/prefill</span> (<code>prepare_for_extend()</code>, admit new reqs, eat whole prompt, lay out ragged tensors) vs <span class="mono">DECODE</span> (<code>prepare_for_decode()</code>, running reqs +1 token each, regular tensors).</li>
-    <li><strong>The batch manages KV alloc and free</strong>: alloc on admit, free on finish; <span class="mono">filter_batch()</span> drops finished reqs mid-flight, freeing slots for waiters—this is continuous batching (Lesson 5) in the flesh.</li>
-    <li><strong>Why split them</strong>: the same Req appears in many <strong>successive decode batches</strong>—Req persists, the batch is ephemeral. Carry this pair into the schedule policy (Lesson 20), chunked prefill (Lesson 22), and model forward (Lesson 24), and all of Part 5 lines up.</li>
+    <li><strong>The batch manages KV alloc and free</strong>: alloc on admit, free on finish; <span class="mono">filter_batch()</span> drops finished reqs mid-flight, freeing slots for waiters—this is continuous batching (<a class="xref" href="05-continuous-batching.html">Lesson 5</a>) in the flesh.</li>
+    <li><strong>Why split them</strong>: the same Req appears in many <strong>successive decode batches</strong>—Req persists, the batch is ephemeral. Carry this pair into the schedule policy (<a class="xref" href="20-schedule-policy.html">Lesson 20</a>), chunked prefill (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>), and model forward (<a class="xref" href="24-model-runner-and-forward-batch.html">Lesson 24</a>), and all of Part 5 lines up.</li>
   </ul>
 </div>
 <div class="selftest">
@@ -915,7 +917,7 @@ spot</strong> and frees its KV slots, leaving A and C running; the freed capacit
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. This is exactly why they are split: the batch is a <strong>recomputed result</strong> of each loop step (Lesson 18), ephemeral; while a request takes tens to hundreds of decode beats to finish, needing a <strong>persistent</strong> object to carry its output tokens, KV indices, and status throughout. Req persistent, batch ephemeral—the spine of Part 5.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. This is exactly why they are split: the batch is a <strong>recomputed result</strong> of each loop step (<a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>), ephemeral; while a request takes tens to hundreds of decode beats to finish, needing a <strong>persistent</strong> object to carry its output tokens, KV indices, and status throughout. Req persistent, batch ephemeral—the spine of Part 5.</div></div></div>
   </details>
 </div>
 <div class="quiz">
@@ -928,14 +930,14 @@ spot</strong> and frees its KV slots, leaving A and C running; the freed capacit
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. <code>forward_mode</code> decides 'how' this beat computes. EXTEND handles the prompt: varying lengths ⇒ ragged tensors, allocate KV for new reqs, and only the prefix-missed part (Lesson 7). DECODE handles generation: each emits one token ⇒ regular tensors, one more KV slot each. A request extends once in its life (or split into chunks, Lesson 22) but decodes many times.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. <code>forward_mode</code> decides 'how' this beat computes. EXTEND handles the prompt: varying lengths ⇒ ragged tensors, allocate KV for new reqs, and only the prefix-missed part (<a class="xref" href="07-radixattention-and-prefix-caching.html">Lesson 7</a>). DECODE handles generation: each emits one token ⇒ regular tensors, one more KV slot each. A request extends once in its life (or split into chunks, <a class="xref" href="22-chunked-prefill.html">Lesson 22</a>) but decodes many times.</div></div></div>
   </details>
 </div>
 <div class="quiz">
   <div class="qn">3. What does <code>filter_batch()</code> do in scheduling, and why is it crucial for throughput?</div>
   <ol class="opts">
     <li>It sorts the whole batch so the longest request comes first</li>
-    <li>It <strong>drops finished requests from the batch on the spot</strong> mid-flight and frees their KV slots, so the freed capacity lets new requests from the waiting queue fill in—the 'slot-freeing' of <strong>continuous batching</strong> (Lesson 5)</li>
+    <li>It <strong>drops finished requests from the batch on the spot</strong> mid-flight and frees their KV slots, so the freed capacity lets new requests from the waiting queue fill in—the 'slot-freeing' of <strong>continuous batching</strong> (<a class="xref" href="05-continuous-batching.html">Lesson 5</a>)</li>
     <li>It copies the batch as a backup and never removes any request</li>
     <li>It is called once at engine shutdown to clear all requests</li>
   </ol>
@@ -948,7 +950,7 @@ spot</strong> and frees its KV slots, leaving A and C running; the freed capacit
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>Using the 'airline: passenger (Req) vs flight manifest (ScheduleBatch)' analogy, explain the division of labor between the two data structures. Cover: which fields Req carries (input/output tokens, sampling params, KV indices, prefix_indices, finished status) and its waiting→running→finished lifecycle; and why ScheduleBatch is <strong>rebuilt each step</strong>, plus how its two <code>forward_mode</code>s (EXTEND/DECODE) lay out tensors and allocate KV.</li>
-    <li>Thinking forward from this lesson: <code>get_next_batch_to_run</code> (Lessons 18/20) must choose each step between 'form an EXTEND batch to admit new requests' and 'form a DECODE batch to advance running ones.' Explain how this choice interacts with KV-pool capacity, waiting-queue length, and the empty slots freed by <code>filter_batch</code>, and connect it to why chunked prefill (Lesson 22) prevents one very long prompt from clogging this loop.</li>
+    <li>Thinking forward from this lesson: <code>get_next_batch_to_run</code> (Lessons 18/20) must choose each step between 'form an EXTEND batch to admit new requests' and 'form a DECODE batch to advance running ones.' Explain how this choice interacts with KV-pool capacity, waiting-queue length, and the empty slots freed by <code>filter_batch</code>, and connect it to why chunked prefill (<a class="xref" href="22-chunked-prefill.html">Lesson 22</a>) prevents one very long prompt from clogging this loop.</li>
   </ul>
 </div>
 </div></div>

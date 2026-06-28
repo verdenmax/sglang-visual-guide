@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -330,7 +332,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>这个类比还能再推一步。如果某位客人点了一道需要慢炖两小时的硬菜（超长 prefill），聪明的厨房不会让主厨守着这一锅、把别人的菜全晾着，而是把慢炖<strong>分几次照看</strong>、其间照常出别的快手菜——这正是分块预填充。如果摆盘、写单这些杂事太多，干脆<strong>另雇一个传菜员</strong>在别的工位上专门干，主厨连看都不用看——这正是进程拆分。你会发现，一家高效厨房的全部智慧，都浓缩成一句话：<strong>千万别让主厨闲下来</strong>。</p></div>
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div>
-<p>"零开销"不是说 CPU 不干活，而是说 CPU 的活<strong>不占用额外的墙钟时间</strong>——它们被<strong>重叠（overlap）</strong>进了 GPU 的前向计算里。一个推理引擎的每一步，逻辑上是：CPU 调度选批 → GPU 前向 → CPU 处理结果（采样、拼 token、检测停止）。如果三者串行，GPU 在前后两段 CPU 时间里都<strong>闲着</strong>。SGLang 的整套调度设计，从<strong>事件循环（第18课）</strong>、<strong>重叠调度（第21课）</strong>、<strong>分块预填充（第22课）</strong>、<strong>CUDA 图（第27课）</strong>，到<strong>进程拆分 + IPC（第14/16课）</strong>，本质上都是同一句话的不同侧面：<span class="mono">找到每一个 CPU 气泡，把它藏到 GPU 的计算背后</span>。</p>
+<p>"零开销"不是说 CPU 不干活，而是说 CPU 的活<strong>不占用额外的墙钟时间</strong>——它们被<strong>重叠（overlap）</strong>进了 GPU 的前向计算里。一个推理引擎的每一步，逻辑上是：CPU 调度选批 → GPU 前向 → CPU 处理结果（采样、拼 token、检测停止）。如果三者串行，GPU 在前后两段 CPU 时间里都<strong>闲着</strong>。SGLang 的整套调度设计，从<strong>事件循环（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）</strong>、<strong>重叠调度（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第21课</a>）</strong>、<strong>分块预填充（<a class="xref" href="22-chunked-prefill.html">第22课</a>）</strong>、<strong>CUDA 图（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）</strong>，到<strong>进程拆分 + IPC（第14/16课）</strong>，本质上都是同一句话的不同侧面：<span class="mono">找到每一个 CPU 气泡，把它藏到 GPU 的计算背后</span>。</p>
 <p>之所以值得单独用一课来讲这个"哲学"，是因为它能<strong>反过来指导你读懂整个系统</strong>。很多人学 SGLang 时把这些机制当成一张<strong>互不相关的特性清单</strong>逐条死记，结果调参时只能照抄别人的命令行。但只要你抓住"别让 GPU 等"这一条主线，就能<strong>自上而下</strong>地理解每个机制存在的理由：它不是为了炫技，而是在堵某一个具体的气泡。本课的目标，就是把这条贯穿前面许多课的隐线<strong>显式地拎出来</strong>，让你从"记住很多招"升级到"看懂一套心法"。</p></div>
 
 <h2>一、气泡从哪来：GPU 太快，CPU 太"碍事"</h2>
@@ -339,8 +341,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>关键洞察是：<strong>GPU 越快，气泡的相对占比越大</strong>。十年前 GPU 慢，CPU 那点开销淹没在计算里看不出来；今天 GPU 一步只要几毫秒，CPU 的几毫秒就成了<strong>对半开</strong>的浪费。换句话说，硬件越先进，软件不把 CPU 开销藏好，浪费就越严重——这是一个<strong>反直觉</strong>的结论：升级显卡如果不配套优化调度，多花的钱可能有一半打了水漂。于是"消灭气泡"从一个锦上添花的优化，升级成了<strong>决定吞吐的头等大事</strong>。这正是 SGLang 把调度器命名为"零开销"的原因——它的目标函数就是让 GPU 占用率逼近 100%。</p>
 
 <h2>二、主线：事件循环与重叠调度</h2>
-<p>一切的心脏是<strong>调度器的事件循环（第18课）</strong>。它是一个永不停歇的 <span class="mono">while True</span>：收请求、组批、发前向、收结果、再组下一批。整个推理引擎就靠这个循环一圈一圈地把系统"泵"起来，每转一圈就吐出一批 token。朴素的事件循环是<strong>串行</strong>的——组完批才发前向，前向回来才处理结果，处理完才组下一批。这就是气泡的温床：在"发前向"和"收结果"这两个边界上，GPU 和 CPU 必然有一方在等另一方。</p>
-<p><strong>重叠调度（第21课）</strong>把这个串行循环改造成<strong>流水线</strong>：当 GPU 正在跑 <span class="mono">forward(批 N)</span> 时，CPU<strong>不闲着</strong>——它已经在<strong>组装批 N+1</strong>（挑请求、分配页、搬张量），并且<strong>并行处理批 N-1 的结果</strong>（采样、拼 token、检测停止）。注意这里有一个微妙但重要的点：CPU 处理的是<strong>上一步</strong>的结果，而不是刚发出去那一步的——因为刚发出的前向还没算完。正是这种"<strong>错一拍</strong>"的安排，让 CPU 永远有活干、GPU 永远不用等。</p>
+<p>一切的心脏是<strong>调度器的事件循环（<a class="xref" href="18-scheduler-event-loop.html">第18课</a>）</strong>。它是一个永不停歇的 <span class="mono">while True</span>：收请求、组批、发前向、收结果、再组下一批。整个推理引擎就靠这个循环一圈一圈地把系统"泵"起来，每转一圈就吐出一批 token。朴素的事件循环是<strong>串行</strong>的——组完批才发前向，前向回来才处理结果，处理完才组下一批。这就是气泡的温床：在"发前向"和"收结果"这两个边界上，GPU 和 CPU 必然有一方在等另一方。</p>
+<p><strong>重叠调度（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第21课</a>）</strong>把这个串行循环改造成<strong>流水线</strong>：当 GPU 正在跑 <span class="mono">forward(批 N)</span> 时，CPU<strong>不闲着</strong>——它已经在<strong>组装批 N+1</strong>（挑请求、分配页、搬张量），并且<strong>并行处理批 N-1 的结果</strong>（采样、拼 token、检测停止）。注意这里有一个微妙但重要的点：CPU 处理的是<strong>上一步</strong>的结果，而不是刚发出去那一步的——因为刚发出的前向还没算完。正是这种"<strong>错一拍</strong>"的安排，让 CPU 永远有活干、GPU 永远不用等。</p>
 <p>这一切由 <span class="mono">enable_overlap</span> 开关控制（即 <span class="mono">--disable-overlap-schedule</span> 的反面）。一旦打开，CPU 的调度与结果处理就被"塞进"了 GPU 前向的影子里，墙钟时间上几乎<strong>不可见</strong>。代价是引擎要同时持有<strong>多步的中间状态</strong>（N-1、N、N+1），实现复杂度更高，也更难调试——但这正是"零开销"四个字真正落地、值得付出的地方。如果你把 overlap 关掉，引擎会退回到那个朴素串行循环，正确性不变，但 GPU 利用率和吞吐都会明显下滑。这也解释了为什么默认就是打开的：对绝大多数线上负载来说，多花一点内存换回近乎翻倍的有效算力，是再划算不过的交易。</p>
 
 <p><strong>一个具体的数字感</strong>：当批很小（比如只有几条 decode 请求）时，GPU 的一次前向可能只要 2~3 毫秒，而 CPU 这一拍要做的挑批、分配、采样加起来也可能逼近 2 毫秒——串行执行时这 2 毫秒几乎让每步耗时<strong>翻倍</strong>。打开重叠后，这段 CPU 工作被整体藏进 GPU 前向的影子里，墙钟时间几乎只由 GPU 决定，吞吐因此回到"<strong>只受 GPU 限制</strong>"的理想值——这正是"零开销"调度名副其实之处。批越大，GPU 前向越长，CPU 那点开销就越容易被完全吃掉，但小批场景恰恰是重叠收益最明显的地方。</p>
@@ -424,8 +426,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>三、其他珠子：分块预填充、CUDA 图、进程拆分</h2>
-<p>同一条主线还串着另外三颗珠子。<strong>分块预填充（第22课）</strong>解决的是另一种气泡：一个超长 prompt 的 prefill 如果一口气跑完，会占满整个前向，让所有正在 decode 的请求<strong>全体卡住</strong>等它，造成延迟尖刺。SGLang 把长 prefill <strong>切成小块</strong>，与 decode <strong>交替</strong>进行——每一步既塞进一点新 prompt 的 prefill，又照顾正在生成的老请求，避免单个大活堵死整条流水线。本质还是那句话："别让某一段把 GPU 的节奏打乱"，把一个会引发长气泡的大任务摊薄成许多不打扰别人的小任务。</p>
-<p><strong>CUDA 图（第27课）</strong>对付的是<strong>内核启动开销</strong>这种气泡：每发射一个 CUDA kernel，CPU 都要付出固定的启动成本，decode 一步要发几十上百个 kernel，加起来就是可观的 CPU 时间，而且这段时间 GPU 往往在等下一个 kernel 被提交。CUDA 图把整串 kernel<strong>录制成一张图</strong>，之后一次<strong>重放</strong>就能在 GPU 上跑完整条序列，CPU 几乎不再逐个参与发射——这是"别让 CPU 成为 GPU 瓶颈"的又一种形态，专门针对 decode 这种<strong>kernel 多、单个小</strong>、最容易被启动开销拖累的场景。</p>
+<p>同一条主线还串着另外三颗珠子。<strong>分块预填充（<a class="xref" href="22-chunked-prefill.html">第22课</a>）</strong>解决的是另一种气泡：一个超长 prompt 的 prefill 如果一口气跑完，会占满整个前向，让所有正在 decode 的请求<strong>全体卡住</strong>等它，造成延迟尖刺。SGLang 把长 prefill <strong>切成小块</strong>，与 decode <strong>交替</strong>进行——每一步既塞进一点新 prompt 的 prefill，又照顾正在生成的老请求，避免单个大活堵死整条流水线。本质还是那句话："别让某一段把 GPU 的节奏打乱"，把一个会引发长气泡的大任务摊薄成许多不打扰别人的小任务。</p>
+<p><strong>CUDA 图（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）</strong>对付的是<strong>内核启动开销</strong>这种气泡：每发射一个 CUDA kernel，CPU 都要付出固定的启动成本，decode 一步要发几十上百个 kernel，加起来就是可观的 CPU 时间，而且这段时间 GPU 往往在等下一个 kernel 被提交。CUDA 图把整串 kernel<strong>录制成一张图</strong>，之后一次<strong>重放</strong>就能在 GPU 上跑完整条序列，CPU 几乎不再逐个参与发射——这是"别让 CPU 成为 GPU 瓶颈"的又一种形态，专门针对 decode 这种<strong>kernel 多、单个小</strong>、最容易被启动开销拖累的场景。</p>
 <p>最后是<strong>进程拆分 + IPC（第14/16课）</strong>。SGLang 把 <span class="mono">TokenizerManager</span> 和 <span class="mono">DetokenizerManager</span> 放在<strong>独立于</strong>调度器 + GPU 的<strong>另外的进程</strong>里，靠 IPC（进程间通信）传消息。这样分词、解码这些纯 CPU 活，根本<strong>不在</strong>前向的关键路径上——它们在别的进程里和 GPU 计算天然并行，连"重叠"都不用刻意安排，操作系统的进程调度就帮你把它们错开了。这也顺带绕开了 Python 的全局解释器锁（GIL）：分词进程的 CPU 占用不会拖慢调度进程。可以说，进程拆分是把气泡<strong>物理隔离</strong>到了关键路径之外。</p>
 
 <h2>四、把所有珠子串成一句话</h2>
@@ -443,8 +445,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <table class="t"><tr><th>CPU 气泡</th><th>SGLang 如何把它藏起来</th><th>对应课</th></tr>
 <tr><td>调度选批 / 结果处理</td><td>事件循环 + 重叠调度，CPU 活塞进 GPU 前向影子里</td><td>第18 / 21 课</td></tr>
-<tr><td>超长 prefill 堵塞流水线</td><td>分块预填充，把长 prefill 切块与 decode 交替</td><td>第22 课</td></tr>
-<tr><td>每步内核启动开销</td><td>CUDA 图录制一次、重放多次，CPU 不再逐个发射</td><td>第27 课</td></tr>
+<tr><td>超长 prefill 堵塞流水线</td><td>分块预填充，把长 prefill 切块与 decode 交替</td><td><a class="xref" href="22-chunked-prefill.html">第22 课</a></td></tr>
+<tr><td>每步内核启动开销</td><td>CUDA 图录制一次、重放多次，CPU 不再逐个发射</td><td><a class="xref" href="27-cuda-graph-capture-and-replay.html">第27 课</a></td></tr>
 <tr><td>分词 / 解码占用关键路径</td><td>进程拆分 + IPC，Tokenizer/Detokenizer 跑在别的进程</td><td>第14 / 16 课</td></tr></table>
 
 <div class="cols"><div class="col"><strong>overlap 关闭</strong><br>组批 → 前向 → 处理结果 串行执行，GPU 在两段 CPU 时间里都<span class="mono">空闲</span>，占用率掉到一半甚至更低，气泡清晰可见。</div><div class="col"><strong>overlap 打开</strong><br>GPU 跑 forward(N) 的同时，CPU 已备好 N+1、处理完 N-1，GPU<span class="mono">始终忙碌</span>，墙钟上看不到 CPU 开销——这就是零开销。</div></div>
@@ -482,7 +484,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
 <li><strong>一条主线</strong>：CPU 绝不能让 GPU 等。任何前向<strong>前后</strong>的 CPU 工作都是潜在气泡。</li>
 <li><strong>重叠是核心手段</strong>：GPU 跑 forward(N) 时，CPU 已组装 N+1、并行处理 N-1（<span class="mono">enable_overlap</span>，第18/21课）。</li>
-<li><strong>多种气泡多种藏法</strong>：分块预填充防长 prefill 堵塞（第22课）、CUDA 图消内核启动开销（第27课）、进程拆分让分词解码离开关键路径（第14/16课）。</li>
+<li><strong>多种气泡多种藏法</strong>：分块预填充防长 prefill 堵塞（<a class="xref" href="22-chunked-prefill.html">第22课</a>）、CUDA 图消内核启动开销（<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>）、进程拆分让分词解码离开关键路径（第14/16课）。</li>
 <li><strong>GPU 越快，气泡越致命</strong>：消灭气泡从锦上添花升级为决定吞吐的头等大事，硬件越先进越要把 CPU 开销藏好。</li>
 <li><strong>融会贯通</strong>：六课六机制，同一个哲学——找到每个 CPU 气泡，把它藏到 GPU 计算背后。记住这一条原则，胜过死记六个孤立的参数，因为它能让你<strong>自己推导</strong>出下一个优化。</li>
 </ul></div>
@@ -502,7 +504,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">2. 重叠调度（第21课）打开 enable_overlap 后，GPU 在跑 forward(批 N) 的同时，CPU 在做什么？</div>
+  <div class="qn">2. 重叠调度（<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第21课</a>）打开 enable_overlap 后，GPU 在跑 forward(批 N) 的同时，CPU 在做什么？</div>
   <ol class="opts">
     <li>重新计算批 N 的 KV 缓存以校验结果</li>
     <li>空等 GPU 返回，什么也不做</li>
@@ -518,7 +520,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="qn">3. 下列「CPU 气泡 → SGLang 如何藏它」的配对，哪一组完全正确？</div>
   <ol class="opts">
     <li>调度→量化；长 prefill→张量并行；内核启动→温度采样；分词→负载均衡</li>
-    <li><strong>调度/结果处理→重叠调度(第18/21课)；长 prefill 堵塞→分块预填充(第22课)；内核启动开销→CUDA 图(第27课)；分词解码→进程拆分+IPC(第14/16课)</strong></li>
+    <li><strong>调度/结果处理→重叠调度(第18/21课)；长 prefill 堵塞→分块预填充(<a class="xref" href="22-chunked-prefill.html">第22课</a>)；内核启动开销→CUDA 图(<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>)；分词解码→进程拆分+IPC(第14/16课)</strong></li>
     <li>所有气泡都只能靠加 GPU 显存解决</li>
     <li>气泡只存在于 prefill，decode 阶段没有气泡</li>
   </ol>
@@ -531,7 +533,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用你自己的话解释：为什么「GPU 越快，CPU 气泡越致命」？结合一次 decode 前向只要几毫秒、而调度+采样+拼 token 也是毫秒级这个事实，说明为什么消灭气泡从锦上添花升级成了决定吞吐的头等大事。</li>
-    <li>挑出本课提到的至少三处「零开销主线的不同面孔」（如事件循环第18课、重叠调度第21课、分块预填充第22课、CUDA 图第27课、进程拆分第14/16课），说明它们骨子里都是同一句话：找到每个 CPU 气泡，把它藏到 GPU 计算背后或挪到别的进程。</li>
+    <li>挑出本课提到的至少三处「零开销主线的不同面孔」（如事件循环<a class="xref" href="18-scheduler-event-loop.html">第18课</a>、重叠调度<a class="xref" href="21-zero-overhead-overlap-scheduler.html">第21课</a>、分块预填充<a class="xref" href="22-chunked-prefill.html">第22课</a>、CUDA 图<a class="xref" href="27-cuda-graph-capture-and-replay.html">第27课</a>、进程拆分第14/16课），说明它们骨子里都是同一句话：找到每个 CPU 气泡，把它藏到 GPU 计算背后或挪到别的进程。</li>
   </ul>
 </div>
 </div></div>
@@ -715,7 +717,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">2. With overlap scheduling (Lesson 21) and enable_overlap on, what is the CPU doing while the GPU runs forward(batch N)?</div>
+  <div class="qn">2. With overlap scheduling (<a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>) and enable_overlap on, what is the CPU doing while the GPU runs forward(batch N)?</div>
   <ol class="opts">
     <li>Recomputing batch N's KV cache to verify the result</li>
     <li>Idly waiting for the GPU to return, doing nothing</li>
@@ -744,7 +746,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>In your own words, explain why 'the faster the GPU, the deadlier the CPU bubble'. Using the fact that a decode forward may take only a few milliseconds while scheduling + sampling + appending tokens is also milliseconds, argue why killing bubbles graduates from a nice-to-have into the top factor deciding throughput.</li>
-    <li>Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop Lesson 18, overlap scheduling Lesson 21, chunked prefill Lesson 22, CUDA graphs Lesson 27, the process split Lesson 14/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.</li>
+    <li>Pick at least three 'different faces of the zero-overhead thread' from this lesson (e.g., the event loop <a class="xref" href="18-scheduler-event-loop.html">Lesson 18</a>, overlap scheduling <a class="xref" href="21-zero-overhead-overlap-scheduler.html">Lesson 21</a>, chunked prefill <a class="xref" href="22-chunked-prefill.html">Lesson 22</a>, CUDA graphs <a class="xref" href="27-cuda-graph-capture-and-replay.html">Lesson 27</a>, the process split <a class="xref" href="14-tokenizer-manager.html">Lesson 14</a>/16), and explain why they are all the same sentence underneath: find every CPU bubble and hide it behind GPU compute or move it to another process.</li>
   </ul>
 </div>
 </div></div>

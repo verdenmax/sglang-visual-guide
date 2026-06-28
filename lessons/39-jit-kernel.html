@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -323,16 +325,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <h1><span class="lang-zh">JIT kernel</span><span class="lang-en">JIT kernels</span></h1>
   </div>
   <div class="lang-zh">
-<p class="lead">第38课我们看到 <span class="mono">sgl-kernel</span> 走的是 AOT（提前编译）路线：核在打包 wheel 时就被 <span class="mono">nvcc</span> 编进二进制。本课的主角 <span class="mono">python/sglang/jit_kernel/</span> 走的是另一条路——<strong>运行时按需即时编译</strong>（JIT，Just-In-Time）。它不在 wheel 里预先塞进每一个核，而是等到真正需要时，才在本机现场把 C++/CUDA 源码编译成 <span class="mono">.so</span>，然后把结果缓存起来反复复用。</p>
+<p class="lead"><a class="xref" href="38-sgl-kernel-overview.html">第38课</a>我们看到 <span class="mono">sgl-kernel</span> 走的是 AOT（提前编译）路线：核在打包 wheel 时就被 <span class="mono">nvcc</span> 编进二进制。本课的主角 <span class="mono">python/sglang/jit_kernel/</span> 走的是另一条路——<strong>运行时按需即时编译</strong>（JIT，Just-In-Time）。它不在 wheel 里预先塞进每一个核，而是等到真正需要时，才在本机现场把 C++/CUDA 源码编译成 <span class="mono">.so</span>，然后把结果缓存起来反复复用。</p>
 
 <div class="card analogy"><div class="tag">🔌 生活类比</div> AOT 像是工厂出货前就把所有口味的蛋糕全部烤好装箱：你买到就能吃，但箱子又大又重，而且工厂得提前猜你要哪些口味。JIT 则像家里的烤箱：第一次想吃某个口味时，你现场按配方烤一炉，要等一会儿；但烤好之后放进冰箱，之后再想吃就直接取出来，和现成的一样快。烤箱（编译工具链）必须在你家里，配方（源码）也得带着，但你不用背着一整箱蛋糕到处走。</div>
 
 <div class="card macro"><div class="tag">🌍 宏观理解</div> 无论 AOT 还是 JIT，最终都变成一组可以从 Python 直接调用、指向已编译 GPU 核的 <span class="mono">torch.ops</span> 风格调用。两者的差别不在“结果是什么”，而在“何时、如何被构建与分发”。AOT 把编译成本前置到发布阶段、换取开箱即用；JIT 把编译成本推迟到首次调用、换取灵活性与更瘦的 wheel。SGLang 同时拥有这两条路径，让稳定高频的核走 AOT、实验性或需按架构定制的核走 JIT。</div>
 
 <h2>一、什么是 JIT 内核路径</h2>
-<p><span class="mono">jit_kernel</span> 模块的核心思想是：把小巧的 C++/CUDA 核当作“源码 + 配方”随包携带，而不是预先编译进二进制。当某个算子第一次被用到时，模块才现场调用编译器把它构建成一个 PyTorch 扩展模块。这样做的直接好处是 wheel 不会因为塞进各种架构、各种数据类型的核而急剧膨胀。比如 <span class="mono">jit_kernel/activation.py</span> 会在首次使用时，按当前的数据类型现场构建一个对应的 JIT 模块；<span class="mono">jit_kernel/norm.py</span> 则提供了一个 JIT 版的 <span class="mono">fused_add_rmsnorm</span>，正是第36课讲 RMSNorm 快速路径时所依赖的那个融合核。</p>
+<p><span class="mono">jit_kernel</span> 模块的核心思想是：把小巧的 C++/CUDA 核当作“源码 + 配方”随包携带，而不是预先编译进二进制。当某个算子第一次被用到时，模块才现场调用编译器把它构建成一个 PyTorch 扩展模块。这样做的直接好处是 wheel 不会因为塞进各种架构、各种数据类型的核而急剧膨胀。比如 <span class="mono">jit_kernel/activation.py</span> 会在首次使用时，按当前的数据类型现场构建一个对应的 JIT 模块；<span class="mono">jit_kernel/norm.py</span> 则提供了一个 JIT 版的 <span class="mono">fused_add_rmsnorm</span>，正是<a class="xref" href="36-rope-norm-and-ops.html">第36课</a>讲 RMSNorm 快速路径时所依赖的那个融合核。</p>
 <p>这里值得展开说说“wheel 膨胀”的来由。一个核往往不是只有一个版本：它可能要为 fp16、bf16、fp8 等多种数据类型各编一份，还可能为不同的 GPU 计算能力（如 sm80、sm90）各编一份，再叠加上各种形状或开关的组合，编译产物会以乘法的方式急剧增长。如果全走 AOT，这些组合都得提前枚举并塞进 <span class="mono">.so</span>，wheel 体积会迅速变得难以接受，而其中绝大多数组合在某次具体部署里根本用不到。JIT 的思路恰好相反：发布物里只放精简的源码，真正要用哪个组合，就在现场为那一个组合编译并缓存——把空间成本换成了一次性的时间成本，且只为实际跑到的代码路径付费。</p>
-<p>这两个模块很能说明 JIT 的“按需”特性。<span class="mono">activation.py</span> 并不是一上来就把所有数据类型的激活核都编出来，而是等到某个具体 dtype 第一次被用到，才为它构建对应的 JIT 模块——用到 fp16 就编 fp16 的，用到 bf16 就编 bf16 的，没用到的就根本不花编译时间。这种“谁触发、才编谁”的策略，把编译成本精确地花在真正会跑的代码路径上。<span class="mono">norm.py</span> 的 <span class="mono">fused_add_rmsnorm</span> 则是一个典型的融合核：它把“残差相加”与“RMSNorm 归一化”两步合进一个 GPU 核里，少一次显存往返。第36课的 RMSNorm 快速路径正是调用了它——这说明 JIT 路径并不是边角料，而是实实在在地服务于主干推理流程中的关键算子。</p>
+<p>这两个模块很能说明 JIT 的“按需”特性。<span class="mono">activation.py</span> 并不是一上来就把所有数据类型的激活核都编出来，而是等到某个具体 dtype 第一次被用到，才为它构建对应的 JIT 模块——用到 fp16 就编 fp16 的，用到 bf16 就编 bf16 的，没用到的就根本不花编译时间。这种“谁触发、才编谁”的策略，把编译成本精确地花在真正会跑的代码路径上。<span class="mono">norm.py</span> 的 <span class="mono">fused_add_rmsnorm</span> 则是一个典型的融合核：它把“残差相加”与“RMSNorm 归一化”两步合进一个 GPU 核里，少一次显存往返。<a class="xref" href="36-rope-norm-and-ops.html">第36课</a>的 RMSNorm 快速路径正是调用了它——这说明 JIT 路径并不是边角料，而是实实在在地服务于主干推理流程中的关键算子。</p>
 <p>为什么不全部走 AOT？因为现实中很多核并不“稳定且通用”。有的算子还在实验阶段、接口经常变；有的核需要根据 GPU 架构生成不同的代码（JIT 路径会查询当前架构，例如通过 <span class="mono">get_jit_cuda_arch</span> 拿到计算能力），再据此选择指令与模板；还有的核要用运行期才知道的形状或开关来参数化。把这些都提前枚举进 wheel 既不现实也太臃肿，交给 JIT 在现场按需生成才是更合适的策略。</p>
 <p>换个角度看，AOT 与 JIT 并不是互相取代的对手，而是分工协作的两条流水线。SGLang 把那些被高频调用、形态固定、对启动延迟敏感的核交给 <span class="mono">sgl-kernel</span> 提前编进二进制；把那些还在演化、依赖具体硬件特性、或只在特定数据类型/形状下才会触发的核留给 <span class="mono">jit_kernel</span> 现场构建。这种“按核的生命周期与稳定程度分流”的设计，让发布物保持精简，又不牺牲对前沿硬件与新算子的快速适配能力。理解 JIT 路径，本质上就是理解“把编译这件事从发布阶段挪到运行阶段”所带来的全部好处与代价。</p>
 
@@ -386,9 +388,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>把这份代价放到 SGLang 的真实场景里看会更清楚。服务通常是长时间运行的：一个推理进程可能要服务几小时甚至几天，那么把首次调用那一两秒的编译成本摊到漫长的服务周期里，几乎可以忽略不计；而它换来的是“同一份代码能在不同架构的卡上各自编出最优核”的能力。反过来，如果是对冷启动极度敏感、或者部署在没有编译器的精简镜像里的场景，JIT 的首调延迟与工具链依赖就会变成真正的痛点——这时候 AOT 才是更稳妥的选择。所以这道选择题没有放之四海皆准的答案，只有结合“核的稳定程度、调用频率、部署环境、对启动延迟的容忍度”之后的最优解。</p>
 
 <h2>四、AOT 与 JIT 殊途同归</h2>
-<p>把第38课和本课放在一起看会更清楚：AOT（<span class="mono">sgl-kernel</span>）和 JIT（<span class="mono">jit_kernel</span>）最终都落到“从 Python 调用一个已编译 GPU 核”。它们的终点相同，分歧只在路上——AOT 在打 wheel 时就把核编好、随二进制分发，安装即用；JIT 把源码随包带着，等首次调用时才在本机编译并缓存。理解了这一点，你就能在设计新算子时做出正确取舍：稳定、高频、要求零依赖即用的核交给 AOT；实验性强、需按架构定制、或不想撑大 wheel 的核交给 JIT。两者并存，正是 SGLang 内核体系兼顾性能与灵活的工程智慧。</p>
+<p>把<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>和本课放在一起看会更清楚：AOT（<span class="mono">sgl-kernel</span>）和 JIT（<span class="mono">jit_kernel</span>）最终都落到“从 Python 调用一个已编译 GPU 核”。它们的终点相同，分歧只在路上——AOT 在打 wheel 时就把核编好、随二进制分发，安装即用；JIT 把源码随包带着，等首次调用时才在本机编译并缓存。理解了这一点，你就能在设计新算子时做出正确取舍：稳定、高频、要求零依赖即用的核交给 AOT；实验性强、需按架构定制、或不想撑大 wheel 的核交给 JIT。两者并存，正是 SGLang 内核体系兼顾性能与灵活的工程智慧。</p>
 <p>更进一步说，这两条路并非彼此孤立。一个核常常先以 JIT 形式诞生：在 <span class="mono">jit_kernel</span> 里快速迭代、按架构试验、跑通正确性与性能之后，如果它逐渐稳定下来、被高频复用，就可以“毕业”到 <span class="mono">sgl-kernel</span> 走 AOT，固化进 wheel 享受零首调延迟。反过来，前沿硬件刚发布、新指令还在打磨时，JIT 又能让 SGLang 第一时间在上面跑起来，而不必等下一次发版。正因为终点统一（都是指向已编译核的 <span class="mono">torch.ops</span> 风格调用），上层代码几乎无需关心某个算子究竟来自 AOT 还是 JIT——这层抽象，正是把“何时编译、如何分发”的复杂度封装起来、让引擎既快又灵活的关键。</p>
-<p>总结一句：JIT 不是 AOT 的替代品，而是它的互补。第38课的 <span class="mono">sgl-kernel</span> 负责把最稳定、最热的核固化进二进制，换取开箱即用与零首调延迟；本课的 <span class="mono">jit_kernel</span> 负责在运行时按需现场编译那些实验性、需按架构定制、或形状多变的核，换取灵活与瘦身。两条路最终都汇入同一套 <span class="mono">torch.ops</span> 风格调用，共同撑起 SGLang 的内核性能地基，也共同体现了大型推理系统在性能与灵活之间求取平衡的工程智慧。</p>
+<p>总结一句：JIT 不是 AOT 的替代品，而是它的互补。<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>的 <span class="mono">sgl-kernel</span> 负责把最稳定、最热的核固化进二进制，换取开箱即用与零首调延迟；本课的 <span class="mono">jit_kernel</span> 负责在运行时按需现场编译那些实验性、需按架构定制、或形状多变的核，换取灵活与瘦身。两条路最终都汇入同一套 <span class="mono">torch.ops</span> 风格调用，共同撑起 SGLang 的内核性能地基，也共同体现了大型推理系统在性能与灵活之间求取平衡的工程智慧。</p>
 
 <div class="fig">
   <svg viewBox="0 0 800 300" role="img" aria-label="AOT 与 JIT 两种策略对比：AOT 把核预编译进 wheel，首次零成本但体积大；JIT 首次现编译并缓存，安装精简、加新核灵活">
@@ -426,7 +428,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <div class="cols">
-  <div class="col"><strong>AOT（sgl-kernel，第38课）</strong>：打 wheel 时就用 <span class="mono">nvcc</span> 把核全部编进二进制。安装即可用，首次调用零编译延迟；但 wheel 体积大、各种架构组合需要提前枚举。</div>
+  <div class="col"><strong>AOT（sgl-kernel，<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）</strong>：打 wheel 时就用 <span class="mono">nvcc</span> 把核全部编进二进制。安装即可用，首次调用零编译延迟；但 wheel 体积大、各种架构组合需要提前枚举。</div>
   <div class="col"><strong>JIT（jit_kernel，本课）</strong>：运行时按需编译，首次调用付一次 <span class="mono">nvcc</span> 成本，之后命中缓存与 AOT 同速；wheel 不臃肿、可按 GPU 架构与运行期形状灵活生成，但要求本机有编译工具链。</div>
 </div>
 
@@ -471,14 +473,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     return run_activation("silu", input, out, expert_ids, expert_step)
 </pre></div>
 
-<p>举个具体例子：同一个 <span class="mono">silu_and_mul</span> 在两条路径里都存在——第38课的 <span class="mono">sgl-kernel</span> 里它是 AOT 版本，随 wheel 出厂即用；本课 <span class="mono">jit_kernel/activation.py</span> 里它是 JIT 版本，第一次调用时才现场编译、之后命中缓存。它的兄弟算子 <span class="mono">gelu_and_mul</span>、<span class="mono">gelu_tanh_and_mul</span> 也都走同一个 <span class="mono">run_activation</span> 入口，只是把激活名从 <span class="mono">"silu"</span> 换成 <span class="mono">"gelu"</span> / <span class="mono">"gelu_tanh"</span>——可见“一个入口、按需编译、多算子复用”正是 JIT 路径的统一套路。</p>
+<p>举个具体例子：同一个 <span class="mono">silu_and_mul</span> 在两条路径里都存在——<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>的 <span class="mono">sgl-kernel</span> 里它是 AOT 版本，随 wheel 出厂即用；本课 <span class="mono">jit_kernel/activation.py</span> 里它是 JIT 版本，第一次调用时才现场编译、之后命中缓存。它的兄弟算子 <span class="mono">gelu_and_mul</span>、<span class="mono">gelu_tanh_and_mul</span> 也都走同一个 <span class="mono">run_activation</span> 入口，只是把激活名从 <span class="mono">"silu"</span> 换成 <span class="mono">"gelu"</span> / <span class="mono">"gelu_tanh"</span>——可见“一个入口、按需编译、多算子复用”正是 JIT 路径的统一套路。</p>
 
 <div class="card key"><div class="tag">📌 本课要点</div><ul>
-<li><span class="mono">jit_kernel/</span> 在运行时按需编译小型 C++/CUDA 核，而不是像第38课的 <span class="mono">sgl-kernel</span> 那样提前编进 wheel。</li>
+<li><span class="mono">jit_kernel/</span> 在运行时按需编译小型 C++/CUDA 核，而不是像<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>的 <span class="mono">sgl-kernel</span> 那样提前编进 wheel。</li>
 <li>核心入口 <span class="mono">load_jit(...)</span>：传入源码 + 包装器（每个是 <span class="mono">(export_name, kernel_name)</span> 二元组），编出 torch 扩展并按唯一标记缓存 <span class="mono">.so</span>。</li>
 <li><strong>编译一次、之后复用</strong>：首次调用付一次 <span class="mono">nvcc</span> 成本，命中缓存后与 AOT 同速。</li>
 <li>选 JIT 的理由：灵活（实验性算子、架构特定 codegen、运行期参数化）、wheel 不臃肿；代价是首调延迟 + 需要编译工具链。</li>
-<li><span class="mono">activation.py</span> 首次使用时按 dtype 建 JIT 模块；<span class="mono">norm.py</span> 提供 JIT 版 <span class="mono">fused_add_rmsnorm</span>（第36课 RMSNorm 快速路径所用）。</li>
+<li><span class="mono">activation.py</span> 首次使用时按 dtype 建 JIT 模块；<span class="mono">norm.py</span> 提供 JIT 版 <span class="mono">fused_add_rmsnorm</span>（<a class="xref" href="36-rope-norm-and-ops.html">第36课</a> RMSNorm 快速路径所用）。</li>
 <li>AOT 与 JIT 殊途同归：都成为指向已编译核的 <span class="mono">torch.ops</span> 风格调用，差别只在“何时、如何构建与分发”。</li>
 </ul></div>
 <div class="selftest">
@@ -510,7 +512,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. 在为新算子选择 <strong>AOT（sgl-kernel，第38课）</strong>还是 <strong>JIT（jit_kernel）</strong>时，下列哪种判断<strong>最合理</strong>？</div>
+  <div class="qn">3. 在为新算子选择 <strong>AOT（sgl-kernel，<a class="xref" href="38-sgl-kernel-overview.html">第38课</a>）</strong>还是 <strong>JIT（jit_kernel）</strong>时，下列哪种判断<strong>最合理</strong>？</div>
   <ol class="opts">
     <li>永远选 AOT，因为 JIT 无法达到与编译核相同的性能</li>
     <li>永远选 JIT，因为它没有任何代价</li>
@@ -526,21 +528,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
     <li>用一句话解释 <span class='mono'>load_jit</span> 的“<strong>按需编译 + 缓存 .so</strong>”机制，并说明唯一标记（marker）在缓存复用中的作用，以及为什么这种设计能让 JIT 在保留灵活性的同时仍保持高性能。</li>
-    <li>对比 <strong>AOT</strong> 与 <strong>JIT</strong> 两条编译路线“殊途同归”的地方与分歧点：两者最终都成为指向已编译核的 <span class='mono'>torch.ops</span> 风格调用，差别只在“何时/如何构建与分发”。结合 <span class='mono'>activation.py</span> 按 dtype 建模块、<span class='mono'>norm.py</span> 的 JIT <span class='mono'>fused_add_rmsnorm</span>（第36课所用），说明各自适合什么样的 kernel。</li>
+    <li>对比 <strong>AOT</strong> 与 <strong>JIT</strong> 两条编译路线“殊途同归”的地方与分歧点：两者最终都成为指向已编译核的 <span class='mono'>torch.ops</span> 风格调用，差别只在“何时/如何构建与分发”。结合 <span class='mono'>activation.py</span> 按 dtype 建模块、<span class='mono'>norm.py</span> 的 JIT <span class='mono'>fused_add_rmsnorm</span>（<a class="xref" href="36-rope-norm-and-ops.html">第36课</a>所用），说明各自适合什么样的 kernel。</li>
   </ul>
 </div>
 </div></div>
   <div class="lang-en">
-<p class="lead">In Lesson 38 we saw that <span class="mono">sgl-kernel</span> follows the AOT (ahead-of-time) route: kernels are compiled by <span class="mono">nvcc</span> into the binary when the wheel is built. This lesson's star, <span class="mono">python/sglang/jit_kernel/</span>, takes the other road—<strong>just-in-time compilation at runtime, on demand</strong> (JIT). Instead of stuffing every kernel into the wheel up front, it compiles the C++/CUDA source into a <span class="mono">.so</span> on the local machine only when actually needed, then caches the result for reuse.</p>
+<p class="lead">In <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> we saw that <span class="mono">sgl-kernel</span> follows the AOT (ahead-of-time) route: kernels are compiled by <span class="mono">nvcc</span> into the binary when the wheel is built. This lesson's star, <span class="mono">python/sglang/jit_kernel/</span>, takes the other road—<strong>just-in-time compilation at runtime, on demand</strong> (JIT). Instead of stuffing every kernel into the wheel up front, it compiles the C++/CUDA source into a <span class="mono">.so</span> on the local machine only when actually needed, then caches the result for reuse.</p>
 
 <div class="card analogy"><div class="tag">🔌 Analogy</div> AOT is like a factory baking every flavor of cake before shipping and packing them all in a box: you can eat the moment you buy, but the box is big and heavy, and the factory has to guess in advance which flavors you'll want. JIT is like the oven at home: the first time you want a flavor you bake a batch from the recipe, which takes a while; but once baked, you put it in the fridge and any later craving is served instantly, as fast as ready-made. The oven (compiler toolchain) must be in your home and you must carry the recipe (source), but you don't haul a whole box of cakes around.</div>
 
 <div class="card macro"><div class="tag">🌍 The big picture</div> Whether AOT or JIT, both end up as a set of <span class="mono">torch.ops</span>-style callables that invoke compiled GPU kernels directly from Python. The difference isn't "what the result is" but "when and how it gets built and shipped." AOT front-loads the compile cost to release time in exchange for being ready out of the box; JIT defers the compile cost to first call in exchange for flexibility and a slimmer wheel. SGLang keeps both paths so stable, hot kernels go AOT while experimental or architecture-specific ones go JIT.</div>
 
 <h2>1. What the JIT kernel path is</h2>
-<p>The core idea of the <span class="mono">jit_kernel</span> module is to ship small C++/CUDA kernels as "source + recipe" rather than pre-compiled into the binary. The first time an op is used, the module invokes the compiler on the spot to build it into a PyTorch extension module. The immediate payoff is that the wheel doesn't bloat from packing kernels for every architecture and dtype. For example, <span class="mono">jit_kernel/activation.py</span> builds a corresponding JIT module per dtype on first use; <span class="mono">jit_kernel/norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span>—exactly the fused kernel the RMSNorm fast path from Lesson 36 relies on.</p>
+<p>The core idea of the <span class="mono">jit_kernel</span> module is to ship small C++/CUDA kernels as "source + recipe" rather than pre-compiled into the binary. The first time an op is used, the module invokes the compiler on the spot to build it into a PyTorch extension module. The immediate payoff is that the wheel doesn't bloat from packing kernels for every architecture and dtype. For example, <span class="mono">jit_kernel/activation.py</span> builds a corresponding JIT module per dtype on first use; <span class="mono">jit_kernel/norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span>—exactly the fused kernel the RMSNorm fast path from <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a> relies on.</p>
 <p>It is worth unpacking where "wheel bloat" comes from. A kernel often has more than one version: it may need a separate build for each dtype (fp16, bf16, fp8, etc.), a separate build for each GPU compute capability (e.g. sm80, sm90), and on top of that the combinations of shapes and flags, so the compiled artifacts grow multiplicatively. If everything went AOT, all these combinations would have to be enumerated up front and packed into the <span class="mono">.so</span>, making the wheel quickly unacceptable in size—while the vast majority of those combinations are never used in any given deployment. JIT takes the opposite approach: the release contains only the slim source, and whichever combination is actually needed gets compiled and cached on the spot for that one combination—trading a space cost for a one-time time cost, and paying only for the code paths that actually run.</p>
-<p>These two modules illustrate JIT's "on demand" nature well. <span class="mono">activation.py</span> does not compile activation kernels for every dtype up front; instead, only when a concrete dtype is first used does it build the corresponding JIT module—use fp16 and it compiles the fp16 one, use bf16 and it compiles the bf16 one, and unused ones cost no compile time at all. This "compile only what is triggered" strategy spends the compile cost precisely on the code paths that actually run. <span class="mono">norm.py</span>'s <span class="mono">fused_add_rmsnorm</span> is a typical fused kernel: it merges the "residual add" and "RMSNorm normalization" steps into one GPU kernel, saving a round trip to memory. Lesson 36's RMSNorm fast path calls exactly this—showing the JIT path is not a side note but genuinely serves a key op in the main inference pipeline.</p>
+<p>These two modules illustrate JIT's "on demand" nature well. <span class="mono">activation.py</span> does not compile activation kernels for every dtype up front; instead, only when a concrete dtype is first used does it build the corresponding JIT module—use fp16 and it compiles the fp16 one, use bf16 and it compiles the bf16 one, and unused ones cost no compile time at all. This "compile only what is triggered" strategy spends the compile cost precisely on the code paths that actually run. <span class="mono">norm.py</span>'s <span class="mono">fused_add_rmsnorm</span> is a typical fused kernel: it merges the "residual add" and "RMSNorm normalization" steps into one GPU kernel, saving a round trip to memory. <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>'s RMSNorm fast path calls exactly this—showing the JIT path is not a side note but genuinely serves a key op in the main inference pipeline.</p>
 <p>Why not make everything AOT? Because in practice many kernels are not "stable and general." Some ops are still experimental with changing interfaces; some kernels need different code per GPU architecture (the JIT path queries the current architecture, e.g. via <span class="mono">get_jit_cuda_arch</span> to get the compute capability) and picks instructions and templates accordingly; some kernels must be parameterized by shapes or flags known only at runtime. Enumerating all of these into the wheel up front is both unrealistic and bloated, so letting JIT generate them on demand is the better strategy.</p>
 <p>Seen from another angle, AOT and JIT are not rivals replacing each other but two cooperating pipelines. SGLang hands the hot, fixed-shape, startup-latency-sensitive kernels to <span class="mono">sgl-kernel</span> to be compiled into the binary ahead of time; it leaves the still-evolving, hardware-feature-dependent, or only-for-specific-dtype/shape kernels to <span class="mono">jit_kernel</span> to build on the spot. This "route by a kernel's lifecycle and stability" design keeps the release lean without sacrificing fast adaptation to cutting-edge hardware and new ops. Understanding the JIT path is essentially understanding all the benefits and costs of "moving compilation from release time to runtime."</p>
 
@@ -594,9 +596,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>This cost is clearer in SGLang's real setting. A service is usually long-running: an inference process may serve for hours or even days, so amortizing the one-or-two-second first-call compile cost over a long serving window is practically negligible; in return you get the ability for "the same code to compile an optimal kernel on each different architecture." Conversely, in scenarios extremely sensitive to cold start, or deployed in a slim image without a compiler, JIT's first-call latency and toolchain dependency become real pain points—there, AOT is the safer choice. So this question has no one-size-fits-all answer, only the best solution after weighing "kernel stability, call frequency, deployment environment, and tolerance for startup latency."</p>
 
 <h2>4. AOT and JIT reach the same destination</h2>
-<p>Putting Lesson 38 and this lesson side by side makes it clearer: AOT (<span class="mono">sgl-kernel</span>) and JIT (<span class="mono">jit_kernel</span>) both end up "calling a compiled GPU kernel from Python." Their destination is the same; they only differ on the way there—AOT compiles kernels at wheel-build time and ships them with the binary, ready on install; JIT ships the source and compiles plus caches on the local machine at first call. Once you grasp this, you can make the right call when designing new ops: hand stable, hot, zero-dependency kernels to AOT; hand experimental, architecture-specific, or wheel-slimming kernels to JIT. Having both is precisely the engineering wisdom that lets SGLang's kernel system balance performance and flexibility.</p>
+<p>Putting <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a> and this lesson side by side makes it clearer: AOT (<span class="mono">sgl-kernel</span>) and JIT (<span class="mono">jit_kernel</span>) both end up "calling a compiled GPU kernel from Python." Their destination is the same; they only differ on the way there—AOT compiles kernels at wheel-build time and ships them with the binary, ready on install; JIT ships the source and compiles plus caches on the local machine at first call. Once you grasp this, you can make the right call when designing new ops: hand stable, hot, zero-dependency kernels to AOT; hand experimental, architecture-specific, or wheel-slimming kernels to JIT. Having both is precisely the engineering wisdom that lets SGLang's kernel system balance performance and flexibility.</p>
 <p>Going further, the two paths are not isolated. A kernel often is born as JIT first: it iterates quickly inside <span class="mono">jit_kernel</span>, is tried per architecture, and once correctness and performance are proven—if it stabilizes and is heavily reused—it can "graduate" to <span class="mono">sgl-kernel</span> on the AOT path, baked into the wheel to enjoy zero first-call latency. Conversely, when new hardware just launches and new instructions are still being polished, JIT lets SGLang run on it immediately without waiting for the next release. Precisely because the destination is unified (both are <span class="mono">torch.ops</span>-style callables into compiled kernels), upper-layer code barely needs to care whether an op comes from AOT or JIT—this abstraction, which encapsulates the complexity of "when to compile and how to ship," is the key to an engine that is both fast and flexible.</p>
-<p>In one sentence: JIT is not a replacement for AOT but its complement. Lesson 38's <span class="mono">sgl-kernel</span> bakes the most stable, hottest kernels into the binary in exchange for being ready out of the box with zero first-call latency; this lesson's <span class="mono">jit_kernel</span> compiles the experimental, architecture-specific, or shape-varying kernels on demand at runtime in exchange for flexibility and slimness. Both paths ultimately converge into the same <span class="mono">torch.ops</span>-style calls, together holding up SGLang's kernel performance foundation, and together embodying the engineering wisdom of balancing performance and flexibility in a large inference system.</p>
+<p>In one sentence: JIT is not a replacement for AOT but its complement. <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>'s <span class="mono">sgl-kernel</span> bakes the most stable, hottest kernels into the binary in exchange for being ready out of the box with zero first-call latency; this lesson's <span class="mono">jit_kernel</span> compiles the experimental, architecture-specific, or shape-varying kernels on demand at runtime in exchange for flexibility and slimness. Both paths ultimately converge into the same <span class="mono">torch.ops</span>-style calls, together holding up SGLang's kernel performance foundation, and together embodying the engineering wisdom of balancing performance and flexibility in a large inference system.</p>
 
 <div class="fig">
   <svg viewBox="0 0 800 300" role="img" aria-label="AOT vs JIT strategies: AOT prebuilds kernels into the wheel, zero first-call cost but big size; JIT compiles on first use and caches, slim install and easy to add a kernel">
@@ -634,7 +636,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <div class="cols">
-  <div class="col"><strong>AOT (sgl-kernel, Lesson 38)</strong>: at wheel-build time <span class="mono">nvcc</span> compiles all kernels into the binary. Ready on install, zero first-call compile latency; but the wheel is large and architecture combinations must be enumerated up front.</div>
+  <div class="col"><strong>AOT (sgl-kernel, <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>)</strong>: at wheel-build time <span class="mono">nvcc</span> compiles all kernels into the binary. Ready on install, zero first-call compile latency; but the wheel is large and architecture combinations must be enumerated up front.</div>
   <div class="col"><strong>JIT (jit_kernel, this lesson)</strong>: compiles on demand at runtime, the first call pays a one-time <span class="mono">nvcc</span> cost, then cache hits are as fast as AOT; the wheel stays slim and can be generated flexibly per GPU architecture and runtime shape, but it requires a compiler toolchain on the machine.</div>
 </div>
 
@@ -679,14 +681,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     return run_activation("silu", input, out, expert_ids, expert_step)
 </pre></div>
 
-<p>A concrete example: the same <span class="mono">silu_and_mul</span> exists on both paths—in Lesson 38's <span class="mono">sgl-kernel</span> it is the AOT version, shipped ready with the wheel; here in <span class="mono">jit_kernel/activation.py</span> it is the JIT version, compiled on the spot on the first call and cache-hit thereafter. Its sibling ops <span class="mono">gelu_and_mul</span> and <span class="mono">gelu_tanh_and_mul</span> go through the same <span class="mono">run_activation</span> entry too, only swapping the activation name from <span class="mono">"silu"</span> to <span class="mono">"gelu"</span> / <span class="mono">"gelu_tanh"</span>—so "one entry, compile on demand, reused across ops" is exactly the JIT path's uniform pattern.</p>
+<p>A concrete example: the same <span class="mono">silu_and_mul</span> exists on both paths—in <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>'s <span class="mono">sgl-kernel</span> it is the AOT version, shipped ready with the wheel; here in <span class="mono">jit_kernel/activation.py</span> it is the JIT version, compiled on the spot on the first call and cache-hit thereafter. Its sibling ops <span class="mono">gelu_and_mul</span> and <span class="mono">gelu_tanh_and_mul</span> go through the same <span class="mono">run_activation</span> entry too, only swapping the activation name from <span class="mono">"silu"</span> to <span class="mono">"gelu"</span> / <span class="mono">"gelu_tanh"</span>—so "one entry, compile on demand, reused across ops" is exactly the JIT path's uniform pattern.</p>
 
 <div class="card key"><div class="tag">📌 Key points</div><ul>
-<li><span class="mono">jit_kernel/</span> compiles small C++/CUDA kernels on demand at runtime, instead of shipping them ahead of time in the wheel like Lesson 38's <span class="mono">sgl-kernel</span>.</li>
+<li><span class="mono">jit_kernel/</span> compiles small C++/CUDA kernels on demand at runtime, instead of shipping them ahead of time in the wheel like <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>'s <span class="mono">sgl-kernel</span>.</li>
 <li>Core entry <span class="mono">load_jit(...)</span>: pass source + wrappers (each an <span class="mono">(export_name, kernel_name)</span> tuple), it builds a torch extension and caches the <span class="mono">.so</span> by a unique marker.</li>
 <li><strong>Compile once, reuse later</strong>: the first call pays a one-time <span class="mono">nvcc</span> cost; after a cache hit it's as fast as AOT.</li>
 <li>Reasons to pick JIT: flexibility (experimental ops, architecture-specific codegen, runtime parameterization) and no wheel bloat; the cost is first-call latency + needing a compiler toolchain.</li>
-<li><span class="mono">activation.py</span> builds a JIT module per dtype on first use; <span class="mono">norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span> (used by Lesson 36's RMSNorm fast path).</li>
+<li><span class="mono">activation.py</span> builds a JIT module per dtype on first use; <span class="mono">norm.py</span> provides a JIT <span class="mono">fused_add_rmsnorm</span> (used by <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>'s RMSNorm fast path).</li>
 <li>AOT and JIT converge: both become <span class="mono">torch.ops</span>-style callables into compiled kernels; the difference is only "when and how they're built and shipped."</li>
 </ul></div>
 <div class="selftest">
@@ -718,7 +720,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. When choosing <strong>AOT (sgl-kernel, Lesson 38)</strong> vs <strong>JIT (jit_kernel)</strong> for a new op, which judgment is <strong>most sound</strong>?</div>
+  <div class="qn">3. When choosing <strong>AOT (sgl-kernel, <a class="xref" href="38-sgl-kernel-overview.html">Lesson 38</a>)</strong> vs <strong>JIT (jit_kernel)</strong> for a new op, which judgment is <strong>most sound</strong>?</div>
   <ol class="opts">
     <li>Always choose AOT because JIT can never match compiled-kernel performance</li>
     <li>Always choose JIT because it has no cost</li>
@@ -734,7 +736,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
     <li>In one sentence explain <span class='mono'>load_jit</span>'s '<strong>compile on demand + cache the .so</strong>' mechanism, the role of the unique marker in cache reuse, and why this design lets JIT stay high-performance while keeping flexibility.</li>
-    <li>Contrast where <strong>AOT</strong> and <strong>JIT</strong> 'reach the same destination' yet diverge: both become <span class='mono'>torch.ops</span>-style callables into compiled kernels, differing only in 'when/how they're built and shipped'. Using <span class='mono'>activation.py</span> building per-dtype modules and <span class='mono'>norm.py</span>'s JIT <span class='mono'>fused_add_rmsnorm</span> (used by Lesson 36), explain what kind of kernel each suits.</li>
+    <li>Contrast where <strong>AOT</strong> and <strong>JIT</strong> 'reach the same destination' yet diverge: both become <span class='mono'>torch.ops</span>-style callables into compiled kernels, differing only in 'when/how they're built and shipped'. Using <span class='mono'>activation.py</span> building per-dtype modules and <span class='mono'>norm.py</span>'s JIT <span class='mono'>fused_add_rmsnorm</span> (used by <a class="xref" href="36-rope-norm-and-ops.html">Lesson 36</a>), explain what kind of kernel each suits.</li>
   </ul>
 </div>
 </div></div>

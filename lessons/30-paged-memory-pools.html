@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -336,15 +338,15 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   把这套机制想成<strong>衣帽间 + 储物柜大厅</strong>：你进门把大衣交给服务员，他给你一张<strong>取衣牌</strong>，牌上印着"你的东西放在 12、37、58 号柜"——
   这张牌就是 <span class="mono">ReqToTokenPool</span>，它只记<strong>柜子编号</strong>，不装大衣。真正的大衣（K/V 张量）锁在<strong>那一排储物柜</strong>里，
   这排柜子就是 <span class="mono">token_to_kv</span> 池。发空柜、回收柜的<strong>服务员</strong>就是 <span class="mono">TokenToKVPoolAllocator</span>。
-  妙处在于：两个人要存<strong>同一件共享的外套</strong>时，服务员可以把<strong>同一个柜号</strong>同时写进两张取衣牌——这正是前缀共享（第 29 课）。
+  妙处在于：两个人要存<strong>同一件共享的外套</strong>时，服务员可以把<strong>同一个柜号</strong>同时写进两张取衣牌——这正是前缀共享（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）。
 </div>
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  一句话定调：<strong>树是索引，池是存储</strong>。第 29 课的树负责"谁和谁共享、共享到第几个 token"，而真正的 K/V 张量住在<strong>两个池</strong>里。
+  一句话定调：<strong>树是索引，池是存储</strong>。<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>的树负责"谁和谁共享、共享到第几个 token"，而真正的 K/V 张量住在<strong>两个池</strong>里。
   寻址要走<strong>两跳</strong>：请求 →（<span class="mono">ReqToTokenPool</span>）→ 一串 token 槽位号 →（<span class="mono">token_to_kv</span> 池）→ 物理 K/V。
-  池子在开机时按 <span class="mono">mem_fraction_static</span>（第 8 课）一次性预留，总槽位数 = 能装下多少 token = <strong>并发上限</strong>（第 4 课）。
-  分页分配（第 6 课）、命中复用（第 29 课）、驱逐回收（第 32 课）全都围着这两个池转。
+  池子在开机时按 <span class="mono">mem_fraction_static</span>（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）一次性预留，总槽位数 = 能装下多少 token = <strong>并发上限</strong>（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）。
+  分页分配（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）、命中复用（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）、驱逐回收（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）全都围着这两个池转。
 </div>
 
 <h2>两个池，两跳寻址：K/V 究竟住在哪</h2>
@@ -354,7 +356,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 按 token 槽位号索引，里面装的是<strong>实打实的 K 和 V</strong>。</p>
 <p>于是寻址必然是<strong>两跳</strong>。第一跳：拿请求的 <span class="mono">req_pool_idx</span> 去 <span class="mono">ReqToTokenPool</span> 那一行，读出"我拥有的一串 token 槽位号"。
 第二跳：拿这串槽位号去 <span class="mono">token_to_kv</span> 池，按下标取出（或写入）每一层对应的 K/V。<strong>请求 → 槽位号 → 物理 K/V</strong>，中间隔着两层<strong>间接</strong>。
-这种"先查账本拿编号、再凭编号取货"的设计不是多此一举——正因为编号这层被独立出来，槽位才能<strong>非连续</strong>（分页，第 6 课）、还能<strong>被多条请求共享</strong>（基数树，第 29 课），
+这种"先查账本拿编号、再凭编号取货"的设计不是多此一举——正因为编号这层被独立出来，槽位才能<strong>非连续</strong>（分页，<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）、还能<strong>被多条请求共享</strong>（基数树，<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>），
 而每条请求的账本只管"哪些编号是我的"，丝毫不关心它们在仓库里是否连续、是否被别人也指着。</p>
 <p>再把 <span class="mono">ReqToTokenPool</span> 这张表的形状说细一点，你会更踏实。它的底层就是一个 <span class="mono">torch.zeros((请求数+1, 最大上下文长度), dtype=int32)</span> 的二维张量：
 <strong>行</strong>是请求（用 <span class="mono">req_pool_idx</span> 选行），<strong>列</strong>是这条请求第几个 token，<strong>格子里填的就是那个 token 在仓库里的槽位号</strong>。
@@ -365,9 +367,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">入口</span><span class="name">一条在跑的请求</span></div><div class="ld">每条请求持有一个 <span class="mono">req_pool_idx</span>——它在私有账本里的<strong>行号</strong>。</div></div>
   <div class="layer l-app"><div class="lh"><span class="badge">① 账本</span><span class="name">ReqToTokenPool</span></div><div class="ld">按 <span class="mono">req_pool_idx</span> 取出这一行：<strong>我依次拥有的 token 槽位号列表</strong>。只记编号，不装张量。</div></div>
-  <div class="layer l-main"><div class="lh"><span class="badge">② 编号</span><span class="name">token 槽位号 (indices)</span></div><div class="ld">一串指向大仓库的<strong>下标</strong>。可非连续（分页，第 6 课），可被多请求共享（第 29 课）。</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">② 编号</span><span class="name">token 槽位号 (indices)</span></div><div class="ld">一串指向大仓库的<strong>下标</strong>。可非连续（分页，<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>），可被多请求共享（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）。</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">③ 仓库</span><span class="name">MHATokenToKVPool</span></div><div class="ld">为<strong>每一层</strong>各开一个大张量，按槽位号去 <span class="mono">k_buffer</span> / <span class="mono">v_buffer</span> 取或写。</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">真身</span><span class="name">物理 K / V 张量</span></div><div class="ld">真正吃显存的就是这里。开机按 <span class="mono">mem_fraction_static</span>（第 8 课）一次性预留。</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">真身</span><span class="name">物理 K / V 张量</span></div><div class="ld">真正吃显存的就是这里。开机按 <span class="mono">mem_fraction_static</span>（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）一次性预留。</div></div>
 </div>
 
 <div class="fig">
@@ -423,24 +425,24 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>分配器：开机预留、入批发槽、驱逐回收</h2>
 <p>谁来决定哪些槽位是空的、该发哪一个？是 <span class="mono">TokenToKVPoolAllocator</span>（基类 <span class="mono">BaseTokenToKVPoolAllocator</span>）。它就是衣帽间那位服务员，手里攥着一份<strong>空闲页清单</strong>。
-当一批请求被准入（admit）要做前向时，调度器向分配器<strong>申领</strong>所需的 token 槽位——分配器以<strong>页为单位</strong>（固定大小，第 6 课）从空闲清单里切出来发给它们；
+当一批请求被准入（admit）要做前向时，调度器向分配器<strong>申领</strong>所需的 token 槽位——分配器以<strong>页为单位</strong>（固定大小，<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）从空闲清单里切出来发给它们；
 请求结束或被驱逐时，再把这些槽位<strong>归还</strong>清单。<span class="mono">available_size</span> 返回的就是"还剩多少页 × 页大小"，也就是<strong>此刻还能再接多少 token</strong>。</p>
-<p>关键在于<strong>总量是开机就钉死的</strong>。引擎启动时，按 <span class="mono">mem_fraction_static</span>（第 8 课）算出能拿来做 KV 缓存的那块显存，再除以"每个 token 每层的 K/V 字节数"，
-得到<strong>总槽位数 = 池子能装下多少 token</strong>。这个数字直接就是<strong>并发上限</strong>（第 4 课）：所有在跑请求的 token 加起来不能超过它。一旦逼近上限，要么排队、要么靠驱逐（第 32 课）腾位。它把抽象的"显存够不够"翻译成了一个具体、可数的整数，调度器每一步都在拿它做减法心算。
+<p>关键在于<strong>总量是开机就钉死的</strong>。引擎启动时，按 <span class="mono">mem_fraction_static</span>（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）算出能拿来做 KV 缓存的那块显存，再除以"每个 token 每层的 K/V 字节数"，
+得到<strong>总槽位数 = 池子能装下多少 token</strong>。这个数字直接就是<strong>并发上限</strong>（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）：所有在跑请求的 token 加起来不能超过它。一旦逼近上限，要么排队、要么靠驱逐（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）腾位。它把抽象的"显存够不够"翻译成了一个具体、可数的整数，调度器每一步都在拿它做减法心算。
 所以分配器虽小，却是<strong>显存预算的总闸门</strong>——发得出槽就能进批，发不出就只能等。它和池子的分工很清爽：<strong>池子是那排柜子本身，分配器是管钥匙的人</strong>。</p>
 <p>分配器内部还有两个值得一提的细节。其一是<strong>空闲页与待释放页分离</strong>：<span class="mono">free_pages</span> 是当下可直接发出的空闲页，<span class="mono">release_pages</span> 是刚被归还、还没并回主清单的页；
 <span class="mono">available_size</span> 把两者加起来 ×页大小，才是真实可用量。这样分两段是为了把"归还"做成<strong>批量、惰性</strong>的，避免每释放一个槽就立刻做一次昂贵的排序合并。
 其二是 <span class="mono">need_sort</span> 这个开关：某些注意力后端要求<strong>同一请求的槽位尽量连续</strong>，于是回收时把空闲页排序、让后续分配尽量挑出连号的页；不需要时就跳过排序、图个快。
-你不必记住这些字段名，但要记住<strong>分配器不是一个简单的栈</strong>——它在"分配要快"和"槽位要尽量规整"之间做了不少工程权衡，这些权衡最终都服务于上层注意力内核能否高效读取（第 6 课的分页正是同一动机）。</p>
+你不必记住这些字段名，但要记住<strong>分配器不是一个简单的栈</strong>——它在"分配要快"和"槽位要尽量规整"之间做了不少工程权衡，这些权衡最终都服务于上层注意力内核能否高效读取（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>的分页正是同一动机）。</p>
 
 <div class="flow">
   <div class="node hl"><div class="nt">入批 alloc</div><div class="nd">分配器以页为单位<br>发出空闲 token 槽位</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">写入 write</div><div class="nd">前向把每层 K/V<br>写到这些槽位</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">命中复用</div><div class="nd">第 29 课的树指向<br>同一批槽位 · 零拷贝</div></div>
+  <div class="node"><div class="nt">命中复用</div><div class="nd"><a class="xref" href="29-radixattention-implementation.html">第 29 课</a>的树指向<br>同一批槽位 · 零拷贝</div></div>
   <div class="arrow">→</div>
-  <div class="node hl"><div class="nt">驱逐 free</div><div class="nd">第 32 课把槽位<br>还回分配器清单</div></div>
+  <div class="node hl"><div class="nt">驱逐 free</div><div class="nd"><a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>把槽位<br>还回分配器清单</div></div>
 </div>
 
 <div class="fig">
@@ -491,12 +493,12 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>为什么拆成两张表，而不是合成一张</h2>
 <p>把私有账本和共享仓库<strong>分开</strong>，是这套设计最值得玩味的取舍。设想若硬要合成一张"请求直接存自己的 K/V"的表，会立刻撞上两堵墙。
-第一堵：<strong>分页</strong>。一条请求的 token 槽位在仓库里往往是<strong>东一块西一块</strong>的（分页分配，第 6 课），不连续。账本这层正好用来<strong>把散落的编号串成一条有序列表</strong>，
-让上层以为"我的 KV 是连成一串的"，底层却自由地把它们摆在任意空页里。第二堵：<strong>共享</strong>。两条请求若前缀相同，它们应当指向<strong>同一批物理槽位</strong>（第 29 课），
+第一堵：<strong>分页</strong>。一条请求的 token 槽位在仓库里往往是<strong>东一块西一块</strong>的（分页分配，<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>），不连续。账本这层正好用来<strong>把散落的编号串成一条有序列表</strong>，
+让上层以为"我的 KV 是连成一串的"，底层却自由地把它们摆在任意空页里。第二堵：<strong>共享</strong>。两条请求若前缀相同，它们应当指向<strong>同一批物理槽位</strong>（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>），
 若 K/V 直接长在请求的私有表里，就<strong>没法共享</strong>——你总不能让两个人的私有储物柜是同一个。</p>
 <p>拆开后两难尽解：<strong>账本（ReqToTokenPool）记"哪些编号是我的"，仓库（token_to_kv 池）是一个所有请求共用的大 arena</strong>。
 编号可以非连续、可以被多份账本同时引用，而仓库只需老老实实按编号存取，不必关心谁在用、用了几份。这正是"<strong>索引与存储分离</strong>"在内存层的又一次体现——
-和第 29 课"树是索引、池是存储"是同一条哲学，只是这里把"池"再细分成了<strong>记账的池</strong>和<strong>存货的池</strong>。下面这张表把两者一字排开。</p>
+和<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>"树是索引、池是存储"是同一条哲学，只是这里把"池"再细分成了<strong>记账的池</strong>和<strong>存货的池</strong>。下面这张表把两者一字排开。</p>
 <p>这种分层还带来一个常被忽略却极其关键的好处：<strong>共享与回收变成纯粹的"改编号"操作，不碰一字节张量</strong>。前缀命中时，引擎只是把命中的那串槽位号<strong>抄进</strong>新请求的账本行；
 驱逐时，只是把槽位号从某节点的 <span class="mono">value</span> 里<strong>摘下来还给分配器</strong>。无论共享还是回收，<strong>仓库里的 K/V 张量一动不动</strong>——既不复制，也不搬家。
 设想若 K/V 直接长在请求的私有表里，共享就得复制张量、回收就得搬运或清零，每一步都是昂贵的显存带宽开销。正因为把"<strong>谁拥有</strong>"（账本里的编号）和"<strong>东西本体</strong>"（仓库里的张量）彻底解耦，
@@ -506,14 +508,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <tr><th>池 / 组件</th><th>映射 / 装什么</th><th>按什么索引</th></tr>
   <tr><td class="mono">ReqToTokenPool</td><td>每条请求 → 它依次拥有的 token 槽位号列表（只记编号）</td><td class="mono">req_pool_idx</td></tr>
   <tr><td class="mono">MHATokenToKVPool</td><td>每层的物理 K / V 张量（真正吃显存）</td><td class="mono">token 槽位号</td></tr>
-  <tr><td class="mono">TokenToKVPoolAllocator</td><td>空闲页清单：发槽 / 回收槽</td><td>页（第 6 课）</td></tr>
+  <tr><td class="mono">TokenToKVPoolAllocator</td><td>空闲页清单：发槽 / 回收槽</td><td>页（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）</td></tr>
 </table>
 
-<h2>接回第 29 课：树存的是 indices，不是张量</h2>
+<h2>接回<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>：树存的是 indices，不是张量</h2>
 <p>现在可以把上一课那句话彻底落地了。基数树 <span class="mono">TreeNode</span> 的 <span class="mono">value</span> 字段，装的<strong>就是这里说的 token 槽位号（indices）</strong>——
 它是<strong>指向 token_to_kv 池的下标</strong>，<strong>不是 K/V 张量本身</strong>。所以树是纯粹的<strong>索引与去重</strong>层，池才是<strong>存储</strong>层。
 两条请求共享前缀，本质是它们在树上拿到<strong>同一串 indices</strong>，于是注意力都去池里读<strong>同一批物理槽位</strong>——共享的部分<strong>零额外显存</strong>。
-当某段前缀被驱逐（第 32 课），做的事就是把它 <span class="mono">value</span> 里那串槽位号<strong>还给分配器</strong>，让别的 token 来占。这就是为什么第 29 课反复强调"<strong>节点装的是指针、不是张量</strong>"——那句话的全部分量，要到这一课见了真正的池子才掂得出来。</p>
+当某段前缀被驱逐（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>），做的事就是把它 <span class="mono">value</span> 里那串槽位号<strong>还给分配器</strong>，让别的 token 来占。这就是为什么<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>反复强调"<strong>节点装的是指针、不是张量</strong>"——那句话的全部分量，要到这一课见了真正的池子才掂得出来。</p>
 <p>把链路完整地连起来：一条请求来了，<span class="mono">match_prefix</span> 在树上命中一段前缀、拿回一串 indices（复用），未命中的尾巴则向分配器<strong>申领新槽位</strong>、
 把算出的 K/V <span class="mono">write</span> 进池子、再把这串新 indices 一并记进自己的 <span class="mono">ReqToTokenPool</span> 行、并 <span class="mono">insert</span> 回树供后来者复用。
 读、写、共享、回收，全部以"槽位号"为通货在<strong>账本、仓库、树</strong>三者间流转。看懂这点，你就握住了 SGLang 显存管理的<strong>总枢纽</strong>。下面这格把"两请求指向共享槽位"画给你看。</p>
@@ -525,8 +527,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="cg-cap"><b>两级寻址 + 前缀共享</b>：两条请求的账本里写着同一个槽位号（高亮），于是指向池里同一批物理 K/V</div>
   <div class="cells"><span class="lab">请求 A 账本</span><span class="cell hl">#12</span><span class="cell">#40</span><span class="cell">#41</span><span class="sep">→</span><span class="cell q">A 拥有的 token 槽位号（按 req_pool_idx 取这一行）</span></div>
   <div class="cells"><span class="lab">请求 B 账本</span><span class="cell hl">#12</span><span class="cell">#88</span><span class="sep">→</span><span class="cell q">B 也指向 <span class="mono">#12</span>——共享前缀，同一个编号写进两张账本</span></div>
-  <div class="cells"><span class="lab">token_to_kv 池</span><span class="cell hl">槽#12 的 K/V</span><span class="sep">→</span><span class="cell q">物理 K/V 只此一份，A 与 B 共读 · 零额外显存（第 29 课）</span></div>
-  <div class="cells"><span class="lab">分配器</span><span class="cell">空闲页…</span><span class="sep">→</span><span class="cell q">发出 <span class="mono">#40/#41/#88</span> 等新槽；驱逐时 <span class="mono">#12</span> 归还（第 32 课）</span></div>
+  <div class="cells"><span class="lab">token_to_kv 池</span><span class="cell hl">槽#12 的 K/V</span><span class="sep">→</span><span class="cell q">物理 K/V 只此一份，A 与 B 共读 · 零额外显存（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）</span></div>
+  <div class="cells"><span class="lab">分配器</span><span class="cell">空闲页…</span><span class="sep">→</span><span class="cell q">发出 <span class="mono">#40/#41/#88</span> 等新槽；驱逐时 <span class="mono">#12</span> 归还（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）</span></div>
 </div>
 
 <p>真实代码里，账本就是一张 <span class="mono">int32</span> 二维表，仓库就是每层一个大张量——朴素得几乎不像"高科技"，但正是这份朴素让两级寻址既快又省：</p>
@@ -579,9 +581,9 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="tag">📌 本课要点</div>
   <strong>① 两个池，两跳寻址</strong>：请求 →（ReqToTokenPool）→ token 槽位号 →（token_to_kv 池）→ 物理 K/V。账本只记编号，仓库才装张量。
   <strong>② ReqToTokenPool 是每请求的私有账本</strong>，按 <span class="mono">req_pool_idx</span> 索引；<strong>MHATokenToKVPool 是每层的共享大仓库</strong>，按槽位号索引。
-  <strong>③ TokenToKVPoolAllocator 发槽 / 回收槽</strong>，按页（第 6 课）；总槽位在开机按 <span class="mono">mem_fraction_static</span>（第 8 课）钉死 = 并发上限（第 4 课）。
-  <strong>④ 第 29 课树里的 value 就是这些 indices，不是张量</strong>——树是索引、池是存储；两请求共享前缀 = 同一串槽位号 = 同一批物理 K/V，零额外显存。
-  <strong>⑤ 拆成两张表是为了支持非连续（分页）与跨请求共享（基数树）</strong>；驱逐（第 32 课）就是把槽位号还给分配器。
+  <strong>③ TokenToKVPoolAllocator 发槽 / 回收槽</strong>，按页（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）；总槽位在开机按 <span class="mono">mem_fraction_static</span>（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）钉死 = 并发上限（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）。
+  <strong>④ <a class="xref" href="29-radixattention-implementation.html">第 29 课</a>树里的 value 就是这些 indices，不是张量</strong>——树是索引、池是存储；两请求共享前缀 = 同一串槽位号 = 同一批物理 K/V，零额外显存。
+  <strong>⑤ 拆成两张表是为了支持非连续（分页）与跨请求共享（基数树）</strong>；驱逐（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）就是把槽位号还给分配器。
 </div>
 <div class="selftest">
 <h2>🧪 自测 · 想一想为什么这么设计</h2>
@@ -595,14 +597,14 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。两个池、两跳是本课核心：ReqToTokenPool 是每请求私有账本（按 req_pool_idx 索引），只记 token 槽位号；token_to_kv 池（MHATokenToKVPool）才按槽位号存每层真正的 K/V。请求不直接存张量；树存的也是 indices 不是张量（第 29 课）；分配器只发槽/回收槽，不存 K/V。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。两个池、两跳是本课核心：ReqToTokenPool 是每请求私有账本（按 req_pool_idx 索引），只记 token 槽位号；token_to_kv 池（MHATokenToKVPool）才按槽位号存每层真正的 K/V。请求不直接存张量；树存的也是 indices 不是张量（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）；分配器只发槽/回收槽，不存 K/V。</div></div></div>
   </details>
 </div>
 <div class="quiz">
   <div class="qn">2. <span class='mono'>ReqToTokenPool</span> 和 <span class='mono'>token_to_kv</span> 池<strong>各自映射什么</strong>？为什么要拆成两张表？</div>
   <ol class="opts">
     <li>ReqToTokenPool 装 K/V 张量，token_to_kv 池装编号</li>
-    <li><span class='mono'>ReqToTokenPool</span> 映射“每条请求 → 它依次拥有的 token 槽位号列表”（每请求记账，按 <span class='mono'>req_pool_idx</span> 索引）；<span class='mono'>token_to_kv</span> 池映射“token 槽位号 → 每层物理 K/V”（共享大仓库）。拆开是为了让槽位能<strong>非连续</strong>（分页，第 6 课）且<strong>被多请求共享</strong>（第 29 课），账本只管“哪些编号是我的”</li>
+    <li><span class='mono'>ReqToTokenPool</span> 映射“每条请求 → 它依次拥有的 token 槽位号列表”（每请求记账，按 <span class='mono'>req_pool_idx</span> 索引）；<span class='mono'>token_to_kv</span> 池映射“token 槽位号 → 每层物理 K/V”（共享大仓库）。拆开是为了让槽位能<strong>非连续</strong>（分页，<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）且<strong>被多请求共享</strong>（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>），账本只管“哪些编号是我的”</li>
     <li>拆开纯粹是历史遗留，没有实际作用</li>
     <li>两张表装的内容完全一样，只是为了冗余备份</li>
   </ol>
@@ -612,23 +614,23 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </details>
 </div>
 <div class="quiz">
-  <div class="qn">3. 第 29 课基数树节点的 <span class='mono'>value</span> 既然是 <strong>indices 而不是张量</strong>，那“<strong>两请求共享前缀</strong>”在内存池里到底意味着什么？</div>
+  <div class="qn">3. <a class="xref" href="29-radixattention-implementation.html">第 29 课</a>基数树节点的 <span class='mono'>value</span> 既然是 <strong>indices 而不是张量</strong>，那“<strong>两请求共享前缀</strong>”在内存池里到底意味着什么？</div>
   <ol class="opts">
     <li>引擎把共享前缀的 K/V 复制一份给每条请求</li>
     <li>两请求各自重算一遍共享前缀的 K/V</li>
-    <li>两条请求的账本里写着<strong>同一批 token 槽位号</strong>，于是注意力都去 <span class='mono'>token_to_kv</span> 池读<strong>同一批物理 K/V</strong>——共享部分<strong>零额外显存</strong>。驱逐（第 32 课）就是把这些槽位号还给分配器；正因为树存的是编号而非张量，复用才能零拷贝</li>
+    <li>两条请求的账本里写着<strong>同一批 token 槽位号</strong>，于是注意力都去 <span class='mono'>token_to_kv</span> 池读<strong>同一批物理 K/V</strong>——共享部分<strong>零额外显存</strong>。驱逐（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）就是把这些槽位号还给分配器；正因为树存的是编号而非张量，复用才能零拷贝</li>
     <li>共享只发生在 CPU 内存，GPU 上仍是各存各的</li>
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。树存的是 indices，所以共享 = 复用指针：两请求账本指向同一批槽位号 → 同一批物理 K/V → 共享部分零额外显存。这正是不复制、不重算的根源。驱逐则把这串槽位号还回分配器（第 32 课）。说复制、重算或仅 CPU 共享都与“索引与存储分离”的设计相悖。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。树存的是 indices，所以共享 = 复用指针：两请求账本指向同一批槽位号 → 同一批物理 K/V → 共享部分零额外显存。这正是不复制、不重算的根源。驱逐则把这串槽位号还回分配器（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）。说复制、重算或仅 CPU 共享都与“索引与存储分离”的设计相悖。</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用“衣帽间 + 储物柜大厅”这个类比，把分页内存池的<strong>两个池与两跳寻址</strong>讲透。请覆盖：①<span class='mono'>ReqToTokenPool</span> 为什么像“取衣牌”——它按 <span class='mono'>req_pool_idx</span> 索引、每行记“这条请求依次拥有哪些 token 槽位号”，<strong>只记编号不装张量</strong>；②<span class='mono'>MHATokenToKVPool</span> 为什么像“那排储物柜”——它为<strong>每一层</strong>各开一个大张量、按槽位号存真正的 K/V；③两跳寻址链路：请求 →（账本取行）→ token 槽位号 →（仓库按号取）→ 物理 K/V；④<span class='mono'>TokenToKVPoolAllocator</span> 为什么像“服务员”——以页（第 6 课）发槽/回收槽，总槽位在开机按 <span class='mono'>mem_fraction_static</span>（第 8 课）钉死 = 并发上限（第 4 课）。</li>
-    <li>把“<strong>树是索引、池是存储</strong>”接回第 29 课，讲清楚共享与驱逐在内存层的真相。请说明：①为什么 <span class='mono'>TreeNode</span> 的 <span class='mono'>value</span> 装的是 token 槽位号（indices）而非 K/V 张量，“树是索引/去重层、池是存储层”如何分工；②“两请求共享前缀”在池子里意味着两份账本写着<strong>同一批槽位号</strong>、指向<strong>同一批物理 K/V</strong>、共享部分<strong>零额外显存</strong>；③为什么要把账本（ReqToTokenPool）和仓库（token_to_kv 池）<strong>拆成两张表</strong>——为支持非连续的分页槽位（第 6 课）与跨请求共享（第 29 课）；④驱逐（第 32 课）如何把 value 里那串槽位号<strong>还给分配器</strong>，让别的 token 来占。</li>
+    <li>用“衣帽间 + 储物柜大厅”这个类比，把分页内存池的<strong>两个池与两跳寻址</strong>讲透。请覆盖：①<span class='mono'>ReqToTokenPool</span> 为什么像“取衣牌”——它按 <span class='mono'>req_pool_idx</span> 索引、每行记“这条请求依次拥有哪些 token 槽位号”，<strong>只记编号不装张量</strong>；②<span class='mono'>MHATokenToKVPool</span> 为什么像“那排储物柜”——它为<strong>每一层</strong>各开一个大张量、按槽位号存真正的 K/V；③两跳寻址链路：请求 →（账本取行）→ token 槽位号 →（仓库按号取）→ 物理 K/V；④<span class='mono'>TokenToKVPoolAllocator</span> 为什么像“服务员”——以页（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）发槽/回收槽，总槽位在开机按 <span class='mono'>mem_fraction_static</span>（<a class="xref" href="08-throughput-vs-latency.html">第 8 课</a>）钉死 = 并发上限（<a class="xref" href="04-autoregressive-and-kv-cache.html">第 4 课</a>）。</li>
+    <li>把“<strong>树是索引、池是存储</strong>”接回<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>，讲清楚共享与驱逐在内存层的真相。请说明：①为什么 <span class='mono'>TreeNode</span> 的 <span class='mono'>value</span> 装的是 token 槽位号（indices）而非 K/V 张量，“树是索引/去重层、池是存储层”如何分工；②“两请求共享前缀”在池子里意味着两份账本写着<strong>同一批槽位号</strong>、指向<strong>同一批物理 K/V</strong>、共享部分<strong>零额外显存</strong>；③为什么要把账本（ReqToTokenPool）和仓库（token_to_kv 池）<strong>拆成两张表</strong>——为支持非连续的分页槽位（<a class="xref" href="06-paged-attention-and-paged-kv.html">第 6 课</a>）与跨请求共享（<a class="xref" href="29-radixattention-implementation.html">第 29 课</a>）；④驱逐（<a class="xref" href="32-eviction-and-hit-rate.html">第 32 课</a>）如何把 value 里那串槽位号<strong>还给分配器</strong>，让别的 token 来占。</li>
   </ul>
 </div>
 </div></div>
@@ -645,15 +647,15 @@ mapping a request to its physical K/V. Grasp it and you'll see exactly who hands
   Picture a <strong>coat-check + locker room</strong>: you hand your coat to the attendant and get a <strong>claim ticket</strong> printed with "your stuff is in lockers 12, 37, 58" —
   that ticket is <span class="mono">ReqToTokenPool</span>; it lists <strong>locker numbers only</strong>, never the coats. The actual coats (K/V tensors) sit in <strong>that bank of lockers</strong>,
   which is the <span class="mono">token_to_kv</span> pool. The <strong>attendant</strong> handing out and reclaiming lockers is <span class="mono">TokenToKVPoolAllocator</span>.
-  The trick: when two people store <strong>the same shared coat</strong>, the attendant can write <strong>the same locker number</strong> onto both tickets — that's prefix sharing (Lesson 29).
+  The trick: when two people store <strong>the same shared coat</strong>, the attendant can write <strong>the same locker number</strong> onto both tickets — that's prefix sharing (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>).
 </div>
 
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
-  One line: <strong>the tree is the index, the pools are the storage</strong>. Lesson 29's tree owns "who shares with whom, up to which token"; the real K/V tensors live in <strong>two pools</strong>.
+  One line: <strong>the tree is the index, the pools are the storage</strong>. <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s tree owns "who shares with whom, up to which token"; the real K/V tensors live in <strong>two pools</strong>.
   Addressing takes <strong>two hops</strong>: request →(<span class="mono">ReqToTokenPool</span>)→ a run of token slot ids →(<span class="mono">token_to_kv</span> pool)→ physical K/V.
-  The pools are pre-allocated once at startup, sized by <span class="mono">mem_fraction_static</span> (Lesson 8); total slots = how many tokens fit = the <strong>concurrency ceiling</strong> (Lesson 4).
-  Paging (Lesson 6), reuse on hit (Lesson 29), and eviction (Lesson 32) all revolve around these two pools.
+  The pools are pre-allocated once at startup, sized by <span class="mono">mem_fraction_static</span> (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>); total slots = how many tokens fit = the <strong>concurrency ceiling</strong> (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).
+  Paging (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>), reuse on hit (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>), and eviction (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>) all revolve around these two pools.
 </div>
 
 <h2>Two pools, two hops: where K/V actually lives</h2>
@@ -663,15 +665,15 @@ It holds <strong>no K/V tensors</strong>, only indices — pure <strong>per-requ
 indexed by token slot, holding the <strong>actual K and V</strong>.</p>
 <p>So addressing is necessarily <strong>two hops</strong>. Hop one: take the request's <span class="mono">req_pool_idx</span> into the <span class="mono">ReqToTokenPool</span> row and read "the run of token slot numbers I own."
 Hop two: take that run into the <span class="mono">token_to_kv</span> pool to fetch (or write) the per-layer K/V by index. <strong>Request → slot ids → physical K/V</strong>, with two layers of <strong>indirection</strong> in between.
-This "look up the ledger for numbers, then fetch goods by number" is not redundant — precisely because the numbering layer is split out, slots can be <strong>non-contiguous</strong> (paging, Lesson 6) and <strong>shared across requests</strong> (the radix tree, Lesson 29),
+This "look up the ledger for numbers, then fetch goods by number" is not redundant — precisely because the numbering layer is split out, slots can be <strong>non-contiguous</strong> (paging, <a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>) and <strong>shared across requests</strong> (the radix tree, <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>),
 while each request's ledger only tracks "which numbers are mine," indifferent to whether they're contiguous in the warehouse or also pointed at by others.</p>
 
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">Entry</span><span class="name">a running request</span></div><div class="ld">Each request holds a <span class="mono">req_pool_idx</span> — its <strong>row number</strong> in the private ledger.</div></div>
   <div class="layer l-app"><div class="lh"><span class="badge">① Ledger</span><span class="name">ReqToTokenPool</span></div><div class="ld">Read the row by <span class="mono">req_pool_idx</span>: <strong>the list of token slot numbers I own, in order</strong>. Numbers only, no tensors.</div></div>
-  <div class="layer l-main"><div class="lh"><span class="badge">② Numbers</span><span class="name">token slot ids (indices)</span></div><div class="ld">A run of <strong>indices</strong> into the warehouse. May be non-contiguous (paging, Lesson 6) and shared by many requests (Lesson 29).</div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">② Numbers</span><span class="name">token slot ids (indices)</span></div><div class="ld">A run of <strong>indices</strong> into the warehouse. May be non-contiguous (paging, <a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>) and shared by many requests (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>).</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">③ Warehouse</span><span class="name">MHATokenToKVPool</span></div><div class="ld">Opens a big tensor <strong>per layer</strong>; fetch or write into <span class="mono">k_buffer</span> / <span class="mono">v_buffer</span> by slot.</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">Real thing</span><span class="name">physical K / V tensors</span></div><div class="ld">What truly eats GPU memory. Pre-allocated once by <span class="mono">mem_fraction_static</span> (Lesson 8).</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">Real thing</span><span class="name">physical K / V tensors</span></div><div class="ld">What truly eats GPU memory. Pre-allocated once by <span class="mono">mem_fraction_static</span> (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>).</div></div>
 </div>
 
 <div class="fig">
@@ -727,10 +729,10 @@ while each request's ledger only tracks "which numbers are mine," indifferent to
 
 <h2>The allocator: pre-reserve, hand out on admit, reclaim on evict</h2>
 <p>Who decides which slots are free and which one to hand out? <span class="mono">TokenToKVPoolAllocator</span> (base <span class="mono">BaseTokenToKVPoolAllocator</span>). It's the coat-check attendant, holding a <strong>free-page list</strong>.
-When a batch of requests is admitted to do a forward, the scheduler <strong>requests</strong> the token slots it needs — the allocator carves them out of the free list <strong>by page</strong> (fixed size, Lesson 6) and hands them over;
+When a batch of requests is admitted to do a forward, the scheduler <strong>requests</strong> the token slots it needs — the allocator carves them out of the free list <strong>by page</strong> (fixed size, <a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>) and hands them over;
 on finish or eviction the slots are <strong>returned</strong> to the list. <span class="mono">available_size</span> returns "free pages × page size," i.e. <strong>how many more tokens can still be admitted</strong> right now.</p>
-<p>The crux: <strong>the total is nailed down at startup</strong>. At launch, the engine computes the GPU memory available for KV cache from <span class="mono">mem_fraction_static</span> (Lesson 8), divides by "K/V bytes per token per layer,"
-and gets <strong>total slots = how many tokens the pool fits</strong>. That number is the <strong>concurrency ceiling</strong> (Lesson 4): the tokens of all running requests can't exceed it. Near the ceiling you either queue or evict (Lesson 32) to free room.
+<p>The crux: <strong>the total is nailed down at startup</strong>. At launch, the engine computes the GPU memory available for KV cache from <span class="mono">mem_fraction_static</span> (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>), divides by "K/V bytes per token per layer,"
+and gets <strong>total slots = how many tokens the pool fits</strong>. That number is the <strong>concurrency ceiling</strong> (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>): the tokens of all running requests can't exceed it. Near the ceiling you either queue or evict (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>) to free room.
 So the small allocator is the <strong>master valve of the memory budget</strong> — if it can hand out slots you join the batch, if not you wait. Its division of labor with the pool is clean: <strong>the pool is the bank of lockers, the allocator is who holds the keys</strong>.</p>
 
 <div class="flow">
@@ -738,9 +740,9 @@ So the small allocator is the <strong>master valve of the memory budget</strong>
   <div class="arrow">→</div>
   <div class="node"><div class="nt">write</div><div class="nd">forward writes each layer's<br>K/V into those slots</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="nt">reuse on hit</div><div class="nd">Lesson 29's tree points at<br>the same slots · zero copy</div></div>
+  <div class="node"><div class="nt">reuse on hit</div><div class="nd"><a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s tree points at<br>the same slots · zero copy</div></div>
   <div class="arrow">→</div>
-  <div class="node hl"><div class="nt">evict free</div><div class="nd">Lesson 32 returns the slots<br>to the allocator's list</div></div>
+  <div class="node hl"><div class="nt">evict free</div><div class="nd"><a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a> returns the slots<br>to the allocator's list</div></div>
 </div>
 
 <div class="fig">
@@ -791,25 +793,25 @@ So the small allocator is the <strong>master valve of the memory budget</strong>
 
 <h2>Why split into two tables, not merge into one</h2>
 <p>Splitting the private ledger from the shared warehouse is the design's most instructive trade-off. Imagine forcing a single "request stores its own K/V" table — you hit two walls at once.
-Wall one: <strong>paging</strong>. A request's token slots are usually scattered <strong>here and there</strong> in the warehouse (paged allocation, Lesson 6), non-contiguous. The ledger layer is exactly what <strong>threads the scattered numbers into an ordered list</strong>,
-letting the upper layer believe "my KV is one contiguous run" while the lower layer freely places them in any free pages. Wall two: <strong>sharing</strong>. Two requests with the same prefix should point at the <strong>same physical slots</strong> (Lesson 29);
+Wall one: <strong>paging</strong>. A request's token slots are usually scattered <strong>here and there</strong> in the warehouse (paged allocation, <a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>), non-contiguous. The ledger layer is exactly what <strong>threads the scattered numbers into an ordered list</strong>,
+letting the upper layer believe "my KV is one contiguous run" while the lower layer freely places them in any free pages. Wall two: <strong>sharing</strong>. Two requests with the same prefix should point at the <strong>same physical slots</strong> (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>);
 if K/V grew directly inside a request's private table, sharing would be <strong>impossible</strong> — you can't make two people's private lockers be the same one.</p>
 <p>Split, both dilemmas dissolve: <strong>the ledger (ReqToTokenPool) records "which numbers are mine," the warehouse (token_to_kv pool) is one big arena shared by all requests</strong>.
 Numbers may be non-contiguous and referenced by many ledgers at once, while the warehouse just stores/fetches by number, indifferent to who uses it or how many times. This is "<strong>index vs. storage separation</strong>" appearing again at the memory layer —
-the same philosophy as Lesson 29's "tree is index, pool is storage," only here the "pool" is further split into a <strong>bookkeeping pool</strong> and a <strong>storage pool</strong>. The table below lays both out side by side.</p>
+the same philosophy as <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s "tree is index, pool is storage," only here the "pool" is further split into a <strong>bookkeeping pool</strong> and a <strong>storage pool</strong>. The table below lays both out side by side.</p>
 
 <table class="t">
   <tr><th>Pool / component</th><th>Maps / holds what</th><th>Indexed by</th></tr>
   <tr><td class="mono">ReqToTokenPool</td><td>each request → the list of token slot numbers it owns (numbers only)</td><td class="mono">req_pool_idx</td></tr>
   <tr><td class="mono">MHATokenToKVPool</td><td>per-layer physical K / V tensors (what really eats memory)</td><td class="mono">token slot id</td></tr>
-  <tr><td class="mono">TokenToKVPoolAllocator</td><td>free-page list: hand out / reclaim slots</td><td>page (Lesson 6)</td></tr>
+  <tr><td class="mono">TokenToKVPoolAllocator</td><td>free-page list: hand out / reclaim slots</td><td>page (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>)</td></tr>
 </table>
 
-<h2>Back to Lesson 29: the tree stores indices, not tensors</h2>
+<h2>Back to <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>: the tree stores indices, not tensors</h2>
 <p>Now we can fully ground last lesson's sentence. The radix <span class="mono">TreeNode</span>'s <span class="mono">value</span> field holds <strong>exactly the token slot numbers (indices) discussed here</strong> —
 they are <strong>indices into the token_to_kv pool</strong>, <strong>not the K/V tensors themselves</strong>. So the tree is a pure <strong>index/dedup</strong> layer; the pools are the <strong>storage</strong> layer.
 Two requests sharing a prefix get <strong>the same run of indices</strong>, so attention reads the <strong>same physical slots</strong> in the pool — the shared part costs <strong>zero extra memory</strong>.
-When a prefix is evicted (Lesson 32), the act is simply <strong>returning the slot numbers in its <span class="mono">value</span> to the allocator</strong>, freeing them for other tokens.</p>
+When a prefix is evicted (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>), the act is simply <strong>returning the slot numbers in its <span class="mono">value</span> to the allocator</strong>, freeing them for other tokens.</p>
 <p>Connect the whole chain: a request arrives, <span class="mono">match_prefix</span> hits a prefix on the tree and returns a run of indices (reuse); the unmatched tail <strong>requests fresh slots from the allocator</strong>,
 <span class="mono">write</span>s the computed K/V into the pool, records that new run of indices into its own <span class="mono">ReqToTokenPool</span> row, and <span class="mono">insert</span>s it back into the tree for later reuse.
 Read, write, share, reclaim — all flow as "slot numbers," the common currency among <strong>ledger, warehouse, and tree</strong>. See this and you hold the <strong>central hub</strong> of SGLang memory management. The cells below draw "two requests pointing at a shared slot."</p>
@@ -818,8 +820,8 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
   <div class="cg-cap"><b>Two-hop addressing + prefix sharing</b>: both requests' ledgers write the same slot number (highlighted), pointing at the same physical K/V in the pool</div>
   <div class="cells"><span class="lab">Request A ledger</span><span class="cell hl">#12</span><span class="cell">#40</span><span class="cell">#41</span><span class="sep">→</span><span class="cell q">slot numbers A owns (read this row by req_pool_idx)</span></div>
   <div class="cells"><span class="lab">Request B ledger</span><span class="cell hl">#12</span><span class="cell">#88</span><span class="sep">→</span><span class="cell q">B also points at <span class="mono">#12</span> — shared prefix, same number in both ledgers</span></div>
-  <div class="cells"><span class="lab">token_to_kv pool</span><span class="cell hl">K/V of slot#12</span><span class="sep">→</span><span class="cell q">one physical K/V; A and B both read it · zero extra memory (Lesson 29)</span></div>
-  <div class="cells"><span class="lab">allocator</span><span class="cell">free pages…</span><span class="sep">→</span><span class="cell q">hands out new slots like <span class="mono">#40/#41/#88</span>; on evict <span class="mono">#12</span> is returned (Lesson 32)</span></div>
+  <div class="cells"><span class="lab">token_to_kv pool</span><span class="cell hl">K/V of slot#12</span><span class="sep">→</span><span class="cell q">one physical K/V; A and B both read it · zero extra memory (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>)</span></div>
+  <div class="cells"><span class="lab">allocator</span><span class="cell">free pages…</span><span class="sep">→</span><span class="cell q">hands out new slots like <span class="mono">#40/#41/#88</span>; on evict <span class="mono">#12</span> is returned (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>)</span></div>
 </div>
 
 <p>In real code, the ledger is just an <span class="mono">int32</span> 2-D table and the warehouse is one big tensor per layer — almost too plain to look "high-tech," yet that plainness is what makes two-hop addressing both fast and thrifty:</p>
@@ -872,9 +874,9 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
   <div class="tag">📌 Key points</div>
   <strong>① Two pools, two-hop addressing</strong>: request →(ReqToTokenPool)→ token slot ids →(token_to_kv pool)→ physical K/V. The ledger holds numbers, the warehouse holds tensors.
   <strong>② ReqToTokenPool is the per-request private ledger</strong>, indexed by <span class="mono">req_pool_idx</span>; <strong>MHATokenToKVPool is the per-layer shared warehouse</strong>, indexed by slot number.
-  <strong>③ TokenToKVPoolAllocator hands out / reclaims slots</strong> by page (Lesson 6); total slots are nailed at startup by <span class="mono">mem_fraction_static</span> (Lesson 8) = the concurrency ceiling (Lesson 4).
-  <strong>④ Lesson 29's node value IS these indices, not tensors</strong> — tree is index, pools are storage; two requests sharing a prefix = the same slot numbers = the same physical K/V, zero extra memory.
-  <strong>⑤ Splitting into two tables enables non-contiguity (paging) and cross-request sharing (radix tree)</strong>; eviction (Lesson 32) just returns the slot numbers to the allocator.
+  <strong>③ TokenToKVPoolAllocator hands out / reclaims slots</strong> by page (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>); total slots are nailed at startup by <span class="mono">mem_fraction_static</span> (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>) = the concurrency ceiling (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).
+  <strong>④ <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>'s node value IS these indices, not tensors</strong> — tree is index, pools are storage; two requests sharing a prefix = the same slot numbers = the same physical K/V, zero extra memory.
+  <strong>⑤ Splitting into two tables enables non-contiguity (paging) and cross-request sharing (radix tree)</strong>; eviction (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>) just returns the slot numbers to the allocator.
 </div>
 <div class="selftest">
 <h2>🧪 Self-test - think about the design</h2>
@@ -888,14 +890,14 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two pools, two hops is the core: ReqToTokenPool is the per-request private ledger (indexed by req_pool_idx) holding only token slot numbers; the token_to_kv pool (MHATokenToKVPool) stores the real per-layer K/V by slot. The request doesn't store tensors; the tree also stores indices not tensors (Lesson 29); the allocator only hands out/reclaims slots, it stores no K/V.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Two pools, two hops is the core: ReqToTokenPool is the per-request private ledger (indexed by req_pool_idx) holding only token slot numbers; the token_to_kv pool (MHATokenToKVPool) stores the real per-layer K/V by slot. The request doesn't store tensors; the tree also stores indices not tensors (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>); the allocator only hands out/reclaims slots, it stores no K/V.</div></div></div>
   </details>
 </div>
 <div class="quiz">
   <div class="qn">2. What does <span class='mono'>ReqToTokenPool</span> map vs. the <span class='mono'>token_to_kv</span> pool, and why split into two tables?</div>
   <ol class="opts">
     <li>ReqToTokenPool holds K/V tensors and the token_to_kv pool holds the numbers</li>
-    <li><span class='mono'>ReqToTokenPool</span> maps 'each request → the list of token slot numbers it owns' (per-request bookkeeping, indexed by <span class='mono'>req_pool_idx</span>); the <span class='mono'>token_to_kv</span> pool maps 'token slot id → per-layer physical K/V' (one shared warehouse). The split lets slots be <strong>non-contiguous</strong> (paging, Lesson 6) and <strong>shared across requests</strong> (Lesson 29), while the ledger only tracks 'which numbers are mine'</li>
+    <li><span class='mono'>ReqToTokenPool</span> maps 'each request → the list of token slot numbers it owns' (per-request bookkeeping, indexed by <span class='mono'>req_pool_idx</span>); the <span class='mono'>token_to_kv</span> pool maps 'token slot id → per-layer physical K/V' (one shared warehouse). The split lets slots be <strong>non-contiguous</strong> (paging, <a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>) and <strong>shared across requests</strong> (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>), while the ledger only tracks 'which numbers are mine'</li>
     <li>the split is purely a historical accident with no real purpose</li>
     <li>the two tables hold identical content, just for redundant backup</li>
   </ol>
@@ -909,19 +911,19 @@ Read, write, share, reclaim — all flow as "slot numbers," the common currency 
   <ol class="opts">
     <li>the engine copies the shared prefix's K/V once per request</li>
     <li>each request recomputes the shared prefix's K/V on its own</li>
-    <li>both requests' ledgers carry <strong>the same token slot numbers</strong>, so attention reads <strong>the same physical K/V</strong> in the <span class='mono'>token_to_kv</span> pool — the shared part costs <strong>zero extra memory</strong>. Eviction (Lesson 32) returns those slot numbers to the allocator; precisely because the tree stores numbers not tensors, reuse is zero-copy</li>
+    <li>both requests' ledgers carry <strong>the same token slot numbers</strong>, so attention reads <strong>the same physical K/V</strong> in the <span class='mono'>token_to_kv</span> pool — the shared part costs <strong>zero extra memory</strong>. Eviction (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>) returns those slot numbers to the allocator; precisely because the tree stores numbers not tensors, reuse is zero-copy</li>
     <li>sharing only happens in CPU memory; on GPU each keeps its own copy</li>
   </ol>
   <details class="accordion">
     <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The tree stores indices, so sharing = reusing pointers: both ledgers point at the same slot numbers → the same physical K/V → zero extra memory for the shared part. That's the root of no-copy, no-recompute. Eviction returns the run of slot numbers to the allocator (Lesson 32). Claims of copying, recomputing, or CPU-only sharing all contradict the index-vs-storage separation.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The tree stores indices, so sharing = reusing pointers: both ledgers point at the same slot numbers → the same physical K/V → zero extra memory for the shared part. That's the root of no-copy, no-recompute. Eviction returns the run of slot numbers to the allocator (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>). Claims of copying, recomputing, or CPU-only sharing all contradict the index-vs-storage separation.</div></div></div>
   </details>
 </div>
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>Using the 'coat-check + locker room' analogy, fully explain the <strong>two pools and two-hop addressing</strong> of paged memory pools. Cover: (1) why <span class='mono'>ReqToTokenPool</span> is like the 'claim ticket' — indexed by <span class='mono'>req_pool_idx</span>, each row recording 'which token slot numbers this request owns, in order,' <strong>numbers only, no tensors</strong>; (2) why <span class='mono'>MHATokenToKVPool</span> is like 'that bank of lockers' — a big tensor <strong>per layer</strong>, storing the real K/V by slot; (3) the two-hop path: request →(ledger row)→ token slot ids →(warehouse by slot)→ physical K/V; (4) why <span class='mono'>TokenToKVPoolAllocator</span> is like the 'attendant' — handing out/reclaiming slots by page (Lesson 6), with total slots nailed at startup by <span class='mono'>mem_fraction_static</span> (Lesson 8) = the concurrency ceiling (Lesson 4).</li>
-    <li>Tie 'tree is index, pool is storage' back to Lesson 29 and explain the truth of sharing and eviction at the memory layer. Cover: (1) why a <span class='mono'>TreeNode</span>'s <span class='mono'>value</span> holds token slot numbers (indices) not K/V tensors, and how 'tree as index/dedup layer, pool as storage layer' divides labor; (2) why 'two requests sharing a prefix' means both ledgers carry <strong>the same slot numbers</strong>, pointing at <strong>the same physical K/V</strong>, with the shared part costing <strong>zero extra memory</strong>; (3) why the ledger (ReqToTokenPool) and warehouse (token_to_kv pool) are <strong>split into two tables</strong> — to support non-contiguous paged slots (Lesson 6) and cross-request sharing (Lesson 29); (4) how eviction (Lesson 32) <strong>returns</strong> the run of slot numbers in a node's value to the allocator so other tokens can occupy them.</li>
+    <li>Using the 'coat-check + locker room' analogy, fully explain the <strong>two pools and two-hop addressing</strong> of paged memory pools. Cover: (1) why <span class='mono'>ReqToTokenPool</span> is like the 'claim ticket' — indexed by <span class='mono'>req_pool_idx</span>, each row recording 'which token slot numbers this request owns, in order,' <strong>numbers only, no tensors</strong>; (2) why <span class='mono'>MHATokenToKVPool</span> is like 'that bank of lockers' — a big tensor <strong>per layer</strong>, storing the real K/V by slot; (3) the two-hop path: request →(ledger row)→ token slot ids →(warehouse by slot)→ physical K/V; (4) why <span class='mono'>TokenToKVPoolAllocator</span> is like the 'attendant' — handing out/reclaiming slots by page (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>), with total slots nailed at startup by <span class='mono'>mem_fraction_static</span> (<a class="xref" href="08-throughput-vs-latency.html">Lesson 8</a>) = the concurrency ceiling (<a class="xref" href="04-autoregressive-and-kv-cache.html">Lesson 4</a>).</li>
+    <li>Tie 'tree is index, pool is storage' back to <a class="xref" href="29-radixattention-implementation.html">Lesson 29</a> and explain the truth of sharing and eviction at the memory layer. Cover: (1) why a <span class='mono'>TreeNode</span>'s <span class='mono'>value</span> holds token slot numbers (indices) not K/V tensors, and how 'tree as index/dedup layer, pool as storage layer' divides labor; (2) why 'two requests sharing a prefix' means both ledgers carry <strong>the same slot numbers</strong>, pointing at <strong>the same physical K/V</strong>, with the shared part costing <strong>zero extra memory</strong>; (3) why the ledger (ReqToTokenPool) and warehouse (token_to_kv pool) are <strong>split into two tables</strong> — to support non-contiguous paged slots (<a class="xref" href="06-paged-attention-and-paged-kv.html">Lesson 6</a>) and cross-request sharing (<a class="xref" href="29-radixattention-implementation.html">Lesson 29</a>); (4) how eviction (<a class="xref" href="32-eviction-and-hit-rate.html">Lesson 32</a>) <strong>returns</strong> the run of slot numbers in a node's value to the allocator so other tokens can occupy them.</li>
   </ul>
 </div>
 </div></div>

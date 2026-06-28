@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
@@ -336,7 +338,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>一、两种测试：单元 vs 端到端</h2>
 <p><strong>单元测试（unit test）</strong>不需要服务器。你直接 <span class="mono">import</span> 一个函数或类，构造输入，断言输出符合预期。它快、稳、便宜，所以在每一个 <span class="mono">PR</span> 上都会被 CI 跑一遍。比如一个采样函数、一个张量布局的转换、一个调度器的小逻辑，都可以这样被单独验证。因为不牵涉网络、不占显存、不拉起进程，单元测试往往在毫秒级就给出结果，开发时可以反复快速迭代。它的另一个好处是<strong>定位精准</strong>：一旦失败，你几乎能立刻锁定是哪一个函数、哪一个分支算错了，而不必在一大坨日志里大海捞针。正因为又快又准，单元测试构成了整张测试网最密的那一层，把绝大多数低级错误挡在合并之前。</p>
-<p><strong>端到端测试（e2e test）</strong>需要真正的服务器。它通过一个像 <span class="mono">popen_launch_server</span> 这样的辅助函数，拉起一个真实的 <span class="mono">sglang.launch_server</span>（见<strong>第13课</strong>），向它发请求，然后检查返回的文本、或者跑一个数据集核对<strong>准确率</strong>。这类测试慢、吃 GPU，但它是唯一能证明「整套系统真的能正确服务」的方式：分词、调度、批处理、注意力内核、采样、流式返回，所有环节必须协同正确，端到端测试才会通过。单元测试保证每个零件没问题，端到端测试保证整台机器装起来还能跑——两者缺一不可，谁也替代不了谁。一个常见的误区是只写单元测试就觉得万事大吉，但很多 bug 恰恰藏在「零件之间的接缝」处：单看每个函数都对，连起来却因为约定不一致而出错，这种问题只有端到端测试才抓得住。</p>
+<p><strong>端到端测试（e2e test）</strong>需要真正的服务器。它通过一个像 <span class="mono">popen_launch_server</span> 这样的辅助函数，拉起一个真实的 <span class="mono">sglang.launch_server</span>（见<strong><a class="xref" href="13-engine-and-http-server.html">第13课</a></strong>），向它发请求，然后检查返回的文本、或者跑一个数据集核对<strong>准确率</strong>。这类测试慢、吃 GPU，但它是唯一能证明「整套系统真的能正确服务」的方式：分词、调度、批处理、注意力内核、采样、流式返回，所有环节必须协同正确，端到端测试才会通过。单元测试保证每个零件没问题，端到端测试保证整台机器装起来还能跑——两者缺一不可，谁也替代不了谁。一个常见的误区是只写单元测试就觉得万事大吉，但很多 bug 恰恰藏在「零件之间的接缝」处：单看每个函数都对，连起来却因为约定不一致而出错，这种问题只有端到端测试才抓得住。</p>
 <p>反过来，只依赖端到端测试也不行：它太慢太贵，无法在每个 PR 上覆盖所有细节，而且一旦失败，你只知道「整台服务器答错了」，却要花大力气才能定位到具体哪一行代码。所以健康的做法是金字塔形：大量便宜的单元测试打底，少量昂贵的端到端测试守住关键路径。</p>
 
 <div class="cols"><div class="col">
@@ -414,7 +416,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>三、CI 流水线：分片、并行、门禁</h2>
 <p>测试登记在 <span class="mono">test/registered/</span> 目录下，CI 会把它们<strong>分片（partition）</strong>派发到多台打了标签的 <span class="mono">GPU</span> 运行机上并行执行，这样庞大的套件也能在合理时间里跑完。试想如果几百个端到端测试都挤在一台机器上一个接一个地跑，光是反复拉起、关闭服务器就要花上几个小时；而分片之后，每台带特定标签（标明 GPU 型号、数量）的机器只认领属于自己的那一片，整体耗时被压到可以接受的范围。在 CI 真正开跑之前，<span class="mono">pre-commit</span> 会先在本地和 CI 上把<strong>代码风格与 lint</strong> 卡一道关——风格不过，后面都免谈，这样能在最便宜的阶段就拦下格式问题，不浪费宝贵的 GPU 机时。</p>
 <p>这套「先便宜后昂贵」的分层把关其实是 CI 设计的通用原则：越靠前的关卡越快越省，越靠后的关卡越慢越贵。<span class="mono">pre-commit</span> 几乎瞬间就能在本地跑完，能在你提交之前就揪出缩进、空行、import 顺序之类的小毛病；接着是单元测试这层，秒级到分钟级；最后才是要真拉服务器的端到端测试，可能要占用多卡跑上十几分钟。把关卡按成本从低到高排列，意味着大多数问题都在最省钱的环节被挡下，只有真正通过了前面所有检查的改动，才值得动用昂贵的 GPU 集群去做最终验证。这也是为什么强烈建议你在本地就装好 <span class="mono">pre-commit</span> 钩子：与其推上去等 CI 几分钟后告诉你格式错了，不如在 <span class="mono">git commit</span> 的一瞬间就自动修好。</p>
-<p>一个贡献者的典型工作流是：在 <span class="mono">test/registered/unit/…</span> 下<strong>找到或新增</strong>对应的测试，先用 <span class="mono">pytest</span> 在本地跑通，然后推送；CI 会在真实 GPU 上把它重新跑一遍。知道这条链路，你就能为自己的改动<strong>自信地补上覆盖</strong>：改了采样逻辑就加个采样的单元测试，改了某个模型的支持就加个端到端的准确率测试。这把第13课（端到端测试拉起的那台服务器）和<strong>第56课</strong>（真正运行这些测试的 PR 流程）串了起来。项目里还有一个专门写 SGLang 测试的约定/技能可以参考，照着它的模板写，能少踩很多坑、更容易通过评审。</p>
+<p>一个贡献者的典型工作流是：在 <span class="mono">test/registered/unit/…</span> 下<strong>找到或新增</strong>对应的测试，先用 <span class="mono">pytest</span> 在本地跑通，然后推送；CI 会在真实 GPU 上把它重新跑一遍。知道这条链路，你就能为自己的改动<strong>自信地补上覆盖</strong>：改了采样逻辑就加个采样的单元测试，改了某个模型的支持就加个端到端的准确率测试。这把<a class="xref" href="13-engine-and-http-server.html">第13课</a>（端到端测试拉起的那台服务器）和<strong><a class="xref" href="56-code-conventions-and-pr.html">第56课</a></strong>（真正运行这些测试的 PR 流程）串了起来。项目里还有一个专门写 SGLang 测试的约定/技能可以参考，照着它的模板写，能少踩很多坑、更容易通过评审。</p>
 <p>这里「打标签的运行机」是关键一环：不同测试对硬件的要求不同——有的只需一张消费级显卡，有的要多卡做张量并行，有的要特定型号才能复现某个内核的行为。CI 通过标签把每一片测试精确地投递到符合要求的机器上，既不会让小测试白占大机器，也不会让大测试被分到带不动的机器上。理解了这套分片加标签的调度，你就能明白为什么有时你的 PR 要排队等某类 GPU 空闲，也能在写测试时主动声明它真正需要的资源，避免浪费集群算力、拖慢所有人的 CI。</p>
 
 <div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit 风格/lint</div><div class="arrow">→</div><div class="node">CI 分片 · GPU 运行机</div><div class="arrow">→</div><div class="node">合并门禁 merge</div></div>
@@ -467,7 +469,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <li>SGLang 用 Python 自带的 <span class="mono">unittest</span> 框架写断言，用 <span class="mono">pytest</span> 作运行器。</li>
 <li><strong>所有测试继承 <span class="mono">CustomTestCase</span></strong>，它包裹 <span class="mono">setUpClass</span>，保证即便 setup 失败 <span class="mono">tearDownClass</span> 也一定执行——避免泄漏端口/GPU 进程、连累后面的测试。</li>
 <li><strong>CI</strong> 把 <span class="mono">test/registered/</span> 下的测试<strong>分片</strong>派发到打标签的 GPU 机并行跑；<span class="mono">pre-commit</span> 先卡风格/lint。</li>
-<li>贡献者工作流：在 <span class="mono">test/registered/unit/…</span> 找/加测试 → 本地 <span class="mono">pytest</span> → push → CI 真机重跑。串起第13课（服务器）与第56课（PR 流程）。</li>
+<li>贡献者工作流：在 <span class="mono">test/registered/unit/…</span> 找/加测试 → 本地 <span class="mono">pytest</span> → push → CI 真机重跑。串起<a class="xref" href="13-engine-and-http-server.html">第13课</a>（服务器）与<a class="xref" href="56-code-conventions-and-pr.html">第56课</a>（PR 流程）。</li>
 <li>记住测试金字塔：大量便宜的单元测试打底，少量昂贵的端到端测试守关键路径；前者抓零件 bug，后者抓接缝处的协同 bug。</li>
 <li>分层把关原则：越靠前的关卡越快越省（pre-commit），越靠后越慢越贵（GPU 端到端）；本地装好 pre-commit 钩子能在提交瞬间就修好格式，省下排队等 CI 的时间。</li>
 </ul></div>
@@ -515,8 +517,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
-    <li>用你自己的话解释单元测试与端到端测试的分工：为什么单元测试能在每个 PR 上快跑，而端到端测试要用 <span class='mono'>popen_launch_server</span> 拉起真实的 <span class='mono'>sglang.launch_server</span>（第13课）再校验输出/准确率？两者各能抓到哪类 bug？</li>
-    <li>详细说明 <span class='mono'>CustomTestCase</span> 为什么要包裹 <span class='mono'>setUpClass</span>：原生 <span class='mono'>unittest</span> 在 setup 失败时的行为是什么，会造成什么后果（端口/GPU 进程泄漏、连累后面测试）？再把测试体系和第56课（运行这些测试的 PR 流程）联系起来。</li>
+    <li>用你自己的话解释单元测试与端到端测试的分工：为什么单元测试能在每个 PR 上快跑，而端到端测试要用 <span class='mono'>popen_launch_server</span> 拉起真实的 <span class='mono'>sglang.launch_server</span>（<a class="xref" href="13-engine-and-http-server.html">第13课</a>）再校验输出/准确率？两者各能抓到哪类 bug？</li>
+    <li>详细说明 <span class='mono'>CustomTestCase</span> 为什么要包裹 <span class='mono'>setUpClass</span>：原生 <span class='mono'>unittest</span> 在 setup 失败时的行为是什么，会造成什么后果（端口/GPU 进程泄漏、连累后面测试）？再把测试体系和<a class="xref" href="56-code-conventions-and-pr.html">第56课</a>（运行这些测试的 PR 流程）联系起来。</li>
   </ul>
 </div>
 </div></div>
@@ -534,7 +536,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>1. Two kinds of tests: unit vs end-to-end</h2>
 <p>A <strong>unit test</strong> needs no server. You directly <span class="mono">import</span> a function or class, build inputs, and assert the output matches expectations. It's fast, stable, and cheap, so CI runs it on every <span class="mono">PR</span>. A sampling function, a tensor-layout conversion, a small bit of scheduler logic—all can be verified in isolation this way.</p>
-<p>An <strong>e2e test</strong> needs a real server. Through a helper like <span class="mono">popen_launch_server</span>, it launches a real <span class="mono">sglang.launch_server</span> (see <strong>Lesson 13</strong>), sends requests, then checks the returned text—or runs a dataset to verify <strong>accuracy</strong>. These tests are slow and GPU-hungry, but they're the only way to prove "the whole system really serves correctly."</p>
+<p>An <strong>e2e test</strong> needs a real server. Through a helper like <span class="mono">popen_launch_server</span>, it launches a real <span class="mono">sglang.launch_server</span> (see <strong><a class="xref" href="13-engine-and-http-server.html">Lesson 13</a></strong>), sends requests, then checks the returned text—or runs a dataset to verify <strong>accuracy</strong>. These tests are slow and GPU-hungry, but they're the only way to prove "the whole system really serves correctly."</p>
 
 <div class="cols"><div class="col">
 <p><strong>Unit test · no server</strong></p>
@@ -608,7 +610,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>3. The CI pipeline: partitioning, parallelism, gating</h2>
 <p>Tests are registered under <span class="mono">test/registered/</span>, and CI <strong>partitions</strong> them across multiple labelled <span class="mono">GPU</span> runners to execute in parallel, so even a huge suite finishes in reasonable time. Before CI even starts, <span class="mono">pre-commit</span> first gates <strong>code style and lint</strong> locally and in CI—if style doesn't pass, nothing else matters.</p>
-<p>A contributor's typical workflow: <strong>find or add</strong> the matching test under <span class="mono">test/registered/unit/…</span>, run it locally with <span class="mono">pytest</span> until it passes, then push; CI re-runs it on real GPUs. Knowing this chain lets you <strong>confidently add coverage</strong> for your change. This ties Lesson 13 (the server those e2e tests launch) to <strong>Lesson 56</strong> (the PR flow that actually runs these tests). There's also a dedicated project convention/skill for writing SGLang tests to reference.</p>
+<p>A contributor's typical workflow: <strong>find or add</strong> the matching test under <span class="mono">test/registered/unit/…</span>, run it locally with <span class="mono">pytest</span> until it passes, then push; CI re-runs it on real GPUs. Knowing this chain lets you <strong>confidently add coverage</strong> for your change. This ties <a class="xref" href="13-engine-and-http-server.html">Lesson 13</a> (the server those e2e tests launch) to <strong><a class="xref" href="56-code-conventions-and-pr.html">Lesson 56</a></strong> (the PR flow that actually runs these tests). There's also a dedicated project convention/skill for writing SGLang tests to reference.</p>
 
 <div class="flow"><div class="node">PR push</div><div class="arrow">→</div><div class="node">pre-commit style/lint</div><div class="arrow">→</div><div class="node">CI partitioned · GPU runners</div><div class="arrow">→</div><div class="node">merge gate</div></div>
 
@@ -660,7 +662,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <li>SGLang writes assertions with Python's built-in <span class="mono">unittest</span> framework and uses <span class="mono">pytest</span> as the runner.</li>
 <li><strong>All tests inherit <span class="mono">CustomTestCase</span></strong>, which wraps <span class="mono">setUpClass</span> so that even if setup fails, <span class="mono">tearDownClass</span> still runs—avoiding leaked ports/GPU processes and cascade-failing later tests.</li>
 <li><strong>CI</strong> <strong>partitions</strong> the tests under <span class="mono">test/registered/</span> across labelled GPU machines to run in parallel; <span class="mono">pre-commit</span> gates style/lint first.</li>
-<li>Contributor workflow: find/add a test under <span class="mono">test/registered/unit/…</span> → local <span class="mono">pytest</span> → push → CI re-runs on real hardware. Ties Lesson 13 (the server) to Lesson 56 (the PR flow).</li>
+<li>Contributor workflow: find/add a test under <span class="mono">test/registered/unit/…</span> → local <span class="mono">pytest</span> → push → CI re-runs on real hardware. Ties <a class="xref" href="13-engine-and-http-server.html">Lesson 13</a> (the server) to <a class="xref" href="56-code-conventions-and-pr.html">Lesson 56</a> (the PR flow).</li>
 <li>Remember the test pyramid: lots of cheap unit tests at the base, a few expensive e2e tests guarding the critical path; unit tests catch part-level bugs, e2e catches the seam/integration bugs.</li>
 <li>Layered gating: earlier gates are cheaper and faster (pre-commit), later ones slower and costlier (GPU e2e); installing the pre-commit hook locally fixes formatting the moment you commit, saving the wait in the CI queue.</li>
 </ul></div>
@@ -708,8 +710,8 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card spark">
   <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
   <ul>
-    <li>In your own words explain the division of labor between unit and e2e tests: why can unit tests run fast on every PR, while e2e tests must launch a real <span class='mono'>sglang.launch_server</span> (Lesson 13) via <span class='mono'>popen_launch_server</span> and then verify outputs/accuracy? What class of bug does each catch?</li>
-    <li>Explain in detail why <span class='mono'>CustomTestCase</span> wraps <span class='mono'>setUpClass</span>: what does plain <span class='mono'>unittest</span> do when setup fails, and what consequences follow (leaked ports/GPU processes, cascade-failing later tests)? Then connect the test system to Lesson 56 (the PR flow that runs these tests).</li>
+    <li>In your own words explain the division of labor between unit and e2e tests: why can unit tests run fast on every PR, while e2e tests must launch a real <span class='mono'>sglang.launch_server</span> (<a class="xref" href="13-engine-and-http-server.html">Lesson 13</a>) via <span class='mono'>popen_launch_server</span> and then verify outputs/accuracy? What class of bug does each catch?</li>
+    <li>Explain in detail why <span class='mono'>CustomTestCase</span> wraps <span class='mono'>setUpClass</span>: what does plain <span class='mono'>unittest</span> do when setup fails, and what consequences follow (leaked ports/GPU processes, cascade-failing later tests)? Then connect the test system to <a class="xref" href="56-code-conventions-and-pr.html">Lesson 56</a> (the PR flow that runs these tests).</li>
   </ul>
 </div>
 </div></div>

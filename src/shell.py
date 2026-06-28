@@ -1,6 +1,7 @@
 """Shared HTML shell (CSS design system + navigation) for the SGLang visual guide."""
 
 import base64
+import re
 
 # ---- favicon (inline SVG, base64) ----
 _FAVICON_SVG = (
@@ -176,6 +177,53 @@ PAGES = [
 ]
 
 
+# --- cross-reference auto-linking ------------------------------------------
+# Map lesson number -> filename, so bare "第 N 课" / "Lesson N" mentions in the
+# prose become clickable links to that lesson.
+_NUM_HREF = {}
+for _p in PAGES:
+    try:
+        _NUM_HREF[int(_p[0].split("-", 1)[0])] = _p[0]
+    except ValueError:
+        pass
+
+# Never linkify text inside these elements (SVG labels, aria-labels live in tag
+# attributes; code/links must stay literal).
+_XREF_SKIP = {"pre", "a", "svg", "code", "script", "style", "h1", "title"}
+_ZH_REF = re.compile(r"第\s*(\d+)\s*课")
+_EN_REF = re.compile(r"\bLesson\s+(\d+)\b")
+
+
+def linkify_refs(html, current):
+    """Wrap bare '第 N 课' / 'Lesson N' cross-references in <a> links to the
+    target lesson. Skips self-references, out-of-range numbers, and any text
+    inside tags or <pre>/<svg>/<a>/<code> blocks (so SVG text, aria-labels,
+    code, and existing links are never touched)."""
+
+    def repl(m):
+        n = int(m.group(1))
+        href = _NUM_HREF.get(n)
+        if not href or href == current:
+            return m.group(0)
+        return f'<a class="xref" href="{href}">{m.group(0)}</a>'
+
+    out, depth = [], 0
+    for tok in re.split(r"(<[^>]+>)", html):
+        if tok[:1] == "<":
+            mm = re.match(r"</?([A-Za-z][\w-]*)", tok)
+            if mm and mm.group(1).lower() in _XREF_SKIP:
+                if tok[:2] == "</":
+                    depth = max(0, depth - 1)
+                elif not tok.endswith("/>"):
+                    depth += 1
+            out.append(tok)
+        elif depth == 0 and tok:
+            out.append(_EN_REF.sub(repl, _ZH_REF.sub(repl, tok)))
+        else:
+            out.append(tok)
+    return "".join(out)
+
+
 def bi(zh, en):
     """Inline bilingual pair; only the active language is shown (CSS-controlled)."""
     return f'<span class="lang-zh">{zh}</span><span class="lang-en">{en}</span>'
@@ -216,6 +264,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
+.xref { color: inherit; border-bottom: 1px dotted var(--accent); }
+.xref:hover { color: var(--accent); border-bottom-style: solid; }
 code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
 /* ---- top progress bar ---- */
