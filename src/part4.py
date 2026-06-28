@@ -877,7 +877,7 @@ handles <strong>abort</strong> and, for multimodal, <strong>image/audio preproce
     <text x="585" y="104" text-anchor="middle" style="fill:var(--blue);font-weight:700;font-size:14px">Scheduler</text>
     <text x="585" y="126" text-anchor="middle" style="fill:var(--muted);font-size:12px">subprocess · GPU · batch+forward</text>
     <text x="585" y="150" text-anchor="middle" style="fill:var(--muted);font-size:11px">speaks only token ids</text>
-    <text x="380" y="96" text-anchor="middle" style="fill:var(--muted);font-size:10px">ZMQ PUSH: tokenized request (rid)</text>
+    <text x="380" y="96" text-anchor="middle" style="fill:var(--muted);font-size:10px">ZMQ PUSH: request (rid)</text>
     <circle cx="310" cy="110" r="6" style="fill:var(--accent);stroke:var(--accent-ink);stroke-width:1"/>
     <circle cx="450" cy="110" r="6" style="fill:var(--blue);stroke:var(--blue);stroke-width:1"/>
     <line x1="316" y1="110" x2="444" y2="110" style="stroke:var(--muted);stroke-width:1.5"/>

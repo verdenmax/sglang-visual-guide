@@ -732,7 +732,7 @@ Grasp these two modes and you hold the main axis of the SGLang front end — <st
     <text x="470" y="175" text-anchor="middle" style="font-size:12px">branch A</text>
     <rect x="590" y="150" width="120" height="40" rx="8" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="650" y="175" text-anchor="middle" style="font-size:12px">branch B</text>
-    <text x="560" y="212" text-anchor="middle" style="fill:var(--teal);font-size:12px">independent branches → schedulable in parallel</text>
+    <text x="560" y="212" text-anchor="middle" style="fill:var(--teal);font-size:11px">independent → parallel</text>
     <line x1="470" y1="190" x2="520" y2="240" style="stroke:var(--accent);stroke-width:1.5"/>
     <line x1="650" y1="190" x2="600" y2="240" style="stroke:var(--accent);stroke-width:1.5"/>
     <rect x="470" y="240" width="180" height="44" rx="8" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
@@ -1508,7 +1508,7 @@ the upper layer depends on a contract, not on the lower layer's implementation. 
     <text x="380" y="165" text-anchor="middle" class="mono" style="font-size:12px">generate(...)</text>
     <rect x="270" y="176" width="220" height="22" rx="5" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.5"/>
     <text x="380" y="191" text-anchor="middle" class="mono" style="font-size:12px">select(...)</text>
-    <text x="380" y="230" text-anchor="middle" style="fill:var(--muted);font-size:12px">the interpreter calls the interface, not a concrete backend</text>
+    <text x="380" y="230" text-anchor="middle" style="fill:var(--muted);font-size:12px">interpreter calls the interface, not a backend</text>
     <line x1="190" y1="252" x2="318" y2="206" style="stroke:var(--blue);stroke-width:1.5;stroke-dasharray:5 5"/>
     <polygon points="318,206 304,208 312,219" style="fill:var(--blue)"/>
     <line x1="570" y1="252" x2="442" y2="206" style="stroke:var(--amber);stroke-width:1.5;stroke-dasharray:5 5"/>
