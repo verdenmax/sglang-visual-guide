@@ -13,6 +13,11 @@ Checks each lesson + index:
 * nav prev/next chain matches shell.PAGES order
 * index TOC lists every page; '共 N 课 · N 个部分' pill matches PAGES
 * registry CONTENT has non-empty zh+en for every PAGES filename (no orphan keys)
+* zh/en inventory parity: equal .fig and .codefile counts, equal <h2> counts
+* every <div class="fig"> has a <div class="figcap">
+* every inline <svg> has viewBox (no width/height attr); no hardcoded fill/
+  stroke colors (var(--...) only, for dark mode); <text> does not clip the
+  viewBox (width estimated from an Arial-ish per-char model + Noto safety)
 * (WARN) every lesson has a key-points card and an analogy card
 
 The "第 N 课" cross-ref check matches Chinese-Arabic digits only (e.g. "第 12 课");
@@ -43,6 +48,7 @@ DIAGRAM_CLASSES = ("layers", "vflow", "flow", "cols", "cellgroup", "timeline", "
 MIN_DIAGRAMS = 6  # per lesson, counting BOTH languages (>= 3 per language)
 MIN_FIGURES = 4  # SVG .fig per lesson, counting BOTH languages (>= 2 per language)
 MIN_CJK = 3000  # per-lesson zh CJK chars (soft floor; authoring target ~4000+)
+SVG_OVERFLOW_MARGIN = 6  # px past viewBox before flagging a <text> clip (calibrated)
 
 # Every class used in generated HTML must be defined in shell.CSS. Catches
 # consolidation artifacts (e.g. a diagram-variant whose CSS was never merged in,
@@ -51,6 +57,44 @@ CSS_DEFINED = set(re.findall(r"\.([A-Za-z][\w-]*)", shell.CSS))
 CSS_CLASS_WHITELIST = {"prev"}  # footnav prev link is styled via `.footnav a`; needs no own rule
 
 issues = []
+
+# Allowed CSS color tokens inside inline SVG fill:/stroke: (dark-mode safe).
+# Hardcoded hex/rgb/named colors break dark mode; flag them.
+SVG_COLOR_RE = re.compile(r"(?:fill|stroke)\s*:\s*(#[0-9a-fA-F]|rgb|\bwhite\b|\bblack\b)")
+# Text width model for the SVG overflow guard. Inline SVG clips to its viewBox
+# (UA overflow:hidden), so any <text> past the edge is cut off on screen. The
+# shipped font stack includes "Noto Sans SC", which renders Latin ~5-10% wider
+# than Arial -- so we model the WIDE case to catch what narrow fonts hide.
+SVG_TEXT_DEFAULT_FS = 16.0  # <text> with no font-size uses the 16px SVG default
+
+
+def _text_width(s, fs, bold):
+    """Approximate rendered width (px) of an SVG <text> string. Per-char em
+    fractions ~ Arial advance widths; CJK = 1em. A safety factor models the
+    shipped 'Noto Sans SC' stack, which renders Latin a few % wider."""
+    narrow = set("ijl.,:;'’!|()[] ")
+    wide = set("mwMW")
+    upper = set("ABCDEFGHJKLNOPQRSTUVXYZ")  # (M/W handled as wide)
+    w = 0.0
+    for ch in s:
+        o = ord(ch)
+        if 0x4E00 <= o <= 0x9FFF or 0x3000 <= o <= 0x33FF or 0xFF00 <= o <= 0xFFEF or o in (0x2014, 0x2026):
+            w += 1.0          # CJK / fullwidth / em-dash / ellipsis
+        elif o == 0xB7:
+            w += 0.33         # middot · is narrow even in CJK fonts
+        elif o > 0x2100:
+            w += 1.1          # emoji / symbols (✅ ❌ → …) render wide
+        elif ch in narrow:
+            w += 0.28
+        elif ch in wide:
+            w += 0.87
+        elif ch in "ftr":
+            w += 0.34
+        elif ch in upper or ch.isdigit():
+            w += 0.64
+        else:
+            w += 0.50         # most lowercase
+    return w * fs * (1.07 if bold else 1.04)  # bold + Noto safety
 
 
 def add(sev, f, msg):
@@ -73,6 +117,69 @@ def check_classes(name, html):
                 continue
             seen.add(c)
             add("ERR", name, f"undefined CSS class {c!r} (no .{c} rule in shell.CSS)")
+
+
+def check_source_pair(fname, zh, en):
+    """Source-level zh/en parity + figure/SVG guards (regression catchers for
+    the bugs that actually recurred: text overflow, missing figcaps, zh/en
+    drift). Operates on the registry source so the shell chrome can't mask it."""
+    exempt = fname in SOFT_EXEMPT
+    # 1. Every <div class="fig"> must contain a <div class="figcap">.
+    for lang, txt in (("zh", zh), ("en", en)):
+        nfig, ncap = txt.count('class="fig"'), txt.count('class="figcap"')
+        if nfig != ncap:
+            add("ERR", fname, f"{lang}: {nfig} .fig but {ncap} .figcap (each figure needs a caption)")
+    # 2. zh/en inventory parity (figures + code references must match).
+    for cls in ("fig", "codefile"):
+        z, e = zh.count(f'class="{cls}"'), en.count(f'class="{cls}"')
+        if z != e:
+            add("ERR", fname, f"zh/en .{cls} count mismatch: {z} vs {e}")
+    # 3. Per-language section parity (a section present in one language only).
+    if not exempt:
+        z, e = zh.count("<h2"), en.count("<h2")
+        if z != e:
+            add("ERR", fname, f"zh/en <h2> count mismatch: {z} vs {e}")
+    # 4. Per-SVG structure, theming, and text-overflow.
+    for lang, txt in (("zh", zh), ("en", en)):
+        for sm in re.finditer(r"<svg\b([^>]*)>(.*?)</svg>", txt, re.S):
+            attrs, body = sm.group(1), sm.group(2)
+            vb = re.search(r'viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"', attrs)
+            if not vb:
+                add("ERR", fname, f"{lang}: <svg> missing viewBox")
+                continue
+            if re.search(r"\b(?:width|height)\s*=", attrs):
+                add("ERR", fname, f"{lang}: <svg> has width/height attr (use viewBox only)")
+            if 'role="img"' not in attrs:
+                add("WARN", fname, f"{lang}: <svg> missing role=\"img\"")
+            if "aria-label" not in attrs:
+                add("WARN", fname, f"{lang}: <svg> missing aria-label")
+            if SVG_COLOR_RE.search(body):
+                bad = SVG_COLOR_RE.search(body).group(0)
+                add("ERR", fname, f"{lang}: hardcoded SVG color {bad!r} (use var(--...) for dark mode)")
+            vbw = float(vb.group(1))
+            for tm in re.finditer(r"<text\b([^>]*)>(.*?)</text>", body, re.S):
+                ta = tm.group(1)
+                s = re.sub(r"<[^>]+>", "", tm.group(2)).strip()
+                xm = re.search(r'\bx="(-?\d+(?:\.\d+)?)"', ta)
+                if not s or not xm:
+                    continue
+                x = float(xm.group(1))
+                fsm = re.search(r"font-size:\s*(\d+(?:\.\d+)?)px", ta)
+                fs = float(fsm.group(1)) if fsm else SVG_TEXT_DEFAULT_FS
+                bold = "font-weight:700" in ta or "font-weight:600" in ta or "font-weight:bold" in ta
+                w = _text_width(s, fs, bold)
+                if 'text-anchor="middle"' in ta:
+                    end, start = x + w / 2, x - w / 2
+                elif 'text-anchor="end"' in ta:
+                    end, start = x, x - w
+                else:
+                    end, start = x + w, x
+                # Margin: only flag a CLEAR clip so the heuristic never false-fails
+                # a legitimate edge-touching label.
+                if end > vbw + SVG_OVERFLOW_MARGIN:
+                    add("ERR", fname, f"{lang}: SVG text clips viewBox (end~{end:.0f}>{vbw:.0f}): {s[:42]!r}")
+                elif start < -SVG_OVERFLOW_MARGIN:
+                    add("ERR", fname, f"{lang}: SVG text clips left edge (start~{start:.0f}): {s[:42]!r}")
 
 
 def check_lesson(fname, html):
@@ -156,6 +263,7 @@ def main():
             cjk = len(re.findall(r"[\u4e00-\u9fff]", c.get("zh", "")))
             if cjk < MIN_CJK:
                 add("WARN", fname, f"only {cjk} CJK chars in zh (want >= {MIN_CJK})")
+        check_source_pair(fname, c.get("zh", ""), c.get("en", ""))
     for fname in CONTENT:
         if fname not in ORDER:
             add("ERR", "registry", f"CONTENT key not in PAGES: {fname}")

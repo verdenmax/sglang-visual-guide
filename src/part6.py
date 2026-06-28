@@ -1791,7 +1791,7 @@ at run time it takes the real batch, <strong>rounds it up to the nearest bucket<
     <line x1="458" y1="130" x2="522" y2="130" style="stroke:var(--accent);stroke-width:1.5"/>
     <polygon points="530,130 516,123 516,137" style="fill:var(--accent)"/>
     <text x="492" y="120" text-anchor="middle" style="fill:var(--accent-ink);font-size:12px">replay × many</text>
-    <text x="540" y="34" style="font-weight:700;fill:var(--teal)">Replay · many (every decode step)</text>
+    <text x="540" y="34" style="font-weight:700;font-size:13px;fill:var(--teal)">Replay · many (every decode step)</text>
     <rect x="540" y="46" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>
     <text x="556" y="68" style="font-size:12px">decode step 1 · replay</text>
     <rect x="540" y="88" width="244" height="34" rx="7" style="fill:var(--teal-soft);stroke:var(--teal);stroke-width:1.5"/>

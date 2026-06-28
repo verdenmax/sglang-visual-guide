@@ -325,7 +325,7 @@ to decide "whom to attend to", then sums their <span class="mono">V</span>.</p>
     <rect x="128" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
     <rect x="160" y="158" width="28" height="22" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
     <text x="30" y="244" style="fill:var(--red);font-size:12px">recompute ∝ t: O(t) per step, O(t²) total</text>
-    <text x="404" y="44" style="font-weight:700;fill:var(--teal)">✅ KV cache: compute new token, reuse history</text>
+    <text x="404" y="44" style="font-weight:700;font-size:13px;fill:var(--teal)">✅ KV cache: compute new token, reuse history</text>
     <text x="404" y="94" style="fill:var(--muted);font-size:12px">step①</text>
     <rect x="470" y="78" width="28" height="22" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
     <text x="404" y="134" style="fill:var(--muted);font-size:12px">step②</text>
@@ -1446,7 +1446,7 @@ physically scattered, page-table-linked":</p>
     <text x="407" y="65" text-anchor="middle" class="mono" style="font-size:11px">logical page 0 → #7</text>
     <rect x="312" y="92" width="190" height="40" rx="4" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
     <text x="407" y="117" text-anchor="middle" class="mono" style="font-size:11px">logical page 1 → #2</text>
-    <text x="600" y="26" style="font-weight:700;fill:var(--muted)">Physical pages (scattered)</text>
+    <text x="600" y="26" style="font-weight:700;fill:var(--muted)">Physical pages</text>
     <rect x="600" y="40" width="150" height="30" rx="4" style="fill:var(--amber-soft);stroke:var(--amber);stroke-width:1.5"/>
     <text x="675" y="60" text-anchor="middle" class="mono" style="font-size:11px">phys #2</text>
     <rect x="600" y="78" width="150" height="30" rx="4" style="fill:var(--panel-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3"/>
