@@ -31,9 +31,10 @@ def build():
         if fname not in CONTENT:
             sys.exit(f"build error: no registry.CONTENT entry for {fname!r} (declared in shell.PAGES)")
         base = CONTENT[fname]
+        skip_num = int(fname.split("-", 1)[0])
         content = {
-            "zh": shell.linkify_refs(base["zh"] + quizzes.render(fname, "zh"), fname),
-            "en": shell.linkify_refs(base["en"] + quizzes.render(fname, "en"), fname),
+            "zh": shell.linkify_refs(base["zh"] + quizzes.render(fname, "zh"), skip_num),
+            "en": shell.linkify_refs(base["en"] + quizzes.render(fname, "en"), skip_num),
         }
         html = shell.page(fname, content, home_href="../index.html")
         with open(os.path.join(LESSONS_DIR, fname), "w", encoding="utf-8") as f:

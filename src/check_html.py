@@ -5,7 +5,8 @@ Run after build.py:
 
 Exits non-zero on any ERROR (used by CI). WARN/INFO print but don't fail.
 Checks each lesson + index:
-* balanced tags (div/details/table/pre/summary) and details<->summary
+* balanced tags (div/details/table/pre/summary + inline strong/span/em/b/code)
+  and details<->summary
 * a <title> + meta description; exactly one <h1> per lesson
 * both languages present (lang-zh and lang-en blocks)
 * no unescaped '<' inside <pre> code blocks
@@ -187,7 +188,8 @@ def check_source_pair(fname, zh, en):
 
 
 def check_lesson(fname, html):
-    for tag in ("div", "details", "table", "pre", "summary"):
+    for tag in ("div", "details", "table", "pre", "summary",
+                "strong", "span", "em", "b", "code"):
         check_balance(fname, html, tag)
     check_classes(fname, html)
     nd = len(re.findall(r"<details", html))

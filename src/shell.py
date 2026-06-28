@@ -194,16 +194,24 @@ _ZH_REF = re.compile(r"第\s*(\d+)\s*课")
 _EN_REF = re.compile(r"\bLesson\s+(\d+)\b")
 
 
-def linkify_refs(html, current):
+def linkify_refs(html, skip_num=None, href_for=None):
     """Wrap bare '第 N 课' / 'Lesson N' cross-references in <a> links to the
-    target lesson. Skips self-references, out-of-range numbers, and any text
-    inside tags or <pre>/<svg>/<a>/<code> blocks (so SVG text, aria-labels,
-    code, and existing links are never touched)."""
+    target lesson. Skips self-references (skip_num), numbers with no target,
+    and any text inside tags or <pre>/<svg>/<a>/<code> blocks (so SVG text,
+    aria-labels, code, and existing links are never touched).
+
+    href_for(n) maps a lesson number to its href; defaults to the per-file map
+    used by the multi-page site. Pass a custom href_for (e.g. '#lesson-NN') to
+    target in-page anchors in the single-document print editions."""
+    if href_for is None:
+        href_for = _NUM_HREF.get
 
     def repl(m):
         n = int(m.group(1))
-        href = _NUM_HREF.get(n)
-        if not href or href == current:
+        if n == skip_num:
+            return m.group(0)
+        href = href_for(n)
+        if not href:
             return m.group(0)
         return f'<a class="xref" href="{href}">{m.group(0)}</a>'
 

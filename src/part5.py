@@ -568,7 +568,7 @@ LESSON_19 = {"zh": r"""
 <p class="lead">
 上一课我们看清了调度器的<strong>心跳</strong>——那段 <span class="inline">while True</span> 的事件循环（第 18 课）。可它每一跳到底在
 <strong>操作什么东西</strong>？答案是两个贯穿整个 Part 5 的核心数据结构：<strong>Req</strong> 与 <strong>ScheduleBatch</strong>。
-<span class="inline">Req</span> 是<strong>一条请求自己的状态机</strong>，从生到死它都<strong>活着</strong>；<span class="inline">ScheduleBatch</strong>
+<span class="inline">Req</span> 是<strong>一条请求自己的状态机</strong>，从生到死它都<strong>活着</strong>；<span class="inline">ScheduleBatch</span>
 是<strong>某一个 step 里被打包一起前向的那一撮 Req</strong>，它<strong>转瞬即逝</strong>——每跳一次就重建一次。看懂这一对"持久 vs 临时"
 的分工，你才真正握住了调度器手里那两样工具。
 </p>
@@ -858,7 +858,7 @@ LESSON_19 = {"zh": r"""
 Last lesson we saw the scheduler's <strong>heartbeat</strong>—that <span class="inline">while True</span> event loop (Lesson 18). But what does each
 beat actually <strong>operate on</strong>? The answer is two data structures that run through all of Part 5: <strong>Req</strong> and
 <strong>ScheduleBatch</strong>. <span class="inline">Req</span> is <strong>one request's own state machine</strong>—it stays <strong>alive</strong> from
-birth to death; <span class="inline">ScheduleBatch</strong> is <strong>the cluster of Reqs forwarded together in ONE step</strong>, and it is
+birth to death; <span class="inline">ScheduleBatch</span> is <strong>the cluster of Reqs forwarded together in ONE step</strong>, and it is
 <strong>ephemeral</strong>—rebuilt every beat. Grasp this "persistent vs temporary" split and you hold the two tools in the scheduler's hands.
 </p>
 

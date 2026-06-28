@@ -76,20 +76,24 @@ def build_lang(lang):
         f"<style>{shell.CSS}\n{PRINT_CSS}</style>\n</head>\n<body>\n"
     )
     parts = [f'<h1>{TITLE[lang]}</h1>\n<p style="color:var(--muted)">{_intro(lang)}</p>']
+    nums = {int(p[0].split("-", 1)[0]) for p in shell.PAGES}
+    anchor_for = lambda k: f"#lesson-{k:02d}" if k in nums else None
     toc = [f'<div class="print-toc"><h2>{TOC[lang]}</h2>\n<ol>']
     for page in shell.PAGES:
+        n = int(page[0].split("-", 1)[0])
         title = page[1] if lang == "zh" else page[2]
-        toc.append(f"  <li>{title}</li>")
+        toc.append(f'  <li><a class="xref" href="#lesson-{n:02d}">{title}</a></li>')
     toc.append("</ol></div>")
     parts.append("\n".join(toc))
     for page in shell.PAGES:
         fname = page[0]
         if fname not in CONTENT:
             sys.exit(f"build_print error: no registry.CONTENT entry for {fname!r} (declared in shell.PAGES)")
+        n = int(fname.split("-", 1)[0])
         title = page[1] if lang == "zh" else page[2]
-        body = _expand_details(CONTENT[fname][lang])
-        quiz = _expand_details(quizzes.render(fname, lang))
-        parts.append(f'<section class="lesson-print">\n<h1>{title}</h1>\n{body}\n{quiz}\n</section>')
+        body = shell.linkify_refs(_expand_details(CONTENT[fname][lang]), n, anchor_for)
+        quiz = shell.linkify_refs(_expand_details(quizzes.render(fname, lang)), n, anchor_for)
+        parts.append(f'<section class="lesson-print" id="lesson-{n:02d}">\n<h1>{title}</h1>\n{body}\n{quiz}\n</section>')
     return head + "\n".join(parts) + "\n</body>\n</html>\n"
 
 
