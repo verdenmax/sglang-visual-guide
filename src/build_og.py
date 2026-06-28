@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the og:image brand share card (og-cover.png, 1200x630).
 
-Run manually when the card design changes:  python3 build_og.py
+Run manually when the card design changes:  cd src && python3 build_og.py
 Requires `rsvg-convert` (librsvg) on PATH and Noto Sans CJK fonts installed.
 This is intentionally NOT imported by build.py, so the site build stays
 zero-dependency (the committed og-cover.png is the served asset).
@@ -11,9 +11,12 @@ import shutil
 import subprocess
 import sys
 
-import shell
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import shell  # noqa: E402
+
 SVG_PATH = os.path.join(ROOT, "og-cover.svg")
 PNG_PATH = os.path.join(ROOT, "og-cover.png")
 
@@ -78,10 +81,11 @@ def build():
         ["rsvg-convert", "-w", "1200", "-h", "630", SVG_PATH, "-o", PNG_PATH],
         check=True,
     )
-    print(f"wrote {os.path.relpath(SVG_PATH, ROOT)} and "
-          f"{os.path.relpath(PNG_PATH, ROOT)} "
-          f"({LESSON_COUNT} lessons / {PART_COUNT} parts)")
+    return SVG_PATH, PNG_PATH
 
 
 if __name__ == "__main__":
-    build()
+    svg_path, png_path = build()
+    print(f"wrote {os.path.relpath(svg_path, ROOT)} and "
+          f"{os.path.relpath(png_path, ROOT)} "
+          f"({LESSON_COUNT} lessons / {PART_COUNT} parts)")
