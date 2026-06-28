@@ -114,6 +114,23 @@ def check_balance(name, html, tag):
         add("ERR", name, f"<{tag}> unbalanced: {o} open / {c} close")
 
 
+def check_social_meta(name, html):
+    """og:image / twitter:image must be the exact absolute card URL, the card
+    must be summary_large_image, and og:url must be present and absolute."""
+    for prop in ("og:image", "twitter:image"):
+        attr = "property" if prop.startswith("og:") else "name"
+        n = html.count(f'<meta {attr}="{prop}" content="{shell.OG_IMAGE}">')
+        if n != 1:
+            add("ERR", name, f"{prop} should appear once as {shell.OG_IMAGE!r} (found {n})")
+    if '<meta name="twitter:card" content="summary_large_image">' not in html:
+        add("ERR", name, "twitter:card must be summary_large_image")
+    m = re.search(r'<meta property="og:url" content="([^"]*)">', html)
+    if not m:
+        add("ERR", name, "missing og:url")
+    elif not m.group(1).startswith("https://"):
+        add("ERR", name, f"og:url not absolute: {m.group(1)!r}")
+
+
 def check_classes(name, html):
     """Every class used in the HTML must have a `.cls` rule in shell.CSS."""
     seen = set()
@@ -206,6 +223,7 @@ def check_lesson(fname, html):
         add("ERR", fname, "missing <title>")
     if 'name="description"' not in html:
         add("ERR", fname, "missing meta description")
+    check_social_meta(fname, html)
     if 'class="lang-zh"' not in html:
         add("ERR", fname, "missing lang-zh content")
     if 'class="lang-en"' not in html:
@@ -286,6 +304,7 @@ def main():
     with open(index_path, encoding="utf-8") as fh:
         idx = fh.read()
     check_classes("index.html", idx)
+    check_social_meta("index.html", idx)
     for page in PAGES:
         fname, tz, te = page[0], page[1], page[2]
         if fname not in idx:

@@ -26,10 +26,15 @@ def esc(s):
     )
 
 
-def head_meta(title, description, og_type="website"):
+SITE_URL = "https://verdenmax.github.io/sglang-visual-guide/"
+OG_IMAGE = SITE_URL + "og-cover.png"
+
+
+def head_meta(title, description, og_type="website", page_url=None):
     """SEO / social meta tags + favicon for a page <head>."""
     t = esc(title)
     d = esc(description)
+    url_tag = f'<meta property="og:url" content="{page_url}">\n' if page_url else ""
     return (
         f'<meta name="description" content="{d}">\n'
         f'<meta name="theme-color" content="#7c48e6">\n'
@@ -38,9 +43,15 @@ def head_meta(title, description, og_type="website"):
         f'<meta property="og:site_name" content="SGLang 图解教程">\n'
         f'<meta property="og:title" content="{t}">\n'
         f'<meta property="og:description" content="{d}">\n'
-        f'<meta name="twitter:card" content="summary">\n'
+        f'{url_tag}'
+        f'<meta property="og:image" content="{OG_IMAGE}">\n'
+        f'<meta property="og:image:width" content="1200">\n'
+        f'<meta property="og:image:height" content="630">\n'
+        f'<meta property="og:image:alt" content="SGLang Visual Guide — {len(PAGES)}-lesson bilingual illustrated guide">\n'
+        f'<meta name="twitter:card" content="summary_large_image">\n'
         f'<meta name="twitter:title" content="{t}">\n'
-        f'<meta name="twitter:description" content="{d}">'
+        f'<meta name="twitter:description" content="{d}">\n'
+        f'<meta name="twitter:image" content="{OG_IMAGE}">'
     )
 
 
@@ -639,7 +650,7 @@ def page(filename, content, home_href="../index.html"):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {LANG_BOOT}
 <title>{esc(title_tag)}</title>
-{head_meta(title_tag, desc, og_type="article")}
+{head_meta(title_tag, desc, og_type="article", page_url=SITE_URL + "lessons/" + filename)}
 <style>{CSS}</style>
 </head><body>
 <div class="topbar">
@@ -833,7 +844,7 @@ def index_page(lesson_prefix="lessons/"):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {LANG_BOOT}
 <title>{esc(title_tag)}</title>
-{head_meta(title_tag, desc, og_type="website")}
+{head_meta(title_tag, desc, og_type="website", page_url=SITE_URL)}
 <style>{CSS}</style>
 </head><body>
 <div class="topbar">
