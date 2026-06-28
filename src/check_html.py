@@ -141,7 +141,7 @@ def check_og_asset():
         return
     with open(path, "rb") as fh:
         head = fh.read(24)
-    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
         add("ERR", "og-cover.png", "not a valid PNG")
         return
     w, h = struct.unpack(">II", head[16:24])
